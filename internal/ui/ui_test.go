@@ -2735,3 +2735,74 @@ func TestDashboardAdjustsAndPersistsLeftPaneWidth(t *testing.T) {
 func key(code rune, text string) tea.KeyPressMsg {
 	return tea.KeyPressMsg(tea.Key{Code: code, Text: text})
 }
+
+// The backoff damps a terminal that is dropping now, not one that has dropped
+// before. Retries used to only ever accumulate, so a tab that reconnected and
+// then worked for an afternoon still counted its old drops towards the ceiling
+// and was eventually left saying it keeps disconnecting.
+func TestDashboardForgetsRetriesAfterAHealthyAttach(t *testing.T) {
+	tabs := []model.Tab{{ID: "tab-1", WorkspaceID: "workspace-1", Name: "1", Running: true}}
+	value, _, refresh := exitedDashboard(t, tabs, 0)
+
+	// One immediate reconnect, one drop, one counted retry — the same walk the
+	// backoff test makes, so the two disagree only about what time it is.
+	updated, open := value.Update(refresh())
+	value = updated.(dashboard)
+	updated, _ = value.Update(open())
+	value = updated.(dashboard)
+	updated, _ = value.Update(terminalOutputMsg{terminal: value.terminal, err: io.EOF})
+	value = updated.(dashboard)
+	updated, _ = value.Update(refresh())
+	value = updated.(dashboard)
+	if value.reattachAttempts != 1 {
+		t.Fatalf("retries after one drop = %d, want 1", value.reattachAttempts)
+	}
+
+	// Reopen, then let the terminal run past the healthy interval before it
+	// drops. That drop starts over: an immediate reconnect, not a delayed one.
+	updated, open = value.Update(reopenTerminalMsg{})
+	value = updated.(dashboard)
+	updated, _ = value.Update(open())
+	value = updated.(dashboard)
+	value.terminalOpenedAt = value.terminalOpenedAt.Add(-2 * healthyAttachInterval)
+
+	updated, _ = value.Update(terminalOutputMsg{terminal: value.terminal, err: io.EOF})
+	value = updated.(dashboard)
+	updated, command := value.Update(refresh())
+	value = updated.(dashboard)
+	if value.reattachAttempts != 0 {
+		t.Fatalf("retries after a healthy attach = %d, want them forgotten", value.reattachAttempts)
+	}
+	if command == nil {
+		t.Fatal("no reconnect after a healthy attach dropped")
+	}
+	if message := command(); message == (reopenTerminalMsg{}) {
+		t.Fatal("a drop after a healthy attach was delayed, want an immediate reconnect")
+	}
+}
+
+// A drop that follows a fresh attach is another turn of the same loop, so the
+// healthy-attach reset must not hand it an immediate retry.
+func TestDashboardStillBacksOffWhenDropsAreImmediate(t *testing.T) {
+	tabs := []model.Tab{{ID: "tab-1", WorkspaceID: "workspace-1", Name: "1", Running: true}}
+	value, _, refresh := exitedDashboard(t, tabs, 0)
+
+	updated, open := value.Update(refresh())
+	value = updated.(dashboard)
+	updated, _ = value.Update(open())
+	value = updated.(dashboard)
+	if value.terminalOpenedAt.IsZero() {
+		t.Fatal("an opened terminal recorded no attach time")
+	}
+	updated, _ = value.Update(terminalOutputMsg{terminal: value.terminal, err: io.EOF})
+	value = updated.(dashboard)
+	updated, command := value.Update(refresh())
+	value = updated.(dashboard)
+	if value.reattachAttempts != 1 || command == nil {
+		t.Fatalf("an immediate drop = (retries %d, command %v), want one counted retry",
+			value.reattachAttempts, command)
+	}
+	if message := command(); message != (reopenTerminalMsg{}) {
+		t.Fatalf("an immediate drop returned %T, want a delayed reopen", message)
+	}
+}
