@@ -307,7 +307,7 @@ func TestDashboardReloadsWorkspacesWhenReturningFromTerminal(t *testing.T) {
 	}}}
 	backend := &fakeBackend{snapshot: refreshed, workspace: rootWorkspace}
 	terminal := newEmbeddedTerminal(tab.ID, newMemoryStream(""), 40, 10)
-	defer terminal.closeTerminal()
+	defer terminal.close()
 	value := newDashboard(backend, initial)
 	value.focus = terminalPane
 	value.selectedWorkspaceID = rootWorkspace.ID
@@ -1080,7 +1080,7 @@ func TestDashboardSwitchesPanesWithOneKey(t *testing.T) {
 func TestDashboardKeepsWorkspaceFocusWhenSwitchingToADeadTerminal(t *testing.T) {
 	value := scrolledDashboard(t, 200)
 	value.focus = leftPane
-	value.terminal.disconnect()
+	value.terminal.close()
 
 	updated, _ := value.Update(key(tea.KeyF7, ""))
 	value = updated.(dashboard)
@@ -1094,7 +1094,7 @@ func TestDashboardKeepsWorkspaceFocusWhenTheTerminalIsGone(t *testing.T) {
 	value.focus = leftPane
 	updated, _ := value.Update(key(tea.KeyF6, ""))
 	value = updated.(dashboard)
-	value.terminal.disconnect()
+	value.terminal.close()
 
 	updated, _ = value.Update(key(tea.KeyEscape, ""))
 	value = updated.(dashboard)
@@ -1996,7 +1996,7 @@ func shortcutOrder(rendered string, values ...string) bool {
 func TestDashboardKeepsNativeMouseSelectionAndUsesKeyboardFocus(t *testing.T) {
 	stream := newMemoryStream("")
 	terminal := newEmbeddedTerminal("tab-1", stream, 40, 10)
-	defer terminal.closeTerminal()
+	defer terminal.close()
 
 	value := newDashboard(&fakeBackend{}, model.Snapshot{})
 	value.width = 120
@@ -2040,7 +2040,7 @@ func TestDashboardMovesWorkspaceAndTabCursorBeforeConfirming(t *testing.T) {
 	}}}
 	backend := &fakeBackend{snapshot: snapshot, workspace: secondWorkspace}
 	terminal := newEmbeddedTerminal(firstTab.ID, newMemoryStream(""), 40, 10)
-	defer terminal.closeTerminal()
+	defer terminal.close()
 	value := newDashboard(backend, snapshot)
 	value.selectedWorkspaceID = firstWorkspace.ID
 	value.selectedPath = firstWorkspace.Path
@@ -2691,7 +2691,7 @@ func helpContainsShortcut(lines []string, description string, keys ...string) bo
 
 func TestDashboardDoesNotCaptureWorkspaceShortcutsInTerminal(t *testing.T) {
 	terminal := newEmbeddedTerminal("tab-1", newMemoryStream(""), 40, 10)
-	defer terminal.closeTerminal()
+	defer terminal.close()
 	value := newDashboard(&fakeBackend{}, model.Snapshot{})
 	value.focus = terminalPane
 	value.terminal = terminal
