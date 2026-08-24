@@ -1036,9 +1036,12 @@ func (m dashboard) resizeTerminal() tea.Cmd {
 	}
 	columns, rows := m.terminalSize()
 	m.terminal.resize(int(columns), int(rows))
-	tabID := m.terminal.id
+	terminal := m.terminal
 	return func() tea.Msg {
-		if err := m.backend.Resize(tabID, columns, rows); err != nil {
+		// The size is read here, not captured above, so a resize that lost the
+		// race still tells the daemon what is on screen.
+		columns, rows := terminal.size()
+		if err := m.backend.Resize(terminal.id, columns, rows); err != nil {
 			return resizeFailedMsg{err: err}
 		}
 		return nil
