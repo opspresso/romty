@@ -15,10 +15,11 @@ import (
 	"github.com/nalbam/romty/internal/daemon"
 	"github.com/nalbam/romty/internal/model"
 	"github.com/nalbam/romty/internal/state"
+	"github.com/nalbam/romty/internal/testutil"
 )
 
 func TestServeRemovesPersistedTerminalTabs(t *testing.T) {
-	base := shortTempDir(t)
+	base := testutil.ShortTempDir(t)
 	socket := filepath.Join(base, "daemon.sock")
 	statePath := filepath.Join(base, "state.json")
 	store := state.New(statePath)
@@ -45,7 +46,7 @@ func TestServeRemovesPersistedTerminalTabs(t *testing.T) {
 		cancel()
 		<-done
 	}()
-	waitForDaemon(t, client.New(socket))
+	testutil.WaitForDaemon(t, client.New(socket))
 	persisted, err = store.Load()
 	if err != nil {
 		t.Fatalf("Load() after Serve error = %v", err)
@@ -56,7 +57,7 @@ func TestServeRemovesPersistedTerminalTabs(t *testing.T) {
 }
 
 func TestServerDiscoversWorkspacesAndReattachesSession(t *testing.T) {
-	base := shortTempDir(t)
+	base := testutil.ShortTempDir(t)
 	root := filepath.Join(base, "projects")
 	secondRoot := filepath.Join(base, "work")
 	workspacePath := filepath.Join(root, "alpha")
@@ -97,7 +98,7 @@ func TestServerDiscoversWorkspacesAndReattachesSession(t *testing.T) {
 	})
 
 	backend := client.New(socket)
-	waitForDaemon(t, backend)
+	testutil.WaitForDaemon(t, backend)
 	snapshot, err := backend.AddRoot(root)
 	if err != nil {
 		t.Fatalf("AddRoot() error = %v", err)
@@ -210,7 +211,7 @@ func TestServerDiscoversWorkspacesAndReattachesSession(t *testing.T) {
 }
 
 func TestServerOpensRootTerminalAndReloadsDirectories(t *testing.T) {
-	base := shortTempDir(t)
+	base := testutil.ShortTempDir(t)
 	root := filepath.Join(base, "projects")
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		t.Fatalf("MkdirAll() error = %v", err)
@@ -231,7 +232,7 @@ func TestServerOpensRootTerminalAndReloadsDirectories(t *testing.T) {
 	}()
 
 	backend := client.New(socket)
-	waitForDaemon(t, backend)
+	testutil.WaitForDaemon(t, backend)
 	snapshot, err := backend.AddRoot(root)
 	if err != nil {
 		t.Fatalf("AddRoot() error = %v", err)
@@ -267,7 +268,7 @@ func TestServerOpensRootTerminalAndReloadsDirectories(t *testing.T) {
 }
 
 func TestEnsureWorkspaceRejectsNestedDirectory(t *testing.T) {
-	base := shortTempDir(t)
+	base := testutil.ShortTempDir(t)
 	root := filepath.Join(base, "projects")
 	nested := filepath.Join(root, "alpha", "nested")
 	if err := os.MkdirAll(nested, 0o755); err != nil {
@@ -287,7 +288,7 @@ func TestEnsureWorkspaceRejectsNestedDirectory(t *testing.T) {
 	}()
 
 	backend := client.New(filepath.Join(base, "daemon.sock"))
-	waitForDaemon(t, backend)
+	testutil.WaitForDaemon(t, backend)
 	snapshot, err := backend.AddRoot(root)
 	if err != nil {
 		t.Fatalf("AddRoot() error = %v", err)
@@ -299,7 +300,7 @@ func TestEnsureWorkspaceRejectsNestedDirectory(t *testing.T) {
 }
 
 func TestServerStopsAfterAcknowledgingShutdown(t *testing.T) {
-	base := shortTempDir(t)
+	base := testutil.ShortTempDir(t)
 	root := filepath.Join(base, "projects")
 	if err := os.Mkdir(root, 0o755); err != nil {
 		t.Fatalf("Mkdir() error = %v", err)
@@ -315,7 +316,7 @@ func TestServerStopsAfterAcknowledgingShutdown(t *testing.T) {
 	go func() { done <- server.Serve(ctx) }()
 
 	backend := client.New(socket)
-	waitForDaemon(t, backend)
+	testutil.WaitForDaemon(t, backend)
 	snapshot, err := backend.AddRoot(root)
 	if err != nil {
 		t.Fatalf("AddRoot() error = %v", err)
@@ -362,18 +363,6 @@ func TestServerStopsAfterAcknowledgingShutdown(t *testing.T) {
 	}
 }
 
-func waitForDaemon(t *testing.T, backend *client.Client) {
-	t.Helper()
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
-		if err := backend.Ping(); err == nil {
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	t.Fatal("daemon did not become ready")
-}
-
 func waitForTabCount(t *testing.T, backend *client.Client, workspaceID string, count int) {
 	t.Helper()
 	deadline := time.Now().Add(3 * time.Second)
@@ -405,16 +394,6 @@ func waitForRootDirectoryCount(t *testing.T, backend *client.Client, count int) 
 	}
 	t.Fatalf("root directory count did not become %d", count)
 	return model.Snapshot{}
-}
-
-func shortTempDir(t *testing.T) string {
-	t.Helper()
-	directory, err := os.MkdirTemp("/tmp", "romty-test-")
-	if err != nil {
-		t.Fatalf("MkdirTemp() error = %v", err)
-	}
-	t.Cleanup(func() { os.RemoveAll(directory) })
-	return directory
 }
 
 func writeCommand(t *testing.T, connection net.Conn, command string) {
