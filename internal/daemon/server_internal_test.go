@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/opspresso/romty/internal/protocol"
 )
 
 // newSessionForTest builds the parts of a session that do not need a PTY.
@@ -380,5 +382,31 @@ func TestListenPrivatelyReportsAlreadyRunningWhenTheBindIsLost(t *testing.T) {
 	}
 	if !errors.Is(err, ErrAlreadyRunning) {
 		t.Fatalf("listenPrivately() error = %v, want ErrAlreadyRunning", err)
+	}
+}
+
+// The handshake is bounded in both directions. A peer that sends its request
+// and then stops reading holds a goroutine and a file descriptor exactly as a
+// peer that never sends one does, once the reply outgrows the socket buffer.
+func TestReplyGivesUpOnAPeerThatStoppedReading(t *testing.T) {
+	previous := requestTimeout
+	requestTimeout = 100 * time.Millisecond
+	t.Cleanup(func() { requestTimeout = previous })
+
+	// net.Pipe buffers nothing, so the write blocks until someone reads, which
+	// is what a full socket buffer looks like without having to fill one.
+	daemonSide, peer := net.Pipe()
+	defer daemonSide.Close()
+	defer peer.Close()
+
+	done := make(chan error, 1)
+	go func() { done <- reply(daemonSide, protocol.Response{}) }()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("reply() to a peer that never read reported success")
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("reply() blocked on a peer that never read")
 	}
 }
