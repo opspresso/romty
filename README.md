@@ -1,7 +1,8 @@
 # romty
 
 > romty = roam + tty.
-> A persistent terminal workspace that keeps your sessions alive across disconnects.
+
+A persistent terminal workspace that keeps your sessions alive across disconnects.
 
 ## 요구 사항
 
