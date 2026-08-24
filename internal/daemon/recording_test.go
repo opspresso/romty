@@ -47,6 +47,34 @@ func TestRecordingKeepsTheNewestBytesInOrder(t *testing.T) {
 	}
 }
 
+// Every tab holds a recording, and most of them hold a prompt and a command or
+// two. Claiming the ceiling on the first byte would make twenty idle terminals
+// cost what twenty busy ones do.
+func TestRecordingGrowsIntoItsLimit(t *testing.T) {
+	withHistoryLimit(t, 8<<20)
+
+	var value recording
+	value.append([]byte("$ "))
+	if len(value.data) > 64 {
+		t.Fatalf("a two-byte recording holds %d bytes, want it to grow into the limit", len(value.data))
+	}
+	if got := string(value.bytes()); got != "$ " {
+		t.Fatalf("bytes() = %q, want what was recorded", got)
+	}
+
+	// And it does reach the limit, rather than growing without end.
+	chunk := make([]byte, 1<<20)
+	for range 16 {
+		value.append(chunk)
+	}
+	if len(value.data) != maxHistoryBytes {
+		t.Fatalf("a filled recording holds %d bytes, want the limit of %d", len(value.data), maxHistoryBytes)
+	}
+	if value.size != maxHistoryBytes {
+		t.Fatalf("size = %d, want the limit of %d", value.size, maxHistoryBytes)
+	}
+}
+
 // bytes() hands the replay a slice of its own. The ring is written in place,
 // so anything else would be rewritten under the replay's feet — which is the
 // whole reason attach copies before releasing the session lock.
