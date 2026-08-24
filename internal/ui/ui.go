@@ -17,6 +17,10 @@ import (
 const (
 	terminalTop        = 2
 	helpKeyColumnWidth = 20
+	// separatorWidth is the width of what paneSeparators draws between the
+	// panes. The terminal's origin, the right pane's width and the mouse
+	// translation all depend on it agreeing with what is rendered.
+	separatorWidth = 3
 
 	maximumReattachAttempts = 3
 	initialReattachBackoff  = 250 * time.Millisecond
@@ -447,11 +451,12 @@ func (m dashboard) forwardMouse(message tea.MouseMsg) (tea.Model, tea.Cmd) {
 // translateMouse moves a host screen position into the terminal pane's own
 // coordinate space and reports false for events outside the pane.
 func (m dashboard) translateMouse(mouse tea.Mouse) (uv.Mouse, bool) {
-	leftWidth, rightWidth, _, terminalHeight := m.dimensions()
+	view := m.dimensions()
+	originX, originY := view.terminalOrigin()
 	translated := uv.Mouse(mouse)
-	translated.X = mouse.X - leftWidth - 3
-	translated.Y = mouse.Y - terminalTop
-	if translated.X < 0 || translated.X >= rightWidth || translated.Y < 0 || translated.Y >= terminalHeight {
+	translated.X = mouse.X - originX
+	translated.Y = mouse.Y - originY
+	if translated.X < 0 || translated.X >= view.rightWidth || translated.Y < 0 || translated.Y >= view.terminalHeight {
 		return uv.Mouse{}, false
 	}
 	return translated, true
@@ -531,12 +536,12 @@ func (m *dashboard) scrollTerminal(delta int) {
 }
 
 func (m dashboard) scrollbackPage() int {
-	_, _, _, terminalHeight := m.dimensions()
+	terminalHeight := m.dimensions().terminalHeight
 	return max(terminalHeight-1, 1)
 }
 
 func (m dashboard) scrollHelp(delta int) (tea.Model, tea.Cmd) {
-	_, _, bodyHeight, _ := m.dimensions()
+	bodyHeight := m.dimensions().bodyHeight
 	m.helpOffset = min(max(m.helpOffset+delta, 0), m.maximumHelpOffset(bodyHeight))
 	return m, nil
 }
@@ -552,7 +557,7 @@ func (m dashboard) shutdownDaemon() tea.Cmd {
 }
 
 func (m dashboard) adjustLeftWidth(delta int) (tea.Model, tea.Cmd) {
-	current, _, _, _ := m.dimensions()
+	current := m.dimensions().leftWidth
 	maximum := min(maximumLeftWidth, max(m.width, 40)-20)
 	m.leftWidth = min(max(current+delta, minimumLeftWidth), maximum)
 	return m, m.saveConfig()
@@ -992,7 +997,24 @@ func runningTabs(tabs []model.Tab) []model.Tab {
 	return result
 }
 
-func (m dashboard) dimensions() (int, int, int, int) {
+// layout is the one description of where things sit. It used to be four
+// unnamed ints, which every one of nineteen call sites unpacked positionally:
+// swapping two widths compiled, rendered, and only looked wrong.
+type layout struct {
+	leftWidth      int
+	rightWidth     int
+	bodyHeight     int
+	terminalHeight int
+}
+
+// terminalOrigin is where the terminal's own first cell lands on screen, which
+// the cursor and mouse translation both need. Deriving it here keeps it tied
+// to the separator and tab bar rather than repeated as a literal.
+func (l layout) terminalOrigin() (int, int) {
+	return l.leftWidth + separatorWidth, terminalTop
+}
+
+func (m dashboard) dimensions() layout {
 	width := max(m.width, 40)
 	height := max(m.height, 10)
 	leftWidth := m.leftWidth
@@ -1000,14 +1022,18 @@ func (m dashboard) dimensions() (int, int, int, int) {
 		leftWidth = min(max(width/4, minimumLeftWidth), 28)
 	}
 	leftWidth = min(leftWidth, width-20)
-	rightWidth := max(width-leftWidth-3, 17)
 	bodyHeight := height - 2
-	return leftWidth, rightWidth, bodyHeight, max(bodyHeight-terminalTop, 1)
+	return layout{
+		leftWidth:      leftWidth,
+		rightWidth:     max(width-leftWidth-separatorWidth, 17),
+		bodyHeight:     bodyHeight,
+		terminalHeight: max(bodyHeight-terminalTop, 1),
+	}
 }
 
 func (m dashboard) terminalSize() (uint16, uint16) {
-	_, rightWidth, _, terminalHeight := m.dimensions()
-	return uint16(min(rightWidth, 65535)), uint16(min(terminalHeight, 65535))
+	view := m.dimensions()
+	return uint16(min(view.rightWidth, 65535)), uint16(min(view.terminalHeight, 65535))
 }
 
 func (m dashboard) View() tea.View {
@@ -1017,9 +1043,9 @@ func (m dashboard) View() tea.View {
 	view.WindowTitle = "romty"
 	view.MouseMode = m.mouseMode()
 	if !m.scrollback && m.focus == terminalPane && m.terminal != nil && m.terminal.active {
-		leftWidth, _, _, _ := m.dimensions()
+		originX, originY := m.dimensions().terminalOrigin()
 		position := m.terminal.cursorPosition()
-		view.Cursor = tea.NewCursor(leftWidth+3+position.X, terminalTop+position.Y)
+		view.Cursor = tea.NewCursor(originX+position.X, originY+position.Y)
 	}
 	return view
 }
@@ -1037,16 +1063,16 @@ func (m dashboard) mouseMode() tea.MouseMode {
 }
 
 func (m dashboard) render() string {
-	leftWidth, rightWidth, bodyHeight, _ := m.dimensions()
+	view := m.dimensions()
 	width := max(m.width, 40)
-	lines := m.renderPanes(leftWidth, rightWidth, bodyHeight)
+	lines := m.renderPanes(view.leftWidth, view.rightWidth, view.bodyHeight)
 	if m.scrollback {
-		lines = m.renderRows(m.renderTerminal(width), width, bodyHeight)
+		lines = m.renderRows(m.renderTerminal(width), width, view.bodyHeight)
 	}
 	if m.modal != noModal {
-		lines = m.overlayModal(lines, width, bodyHeight)
+		lines = m.overlayModal(lines, width, view.bodyHeight)
 	}
-	lines = append(lines, m.renderStatus(width, bodyHeight)...)
+	lines = append(lines, m.renderStatus(width, view.bodyHeight)...)
 	return strings.Join(lines, "\n")
 }
 
@@ -1200,10 +1226,9 @@ func (m dashboard) renderModal(width, height int) []string {
 		)
 	}
 	if m.modal == configModal {
-		leftWidth, _, _, _ := m.dimensions()
 		return modalBox(m.styles, modalWidth, "Config",
 			"",
-			m.styles.modalStrong.Render(fmt.Sprintf("Left pane width: %d", leftWidth)),
+			m.styles.modalStrong.Render(fmt.Sprintf("Left pane width: %d", m.dimensions().leftWidth)),
 			"",
 			m.styles.modalBody.Render("Use ←/→ or [/] to adjust"),
 			"",
