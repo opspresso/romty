@@ -4,6 +4,10 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	tea "charm.land/bubbletea/v2"
+
+	"github.com/nalbam/romty/internal/model"
 )
 
 func TestConfigRoundTrip(t *testing.T) {
@@ -36,5 +40,42 @@ func TestConfigMissingFileUsesResponsiveWidth(t *testing.T) {
 	}
 	if got.LeftWidth != 0 {
 		t.Fatalf("loadConfig() = %#v, want responsive width", got)
+	}
+}
+
+// Saving used to rebuild the document from dashboard fields, so a setting
+// nobody remembered to copy across was erased the moment the user touched the
+// pane width — and an older romty would erase what a newer one had written.
+func TestAdjustingOneSettingKeepsTheRest(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(path, []byte(`{"left_width":24,"mouse_passthrough":true}`+"\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	loaded, err := loadConfig(path)
+	if err != nil {
+		t.Fatalf("loadConfig() error = %v", err)
+	}
+
+	value := newDashboardWithConfig(&fakeBackend{}, model.Snapshot{}, path, loaded)
+	value.width = 120
+	value.height = 40
+	updated, _ := value.Update(key(',', ","))
+	value = updated.(dashboard)
+	updated, save := value.Update(key(tea.KeyRight, ""))
+	value = updated.(dashboard)
+	if save == nil {
+		t.Fatal("adjusting the width produced no save")
+	}
+	save()
+
+	written, err := loadConfig(path)
+	if err != nil {
+		t.Fatalf("loadConfig() after save error = %v", err)
+	}
+	if written.LeftWidth != 25 {
+		t.Fatalf("left_width = %d, want the adjusted 25", written.LeftWidth)
+	}
+	if !written.MousePassthrough {
+		t.Fatal("adjusting the pane width erased mouse_passthrough")
 	}
 }
