@@ -1,0 +1,65 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v[0-9]*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: Validate
+        run: |
+          go vet ./...
+          go test ./...
+
+      - name: Release
+        uses: goreleaser/goreleaser-action@v7
+        with:
+          distribution: goreleaser
+          version: v2.17.1
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Render Homebrew formula
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: ./scripts/render-homebrew-formula.sh "$RELEASE_TAG" dist/checksums.txt /tmp/romty.rb
+
+      - name: Publish Homebrew formula
+        env:
+          GH_TOKEN: ${{ secrets.GHP_TOKEN }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          FORMULA_PATH="Formula/romty.rb"
+          FORMULA_SHA="$(gh api "repos/opspresso/homebrew-tap/contents/$FORMULA_PATH" --jq .sha 2>/dev/null || true)"
+          FORMULA_CONTENT="$(base64 -w 0 /tmp/romty.rb)"
+
+          args=(
+            --method PUT
+            "repos/opspresso/homebrew-tap/contents/$FORMULA_PATH"
+            -f "message=romty $RELEASE_TAG Version Update"
+            -f "content=$FORMULA_CONTENT"
+            -f "branch=main"
+          )
+          if [ -n "$FORMULA_SHA" ]; then
+            args+=(-f "sha=$FORMULA_SHA")
+          fi
+          gh api "${args[@]}"

@@ -9,6 +9,15 @@ romty는 Root Folder 아래의 workspace와 persistent terminal tab을 관리하
 
 ## 설치
 
+Homebrew를 사용한다.
+
+```sh
+brew tap opspresso/tap
+brew install opspresso/tap/romty
+```
+
+소스에서 설치한다.
+
 ```sh
 go install ./cmd/romty
 ```
