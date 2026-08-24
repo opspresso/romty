@@ -34,7 +34,7 @@ brew install opspresso/tap/romty
 Or install the latest version with Go:
 
 ```sh
-go install github.com/nalbam/romty/cmd/romty@latest
+go install github.com/opspresso/romty/cmd/romty@latest
 ```
 
 To build a local checkout:

@@ -17,9 +17,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/nalbam/romty/internal/model"
-	"github.com/nalbam/romty/internal/protocol"
-	"github.com/nalbam/romty/internal/state"
+	"github.com/opspresso/romty/internal/model"
+	"github.com/opspresso/romty/internal/protocol"
+	"github.com/opspresso/romty/internal/state"
 )
 
 var ErrAlreadyRunning = errors.New("romty daemon is already running")

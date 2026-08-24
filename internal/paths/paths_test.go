@@ -4,7 +4,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/nalbam/romty/internal/paths"
+	"github.com/opspresso/romty/internal/paths"
 )
 
 func TestResolveIncludesConfigPath(t *testing.T) {

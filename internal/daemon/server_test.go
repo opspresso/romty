@@ -11,11 +11,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/nalbam/romty/internal/client"
-	"github.com/nalbam/romty/internal/daemon"
-	"github.com/nalbam/romty/internal/model"
-	"github.com/nalbam/romty/internal/state"
-	"github.com/nalbam/romty/internal/testutil"
+	"github.com/opspresso/romty/internal/client"
+	"github.com/opspresso/romty/internal/daemon"
+	"github.com/opspresso/romty/internal/model"
+	"github.com/opspresso/romty/internal/state"
+	"github.com/opspresso/romty/internal/testutil"
 )
 
 func TestServeRemovesPersistedTerminalTabs(t *testing.T) {

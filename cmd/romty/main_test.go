@@ -7,10 +7,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/nalbam/romty/internal/client"
-	"github.com/nalbam/romty/internal/daemon"
-	"github.com/nalbam/romty/internal/paths"
-	"github.com/nalbam/romty/internal/testutil"
+	"github.com/opspresso/romty/internal/client"
+	"github.com/opspresso/romty/internal/daemon"
+	"github.com/opspresso/romty/internal/paths"
+	"github.com/opspresso/romty/internal/testutil"
 )
 
 func TestRunRejectsNestedRomty(t *testing.T) {

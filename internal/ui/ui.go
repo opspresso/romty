@@ -11,7 +11,7 @@ import (
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/nalbam/romty/internal/model"
+	"github.com/opspresso/romty/internal/model"
 )
 
 const (

@@ -1,4 +1,4 @@
-module github.com/nalbam/romty
+module github.com/opspresso/romty
 
 go 1.25.0
 

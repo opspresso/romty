@@ -7,7 +7,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/nalbam/romty/internal/model"
+	"github.com/opspresso/romty/internal/model"
 )
 
 func TestConfigRoundTrip(t *testing.T) {

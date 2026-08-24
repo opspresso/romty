@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/nalbam/romty/internal/model"
+	"github.com/opspresso/romty/internal/model"
 )
 
 // Version is the protocol romty speaks. The daemon outlives the client binary

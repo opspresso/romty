@@ -5,8 +5,8 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/nalbam/romty/internal/model"
-	"github.com/nalbam/romty/internal/state"
+	"github.com/opspresso/romty/internal/model"
+	"github.com/opspresso/romty/internal/state"
 )
 
 func TestStoreRoundTrip(t *testing.T) {

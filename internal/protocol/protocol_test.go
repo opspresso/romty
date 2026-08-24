@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/nalbam/romty/internal/protocol"
+	"github.com/opspresso/romty/internal/protocol"
 )
 
 func TestMessageRoundTrip(t *testing.T) {

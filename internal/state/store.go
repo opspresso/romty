@@ -3,8 +3,8 @@ package state
 import (
 	"sync"
 
-	"github.com/nalbam/romty/internal/jsonfile"
-	"github.com/nalbam/romty/internal/model"
+	"github.com/opspresso/romty/internal/jsonfile"
+	"github.com/opspresso/romty/internal/model"
 )
 
 type Store struct {

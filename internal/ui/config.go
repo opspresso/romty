@@ -3,7 +3,7 @@ package ui
 import (
 	"fmt"
 
-	"github.com/nalbam/romty/internal/jsonfile"
+	"github.com/opspresso/romty/internal/jsonfile"
 )
 
 const (

@@ -8,10 +8,10 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/nalbam/romty/internal/client"
-	"github.com/nalbam/romty/internal/daemon"
-	"github.com/nalbam/romty/internal/paths"
-	"github.com/nalbam/romty/internal/ui"
+	"github.com/opspresso/romty/internal/client"
+	"github.com/opspresso/romty/internal/daemon"
+	"github.com/opspresso/romty/internal/paths"
+	"github.com/opspresso/romty/internal/ui"
 )
 
 func main() {

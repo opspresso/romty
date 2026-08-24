@@ -18,7 +18,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/nalbam/romty/internal/model"
+	"github.com/opspresso/romty/internal/model"
 )
 
 type fakeBackend struct {

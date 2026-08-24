@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/nalbam/romty/internal/client"
+	"github.com/opspresso/romty/internal/client"
 )
 
 // QuietLogger keeps the daemon's diagnostics out of test output. They belong

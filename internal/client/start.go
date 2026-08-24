@@ -7,7 +7,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/nalbam/romty/internal/paths"
+	"github.com/opspresso/romty/internal/paths"
 )
 
 func EnsureDaemon(runtime paths.Paths, executable string) error {
