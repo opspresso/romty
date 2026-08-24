@@ -1367,9 +1367,14 @@ func (m dashboard) mouseMode() tea.MouseMode {
 func (m dashboard) render() string {
 	view := m.dimensions()
 	width := max(m.width, 40)
-	lines := m.renderPanes(view.leftWidth, view.rightWidth, view.bodyHeight)
+	// Scrollback replaces the split rather than drawing over it, so the panes
+	// it hides are not built at all: rendering both meant every frame drew the
+	// workspace tree and a second terminal viewport it then threw away.
+	var lines []string
 	if m.scrollback {
 		lines = m.renderRows(m.renderTerminal(width), width, view.bodyHeight)
+	} else {
+		lines = m.renderPanes(view.leftWidth, view.rightWidth, view.bodyHeight)
 	}
 	if m.modal != noModal {
 		lines = m.overlayModal(lines, width, view.bodyHeight)
