@@ -1150,11 +1150,11 @@ func (m dashboard) renderModal(width, height int) []string {
 func (m dashboard) helpEntries() []string {
 	return []string{
 		renderHelpSection(m.styles, "COMMANDS", "F-keys work in both areas"),
-		renderHelpShortcut(m.styles, "About", "i", "F1"),
-		renderHelpShortcut(m.styles, "Add root", "a", "F2"),
-		renderHelpShortcut(m.styles, "Config", ",", "F3"),
-		renderHelpShortcut(m.styles, "Quit", "q", "F4"),
-		renderHelpShortcut(m.styles, "Refresh", "r", "F5"),
+		renderHelpShortcut(m.styles, "About", "F1", "i"),
+		renderHelpShortcut(m.styles, "Add root", "F2", "a"),
+		renderHelpShortcut(m.styles, "Config", "F3", ","),
+		renderHelpShortcut(m.styles, "Quit", "F4", "q"),
+		renderHelpShortcut(m.styles, "Refresh", "F5", "r"),
 		renderHelpShortcut(m.styles, "Stop daemon", "F6"),
 		renderHelpShortcut(m.styles, "Scrollback", "F7"),
 		renderHelpShortcut(m.styles, "Help", "?"),
