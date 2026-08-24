@@ -307,6 +307,8 @@ func (m dashboard) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		// disagree until the next successful resize.
 		m.setError(terminalError, "resize terminal: "+message.err.Error())
 		return m, nil
+	case browserMsg:
+		return m.handleBrowserRead(message)
 	case reopenTerminalMsg:
 		return m, m.openSelectedTerminal()
 	case daemonStoppedMsg:
@@ -477,11 +479,20 @@ func (m dashboard) handleModalKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 			return m, m.shutdownDaemon()
 		}
 	case helpModal:
+		page := max(modalCapacity(m.dimensions().bodyHeight)-1, 1)
 		switch message.String() {
 		case "up", "k":
 			return m.scrollHelp(-1)
 		case "down", "j":
 			return m.scrollHelp(1)
+		case "pgup", "ctrl+b":
+			return m.scrollHelp(-page)
+		case "pgdown", "ctrl+f":
+			return m.scrollHelp(page)
+		case "home", "g":
+			return m.scrollHelp(-len(m.helpEntries()))
+		case "end", "G":
+			return m.scrollHelp(len(m.helpEntries()))
 		}
 	case configModal:
 		switch message.String() {
@@ -991,7 +1002,11 @@ func (m *dashboard) moveNavigation(delta int) {
 		m.tabIndex = 0
 		return
 	}
-	m.navIndex = (m.navIndex + delta + len(items)) % len(items)
+	// Stopping at the ends rather than wrapping: the wheel reaches romty as
+	// arrow keys — three per notch, through the terminal's alternate scroll —
+	// and a list that wraps sends one notch at the bottom back to the top.
+	// The picker, help and scrollback all stop; the tree used to be alone.
+	m.navIndex = min(max(m.navIndex+delta, 0), len(items)-1)
 	m.cursorPath = items[m.navIndex].workspace.Path
 	m.syncTabCursor(runningTabs(items[m.navIndex].tabs))
 }
@@ -1462,8 +1477,11 @@ func (m dashboard) renderModal(width, height int) []string {
 
 func (m dashboard) helpEntries() []string {
 	return []string{
-		// About lost its function key to help, so help carries what it said.
-		m.styles.modalStrong.Render("romty") + m.styles.modalBody.Render("  "+tagline),
+		// About lost its function key to help, so help carries what it said —
+		// the version included, because help is the only one of the two the
+		// terminal pane can reach.
+		m.styles.modalStrong.Render("romty") + m.styles.empty.Render("  "+version.String()) +
+			m.styles.modalBody.Render("  "+tagline),
 		// The split is the point: this is the only reference the terminal pane
 		// can reach, so it has to say which of these keys reach it too. The
 		// letters and F8/F9 do not — the shell gets those.
@@ -1487,6 +1505,13 @@ func (m dashboard) helpEntries() []string {
 		renderHelpShortcut(m.styles, "Select tab / +", "←/→", "h/l"),
 		renderHelpShortcut(m.styles, "Open / confirm", "Enter"),
 		renderHelpShortcut(m.styles, "Focus terminal", "F7", "Tab"),
+		renderHelpSection(m.styles, "ADD ROOT", "the F2 picker"),
+		renderHelpShortcut(m.styles, "Select a directory", "↑/↓", "j/k"),
+		renderHelpShortcut(m.styles, "Open / parent", "→/←", "l/h"),
+		renderHelpShortcut(m.styles, "Add the selected one", "Enter"),
+		renderHelpShortcut(m.styles, "Page up / down", "PgUp/PgDn"),
+		renderHelpShortcut(m.styles, "First / last", "Home/End"),
+		renderHelpShortcut(m.styles, "Type a path instead", "/"),
 		renderHelpSection(m.styles, "TERMINAL", "terminal area"),
 		renderHelpShortcut(m.styles, "Focus workspace", "F7", "Ctrl+\\"),
 		renderHelpSection(m.styles, "SCROLLBACK", "mouse works here only"),
@@ -1499,7 +1524,6 @@ func (m dashboard) helpEntries() []string {
 		renderHelpSection(m.styles, "OTHER", "contextual"),
 		renderHelpShortcut(m.styles, "Quit", "Ctrl+C"),
 		renderHelpShortcut(m.styles, "Resize workspace pane", "←/→", "[/]"),
-		renderHelpShortcut(m.styles, "Type a root path", "/"),
 		renderHelpShortcut(m.styles, "Close / cancel", "Esc"),
 	}
 }
