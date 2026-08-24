@@ -138,7 +138,10 @@ func TestServerDiscoversWorkspacesAndReattachesSession(t *testing.T) {
 	}
 	writeCommand(t, firstConnection, "stty size")
 	readUntil(t, firstConnection, firstReader, "35 120")
-	writeCommand(t, firstConnection, "printf 'romty-first-marker\\n'")
+	// The marker is assembled by printf so the shell's echo of the command
+	// never contains it whole: matching the echo would let this test pass
+	// while the replay had lost the command's actual output.
+	writeCommand(t, firstConnection, "printf 'romty-first-%s\\n' marker")
 	readUntil(t, firstConnection, firstReader, "romty-first-marker")
 	if err := firstConnection.Close(); err != nil {
 		t.Fatalf("Close() first connection error = %v", err)
@@ -151,7 +154,7 @@ func TestServerDiscoversWorkspacesAndReattachesSession(t *testing.T) {
 	}
 	defer secondConnection.Close()
 	readUntil(t, secondConnection, secondReader, "romty-first-marker")
-	writeCommand(t, secondConnection, "printf 'romty-second-marker\\n'")
+	writeCommand(t, secondConnection, "printf 'romty-second-%s\\n' marker")
 	readUntil(t, secondConnection, secondReader, "romty-second-marker")
 	secondTab, err := restartedClient.CreateTab(workspace.ID, 90, 25)
 	if err != nil {
@@ -162,7 +165,7 @@ func TestServerDiscoversWorkspacesAndReattachesSession(t *testing.T) {
 		t.Fatalf("OpenAttach() third error = %v", err)
 	}
 	defer thirdConnection.Close()
-	writeCommand(t, thirdConnection, "printf 'romty-third-marker\\n'")
+	writeCommand(t, thirdConnection, "printf 'romty-third-%s\\n' marker")
 	readUntil(t, thirdConnection, thirdReader, "romty-third-marker")
 
 	restored, err := restartedClient.Snapshot()
