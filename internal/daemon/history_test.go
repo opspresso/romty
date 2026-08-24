@@ -3,6 +3,7 @@ package daemon
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestStripQueriesRemovesQueriesAndKeepsOutput(t *testing.T) {
@@ -60,6 +61,51 @@ func TestStripQueriesRemovesQueriesAndKeepsOutput(t *testing.T) {
 			name:    "setting value request",
 			history: "before\x1bP$qm\x1b\\after",
 			want:    "beforeafter",
+		},
+		{
+			name:    "8-bit cursor position report request",
+			history: "before\x9b6nafter",
+			want:    "beforeafter",
+		},
+		{
+			name:    "8-bit device attributes",
+			history: "before\x9bcafter",
+			want:    "beforeafter",
+		},
+		{
+			name:    "8-bit background color query",
+			history: "before\x9d11;?\x07after",
+			want:    "beforeafter",
+		},
+		{
+			name:    "8-bit setting value request",
+			history: "before\x90$qm\x9cafter",
+			want:    "beforeafter",
+		},
+		{
+			name:    "an OSC closed by the 8-bit string terminator",
+			history: "before\x1b]11;?\x9cafter",
+			want:    "beforeafter",
+		},
+		{
+			name:    "in-band resize is dropped because the emulator answers it",
+			history: "before\x1b[?2048hafter",
+			want:    "beforeafter",
+		},
+		{
+			name:    "a soft reset is not a query",
+			history: "before\x1b[!pafter",
+			want:    "before\x1b[!pafter",
+		},
+		{
+			name:    "a cursor shape request is not a query",
+			history: "before\x1b[2 qafter",
+			want:    "before\x1b[2 qafter",
+		},
+		{
+			name:    "another mode enable is not a query",
+			history: "before\x1b[?2004hafter",
+			want:    "before\x1b[?2004hafter",
 		},
 		{
 			name:    "a startup burst of every query at once",
@@ -169,5 +215,56 @@ func TestStripQueriesRemovesEveryAnsweredQueryFromRealisticHistory(t *testing.T)
 		if !strings.Contains(filtered, kept) {
 			t.Fatalf("filter dropped screen content %q: %q", kept, filtered)
 		}
+	}
+}
+
+// The scanner's memory of exhausted terminator searches is what keeps replay
+// linear. Without it this input took minutes, and it runs while the session
+// lock is held, so a regression stalls every client of that terminal.
+func TestStripQueriesStaysLinearOnUnterminatedIntroducers(t *testing.T) {
+	for _, probe := range []struct {
+		name       string
+		introducer string
+	}{
+		{name: "OSC", introducer: "\x1b]"},
+		{name: "DCS", introducer: "\x1bP"},
+		{name: "8-bit OSC", introducer: "\x9d"},
+		{name: "8-bit DCS", introducer: "\x90"},
+	} {
+		t.Run(probe.name, func(t *testing.T) {
+			// maxHistoryBytes of output whose terminators never arrive, the
+			// shape of `cat`ing a binary file.
+			var history []byte
+			for len(history) < maxHistoryBytes {
+				history = append(history, strings.Repeat("x", 4096)...)
+				history = append(history, probe.introducer...)
+			}
+			history = history[:maxHistoryBytes]
+
+			done := make(chan int, 1)
+			go func() { done <- len(stripQueries(history)) }()
+			select {
+			case length := <-done:
+				if length != len(history) {
+					t.Fatalf("filtered length = %d, want the input kept whole at %d", length, len(history))
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatalf("stripQueries did not finish %d bytes in 5s; the scanner is rescanning", len(history))
+			}
+		})
+	}
+}
+
+func BenchmarkStripQueries(b *testing.B) {
+	var history []byte
+	for len(history) < maxHistoryBytes {
+		history = append(history, strings.Repeat("x", 4096)...)
+		history = append(history, "\x1b]"...)
+	}
+	history = history[:maxHistoryBytes]
+	b.SetBytes(int64(len(history)))
+	b.ReportAllocs()
+	for b.Loop() {
+		stripQueries(history)
 	}
 }
