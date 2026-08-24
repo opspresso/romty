@@ -122,6 +122,9 @@ type dashboard struct {
 	scrollOffset     int
 	helpOffset       int
 	configPath       string
+	// config is the document as loaded, kept so saving edits it instead of
+	// reconstructing it from fields.
+	config           Config
 	leftWidth        int
 	mousePassthrough bool
 	styles           *uiStyles
@@ -202,6 +205,7 @@ func newDashboardWithConfig(backend Backend, initial model.Snapshot, configPath 
 		width:            80,
 		height:           24,
 		configPath:       configPath,
+		config:           config,
 		leftWidth:        config.LeftWidth,
 		mousePassthrough: config.MousePassthrough,
 		styles:           newUIStyles(true),
@@ -620,8 +624,12 @@ func (m dashboard) adjustLeftWidth(delta int) (tea.Model, tea.Cmd) {
 
 func (m dashboard) saveConfig() tea.Cmd {
 	path := m.configPath
-	// Carry every field, or adjusting the pane width would erase the rest.
-	config := Config{LeftWidth: m.leftWidth, MousePassthrough: m.mousePassthrough}
+	// Edit the document romty loaded rather than rebuilding it from fields.
+	// Rebuilding meant a setting nobody remembered to copy here was erased the
+	// moment the user touched the pane width, and an older romty would erase
+	// whatever a newer one had written.
+	config := m.config
+	config.LeftWidth = m.leftWidth
 	return func() tea.Msg {
 		return configSavedMsg{leftWidth: config.LeftWidth, err: saveConfig(path, config)}
 	}
