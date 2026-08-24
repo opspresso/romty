@@ -49,6 +49,24 @@ const (
 	terminalPane
 )
 
+// errorSource records what raised the message in the status bar. There is one
+// slot, so without an owner any handler could erase any other's failure — and
+// the refresh a user runs right after a failure did exactly that.
+type errorSource int
+
+const (
+	noError errorSource = iota
+	// treeError is about the workspace tree or the daemon behind it, so a
+	// fresh snapshot answers it.
+	treeError
+	// terminalError is about the open terminal and stands until that terminal
+	// is opened, closed, or replaced.
+	terminalError
+	// settingError is about config or shutting the daemon down, which a
+	// snapshot says nothing about.
+	settingError
+)
+
 type modal int
 
 const (
@@ -90,6 +108,7 @@ type dashboard struct {
 	inputMode           bool
 	input               string
 	errorMessage        string
+	errorFrom           errorSource
 	terminal            *embeddedTerminal
 	modal               modal
 	shutdownPending     bool
@@ -139,6 +158,14 @@ type configSavedMsg struct {
 }
 
 type daemonStoppedMsg struct {
+	err error
+}
+
+// resizeFailedMsg keeps a failed resize out of snapshotMsg, which means "a new
+// snapshot arrived" and whose handler clears the status bar. Borrowing it made
+// a resize failure erase itself and, worse, made every snapshotMsg handler
+// unable to trust message.value.
+type resizeFailedMsg struct {
 	err error
 }
 
@@ -209,7 +236,7 @@ func (m dashboard) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case snapshotMsg:
 		if message.err != nil {
-			m.errorMessage = message.err.Error()
+			m.setError(treeError, message.err.Error())
 			if m.terminalExited {
 				// The snapshot that would have picked a sibling tab never
 				// arrived. Settle on the workspace pane now: leaving the move
@@ -224,7 +251,11 @@ func (m dashboard) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.syncSelection()
 		m.ensureWorkspaceCursor()
 		m.clampTabIndex()
-		m.errorMessage = ""
+		// A refresh says the tree is current; it says nothing about a failed
+		// resize or a daemon that would not stop. Clearing unconditionally
+		// meant the F5 a user presses after a failure erased the reason for
+		// it, and that an in-flight refresh could erase one at random.
+		m.clearError(treeError)
 		if m.terminalExited {
 			return m.settleAfterExit()
 		}
@@ -242,18 +273,23 @@ func (m dashboard) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.saveConfig()
 		}
 		if message.err != nil {
-			m.errorMessage = message.err.Error()
+			m.setError(settingError, message.err.Error())
 			return m, m.resizeTerminal()
 		}
-		m.errorMessage = ""
+		m.clearError(settingError)
 		return m, m.resizeTerminal()
+	case resizeFailedMsg:
+		// The emulator has already taken the new size, so it and the PTY now
+		// disagree until the next successful resize.
+		m.setError(terminalError, "resize terminal: "+message.err.Error())
+		return m, nil
 	case reopenTerminalMsg:
 		return m, m.openSelectedTerminal()
 	case daemonStoppedMsg:
 		if message.err != nil {
 			m.modal = noModal
 			m.shutdownPending = false
-			m.errorMessage = "stop daemon: " + message.err.Error()
+			m.setError(settingError, "stop daemon: "+message.err.Error())
 			return m, nil
 		}
 		return m.quit()
@@ -352,10 +388,29 @@ func (m dashboard) quit() (tea.Model, tea.Cmd) {
 	return m, tea.Quit
 }
 
+// setError takes the status bar for one source; clearError gives it up only if
+// that source still holds it.
+func (m *dashboard) setError(source errorSource, message string) {
+	m.errorMessage = message
+	m.errorFrom = source
+}
+
+func (m *dashboard) clearError(source errorSource) {
+	if m.errorFrom == source || m.errorFrom == noError {
+		m.errorMessage = ""
+		m.errorFrom = noError
+	}
+}
+
+func (m *dashboard) clearAnyError() {
+	m.errorMessage = ""
+	m.errorFrom = noError
+}
+
 func (m dashboard) openModal(value modal) (tea.Model, tea.Cmd) {
 	m.modal = value
 	m.helpOffset = 0
-	m.errorMessage = ""
+	m.clearAnyError()
 	return m, nil
 }
 
@@ -363,7 +418,7 @@ func (m dashboard) startRootInput() (tea.Model, tea.Cmd) {
 	m.modal = noModal
 	m.inputMode = true
 	m.input = ""
-	m.errorMessage = ""
+	m.clearAnyError()
 	return m, nil
 }
 
@@ -478,7 +533,7 @@ func (m dashboard) pageHistory(pages int) (tea.Model, tea.Cmd) {
 			m.terminal.sendKey(pagingKey(pages))
 			return m, nil
 		}
-		m.errorMessage = m.scrollbackUnavailable()
+		m.setError(terminalError, m.scrollbackUnavailable())
 		return m, nil
 	}
 	m.scrollTerminal(pages * m.scrollbackPage())
@@ -498,7 +553,7 @@ func (m *dashboard) startScrollback() bool {
 	}
 	m.scrollback = true
 	m.modal = noModal
-	m.errorMessage = ""
+	m.clearAnyError()
 	return true
 }
 
@@ -579,7 +634,7 @@ func (m dashboard) handleInput(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.input = ""
 	case "enter":
 		if strings.TrimSpace(m.input) == "" {
-			m.errorMessage = "root path is required"
+			m.setError(treeError, "root path is required")
 			return m, nil
 		}
 		path := strings.TrimSpace(m.input)
@@ -604,7 +659,7 @@ func (m dashboard) handleInput(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 func (m dashboard) handleWorkspace(message workspaceMsg) (tea.Model, tea.Cmd) {
 	if message.err != nil {
-		m.errorMessage = message.err.Error()
+		m.setError(treeError, message.err.Error())
 		return m, nil
 	}
 	m.selectedWorkspaceID = message.value.ID
@@ -613,7 +668,9 @@ func (m dashboard) handleWorkspace(message workspaceMsg) (tea.Model, tea.Cmd) {
 	m.state = message.snapshot
 	tabs := m.selectedTabs()
 	m.focus = leftPane
-	m.errorMessage = ""
+	// The user's selection succeeded, so whatever was on the status bar is
+	// answered whichever part of romty put it there.
+	m.clearAnyError()
 	if message.createTab {
 		m.tabIndex = len(tabs)
 		return m, m.createTab()
@@ -625,13 +682,13 @@ func (m dashboard) handleWorkspace(message workspaceMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 	m.clampTabIndex()
-	m.errorMessage = "selected terminal is no longer running"
+	m.setError(terminalError, "selected terminal is no longer running")
 	return m, nil
 }
 
 func (m dashboard) handleCreatedTab(message tabMsg) (tea.Model, tea.Cmd) {
 	if message.err != nil {
-		m.errorMessage = message.err.Error()
+		m.setError(terminalError, message.err.Error())
 		return m, nil
 	}
 	m.state = message.snapshot
@@ -642,13 +699,13 @@ func (m dashboard) handleCreatedTab(message tabMsg) (tea.Model, tea.Cmd) {
 			break
 		}
 	}
-	m.errorMessage = ""
+	m.clearAnyError()
 	return m, m.openSelectedTerminal()
 }
 
 func (m dashboard) handleOpenedTerminal(message terminalOpenedMsg) (tea.Model, tea.Cmd) {
 	if message.err != nil {
-		m.errorMessage = message.err.Error()
+		m.setError(terminalError, message.err.Error())
 		m.focus = leftPane
 		return m, nil
 	}
@@ -656,7 +713,8 @@ func (m dashboard) handleOpenedTerminal(message terminalOpenedMsg) (tea.Model, t
 	columns, rows := m.terminalSize()
 	m.terminal = newEmbeddedTerminal(message.tabID, message.stream, int(columns), int(rows))
 	m.focus = terminalPane
-	m.errorMessage = ""
+	// A terminal that opened supersedes any complaint about terminals.
+	m.clearError(terminalError)
 	return m, m.terminal.read()
 }
 
@@ -672,7 +730,7 @@ func (m dashboard) handleTerminalOutput(message terminalOutputMsg) (tea.Model, t
 		case m.terminal.scrollbackLen() == 0:
 			// The application took over the screen; its history is its own.
 			m.stopScrollback()
-			m.errorMessage = m.scrollbackUnavailable()
+			m.setError(terminalError, m.scrollbackUnavailable())
 		default:
 			// Hold the viewport on the same content as new output pushes
 			// older lines into the scrollback.
@@ -718,7 +776,7 @@ func (m dashboard) settleAfterExit() (tea.Model, tea.Cmd) {
 	m.reattachAttempts++
 	if m.reattachAttempts > maximumReattachAttempts {
 		m.focusNavigation()
-		m.errorMessage = "terminal keeps disconnecting; press Enter to try again"
+		m.setError(terminalError, "terminal keeps disconnecting; press Enter to try again")
 		m.reattachTab, m.reattachAttempts = "", 0
 		return m, nil
 	}
@@ -824,7 +882,7 @@ func (m dashboard) resizeTerminal() tea.Cmd {
 	tabID := m.terminal.id
 	return func() tea.Msg {
 		if err := m.backend.Resize(tabID, columns, rows); err != nil {
-			return snapshotMsg{err: err}
+			return resizeFailedMsg{err: err}
 		}
 		return nil
 	}
