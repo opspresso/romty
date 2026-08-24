@@ -14,6 +14,7 @@ import (
 	"github.com/opspresso/romty/internal/client"
 	"github.com/opspresso/romty/internal/daemon"
 	"github.com/opspresso/romty/internal/model"
+	"github.com/opspresso/romty/internal/protocol"
 	"github.com/opspresso/romty/internal/state"
 	"github.com/opspresso/romty/internal/testutil"
 )
@@ -718,4 +719,113 @@ func TestCreateTabUsesTheClientEnvironment(t *testing.T) {
 	defer connection.Close()
 	writeCommand(t, connection, `printf 'marker=%s\n' "$ROMTY_AUDIT_MARKER"`)
 	readUntil(t, connection, reader, "marker=from-the-client")
+}
+
+// The version check has to run on both sides. Until the daemon read the field
+// the client stamped, a mismatched client's request was carried out first and
+// the mismatch reported afterwards, with the tab already created.
+func TestServerRefusesAClientSpeakingAnotherProtocol(t *testing.T) {
+	socket, cancel, done := serveForTest(t)
+	defer func() { cancel(); <-done }()
+
+	response := speakRaw(t, socket, map[string]any{"action": "snapshot", "version": protocol.Version + 1})
+	if response.Error == "" {
+		t.Fatal("snapshot from a mismatched client was accepted")
+	}
+	for _, want := range []string{"protocol", "romty stop"} {
+		if !strings.Contains(response.Error, want) {
+			t.Fatalf("error = %q, want it to mention %q", response.Error, want)
+		}
+	}
+	if response.Snapshot != nil {
+		t.Fatal("a refused request still returned a snapshot")
+	}
+}
+
+// Ping and shutdown are the two the check must let through: ping is how the
+// client decides whether a daemon is running at all, and shutdown is the
+// remedy the mismatch message names.
+func TestServerAnswersPingAndShutdownRegardlessOfVersion(t *testing.T) {
+	socket, cancel, done := serveForTest(t)
+	defer cancel()
+
+	if response := speakRaw(t, socket, map[string]any{"action": "ping"}); response.Error != "" {
+		t.Fatalf("unversioned ping error = %q, want it answered", response.Error)
+	}
+	if response := speakRaw(t, socket, map[string]any{"action": "shutdown"}); response.Error != "" {
+		t.Fatalf("unversioned shutdown error = %q, want it answered", response.Error)
+	}
+	// The shutdown was accepted, so the daemon stops on its own; waiting on
+	// Serve is what proves the request reached past the version check.
+	if err := <-done; err != nil {
+		t.Fatalf("Serve() after an unversioned shutdown error = %v", err)
+	}
+}
+
+// Attach built its request inline and sent it unversioned, so the daemon saw
+// every attach as coming from a client that predates the field.
+func TestAttachSendsTheProtocolVersion(t *testing.T) {
+	socket, cancel, done := serveForTest(t)
+	defer func() { cancel(); <-done }()
+
+	backend := client.New(socket)
+	testutil.WaitForDaemon(t, backend)
+	root := t.TempDir()
+	if _, err := backend.AddRoot(root); err != nil {
+		t.Fatalf("AddRoot() error = %v", err)
+	}
+	snapshot, err := backend.Snapshot()
+	if err != nil {
+		t.Fatalf("Snapshot() error = %v", err)
+	}
+	workspace, err := backend.EnsureWorkspace(snapshot.Roots[0].Root.ID, root)
+	if err != nil {
+		t.Fatalf("EnsureWorkspace() error = %v", err)
+	}
+	tab, err := backend.CreateTab(workspace.ID, 80, 24)
+	if err != nil {
+		t.Fatalf("CreateTab() error = %v", err)
+	}
+	stream, err := backend.OpenTerminal(tab.ID)
+	if err != nil {
+		t.Fatalf("OpenTerminal() error = %v", err)
+	}
+	stream.Close()
+}
+
+// serveForTest starts a daemon on a private socket and returns the socket, the
+// cancel that stops it, and the channel carrying Serve's result.
+func serveForTest(t *testing.T) (string, context.CancelFunc, chan error) {
+	t.Helper()
+	base := testutil.ShortTempDir(t)
+	socket := filepath.Join(base, "daemon.sock")
+	server, err := daemon.New(socket, filepath.Join(base, "state.json"), "/bin/sh")
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	server.SetLogger(testutil.QuietLogger())
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- server.Serve(ctx) }()
+	return socket, cancel, done
+}
+
+// speakRaw sends one hand-built request, so a test can say a version the
+// client package would never send.
+func speakRaw(t *testing.T, socket string, request map[string]any) protocol.Response {
+	t.Helper()
+	testutil.WaitForDaemon(t, client.New(socket))
+	connection, err := net.Dial("unix", socket)
+	if err != nil {
+		t.Fatalf("Dial() error = %v", err)
+	}
+	defer connection.Close()
+	if err := protocol.Write(connection, request); err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+	var response protocol.Response
+	if err := protocol.Read(bufio.NewReader(connection), &response); err != nil {
+		t.Fatalf("Read() error = %v", err)
+	}
+	return response
 }

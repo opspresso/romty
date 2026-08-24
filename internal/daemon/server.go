@@ -202,6 +202,11 @@ func (s *Server) handle(connection net.Conn) {
 		return
 	}
 
+	if err := checkClientVersion(request); err != nil {
+		_ = reply(connection, protocol.Response{Error: err.Error()})
+		return
+	}
+
 	// The request is in; what follows is either a long-lived attach or a short
 	// reply, and neither wants the read deadline that bounded the handshake.
 	if err := connection.SetReadDeadline(time.Time{}); err != nil {
@@ -219,6 +224,29 @@ func (s *Server) handle(connection net.Conn) {
 		return
 	}
 	_ = reply(connection, s.dispatch(request))
+}
+
+// checkClientVersion refuses work for a client that speaks another protocol.
+// The client stamps every request with its version and checks the daemon's on
+// every reply, but until the daemon read that field the check only ran on one
+// side: the daemon carried out the request first and the client discovered the
+// mismatch afterwards, having already created the tab or forgotten the root.
+//
+// Two actions are exempt. Ping is how EnsureDaemon decides whether to start a
+// daemon at all, and refusing it turns a version mismatch into "daemon did not
+// become ready", which names neither side. Shutdown is the remedy this error
+// asks for, and a daemon that refuses the request that stops it cannot be
+// stopped by the client meeting it.
+func checkClientVersion(request protocol.Request) error {
+	switch request.Action {
+	case protocol.ActionPing, protocol.ActionShutdown:
+		return nil
+	}
+	if request.Version == protocol.Version {
+		return nil
+	}
+	return fmt.Errorf("this daemon speaks protocol %d but the client speaks %d; run `romty stop` and start romty again",
+		protocol.Version, request.Version)
 }
 
 // reply stamps every response with the protocol version, so a client can tell
