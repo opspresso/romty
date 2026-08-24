@@ -26,6 +26,12 @@ jobs:
 
       - name: Validate
         run: |
+          unformatted="$(gofmt -s -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "gofmt -s reports:"
+            echo "$unformatted"
+            exit 1
+          fi
           go vet ./...
           go test ./...
 

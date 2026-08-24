@@ -78,9 +78,11 @@ type dashboard struct {
 	errorMessage        string
 	terminal            *embeddedTerminal
 	modal               modal
+	shutdownPending     bool
+	helpOffset          int
 	configPath          string
 	leftWidth           int
-	styles              uiStyles
+	styles              *uiStyles
 }
 
 type snapshotMsg struct {
@@ -207,6 +209,7 @@ func (m dashboard) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	case daemonStoppedMsg:
 		if message.err != nil {
 			m.modal = noModal
+			m.shutdownPending = false
 			m.errorMessage = "stop daemon: " + message.err.Error()
 			return m, nil
 		}
@@ -215,35 +218,33 @@ func (m dashboard) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// globalKeys are handled in both panes and with a modal open. Routing every
+// function key through one table keeps their precedence at a single point.
+var globalKeys = map[string]func(dashboard) (tea.Model, tea.Cmd){
+	"f1": func(m dashboard) (tea.Model, tea.Cmd) { return m.openModal(aboutModal) },
+	"f2": func(m dashboard) (tea.Model, tea.Cmd) { return m.startRootInput() },
+	"f3": func(m dashboard) (tea.Model, tea.Cmd) { return m.openModal(configModal) },
+	"f4": func(m dashboard) (tea.Model, tea.Cmd) { return m.quit() },
+	"f5": func(m dashboard) (tea.Model, tea.Cmd) { return m, m.refresh() },
+	"f6": func(m dashboard) (tea.Model, tea.Cmd) { return m.openModal(shutdownModal) },
+}
+
 func (m dashboard) handleKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	if message.String() == "f4" {
-		return m.quit()
-	}
 	if m.inputMode {
 		return m.handleInput(message)
 	}
-	if message.String() == "f6" {
-		m.modal = shutdownModal
-		m.errorMessage = ""
+	if m.shutdownPending {
+		// The daemon is already stopping; only quitting the TUI still applies.
+		if message.String() == "f4" {
+			return m.quit()
+		}
 		return m, nil
+	}
+	if action, ok := globalKeys[message.String()]; ok {
+		return action(m)
 	}
 	if m.modal != noModal {
 		return m.handleModalKey(message)
-	}
-	switch message.String() {
-	case "f1":
-		m.modal = aboutModal
-		return m, nil
-	case "f2":
-		m.inputMode = true
-		m.input = ""
-		m.errorMessage = ""
-		return m, nil
-	case "f3":
-		m.modal = configModal
-		return m, nil
-	case "f5":
-		return m, m.refresh()
 	}
 	if m.focus == terminalPane {
 		if message.String() == "ctrl+\\" {
@@ -265,19 +266,17 @@ func (m dashboard) handleKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.syncTabCursor(m.selectedTabs())
 		}
 	case "i":
-		m.modal = aboutModal
+		return m.openModal(aboutModal)
 	case "a":
-		m.inputMode = true
-		m.input = ""
-		m.errorMessage = ""
+		return m.startRootInput()
 	case ",":
-		m.modal = configModal
+		return m.openModal(configModal)
 	case "q":
 		return m.quit()
 	case "r":
 		return m, m.refresh()
 	case "?":
-		m.modal = helpModal
+		return m.openModal(helpModal)
 	case "up", "k":
 		m.moveNavigation(-1)
 	case "down", "j":
@@ -298,24 +297,58 @@ func (m dashboard) quit() (tea.Model, tea.Cmd) {
 	return m, tea.Quit
 }
 
+func (m dashboard) openModal(value modal) (tea.Model, tea.Cmd) {
+	m.modal = value
+	m.helpOffset = 0
+	m.errorMessage = ""
+	return m, nil
+}
+
+func (m dashboard) startRootInput() (tea.Model, tea.Cmd) {
+	m.modal = noModal
+	m.inputMode = true
+	m.input = ""
+	m.errorMessage = ""
+	return m, nil
+}
+
 func (m dashboard) handleModalKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if message.String() == "esc" {
 		m.modal = noModal
 		return m, nil
 	}
-	if m.modal != configModal {
-		if m.modal == shutdownModal && message.String() == "enter" {
+	switch m.modal {
+	case shutdownModal:
+		if message.String() == "enter" {
+			m.shutdownPending = true
 			return m, m.shutdownDaemon()
 		}
-		return m, nil
-	}
-	switch message.String() {
-	case "left", "[":
-		return m.adjustLeftWidth(-1)
-	case "right", "]":
-		return m.adjustLeftWidth(1)
+	case helpModal:
+		switch message.String() {
+		case "up", "k":
+			return m.scrollHelp(-1)
+		case "down", "j":
+			return m.scrollHelp(1)
+		}
+	case configModal:
+		switch message.String() {
+		case "left", "[":
+			return m.adjustLeftWidth(-1)
+		case "right", "]":
+			return m.adjustLeftWidth(1)
+		}
 	}
 	return m, nil
+}
+
+func (m dashboard) scrollHelp(delta int) (tea.Model, tea.Cmd) {
+	_, _, bodyHeight, _ := m.dimensions()
+	m.helpOffset = min(max(m.helpOffset+delta, 0), m.maximumHelpOffset(bodyHeight))
+	return m, nil
+}
+
+func (m dashboard) maximumHelpOffset(height int) int {
+	return max(len(m.helpEntries())-modalCapacity(height), 0)
 }
 
 func (m dashboard) shutdownDaemon() tea.Cmd {
@@ -724,8 +757,9 @@ func (m dashboard) View() tea.View {
 
 func (m dashboard) render() string {
 	leftWidth, rightWidth, bodyHeight, _ := m.dimensions()
-	left := m.renderNavigation(leftWidth)
+	left := m.renderNavigation(leftWidth, bodyHeight)
 	right := m.renderTerminal(rightWidth)
+	headSeparator, bodySeparator := m.paneSeparators()
 	lines := make([]string, 0, bodyHeight+2)
 	for row := 0; row < bodyHeight; row++ {
 		leftLine := ""
@@ -736,68 +770,84 @@ func (m dashboard) render() string {
 		if row < len(right) {
 			rightLine = right[row]
 		}
+		separator := bodySeparator
+		if row == 0 {
+			separator = headSeparator
+		}
 		leftLine = pad(truncate(leftLine, leftWidth), leftWidth)
 		rightLine = truncate(rightLine, rightWidth)
-		lines = append(lines, leftLine+m.paneSeparator(row)+rightLine)
+		lines = append(lines, leftLine+separator+rightLine)
 	}
 	width := max(m.width, 40)
 	if m.modal != noModal {
-		lines = m.overlayModal(lines, width)
+		lines = m.overlayModal(lines, width, bodyHeight)
 	}
-	commands := []shortcut{
-		shortcut{key: "F1", description: "about"},
-		shortcut{key: "F2", description: "add root"},
-		shortcut{key: "F3", description: "config"},
-		shortcut{key: "F4", description: "quit"},
-		shortcut{key: "F5", description: "refresh"},
-		shortcut{key: "F6", description: "stop daemon"},
-	}
-	var contextShortcuts []shortcut
-	if m.focus == terminalPane {
-		contextShortcuts = []shortcut{
-			shortcut{key: "Ctrl+\\", description: "navigation"},
-		}
-	} else {
-		contextShortcuts = []shortcut{
-			shortcut{key: "↑/↓", description: "workspace"},
-			shortcut{key: "←/→", description: "tabs"},
-			shortcut{key: "Enter", description: "open"},
-			shortcut{key: "Tab", description: "terminal"},
-		}
-	}
-	rail := renderShortcutRail(m.styles, width, contextShortcuts...)
-	status := renderShortcuts(m.styles, width, commands...)
-	if m.inputMode {
-		rail = m.styles.tabRail.Render(strings.Repeat("─", width))
+	lines = append(lines, m.renderStatus(width, bodyHeight)...)
+	return strings.Join(lines, "\n")
+}
+
+// renderStatus returns the shortcut rail and the status bar. Only the default
+// branch keeps a contextual rail; every other state uses a plain full-width one.
+func (m dashboard) renderStatus(width, bodyHeight int) []string {
+	rail := m.styles.tabRail.Render(strings.Repeat("─", width))
+	var status string
+	switch {
+	case m.inputMode:
 		status = truncate(
 			m.styles.promptLabel.Render(" ROOT ")+" "+m.styles.promptText.Render(m.input)+m.styles.dividerActive.Render("█"),
 			width,
 		)
-	} else if m.errorMessage != "" {
-		rail = m.styles.tabRail.Render(strings.Repeat("─", width))
+	case m.errorMessage != "":
 		status = truncate(m.styles.errorLabel.Render(" ERROR ")+" "+m.styles.errorText.Render(m.errorMessage), width)
-	} else if m.modal == aboutModal || m.modal == helpModal {
-		rail = m.styles.tabRail.Render(strings.Repeat("─", width))
+	case m.modal == helpModal:
+		shortcuts := []shortcut{{key: "Esc", description: "close"}}
+		if m.maximumHelpOffset(bodyHeight) > 0 {
+			shortcuts = append([]shortcut{{key: "↑/↓", description: "scroll"}}, shortcuts...)
+		}
+		status = renderShortcuts(m.styles, width, shortcuts...)
+	case m.modal == aboutModal:
 		status = renderShortcuts(m.styles, width, shortcut{key: "Esc", description: "close"})
-	} else if m.modal == configModal {
-		rail = m.styles.tabRail.Render(strings.Repeat("─", width))
+	case m.modal == configModal:
 		status = renderShortcuts(m.styles, width,
 			shortcut{key: "←/→", description: "adjust width"},
 			shortcut{key: "Esc", description: "close"},
 		)
-	} else if m.modal == shutdownModal {
-		rail = m.styles.tabRail.Render(strings.Repeat("─", width))
+	case m.modal == shutdownModal && m.shutdownPending:
+		// The request is already out; no key can take it back.
+		status = truncate(
+			m.styles.promptLabel.Render(" STOPPING ")+" "+m.styles.shortcutDescription.Render("waiting for the daemon to stop"),
+			width,
+		)
+	case m.modal == shutdownModal:
 		status = renderShortcuts(m.styles, width,
 			shortcut{key: "Enter", description: "stop daemon"},
 			shortcut{key: "Esc", description: "cancel"},
 		)
+	default:
+		contextShortcuts := []shortcut{
+			{key: "↑/↓", description: "workspace"},
+			{key: "←/→", description: "tabs"},
+			{key: "Enter", description: "open"},
+			{key: "Tab", description: "terminal"},
+		}
+		if m.focus == terminalPane {
+			contextShortcuts = []shortcut{{key: "Ctrl+\\", description: "navigation"}}
+		}
+		rail = renderShortcutRail(m.styles, width, contextShortcuts...)
+		status = renderShortcuts(m.styles, width,
+			shortcut{key: "F1", description: "about"},
+			shortcut{key: "F2", description: "add root"},
+			shortcut{key: "F3", description: "config"},
+			shortcut{key: "F4", description: "quit"},
+			shortcut{key: "F5", description: "refresh"},
+			shortcut{key: "F6", description: "stop daemon"},
+		)
 	}
-	lines = append(lines, rail, status)
-	return strings.Join(lines, "\n")
+	return []string{rail, status}
 }
 
-func (m dashboard) overlayModal(lines []string, width int) []string {
-	modalLines := m.renderModal(width)
+func (m dashboard) overlayModal(lines []string, width, height int) []string {
+	modalLines := m.renderModal(width, height)
 	top := max((len(lines)-len(modalLines))/2, 0)
 	for index, line := range modalLines {
 		row := top + index
@@ -812,11 +862,11 @@ func (m dashboard) overlayModal(lines []string, width int) []string {
 	return lines
 }
 
-func (m dashboard) renderModal(width int) []string {
+func (m dashboard) renderModal(width, height int) []string {
 	modalWidth := min(max(width-8, 32), 56)
 	if m.modal == helpModal {
 		modalWidth = min(max(width-4, 40), 64)
-		return m.renderHelpModal(modalWidth)
+		return m.renderHelpModal(modalWidth, height)
 	}
 	if m.modal == shutdownModal {
 		return modalBox(m.styles, modalWidth, "Stop daemon",
@@ -845,8 +895,8 @@ func (m dashboard) renderModal(width int) []string {
 	)
 }
 
-func (m dashboard) renderHelpModal(width int) []string {
-	return modalBox(m.styles, width, "Help",
+func (m dashboard) helpEntries() []string {
+	return []string{
 		renderHelpSection(m.styles, "COMMANDS", "F-keys work in both areas"),
 		renderHelpShortcut(m.styles, "About", "i", "F1"),
 		renderHelpShortcut(m.styles, "Add root", "a", "F2"),
@@ -866,14 +916,33 @@ func (m dashboard) renderHelpModal(width int) []string {
 		renderHelpShortcut(m.styles, "Quit", "Ctrl+C"),
 		renderHelpShortcut(m.styles, "Resize workspace pane", "←/→", "[/]"),
 		renderHelpShortcut(m.styles, "Close / cancel", "Esc"),
-	)
+	}
 }
 
-func renderHelpSection(styles uiStyles, title, note string) string {
+// renderHelpModal windows the shortcut list so the box always fits the body and
+// stays terminated; the title carries the visible range when it has to scroll.
+func (m dashboard) renderHelpModal(width, height int) []string {
+	entries := m.helpEntries()
+	capacity := modalCapacity(height)
+	if len(entries) <= capacity {
+		return modalBox(m.styles, width, "Help", entries...)
+	}
+	offset := min(max(m.helpOffset, 0), len(entries)-capacity)
+	title := fmt.Sprintf("Help %d-%d/%d", offset+1, offset+capacity, len(entries))
+	return modalBox(m.styles, width, title, entries[offset:offset+capacity]...)
+}
+
+// modalCapacity is the number of content lines a modal box can hold without
+// losing its top and bottom borders.
+func modalCapacity(height int) int {
+	return max(height-2, 1)
+}
+
+func renderHelpSection(styles *uiStyles, title, note string) string {
 	return styles.modalBorder.Render("── ") + styles.modalTitle.Render(title) + "  " + styles.empty.Render(note)
 }
 
-func renderHelpShortcut(styles uiStyles, description string, keys ...string) string {
+func renderHelpShortcut(styles *uiStyles, description string, keys ...string) string {
 	keycaps := make([]string, 0, len(keys))
 	for _, key := range keys {
 		keycaps = append(keycaps, styles.shortcutKey.Render(" "+key+" "))
@@ -882,7 +951,7 @@ func renderHelpShortcut(styles uiStyles, description string, keys ...string) str
 	return pad(strings.Join(keycaps, separator), helpKeyColumnWidth) + styles.modalBody.Render(description)
 }
 
-func modalBox(styles uiStyles, width int, title string, values ...string) []string {
+func modalBox(styles *uiStyles, width int, title string, values ...string) []string {
 	interior := width - 2
 	lines := make([]string, 0, len(values)+2)
 	title = " " + title + " "
@@ -900,18 +969,19 @@ func modalBox(styles uiStyles, width int, title string, values ...string) []stri
 	return append(lines, styles.modalBorder.Render("╰"+strings.Repeat("─", interior)+"╯"))
 }
 
-func (m dashboard) paneSeparator(row int) string {
+// paneSeparators returns the divider for the first body row, which carries the
+// focus arrow, and the one shared by every remaining row.
+func (m dashboard) paneSeparators() (string, string) {
 	divider := m.styles.divider.Render("│")
-	if row != 0 {
-		return " " + divider + " "
-	}
 	if m.focus == leftPane {
-		return m.styles.dividerActive.Render("◀") + divider + " "
+		return m.styles.dividerActive.Render("◀") + divider + " ", " " + divider + " "
 	}
-	return " " + divider + m.styles.dividerActive.Render("▶")
+	return " " + divider + m.styles.dividerActive.Render("▶"), " " + divider + " "
 }
 
-func (m dashboard) renderNavigation(width int) []string {
+// renderNavigation windows the tree around the cursor so the selected item stays
+// visible when the item count exceeds the pane height.
+func (m dashboard) renderNavigation(width, height int) []string {
 	titleStyle := m.styles.paneTitle
 	if m.focus == leftPane {
 		titleStyle = m.styles.paneTitleActive
@@ -920,8 +990,13 @@ func (m dashboard) renderNavigation(width int) []string {
 	header := title + m.styles.tabRail.Render(strings.Repeat("─", max(width-lipgloss.Width(title), 0)))
 	lines := []string{header, ""}
 	items := m.navigationItems()
-	for index, item := range items {
-		lines = append(lines, m.renderNavigationItem(item, index, width))
+	capacity := max(height-len(lines), 1)
+	start := 0
+	if len(items) > capacity {
+		start = min(max(m.navIndex-capacity/2, 0), len(items)-capacity)
+	}
+	for index := start; index < len(items) && index-start < capacity; index++ {
+		lines = append(lines, m.renderNavigationItem(items[index], index, width))
 	}
 	if len(items) == 0 {
 		lines = append(lines,
@@ -987,10 +1062,16 @@ func (m dashboard) renderTerminal(width int) []string {
 	return append(lines, m.styles.empty.Render("  Select a tab and press Enter"))
 }
 
-func renderTabBar(styles uiStyles, tabs []model.Tab, active, width int) []string {
+func renderTabBar(styles *uiStyles, tabs []model.Tab, active, width int) []string {
+	labels := make([]string, 0, len(tabs)+1)
+	for _, tab := range tabs {
+		labels = append(labels, " "+tab.Name+" ")
+	}
+	labels = append(labels, " + ")
+
 	var tabsLine strings.Builder
 	var railLine strings.Builder
-	for index, tab := range tabs {
+	for index, label := range labels {
 		if index > 0 {
 			tabsLine.WriteString(" ")
 			railLine.WriteString(styles.tabRail.Render("─"))
@@ -1003,25 +1084,9 @@ func renderTabBar(styles uiStyles, tabs []model.Tab, active, width int) []string
 			railStyle = styles.tabRailSelected
 			railCharacter = "━"
 		}
-		label := " " + tab.Name + " "
 		tabsLine.WriteString(style.Render(label))
 		railLine.WriteString(railStyle.Render(strings.Repeat(railCharacter, lipgloss.Width(label))))
 	}
-	if len(tabs) > 0 {
-		tabsLine.WriteString(" ")
-		railLine.WriteString(styles.tabRail.Render("─"))
-	}
-	style := styles.tab
-	railStyle := styles.tabRail
-	railCharacter := "─"
-	if active == len(tabs) {
-		style = styles.tabSelected
-		railStyle = styles.tabRailSelected
-		railCharacter = "━"
-	}
-	label := " + "
-	tabsLine.WriteString(style.Render(label))
-	railLine.WriteString(railStyle.Render(strings.Repeat(railCharacter, lipgloss.Width(label))))
 	remaining := width - lipgloss.Width(railLine.String())
 	if remaining > 0 {
 		railLine.WriteString(styles.tabRail.Render(strings.Repeat("─", remaining)))
@@ -1029,7 +1094,7 @@ func renderTabBar(styles uiStyles, tabs []model.Tab, active, width int) []string
 	return []string{truncate(tabsLine.String(), width), truncate(railLine.String(), width)}
 }
 
-func renderShortcuts(styles uiStyles, width int, values ...shortcut) string {
+func renderShortcuts(styles *uiStyles, width int, values ...shortcut) string {
 	segments := make([]string, 0, len(values))
 	for _, value := range values {
 		segments = append(segments,
@@ -1039,7 +1104,7 @@ func renderShortcuts(styles uiStyles, width int, values ...shortcut) string {
 	return truncate(strings.Join(segments, "  "), width)
 }
 
-func renderShortcutRail(styles uiStyles, width int, values ...shortcut) string {
+func renderShortcutRail(styles *uiStyles, width int, values ...shortcut) string {
 	shortcuts := renderShortcuts(styles, width, values...)
 	fill := max(width-lipgloss.Width(shortcuts)-1, 0)
 	if fill == 0 {

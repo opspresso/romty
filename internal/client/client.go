@@ -2,12 +2,14 @@ package client
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
 	"net"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/nalbam/romty/internal/model"
@@ -123,6 +125,12 @@ func (c *Client) Resize(tabID string, columns, rows uint16) error {
 func (c *Client) Shutdown() error {
 	_, err := c.call(protocol.Request{Action: protocol.ActionShutdown})
 	return err
+}
+
+// Unavailable reports whether err means the daemon socket could not be reached,
+// which is what a request returns when no daemon is running.
+func Unavailable(err error) bool {
+	return errors.Is(err, syscall.ENOENT) || errors.Is(err, syscall.ECONNREFUSED)
 }
 
 func (c *Client) OpenAttach(tabID string) (net.Conn, *bufio.Reader, error) {

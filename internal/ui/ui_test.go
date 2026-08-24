@@ -2,6 +2,8 @@ package ui
 
 import (
 	"bytes"
+	"errors"
+	"fmt"
 	"image/color"
 	"io"
 	"path/filepath"
@@ -492,13 +494,97 @@ func TestDashboardConfirmsDaemonShutdown(t *testing.T) {
 	value = updated.(dashboard)
 	updated, command = value.Update(key(tea.KeyEnter, ""))
 	value = updated.(dashboard)
-	if command == nil || backend.shutdownCount != 0 {
-		t.Fatalf("Enter result = (command %v, shutdowns %d), want deferred shutdown", command, backend.shutdownCount)
+	if command == nil || !value.shutdownPending || backend.shutdownCount != 0 {
+		t.Fatalf("Enter result = (command %v, pending %v, shutdowns %d), want deferred shutdown", command, value.shutdownPending, backend.shutdownCount)
 	}
+
+	// Esc cannot take back a dispatched shutdown, and Enter must not repeat it.
+	for _, message := range []tea.KeyPressMsg{key(tea.KeyEscape, ""), key(tea.KeyEnter, ""), key(tea.KeyF6, "")} {
+		updated, extra := value.Update(message)
+		value = updated.(dashboard)
+		if extra != nil || value.modal != shutdownModal {
+			t.Fatalf("%q during shutdown = (command %v, modal %v), want the modal held", message.String(), extra, value.modal)
+		}
+	}
+	if rendered := ansi.Strip(value.render()); !strings.Contains(rendered, "STOPPING") {
+		t.Fatalf("status bar does not report the pending shutdown:\n%s", rendered)
+	}
+
 	updated, quitCommand := value.Update(command())
 	value = updated.(dashboard)
 	if backend.shutdownCount != 1 || !value.result.Quit || quitCommand == nil || value.terminal != nil {
 		t.Fatalf("shutdown result = (count %d, quit %v, command %v, terminal %v)", backend.shutdownCount, value.result.Quit, quitCommand, value.terminal)
+	}
+}
+
+func TestDashboardReportsFailedShutdown(t *testing.T) {
+	value := newDashboard(&fakeBackend{}, model.Snapshot{})
+	updated, _ := value.Update(key(tea.KeyF6, ""))
+	value = updated.(dashboard)
+	updated, _ = value.Update(key(tea.KeyEnter, ""))
+	value = updated.(dashboard)
+
+	updated, command := value.Update(daemonStoppedMsg{err: errors.New("dial unix: no such file")})
+	value = updated.(dashboard)
+	if command != nil || value.shutdownPending || value.modal != noModal || value.result.Quit {
+		t.Fatalf("failed shutdown = (command %v, pending %v, modal %v, quit %v), want the dashboard restored",
+			command, value.shutdownPending, value.modal, value.result.Quit)
+	}
+	if !strings.Contains(value.errorMessage, "stop daemon: ") {
+		t.Fatalf("error message = %q, want a stop daemon failure", value.errorMessage)
+	}
+
+	// Retrying is possible because the pending flag was cleared.
+	updated, _ = value.Update(key(tea.KeyF6, ""))
+	value = updated.(dashboard)
+	if value.modal != shutdownModal || value.errorMessage != "" {
+		t.Fatalf("retry = (modal %v, error %q), want a fresh confirmation", value.modal, value.errorMessage)
+	}
+}
+
+func TestDashboardKeepsGlobalKeysAtOnePrecedence(t *testing.T) {
+	value := newDashboard(&fakeBackend{}, model.Snapshot{})
+	value.errorMessage = "boom"
+
+	// Every function key works with a modal open, and each clears a stale error.
+	for _, step := range []struct {
+		message tea.KeyPressMsg
+		want    modal
+	}{
+		{message: key(tea.KeyF1, ""), want: aboutModal},
+		{message: key(tea.KeyF3, ""), want: configModal},
+		{message: key(tea.KeyF6, ""), want: shutdownModal},
+		{message: key(tea.KeyF1, ""), want: aboutModal},
+	} {
+		updated, command := value.Update(step.message)
+		value = updated.(dashboard)
+		if value.modal != step.want || command != nil || value.errorMessage != "" {
+			t.Fatalf("%q with a modal open = (modal %v, command %v, error %q), want modal %v",
+				step.message.String(), value.modal, command, value.errorMessage, step.want)
+		}
+	}
+	if rendered := ansi.Strip(value.render()); strings.Contains(rendered, "ERROR") || !strings.Contains(rendered, "Esc") {
+		t.Fatalf("status bar keeps the stale error instead of the modal hint:\n%s", rendered)
+	}
+
+	updated, _ := value.Update(key(tea.KeyF2, ""))
+	value = updated.(dashboard)
+	if !value.inputMode || value.modal != noModal {
+		t.Fatalf("F2 with a modal open = (input %v, modal %v), want root input", value.inputMode, value.modal)
+	}
+
+	// Root input owns every key except its own cancel, so F4 cannot discard it.
+	value.input = "/projects"
+	updated, command := value.Update(key(tea.KeyF4, ""))
+	value = updated.(dashboard)
+	if value.result.Quit || command != nil || value.input != "/projects" {
+		t.Fatalf("F4 while typing = (quit %v, command %v, input %q), want the input kept",
+			value.result.Quit, command, value.input)
+	}
+	updated, _ = value.Update(key(tea.KeyEscape, ""))
+	value = updated.(dashboard)
+	if value.inputMode || value.input != "" {
+		t.Fatalf("Esc while typing = (input mode %v, input %q), want the prompt cancelled", value.inputMode, value.input)
 	}
 }
 
@@ -685,11 +771,19 @@ func TestDashboardHighlightsNavigationAndShowsOpenTabs(t *testing.T) {
 	if strings.Contains(plain, "> ") {
 		t.Fatalf("navigation still contains arrow cursor:\n%s", rendered)
 	}
-	if !strings.Contains(plain, "▾ nalbam") || !strings.Contains(plain, "▌ ├─ SnowClash") || !strings.Contains(plain, "●●") {
+	if !strings.Contains(plain, "▾ nalbam") || !strings.Contains(plain, "▌ ├─ SnowClash") {
 		t.Fatalf("navigation tree or selection color is missing:\n%s", rendered)
 	}
-	if strings.Contains(plain, "SnowClash  ●●●") {
-		t.Fatalf("exited tab was included in workspace markers:\n%s", rendered)
+	leftWidth, _, bodyHeight, _ := value.dimensions()
+	navigation := ansi.Strip(strings.Join(value.renderNavigation(leftWidth, bodyHeight), "\n"))
+	snowClash := ""
+	for _, line := range strings.Split(navigation, "\n") {
+		if strings.Contains(line, "SnowClash") {
+			snowClash = strings.TrimRight(line, " ")
+		}
+	}
+	if !strings.HasSuffix(snowClash, "●●") || strings.HasSuffix(snowClash, "●●●") {
+		t.Fatalf("SnowClash row = %q, want markers for exactly the two running tabs", snowClash)
 	}
 	if strings.Contains(plain, "2 exited") {
 		t.Fatalf("exited tab was included in terminal tabs:\n%s", rendered)
@@ -770,6 +864,39 @@ func TestDashboardKeepsWideWorkspaceNamesWithinViewport(t *testing.T) {
 	}
 }
 
+func TestDashboardKeepsNavigationCursorVisible(t *testing.T) {
+	directories := make([]model.WorkspaceView, 0, 40)
+	for index := range 40 {
+		name := fmt.Sprintf("workspace-%02d", index)
+		directories = append(directories, model.WorkspaceView{
+			Workspace: model.Workspace{ID: name, RootID: "root-1", Name: name, Path: "/projects/" + name},
+		})
+	}
+	value := newDashboard(&fakeBackend{}, model.Snapshot{Roots: []model.RootView{{
+		Root:        model.Root{ID: "root-1", Name: "nalbam", Path: "/projects"},
+		Directories: directories,
+	}}})
+	value.width = 120
+	value.height = 30
+	leftWidth, _, bodyHeight, _ := value.dimensions()
+
+	for _, navIndex := range []int{0, 20, len(directories)} {
+		value.navIndex = navIndex
+		lines := value.renderNavigation(leftWidth, bodyHeight)
+		if len(lines) > bodyHeight {
+			t.Fatalf("navigation at index %d rendered %d lines, want at most %d", navIndex, len(lines), bodyHeight)
+		}
+		item, ok := value.navigationItem()
+		if !ok {
+			t.Fatalf("navigation item at index %d is missing", navIndex)
+		}
+		if !strings.Contains(ansi.Strip(strings.Join(lines, "\n")), item.workspace.Name) {
+			t.Fatalf("navigation at index %d does not show the selected %q:\n%s",
+				navIndex, item.workspace.Name, ansi.Strip(strings.Join(lines, "\n")))
+		}
+	}
+}
+
 func TestDashboardShowsAboutModalWithoutReplacingDashboard(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, model.Snapshot{})
 	value.width = 100
@@ -781,7 +908,10 @@ func TestDashboardShowsAboutModalWithoutReplacingDashboard(t *testing.T) {
 		t.Fatalf("modal = %v, want about", value.modal)
 	}
 	rendered := value.render()
-	if !strings.Contains(rendered, "About") || !strings.Contains(rendered, "Persistent terminal workspace manager") || !strings.Contains(rendered, "romty") {
+	// The pane title only ever comes from the dashboard behind the modal; the
+	// modal body renders "romty" too, so a bare substring proves nothing.
+	if !strings.Contains(rendered, "About") || !strings.Contains(rendered, "Persistent terminal workspace manager") ||
+		!strings.Contains(rendered, value.styles.paneTitleActive.Render(" romty ")) {
 		t.Fatalf("about modal or dashboard background is missing:\n%s", rendered)
 	}
 
@@ -807,7 +937,8 @@ func TestDashboardShowsAllShortcutsInHelpModal(t *testing.T) {
 	if value.modal != helpModal || command != nil {
 		t.Fatalf("? result = (modal %v, command %v), want help modal", value.modal, command)
 	}
-	modalLines := value.renderModal(value.width)
+	_, _, bodyHeight, _ := value.dimensions()
+	modalLines := value.renderModal(value.width, bodyHeight)
 	plainLines := strings.Split(ansi.Strip(strings.Join(modalLines, "\n")), "\n")
 	plain := strings.Join(plainLines, "\n")
 	for _, section := range []string{"COMMANDS", "NAVIGATION", "TERMINAL", "OTHER"} {
@@ -847,6 +978,41 @@ func TestDashboardShowsAllShortcutsInHelpModal(t *testing.T) {
 		if lineWidth := lipgloss.Width(line); lineWidth > 64 {
 			t.Fatalf("help modal line %d width = %d, want at most 64", index, lineWidth)
 		}
+	}
+}
+
+func TestDashboardScrollsHelpModalOnShortTerminals(t *testing.T) {
+	value := newDashboard(&fakeBackend{}, model.Snapshot{})
+	value.width = 100
+	value.height = 20
+	updated, _ := value.Update(key('?', "?"))
+	value = updated.(dashboard)
+
+	_, _, bodyHeight, _ := value.dimensions()
+	lines := strings.Split(value.render(), "\n")
+	modalLines := value.renderModal(value.width, bodyHeight)
+	if len(modalLines) > bodyHeight {
+		t.Fatalf("help modal height = %d, want at most %d", len(modalLines), bodyHeight)
+	}
+	if !strings.HasPrefix(ansi.Strip(modalLines[0]), "╭─ Help 1-") ||
+		!strings.HasPrefix(ansi.Strip(modalLines[len(modalLines)-1]), "╰─") {
+		t.Fatalf("help modal is not a terminated box with a range title:\n%s", ansi.Strip(strings.Join(modalLines, "\n")))
+	}
+	if !strings.Contains(ansi.Strip(lines[len(lines)-1]), "scroll") {
+		t.Fatalf("status bar does not offer the scroll shortcut:\n%s", ansi.Strip(lines[len(lines)-1]))
+	}
+
+	// The last entry is off screen at this height and must be reachable.
+	for range value.helpEntries() {
+		updated, _ = value.Update(key(tea.KeyDown, ""))
+		value = updated.(dashboard)
+	}
+	plain := ansi.Strip(strings.Join(value.renderModal(value.width, bodyHeight), "\n"))
+	if !strings.Contains(plain, "Close / cancel") {
+		t.Fatalf("help modal did not scroll to the last shortcut:\n%s", plain)
+	}
+	if strings.Contains(plain, "About") {
+		t.Fatalf("help modal kept the first shortcut after scrolling to the end:\n%s", plain)
 	}
 }
 

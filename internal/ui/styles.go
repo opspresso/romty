@@ -28,7 +28,7 @@ type uiStyles struct {
 	empty               lipgloss.Style
 }
 
-func newUIStyles(hasDarkBackground bool) uiStyles {
+func newUIStyles(hasDarkBackground bool) *uiStyles {
 	lightDark := lipgloss.LightDark(hasDarkBackground)
 	text := lightDark(lipgloss.Color("#0F172A"), lipgloss.Color("#E2E8F0"))
 	muted := lightDark(lipgloss.Color("#64748B"), lipgloss.Color("#8492A6"))
@@ -40,7 +40,7 @@ func newUIStyles(hasDarkBackground bool) uiStyles {
 	errorColor := lightDark(lipgloss.Color("#BE123C"), lipgloss.Color("#FB7185"))
 	errorText := lightDark(lipgloss.Color("#FFFFFF"), lipgloss.Color("#0F172A"))
 
-	return uiStyles{
+	return &uiStyles{
 		paneTitle:           lipgloss.NewStyle().Foreground(muted).Bold(true),
 		paneTitleActive:     lipgloss.NewStyle().Foreground(accent).Bold(true),
 		navigationItem:      lipgloss.NewStyle().Foreground(text),

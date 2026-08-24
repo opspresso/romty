@@ -34,7 +34,8 @@ func run() error {
 		case "daemon":
 			return runDaemon(runtime)
 		case "stop":
-			if err := client.New(runtime.Socket).Shutdown(); err != nil {
+			// Stopping an already stopped daemon is a no-op, not a failure.
+			if err := client.New(runtime.Socket).Shutdown(); err != nil && !client.Unavailable(err) {
 				return fmt.Errorf("stop daemon: %w", err)
 			}
 			return nil

@@ -158,9 +158,10 @@ func (s *Server) handle(connection net.Conn) {
 		return
 	}
 	if request.Action == protocol.ActionShutdown {
-		if err := protocol.Write(connection, protocol.Response{}); err == nil {
-			s.stopOnce.Do(func() { close(s.stop) })
-		}
+		// Stop even when the acknowledgement cannot be delivered, so a client
+		// that already timed out never leaves the daemon running unnoticed.
+		_ = protocol.Write(connection, protocol.Response{})
+		s.stopOnce.Do(func() { close(s.stop) })
 		return
 	}
 	response := s.dispatch(request)
