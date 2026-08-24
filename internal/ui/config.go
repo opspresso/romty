@@ -15,6 +15,9 @@ const (
 
 type Config struct {
 	LeftWidth int `json:"left_width,omitempty"`
+	// MousePassthrough hands the mouse to applications that ask for it, at the
+	// cost of the host terminal's drag selection while they run.
+	MousePassthrough bool `json:"mouse_passthrough,omitempty"`
 }
 
 func loadConfig(path string) (Config, error) {
