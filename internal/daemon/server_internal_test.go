@@ -3,6 +3,7 @@ package daemon
 import (
 	"bytes"
 	"context"
+	"errors"
 	"log"
 	"net"
 	"os"
@@ -350,5 +351,34 @@ func TestStartSessionUsesTheEnvironmentItIsGiven(t *testing.T) {
 	}
 	if output := <-seen; !bytes.Contains([]byte(output), []byte("marker=yes")) {
 		t.Fatalf("the shell did not receive the request's environment: %q", output)
+	}
+}
+
+// The bind, not the probe that precedes it, is what decides who owns the
+// socket. Two daemons starting at once can both find nothing to dial and race
+// to create one, and the one that loses the bind has lost a race rather than
+// failed: reporting it as a bind error sent the ordinary outcome of that race
+// to daemon.log as a failure and exited non-zero.
+func TestListenPrivatelyReportsAlreadyRunningWhenTheBindIsLost(t *testing.T) {
+	base, err := os.MkdirTemp("/tmp", "romty-bind-")
+	if err != nil {
+		t.Fatalf("MkdirTemp() error = %v", err)
+	}
+	t.Cleanup(func() { os.RemoveAll(base) })
+	socket := filepath.Join(base, "daemon.sock")
+
+	winner, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatalf("Listen() error = %v", err)
+	}
+	defer winner.Close()
+
+	listener, err := listenPrivately(socket)
+	if err == nil {
+		listener.Close()
+		t.Fatal("listenPrivately() bound a socket another listener already owns")
+	}
+	if !errors.Is(err, ErrAlreadyRunning) {
+		t.Fatalf("listenPrivately() error = %v, want ErrAlreadyRunning", err)
 	}
 }
