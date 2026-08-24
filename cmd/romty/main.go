@@ -29,11 +29,21 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	if len(os.Args) == 2 && os.Args[1] == "daemon" {
-		return runDaemon(runtime)
+	if len(os.Args) == 2 {
+		switch os.Args[1] {
+		case "daemon":
+			return runDaemon(runtime)
+		case "stop":
+			if err := client.New(runtime.Socket).Shutdown(); err != nil {
+				return fmt.Errorf("stop daemon: %w", err)
+			}
+			return nil
+		default:
+			return fmt.Errorf("usage: romty [stop]")
+		}
 	}
 	if len(os.Args) != 1 {
-		return fmt.Errorf("usage: romty")
+		return fmt.Errorf("usage: romty [stop]")
 	}
 
 	executable, err := os.Executable()

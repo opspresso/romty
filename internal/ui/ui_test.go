@@ -29,6 +29,7 @@ type fakeBackend struct {
 	ensuredPath    string
 	openedTab      string
 	snapshotCount  int
+	shutdownCount  int
 	stream         *memoryStream
 }
 
@@ -110,6 +111,11 @@ func (f *fakeBackend) OpenTerminal(tabID string) (io.ReadWriteCloser, error) {
 func (f *fakeBackend) Resize(_ string, columns, rows uint16) error {
 	f.createdColumns = columns
 	f.createdRows = rows
+	return nil
+}
+
+func (f *fakeBackend) Shutdown() error {
+	f.shutdownCount++
 	return nil
 }
 
@@ -414,8 +420,8 @@ func TestDashboardSupportsIMEIndependentShortcuts(t *testing.T) {
 	value.focus = terminalPane
 	value.terminal = terminal
 	value.width = 120
-	if rendered := value.render(); !shortcutOrder(rendered, "F1", "F2", "F3", "F4", "F5") {
-		t.Fatalf("terminal shortcuts are not in F1-F5 order:\n%s", rendered)
+	if rendered := value.render(); !shortcutOrder(rendered, "F1", "F2", "F3", "F4", "F5", "F6") {
+		t.Fatalf("terminal shortcuts are not in F1-F6 order:\n%s", rendered)
 	} else if !strings.Contains(rendered, value.styles.shortcutKey.Render(" Ctrl+\\ ")) {
 		t.Fatalf("terminal status bar does not contain navigation shortcut:\n%s", rendered)
 	}
@@ -433,13 +439,13 @@ func TestDashboardSupportsIMEIndependentShortcuts(t *testing.T) {
 	value = newDashboard(backend, model.Snapshot{})
 	value.width = 120
 	rendered := value.render()
-	for _, status := range []string{"F1", "F2", "F3", "F4", "F5"} {
+	for _, status := range []string{"F1", "F2", "F3", "F4", "F5", "F6"} {
 		if !strings.Contains(rendered, value.styles.shortcutKey.Render(" "+status+" ")) {
 			t.Fatalf("status bar does not contain %s:\n%s", status, rendered)
 		}
 	}
-	if !shortcutOrder(rendered, "F1", "F2", "F3", "F4", "F5") {
-		t.Fatalf("workspace shortcuts are not in F1-F5 order:\n%s", rendered)
+	if !shortcutOrder(rendered, "F1", "F2", "F3", "F4", "F5", "F6") {
+		t.Fatalf("workspace shortcuts are not in F1-F6 order:\n%s", rendered)
 	}
 	for _, key := range []string{"↑/↓", "←/→", "Enter", "Tab"} {
 		if !strings.Contains(rendered, value.styles.shortcutKey.Render(" "+key+" ")) {
@@ -455,6 +461,44 @@ func TestDashboardSupportsIMEIndependentShortcuts(t *testing.T) {
 		if !strings.Contains(rendered, value.styles.shortcutDescription.Render(description)) {
 			t.Fatalf("status bar does not contain %q description:\n%s", description, rendered)
 		}
+	}
+}
+
+func TestDashboardConfirmsDaemonShutdown(t *testing.T) {
+	backend := &fakeBackend{}
+	terminal := newEmbeddedTerminal("tab-1", newMemoryStream(""), 40, 10)
+	value := newDashboard(backend, model.Snapshot{})
+	value.focus = terminalPane
+	value.terminal = terminal
+	value.width = 100
+	value.height = 24
+
+	updated, command := value.Update(key(tea.KeyF6, ""))
+	value = updated.(dashboard)
+	if value.modal != shutdownModal || command != nil || backend.shutdownCount != 0 {
+		t.Fatalf("F6 result = (modal %v, command %v, shutdowns %d), want confirmation", value.modal, command, backend.shutdownCount)
+	}
+	if rendered := ansi.Strip(value.render()); !strings.Contains(rendered, "Stop daemon") || !strings.Contains(rendered, "all running terminal sessions") {
+		t.Fatalf("shutdown warning is missing:\n%s", rendered)
+	}
+
+	updated, command = value.Update(key(tea.KeyEscape, ""))
+	value = updated.(dashboard)
+	if value.modal != noModal || command != nil || backend.shutdownCount != 0 {
+		t.Fatalf("Esc result = (modal %v, command %v, shutdowns %d), want cancellation", value.modal, command, backend.shutdownCount)
+	}
+
+	updated, _ = value.Update(key(tea.KeyF6, ""))
+	value = updated.(dashboard)
+	updated, command = value.Update(key(tea.KeyEnter, ""))
+	value = updated.(dashboard)
+	if command == nil || backend.shutdownCount != 0 {
+		t.Fatalf("Enter result = (command %v, shutdowns %d), want deferred shutdown", command, backend.shutdownCount)
+	}
+	updated, quitCommand := value.Update(command())
+	value = updated.(dashboard)
+	if backend.shutdownCount != 1 || !value.result.Quit || quitCommand == nil || value.terminal != nil {
+		t.Fatalf("shutdown result = (count %d, quit %v, command %v, terminal %v)", backend.shutdownCount, value.result.Quit, quitCommand, value.terminal)
 	}
 }
 
@@ -780,6 +824,7 @@ func TestDashboardShowsAllShortcutsInHelpModal(t *testing.T) {
 		{keys: []string{",", "F3"}, description: "Config"},
 		{keys: []string{"q", "F4"}, description: "Quit"},
 		{keys: []string{"r", "F5"}, description: "Refresh"},
+		{keys: []string{"F6"}, description: "Stop daemon"},
 		{keys: []string{"?"}, description: "Help"},
 		{keys: []string{"↑/↓", "j/k"}, description: "Select workspace"},
 		{keys: []string{"←/→", "h/l"}, description: "Select tab / +"},

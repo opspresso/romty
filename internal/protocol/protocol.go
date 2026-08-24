@@ -17,6 +17,7 @@ const (
 	ActionCreateTab       = "create_tab"
 	ActionAttach          = "attach"
 	ActionResize          = "resize"
+	ActionShutdown        = "shutdown"
 )
 
 type Request struct {

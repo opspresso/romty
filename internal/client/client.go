@@ -120,6 +120,11 @@ func (c *Client) Resize(tabID string, columns, rows uint16) error {
 	return err
 }
 
+func (c *Client) Shutdown() error {
+	_, err := c.call(protocol.Request{Action: protocol.ActionShutdown})
+	return err
+}
+
 func (c *Client) OpenAttach(tabID string) (net.Conn, *bufio.Reader, error) {
 	connection, err := net.DialTimeout("unix", c.socket, 2*time.Second)
 	if err != nil {

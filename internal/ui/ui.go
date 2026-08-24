@@ -24,6 +24,7 @@ type Backend interface {
 	CreateTab(workspaceID string, columns, rows uint16) (model.Tab, error)
 	OpenTerminal(tabID string) (io.ReadWriteCloser, error)
 	Resize(tabID string, columns, rows uint16) error
+	Shutdown() error
 }
 
 type Result struct {
@@ -44,6 +45,7 @@ const (
 	aboutModal
 	helpModal
 	configModal
+	shutdownModal
 )
 
 type navItem struct {
@@ -109,6 +111,10 @@ type terminalOpenedMsg struct {
 type configSavedMsg struct {
 	leftWidth int
 	err       error
+}
+
+type daemonStoppedMsg struct {
+	err error
 }
 
 func Run(backend Backend, initial model.Snapshot, configPath string) (Result, error) {
@@ -198,6 +204,13 @@ func (m dashboard) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.errorMessage = ""
 		return m, m.resizeTerminal()
+	case daemonStoppedMsg:
+		if message.err != nil {
+			m.modal = noModal
+			m.errorMessage = "stop daemon: " + message.err.Error()
+			return m, nil
+		}
+		return m.quit()
 	}
 	return m, nil
 }
@@ -208,6 +221,11 @@ func (m dashboard) handleKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 	if m.inputMode {
 		return m.handleInput(message)
+	}
+	if message.String() == "f6" {
+		m.modal = shutdownModal
+		m.errorMessage = ""
+		return m, nil
 	}
 	if m.modal != noModal {
 		return m.handleModalKey(message)
@@ -286,6 +304,9 @@ func (m dashboard) handleModalKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 		return m, nil
 	}
 	if m.modal != configModal {
+		if m.modal == shutdownModal && message.String() == "enter" {
+			return m, m.shutdownDaemon()
+		}
 		return m, nil
 	}
 	switch message.String() {
@@ -295,6 +316,12 @@ func (m dashboard) handleModalKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 		return m.adjustLeftWidth(1)
 	}
 	return m, nil
+}
+
+func (m dashboard) shutdownDaemon() tea.Cmd {
+	return func() tea.Msg {
+		return daemonStoppedMsg{err: m.backend.Shutdown()}
+	}
 }
 
 func (m dashboard) adjustLeftWidth(delta int) (tea.Model, tea.Cmd) {
@@ -717,42 +744,55 @@ func (m dashboard) render() string {
 	if m.modal != noModal {
 		lines = m.overlayModal(lines, width)
 	}
-	shortcuts := []shortcut{
+	commands := []shortcut{
 		shortcut{key: "F1", description: "about"},
 		shortcut{key: "F2", description: "add root"},
 		shortcut{key: "F3", description: "config"},
 		shortcut{key: "F4", description: "quit"},
 		shortcut{key: "F5", description: "refresh"},
+		shortcut{key: "F6", description: "stop daemon"},
 	}
+	var contextShortcuts []shortcut
 	if m.focus == terminalPane {
-		shortcuts = append(shortcuts,
+		contextShortcuts = []shortcut{
 			shortcut{key: "Ctrl+\\", description: "navigation"},
-		)
+		}
 	} else {
-		shortcuts = append(shortcuts,
+		contextShortcuts = []shortcut{
 			shortcut{key: "↑/↓", description: "workspace"},
 			shortcut{key: "←/→", description: "tabs"},
 			shortcut{key: "Enter", description: "open"},
 			shortcut{key: "Tab", description: "terminal"},
-		)
+		}
 	}
-	status := renderShortcuts(m.styles, width, shortcuts...)
+	rail := renderShortcutRail(m.styles, width, contextShortcuts...)
+	status := renderShortcuts(m.styles, width, commands...)
 	if m.inputMode {
+		rail = m.styles.tabRail.Render(strings.Repeat("─", width))
 		status = truncate(
 			m.styles.promptLabel.Render(" ROOT ")+" "+m.styles.promptText.Render(m.input)+m.styles.dividerActive.Render("█"),
 			width,
 		)
 	} else if m.errorMessage != "" {
+		rail = m.styles.tabRail.Render(strings.Repeat("─", width))
 		status = truncate(m.styles.errorLabel.Render(" ERROR ")+" "+m.styles.errorText.Render(m.errorMessage), width)
 	} else if m.modal == aboutModal || m.modal == helpModal {
+		rail = m.styles.tabRail.Render(strings.Repeat("─", width))
 		status = renderShortcuts(m.styles, width, shortcut{key: "Esc", description: "close"})
 	} else if m.modal == configModal {
+		rail = m.styles.tabRail.Render(strings.Repeat("─", width))
 		status = renderShortcuts(m.styles, width,
 			shortcut{key: "←/→", description: "adjust width"},
 			shortcut{key: "Esc", description: "close"},
 		)
+	} else if m.modal == shutdownModal {
+		rail = m.styles.tabRail.Render(strings.Repeat("─", width))
+		status = renderShortcuts(m.styles, width,
+			shortcut{key: "Enter", description: "stop daemon"},
+			shortcut{key: "Esc", description: "cancel"},
+		)
 	}
-	lines = append(lines, m.styles.tabRail.Render(strings.Repeat("─", width)), status)
+	lines = append(lines, rail, status)
 	return strings.Join(lines, "\n")
 }
 
@@ -777,6 +817,15 @@ func (m dashboard) renderModal(width int) []string {
 	if m.modal == helpModal {
 		modalWidth = min(max(width-4, 40), 64)
 		return m.renderHelpModal(modalWidth)
+	}
+	if m.modal == shutdownModal {
+		return modalBox(m.styles, modalWidth, "Stop daemon",
+			"",
+			m.styles.modalStrong.Render("Stop daemon and all running terminal sessions?"),
+			"",
+			m.styles.errorText.Render("Running shells will be terminated."),
+			"",
+		)
 	}
 	if m.modal == configModal {
 		leftWidth, _, _, _ := m.dimensions()
@@ -804,6 +853,7 @@ func (m dashboard) renderHelpModal(width int) []string {
 		renderHelpShortcut(m.styles, "Config", ",", "F3"),
 		renderHelpShortcut(m.styles, "Quit", "q", "F4"),
 		renderHelpShortcut(m.styles, "Refresh", "r", "F5"),
+		renderHelpShortcut(m.styles, "Stop daemon", "F6"),
 		renderHelpShortcut(m.styles, "Help", "?"),
 		renderHelpSection(m.styles, "NAVIGATION", "workspace area"),
 		renderHelpShortcut(m.styles, "Select workspace", "↑/↓", "j/k"),
@@ -987,6 +1037,15 @@ func renderShortcuts(styles uiStyles, width int, values ...shortcut) string {
 		)
 	}
 	return truncate(strings.Join(segments, "  "), width)
+}
+
+func renderShortcutRail(styles uiStyles, width int, values ...shortcut) string {
+	shortcuts := renderShortcuts(styles, width, values...)
+	fill := max(width-lipgloss.Width(shortcuts)-1, 0)
+	if fill == 0 {
+		return shortcuts
+	}
+	return styles.tabRail.Render(strings.Repeat("─", fill)) + " " + shortcuts
 }
 
 func truncate(value string, width int) string {
