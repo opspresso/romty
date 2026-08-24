@@ -185,7 +185,7 @@ func (c *Client) OpenAttach(tabID string) (net.Conn, *bufio.Reader, error) {
 	// Attach used to skip the version check the short requests run, so a
 	// mismatch here arrived as whatever the old daemon streamed next rather
 	// than as the one message that says which side to restart.
-	if err := checkResponse(response); err != nil {
+	if err := checkResponse(protocol.ActionAttach, response); err != nil {
 		connection.Close()
 		return nil, nil, err
 	}
@@ -215,14 +215,6 @@ func sendRequest(w io.Writer, request protocol.Request) error {
 	return protocol.Write(w, request)
 }
 
-// outdatedDaemon explains a mismatch in the terms a user can act on, rather
-// than leaving them with a puzzling error from a daemon that predates the
-// request they just made.
-func outdatedDaemon(daemonVersion int) error {
-	return fmt.Errorf("this romty speaks protocol %d but the running daemon speaks %d; run `romty stop` and start romty again",
-		protocol.Version, daemonVersion)
-}
-
 func (c *Client) call(request protocol.Request) (protocol.Response, error) {
 	connection, err := net.DialTimeout("unix", c.socket, dialTimeout)
 	if err != nil {
@@ -240,7 +232,7 @@ func (c *Client) call(request protocol.Request) (protocol.Response, error) {
 	if err := protocol.Read(bufio.NewReader(connection), &response); err != nil {
 		return protocol.Response{}, err
 	}
-	if err := checkResponse(response); err != nil {
+	if err := checkResponse(request.Action, response); err != nil {
 		return protocol.Response{}, err
 	}
 	return response, nil
@@ -249,9 +241,17 @@ func (c *Client) call(request protocol.Request) (protocol.Response, error) {
 // checkResponse judges a reply before anything reads its fields. The version
 // comes first: a daemon that speaks another protocol may well have an error to
 // report, but the mismatch is what the user has to act on.
-func checkResponse(response protocol.Response) error {
-	if response.Version != protocol.Version {
-		return outdatedDaemon(response.Version)
+//
+// Except for the actions protocol.VersionExempt names, which the daemon
+// carries out whatever version asked. Judging their replies by the version
+// undid that on this side: pinging a mismatched daemon reported it as no
+// daemon at all, so romty started a second one, watched it lose the lock and
+// exit, and gave up with "daemon did not become ready" — and `romty stop`, the
+// remedy every mismatch names, stopped the daemon and then reported the
+// mismatch as a failure to stop it.
+func checkResponse(action string, response protocol.Response) error {
+	if response.Version != protocol.Version && !protocol.VersionExempt(action) {
+		return protocol.VersionMismatch("romty", protocol.Version, "running daemon", response.Version)
 	}
 	if response.Error != "" {
 		return fmt.Errorf("daemon: %s", response.Error)

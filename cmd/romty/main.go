@@ -73,7 +73,15 @@ func runDaemon(runtime paths.Paths) error {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-	if err := server.Serve(ctx); err != nil && !errors.Is(err, daemon.ErrAlreadyRunning) {
+	if err := server.Serve(ctx); err != nil {
+		if errors.Is(err, daemon.ErrAlreadyRunning) {
+			// Losing the race for the socket is the ordinary outcome of two
+			// clients starting at once, not a failure — but exiting in
+			// silence left daemon.log empty, and the caller that gives up
+			// with "see daemon.log" pointing at nothing.
+			fmt.Fprintln(os.Stderr, "romty:", err)
+			return nil
+		}
 		return err
 	}
 	return nil

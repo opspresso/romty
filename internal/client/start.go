@@ -12,8 +12,16 @@ import (
 
 func EnsureDaemon(runtime paths.Paths, executable string) error {
 	backend := New(runtime.Socket)
+	// Only "nothing is listening" is grounds for starting one. Treating every
+	// failed ping as an absent daemon meant a socket that answers but cannot
+	// be understood — one held by another program, or a daemon too wedged to
+	// reply — sent romty off to start a second daemon, which lost the lock to
+	// the first and exited, leaving the user with "daemon did not become
+	// ready" in place of what the ping actually said.
 	if err := backend.Ping(); err == nil {
 		return nil
+	} else if !Unavailable(err) {
+		return err
 	}
 	if err := runtime.Ensure(); err != nil {
 		return err

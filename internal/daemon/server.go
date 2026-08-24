@@ -282,21 +282,13 @@ func (s *Server) handle(connection net.Conn) {
 // side: the daemon carried out the request first and the client discovered the
 // mismatch afterwards, having already created the tab or forgotten the root.
 //
-// Two actions are exempt. Ping is how EnsureDaemon decides whether to start a
-// daemon at all, and refusing it turns a version mismatch into "daemon did not
-// become ready", which names neither side. Shutdown is the remedy this error
-// asks for, and a daemon that refuses the request that stops it cannot be
-// stopped by the client meeting it.
+// Which actions are carried out anyway is protocol.VersionExempt's to say, so
+// that both sides exempt the same two.
 func checkClientVersion(request protocol.Request) error {
-	switch request.Action {
-	case protocol.ActionPing, protocol.ActionShutdown:
+	if protocol.VersionExempt(request.Action) || request.Version == protocol.Version {
 		return nil
 	}
-	if request.Version == protocol.Version {
-		return nil
-	}
-	return fmt.Errorf("this daemon speaks protocol %d but the client speaks %d; run `romty stop` and start romty again",
-		protocol.Version, request.Version)
+	return protocol.VersionMismatch("daemon", protocol.Version, "client", request.Version)
 }
 
 // reply stamps every response with the protocol version, so a client can tell

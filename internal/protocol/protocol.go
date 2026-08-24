@@ -28,6 +28,32 @@ const (
 	ActionShutdown        = "shutdown"
 )
 
+// VersionExempt reports whether an action is carried out whatever protocol the
+// two sides speak. Both sides ask, because a check that only one of them runs
+// is not an exemption: the daemon used to answer these two and the client then
+// refused the answer, which left `romty stop` — the remedy every mismatch
+// names — reporting a mismatch of its own instead of stopping the daemon.
+//
+// Ping is how EnsureDaemon decides whether a daemon is running at all, and
+// refusing it turns a version mismatch into "daemon did not become ready",
+// which names neither side. Shutdown is the remedy itself.
+func VersionExempt(action string) bool {
+	switch action {
+	case ActionPing, ActionShutdown:
+		return true
+	}
+	return false
+}
+
+// VersionMismatch says which two sides cannot work together and what to do
+// about it. Both sides raise it — the daemon when it refuses a request, the
+// client when it refuses a reply — and one sentence keeps their wording and
+// their remedy from drifting apart.
+func VersionMismatch(speaker string, speakerVersion int, peer string, peerVersion int) error {
+	return fmt.Errorf("this %s speaks protocol %d but the %s speaks %d; run `romty stop` and start romty again",
+		speaker, speakerVersion, peer, peerVersion)
+}
+
 type Request struct {
 	Action string `json:"action"`
 	// Version is what the client speaks. A daemon that predates the field
