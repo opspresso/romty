@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/opspresso/romty/internal/client"
+	"github.com/opspresso/romty/internal/paths"
 )
 
 // QuietLogger keeps the daemon's diagnostics out of test output. They belong
@@ -18,17 +19,16 @@ func QuietLogger() *log.Logger {
 	return log.New(io.Discard, "", 0)
 }
 
-// socketPathLimit is the portable ceiling for a unix socket path. Linux allows
-// 108 bytes and macOS 104, so the shorter one bounds both.
-const socketPathLimit = 104
-
 // ShortTempDir creates a temporary romty home whose daemon socket path stays
-// within socketPathLimit. TMPDIR is used when it fits, which it does not on
-// macOS, where the per-user temporary directory alone is nearly 50 bytes.
+// under paths.SocketPathLimit, which is what paths.Resolve refuses to exceed.
+// TMPDIR is used when it fits, which it does not on macOS, where the per-user
+// temporary directory alone is nearly 50 bytes.
 func ShortTempDir(t *testing.T) string {
 	t.Helper()
 	base := os.TempDir()
-	if len(filepath.Join(base, "romty-test-0123456789", "daemon.sock")) > socketPathLimit {
+	// The name MkdirTemp settles on is "romty-test-" and ten digits, which is
+	// what this stands in for.
+	if len(filepath.Join(base, "romty-test-0123456789", "daemon.sock")) >= paths.SocketPathLimit {
 		base = "/tmp"
 	}
 	directory, err := os.MkdirTemp(base, "romty-test-")
