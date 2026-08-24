@@ -18,6 +18,7 @@ type fakeBackend struct {
 	createdTab     model.Tab
 	createdColumns uint16
 	createdRows    uint16
+	createCount    int
 	addedPath      string
 	stream         *memoryStream
 }
@@ -68,6 +69,7 @@ func (f *fakeBackend) EnsureWorkspace(_, _ string) (model.Workspace, error) {
 }
 
 func (f *fakeBackend) CreateTab(_ string, columns, rows uint16) (model.Tab, error) {
+	f.createCount++
 	f.createdColumns = columns
 	f.createdRows = rows
 	f.snapshot.Roots[0].Directories[0].Tabs = append(f.snapshot.Roots[0].Directories[0].Tabs, f.createdTab)
@@ -114,14 +116,8 @@ func TestDashboardSelectsWorkspaceAndCreatesTerminal(t *testing.T) {
 	if value.selectedWorkspaceID != workspace.ID || value.focus != leftPane {
 		t.Fatalf("selected workspace = %q, focus = %v", value.selectedWorkspaceID, value.focus)
 	}
-	if command != nil {
-		t.Fatal("workspace without tabs unexpectedly opened a terminal")
-	}
-
-	updated, command = value.Update(key('+', "+"))
-	value = updated.(dashboard)
 	if command == nil {
-		t.Fatal("create tab command = nil")
+		t.Fatal("workspace without tabs did not create a terminal")
 	}
 	updated, openCommand := value.Update(command())
 	value = updated.(dashboard)
@@ -137,6 +133,9 @@ func TestDashboardSelectsWorkspaceAndCreatesTerminal(t *testing.T) {
 	if backend.createdColumns != 77 || backend.createdRows != 34 {
 		t.Fatalf("terminal size = %dx%d, want right pane size 77x34", backend.createdColumns, backend.createdRows)
 	}
+	if backend.createCount != 1 {
+		t.Fatalf("CreateTab() calls = %d, want 1", backend.createCount)
+	}
 
 	updated, _ = value.Update(readCommand())
 	value = updated.(dashboard)
@@ -148,6 +147,28 @@ func TestDashboardSelectsWorkspaceAndCreatesTerminal(t *testing.T) {
 	value = updated.(dashboard)
 	if value.focus != leftPane || value.terminal == nil {
 		t.Fatalf("Ctrl+\\ focus = %v, terminal = %v", value.focus, value.terminal)
+	}
+}
+
+func TestDashboardOpensExistingWorkspaceTabWithoutCreatingOne(t *testing.T) {
+	workspace := model.Workspace{ID: "workspace-1", RootID: "root-1", Name: "alpha", Path: "/projects/alpha"}
+	tab := model.Tab{ID: "tab-1", WorkspaceID: workspace.ID, Name: "1", Running: true}
+	snapshot := model.Snapshot{Roots: []model.RootView{{
+		Root:        model.Root{ID: "root-1", Name: "projects", Path: "/projects"},
+		Directories: []model.WorkspaceView{{Workspace: workspace, Tabs: []model.Tab{tab}}},
+	}}}
+	backend := &fakeBackend{snapshot: snapshot, workspace: workspace}
+	value := newDashboard(backend, snapshot)
+	value.navIndex = 1
+
+	command := value.selectWorkspace()
+	updated, openCommand := value.Update(command())
+	value = updated.(dashboard)
+	if openCommand == nil {
+		t.Fatal("existing terminal was not opened")
+	}
+	if backend.createCount != 0 {
+		t.Fatalf("CreateTab() calls = %d, want 0", backend.createCount)
 	}
 }
 
@@ -275,6 +296,12 @@ func TestDashboardHighlightsNavigationAndShowsOpenTabs(t *testing.T) {
 	}
 	if strings.Contains(rendered, "2 exited") {
 		t.Fatalf("exited tab was included in terminal tabs:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, "\x1b[1;30;106m 1 \x1b[0m") || !strings.Contains(rendered, "\x1b[36m 3 \x1b[0m") {
+		t.Fatalf("terminal tabs are not styled as active and inactive tabs:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, "\x1b[1;96m[a]\x1b[0m add root") {
+		t.Fatalf("status shortcuts and descriptions are not separated:\n%s", rendered)
 	}
 	if !strings.Contains(rendered, "  TankClash") {
 		t.Fatalf("workspace without tabs is missing:\n%s", rendered)

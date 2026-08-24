@@ -11,10 +11,12 @@ import (
 )
 
 const (
-	terminalTop = 4
-	focusStyle  = "\x1b[1;96m"
-	selectStyle = "\x1b[1;92m"
-	resetStyle  = "\x1b[0m"
+	terminalTop    = 4
+	focusStyle     = "\x1b[1;96m"
+	selectStyle    = "\x1b[1;92m"
+	activeTabStyle = "\x1b[1;30;106m"
+	tabStyle       = "\x1b[36m"
+	resetStyle     = "\x1b[0m"
 )
 
 type Backend interface {
@@ -42,6 +44,16 @@ type navItem struct {
 	workspace model.Workspace
 	tabs      []model.Tab
 	isRoot    bool
+}
+
+type styledSegment struct {
+	text  string
+	style string
+}
+
+type shortcut struct {
+	key         string
+	description string
 }
 
 type dashboard struct {
@@ -259,9 +271,13 @@ func (m dashboard) handleWorkspace(message workspaceMsg) (tea.Model, tea.Cmd) {
 	m.selectedWorkspaceID = message.value.ID
 	m.selectedPath = message.value.Path
 	m.state = message.snapshot
-	m.tabIndex = firstRunningTab(m.selectedTabs())
+	tabs := m.selectedTabs()
+	m.tabIndex = firstRunningTab(tabs)
 	m.focus = leftPane
 	m.errorMessage = ""
+	if len(tabs) == 0 {
+		return m, m.createTab()
+	}
 	return m, m.openSelectedTerminal()
 }
 
@@ -540,19 +556,33 @@ func (m dashboard) render() string {
 		}
 		lines = append(lines, leftLine+" │ "+rightLine)
 	}
-	status := "Focus: Workspaces  Ctrl+G click focus  a add root  enter workspace  + terminal  q quit"
+	width := max(m.width, 40)
+	status := renderShortcuts(width,
+		shortcut{key: "a", description: "add root"},
+		shortcut{key: "Enter", description: "workspace"},
+		shortcut{key: "+", description: "new tab"},
+		shortcut{key: "h/l", description: "tabs"},
+		shortcut{key: "Tab", description: "terminal"},
+		shortcut{key: "Ctrl+G", description: "mouse"},
+		shortcut{key: "q", description: "quit"},
+	)
 	if m.focus == terminalPane {
-		status = "Focus: Terminal  Ctrl+G click focus  Ctrl+\\ navigation"
+		status = renderShortcuts(width,
+			shortcut{key: "Ctrl+G", description: "mouse focus"},
+			shortcut{key: "Ctrl+\\", description: "workspaces"},
+		)
 	}
 	if m.inputMode {
-		status = "Root folder: " + m.input + "_"
+		status = truncate("Root folder: "+m.input+"_", width)
 	} else if m.mouseFocusMode {
-		status = "Mouse focus: click Workspaces or Terminal  Esc cancel"
+		status = renderShortcuts(width,
+			shortcut{key: "Click", description: "focus pane"},
+			shortcut{key: "Esc", description: "cancel"},
+		)
 	} else if m.errorMessage != "" {
-		status = "Error: " + m.errorMessage
+		status = truncate("Error: "+m.errorMessage, width)
 	}
-	width := max(m.width, 40)
-	lines = append(lines, strings.Repeat("─", min(width, 120)), truncate(status, width))
+	lines = append(lines, strings.Repeat("─", min(width, 120)), status)
 	return strings.Join(lines, "\n")
 }
 
@@ -584,25 +614,66 @@ func (m dashboard) renderTerminal(width int) []string {
 	lines = append(lines, truncate(m.selectedPath, width))
 	tabs := m.selectedTabs()
 	if len(tabs) == 0 {
-		return append(lines, "[+]", strings.Repeat("─", width), "Press + to create a terminal")
+		return append(lines, renderTabBar(tabs, m.tabIndex, width), strings.Repeat("─", width), "Creating a terminal...")
 	}
-	labels := make([]string, 0, len(tabs)+1)
-	for index, tab := range tabs {
-		label := tab.Name
-		if !tab.Running {
-			label += " exited"
-		}
-		if index == m.tabIndex {
-			label = "[" + label + "]"
-		}
-		labels = append(labels, label)
-	}
-	labels = append(labels, "+")
-	lines = append(lines, truncate(strings.Join(labels, "  "), width), strings.Repeat("─", width))
+	lines = append(lines, renderTabBar(tabs, m.tabIndex, width), strings.Repeat("─", width))
 	if m.terminal == nil {
 		return append(lines, "Select a running tab with h/l")
 	}
 	return append(lines, m.terminal.render()...)
+}
+
+func renderTabBar(tabs []model.Tab, active, width int) string {
+	segments := make([]styledSegment, 0, len(tabs)*2+2)
+	for index, tab := range tabs {
+		if index > 0 {
+			segments = append(segments, styledSegment{text: " "})
+		}
+		style := tabStyle
+		if index == active {
+			style = activeTabStyle
+		}
+		segments = append(segments, styledSegment{text: " " + tab.Name + " ", style: style})
+	}
+	if len(tabs) > 0 {
+		segments = append(segments, styledSegment{text: " "})
+	}
+	segments = append(segments, styledSegment{text: " + ", style: tabStyle})
+	return renderStyled(width, segments)
+}
+
+func renderShortcuts(width int, values ...shortcut) string {
+	segments := make([]styledSegment, 0, len(values)*3)
+	for index, value := range values {
+		if index > 0 {
+			segments = append(segments, styledSegment{text: "  "})
+		}
+		segments = append(segments,
+			styledSegment{text: "[" + value.key + "]", style: focusStyle},
+			styledSegment{text: " " + value.description},
+		)
+	}
+	return renderStyled(width, segments)
+}
+
+func renderStyled(width int, segments []styledSegment) string {
+	var result strings.Builder
+	remaining := width
+	for _, segment := range segments {
+		if remaining <= 0 {
+			break
+		}
+		text := truncate(segment.text, remaining)
+		if segment.style != "" {
+			result.WriteString(segment.style)
+		}
+		result.WriteString(text)
+		if segment.style != "" {
+			result.WriteString(resetStyle)
+		}
+		remaining -= len([]rune(text))
+	}
+	return result.String()
 }
 
 func truncate(value string, width int) string {

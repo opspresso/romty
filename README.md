@@ -27,7 +27,7 @@ romty
 
 처음 실행하면 background daemon을 자동으로 시작한다. `a`를 눌러 Root Folder 경로를 입력한다. Root 아래의 1-depth directory가 왼쪽에 workspace 후보로 나타난다.
 
-왼쪽 pane의 현재 탐색 항목은 green으로 표시한다. 각 workspace 이름 뒤의 `●` 개수는 실행 중인 terminal tab 수를 나타낸다.
+왼쪽 pane의 현재 탐색 항목은 green으로 표시한다. 각 workspace 이름 뒤의 `●` 개수는 실행 중인 terminal tab 수를 나타낸다. 오른쪽의 활성 tab은 cyan 배경, 비활성 tab은 cyan 글자색으로 구분한다.
 
 | 키 | 동작 |
 |---|---|
@@ -35,7 +35,7 @@ romty
 | `↑`/`↓`, `j`/`k` | Root와 workspace 이동 |
 | `Tab` | 선택된 terminal에 focus |
 | `←`/`→`, `h`/`l` | navigation 상태에서 terminal tab 이동 |
-| `Enter` | workspace 선택 |
+| `Enter` | workspace 선택, terminal이 없으면 첫 tab 생성 |
 | `+` | 선택한 workspace에서 terminal 생성 후 focus |
 | `r` | Root directory와 session 상태 새로고침 |
 | `Ctrl+G`, click | 다음 한 번의 click으로 Workspace/Terminal focus 전환 |
@@ -43,6 +43,8 @@ romty
 | `q` | navigation 상태에서 romty 종료 |
 
 terminal focus에서는 `Ctrl+G`와 `Ctrl+\`를 제외한 key와 paste를 daemon이 소유한 PTY로 전달한다. PTY 출력은 VT emulator로 해석해 오른쪽 pane 안에 렌더링한다. 평상시에는 mouse tracking을 끄므로 표시된 텍스트는 일반 terminal의 mouse selection과 copy를 사용한다. `Ctrl+G`를 누르면 다음 click까지만 mouse tracking을 켜며, `Esc`로 취소할 수 있다.
+
+하단 status bar는 단축키를 `[key]` 형식과 색상으로 강조하고 동작 설명을 일반 글자색으로 표시한다.
 
 romty terminal 안에서 `romty`를 다시 실행하는 중첩 TUI는 허용하지 않는다.
 
