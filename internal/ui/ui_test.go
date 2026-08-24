@@ -528,7 +528,7 @@ func TestDashboardConfirmsDaemonShutdown(t *testing.T) {
 	value.width = 100
 	value.height = 24
 
-	updated, command := value.Update(key(tea.KeyF6, ""))
+	updated, command := value.Update(key(tea.KeyF9, ""))
 	value = updated.(dashboard)
 	if value.modal != shutdownModal || command != nil || backend.shutdownCount != 0 {
 		t.Fatalf("F6 result = (modal %v, command %v, shutdowns %d), want confirmation", value.modal, command, backend.shutdownCount)
@@ -543,7 +543,7 @@ func TestDashboardConfirmsDaemonShutdown(t *testing.T) {
 		t.Fatalf("Esc result = (modal %v, command %v, shutdowns %d), want cancellation", value.modal, command, backend.shutdownCount)
 	}
 
-	updated, _ = value.Update(key(tea.KeyF6, ""))
+	updated, _ = value.Update(key(tea.KeyF9, ""))
 	value = updated.(dashboard)
 	updated, command = value.Update(key(tea.KeyEnter, ""))
 	value = updated.(dashboard)
@@ -552,7 +552,7 @@ func TestDashboardConfirmsDaemonShutdown(t *testing.T) {
 	}
 
 	// Esc cannot take back a dispatched shutdown, and Enter must not repeat it.
-	for _, message := range []tea.KeyPressMsg{key(tea.KeyEscape, ""), key(tea.KeyEnter, ""), key(tea.KeyF6, "")} {
+	for _, message := range []tea.KeyPressMsg{key(tea.KeyEscape, ""), key(tea.KeyEnter, ""), key(tea.KeyF9, "")} {
 		updated, extra := value.Update(message)
 		value = updated.(dashboard)
 		if extra != nil || value.modal != shutdownModal {
@@ -572,7 +572,7 @@ func TestDashboardConfirmsDaemonShutdown(t *testing.T) {
 
 func TestDashboardReportsFailedShutdown(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, model.Snapshot{})
-	updated, _ := value.Update(key(tea.KeyF6, ""))
+	updated, _ := value.Update(key(tea.KeyF9, ""))
 	value = updated.(dashboard)
 	updated, _ = value.Update(key(tea.KeyEnter, ""))
 	value = updated.(dashboard)
@@ -588,7 +588,7 @@ func TestDashboardReportsFailedShutdown(t *testing.T) {
 	}
 
 	// Retrying is possible because the pending flag was cleared.
-	updated, _ = value.Update(key(tea.KeyF6, ""))
+	updated, _ = value.Update(key(tea.KeyF9, ""))
 	value = updated.(dashboard)
 	if value.modal != shutdownModal || value.errorMessage != "" {
 		t.Fatalf("retry = (modal %v, error %q), want a fresh confirmation", value.modal, value.errorMessage)
@@ -664,7 +664,7 @@ func TestDashboardScrollsTerminalHistory(t *testing.T) {
 	}
 	live := plainRows(value.terminal.renderViewport(0))
 
-	updated, command := value.Update(key(tea.KeyF7, ""))
+	updated, command := value.Update(key(tea.KeyF6, ""))
 	value = updated.(dashboard)
 	if !value.scrollback || value.scrollOffset != 0 || command != nil {
 		t.Fatalf("F7 = (scrollback %v, offset %d, command %v), want the live view in scrollback mode",
@@ -730,7 +730,7 @@ func TestDashboardEntersScrollbackFromEveryBinding(t *testing.T) {
 		offset  int
 		wheelOK bool
 	}{
-		{name: "F7", enter: []tea.KeyPressMsg{key(tea.KeyF7, "")}, focus: terminalPane},
+		{name: "F6", enter: []tea.KeyPressMsg{key(tea.KeyF6, "")}, focus: terminalPane},
 		{
 			name:  "Ctrl+\\ twice",
 			enter: []tea.KeyPressMsg{tea.KeyPressMsg(tea.Key{Code: '\\', Mod: tea.ModCtrl}), tea.KeyPressMsg(tea.Key{Code: '\\', Mod: tea.ModCtrl})},
@@ -797,7 +797,7 @@ func TestDashboardHoldsScrollbackViewportOnNewOutput(t *testing.T) {
 // main screen's older output as if it belonged to them.
 func TestDashboardRefusesScrollbackOnTheAlternateScreen(t *testing.T) {
 	value := scrolledDashboard(t, 200)
-	updated, _ := value.Update(key(tea.KeyF7, ""))
+	updated, _ := value.Update(key(tea.KeyF6, ""))
 	value = updated.(dashboard)
 	if !value.scrollback {
 		t.Fatal("scrollback did not open on the main screen")
@@ -819,7 +819,7 @@ func TestDashboardRefusesScrollbackOnTheAlternateScreen(t *testing.T) {
 
 	// Re-entering must not resurrect the history from before the application.
 	for _, message := range []tea.KeyPressMsg{
-		key(tea.KeyF7, ""),
+		key(tea.KeyF6, ""),
 		tea.KeyPressMsg(tea.Key{Code: tea.KeyPgUp, Mod: tea.ModShift}),
 	} {
 		updated, _ = value.Update(message)
@@ -839,7 +839,7 @@ func TestDashboardRefusesScrollbackOnTheAlternateScreen(t *testing.T) {
 	// Leaving the alternate screen restores the history that was there before.
 	updated, _ = value.Update(terminalOutputMsg{terminal: value.terminal, data: []byte("\x1b[?1049l")})
 	value = updated.(dashboard)
-	updated, _ = value.Update(key(tea.KeyF7, ""))
+	updated, _ = value.Update(key(tea.KeyF6, ""))
 	value = updated.(dashboard)
 	if !value.scrollback {
 		t.Fatalf("scrollback did not reopen after the application exited: %q", value.errorMessage)
@@ -859,7 +859,7 @@ func TestDashboardRendersCopyModeFullWidth(t *testing.T) {
 		t.Fatal("the split layout does not show the workspace tree")
 	}
 
-	updated, _ := value.Update(key(tea.KeyF7, ""))
+	updated, _ := value.Update(key(tea.KeyF6, ""))
 	value = updated.(dashboard)
 	bodyHeight := value.dimensions().bodyHeight
 	body := strings.Split(ansi.Strip(value.render()), "\n")[:bodyHeight]
@@ -906,7 +906,7 @@ func TestDashboardKeepsMouseWithTheHostUnlessPassthroughIsOn(t *testing.T) {
 	waitForGuestSilence(t, value.terminal.stream.(*memoryStream), sent)
 
 	// Copy mode takes the mouse back so the host can select the scrolled page.
-	updated, _ := value.Update(key(tea.KeyF7, ""))
+	updated, _ := value.Update(key(tea.KeyF6, ""))
 	value = updated.(dashboard)
 	if !value.scrollback || value.View().MouseMode != tea.MouseModeNone {
 		t.Fatalf("copy mode = (scrollback %v, mouse %v), want the mouse returned to the host",
@@ -938,7 +938,7 @@ func TestDashboardForwardsPagingToTheGuestThatOwnsTheScreen(t *testing.T) {
 // scrollback puts the keyboard back where the full-width view already is.
 func TestDashboardFocusesTerminalWhenLeavingScrollback(t *testing.T) {
 	control := tea.KeyPressMsg(tea.Key{Code: '\\', Mod: tea.ModCtrl})
-	for _, leave := range []tea.KeyPressMsg{control, key(tea.KeyEscape, ""), key('q', "q"), key(tea.KeyF7, "")} {
+	for _, leave := range []tea.KeyPressMsg{control, key(tea.KeyEscape, ""), key('q', "q"), key(tea.KeyF6, "")} {
 		value := scrolledDashboard(t, 200)
 		updated, _ := value.Update(control)
 		value = updated.(dashboard)
@@ -964,10 +964,56 @@ func TestDashboardFocusesTerminalWhenLeavingScrollback(t *testing.T) {
 	}
 }
 
+// Tab moved into the terminal and Ctrl+\ moved out, so neither key alone got
+// you back and forth. F7 does both, which matters on Windows, where a global
+// hotkey often takes Ctrl+\ before the terminal ever sees it.
+func TestDashboardSwitchesPanesWithOneKey(t *testing.T) {
+	value := scrolledDashboard(t, 200)
+
+	updated, command := value.Update(key(tea.KeyF7, ""))
+	value = updated.(dashboard)
+	if value.focus != leftPane || command == nil {
+		t.Fatalf("F7 in the terminal = (focus %v, command %v), want the workspace pane refreshed", value.focus, command)
+	}
+
+	updated, _ = value.Update(key(tea.KeyF7, ""))
+	value = updated.(dashboard)
+	if value.focus != terminalPane {
+		t.Fatalf("F7 in the workspace = focus %v, want the terminal", value.focus)
+	}
+
+	// Scrollback covers the terminal, so switching away from the terminal has
+	// to leave it rather than land the keyboard behind the full-width view.
+	updated, _ = value.Update(key(tea.KeyF6, ""))
+	value = updated.(dashboard)
+	if !value.scrollback {
+		t.Fatal("F6 did not open scrollback")
+	}
+	updated, _ = value.Update(key(tea.KeyF7, ""))
+	value = updated.(dashboard)
+	if value.scrollback || value.focus != leftPane {
+		t.Fatalf("F7 in scrollback = (scrollback %v, focus %v), want the workspace pane",
+			value.scrollback, value.focus)
+	}
+}
+
+// A terminal whose shell has exited is not somewhere the keyboard can go.
+func TestDashboardKeepsWorkspaceFocusWhenSwitchingToADeadTerminal(t *testing.T) {
+	value := scrolledDashboard(t, 200)
+	value.focus = leftPane
+	value.terminal.disconnect()
+
+	updated, _ := value.Update(key(tea.KeyF7, ""))
+	value = updated.(dashboard)
+	if value.focus != leftPane {
+		t.Fatalf("F7 onto a dead terminal = focus %v, want the workspace pane", value.focus)
+	}
+}
+
 func TestDashboardKeepsWorkspaceFocusWhenTheTerminalIsGone(t *testing.T) {
 	value := scrolledDashboard(t, 200)
 	value.focus = leftPane
-	updated, _ := value.Update(key(tea.KeyF7, ""))
+	updated, _ := value.Update(key(tea.KeyF6, ""))
 	value = updated.(dashboard)
 	value.terminal.disconnect()
 
@@ -1605,7 +1651,7 @@ func TestDashboardRefusesScrollbackWithoutTerminal(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, model.Snapshot{})
 
 	for _, message := range []tea.KeyPressMsg{
-		key(tea.KeyF7, ""),
+		key(tea.KeyF6, ""),
 		tea.KeyPressMsg(tea.Key{Code: tea.KeyPgUp, Mod: tea.ModShift}),
 		tea.KeyPressMsg(tea.Key{Code: '\\', Mod: tea.ModCtrl}),
 	} {
@@ -1631,7 +1677,7 @@ func TestDashboardKeepsGlobalKeysAtOnePrecedence(t *testing.T) {
 	}{
 		{message: key(tea.KeyF1, ""), want: helpModal},
 		{message: key(tea.KeyF3, ""), want: configModal},
-		{message: key(tea.KeyF6, ""), want: shutdownModal},
+		{message: key(tea.KeyF9, ""), want: shutdownModal},
 		{message: key(tea.KeyF1, ""), want: helpModal},
 	} {
 		updated, command := value.Update(step.message)
@@ -2059,14 +2105,15 @@ func TestDashboardShowsAllShortcutsInHelpModal(t *testing.T) {
 		{keys: []string{",", "F3"}, description: "Config"},
 		{keys: []string{"q", "F4"}, description: "Quit"},
 		{keys: []string{"r", "F5"}, description: "Refresh"},
-		{keys: []string{"F6"}, description: "Stop daemon"},
-		{keys: []string{"F7"}, description: "Scrollback"},
+		{keys: []string{"F6"}, description: "Scrollback"},
+		{keys: []string{"F7"}, description: "Switch pane"},
+		{keys: []string{"F9"}, description: "Stop daemon"},
 		{keys: []string{"↑/↓", "j/k"}, description: "Select workspace"},
 		{keys: []string{"←/→", "h/l"}, description: "Select tab / +"},
 		{keys: []string{"Enter"}, description: "Open / confirm"},
 		{keys: []string{"Tab"}, description: "Focus terminal"},
 		{keys: []string{"Ctrl+\\"}, description: "Focus workspace"},
-		{keys: []string{"F7", "Ctrl+\\"}, description: "Enter / leave"},
+		{keys: []string{"F6", "Ctrl+\\"}, description: "Enter / leave"},
 		{keys: []string{"PgUp/PgDn"}, description: "Scroll a page"},
 		{keys: []string{"Shift+PgUp"}, description: "Enter at a page back"},
 		{keys: []string{"Wheel"}, description: "Scroll with the mouse"},

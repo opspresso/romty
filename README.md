@@ -84,9 +84,12 @@ These function keys work from either pane, with a modal open, and with non-Engli
 | `F3` | Open Config |
 | `F4` | Quit romty |
 | `F5` | Refresh roots, workspaces, and sessions |
-| `F6` | Ask for confirmation, then stop the daemon and all running terminal sessions |
-| `F7` | Enter or leave scrollback for the open terminal |
+| `F6` | Enter or leave scrollback for the open terminal |
+| `F7` | Switch between the workspace and terminal panes |
+| `F9` | Ask for confirmation, then stop the daemon and all running terminal sessions |
 | `Shift`+`PgUp`/`PgDn` | Enter scrollback and move one page at a time |
+
+`F9` is off the end of the status bar on purpose: stopping the daemon terminates every running shell, so it sits well away from `F5`, which refreshes. `F1` lists it with everything else.
 
 ### Workspace pane
 
@@ -111,14 +114,16 @@ The `+` key itself is not a shortcut. Select the `+` tab with `←`/`→` and co
 
 | Key | Action |
 |---|---|
-| `Ctrl+\` | Focus the workspace pane and refresh the workspace tree |
+| `F7`, `Ctrl+\` | Focus the workspace pane and refresh the workspace tree |
 | `Ctrl+\` `Ctrl+\` | Pressing it a second time, from the workspace pane, opens the terminal's scrollback |
+
+On Windows, `Ctrl+\` frequently never reaches the terminal — 1Password and other tools claim it as a global hotkey — so `F7` is the way out of the terminal pane there. It also works in the other direction, which `Tab` and `Ctrl+\` each did one way only.
 
 Except for the global function keys and `Ctrl+\`, keyboard and paste input is forwarded to the PTY, including keys held with `Shift`, `Ctrl` or `Meta` such as `Ctrl`+`←` for word-wise movement. Mouse tracking remains disabled so the host terminal can select and copy displayed text normally.
 
 ### Scrollback
 
-romty keeps the last 10,000 lines that scrolled off each terminal. Enter scrollback with `F7`, `Shift`+`PgUp`, or a second `Ctrl+\`, and leave it with `Esc`, `q`, `F7`, or `Ctrl+\`. New output does not move the view while you are scrolled back; leaving returns to the live screen.
+romty keeps the last 10,000 lines that scrolled off each terminal. Enter scrollback with `F6`, `Shift`+`PgUp`, or a second `Ctrl+\`, and leave it with `Esc`, `q`, `F6`, or `Ctrl+\`. New output does not move the view while you are scrolled back; leaving returns to the live screen.
 
 Full-screen applications such as `vim`, `less`, and Claude Code switch the terminal to its alternate screen, which keeps no history — the application owns every row and scrolls its own content. romty says so instead of opening scrollback, because the history from before the application started is not what you asked for. `Shift`+`PgUp`/`PgDn` reaches such an application as a plain `PgUp`/`PgDn` so its own paging still works.
 
@@ -157,7 +162,7 @@ While scrollback is open it owns the keyboard, so navigation and terminal input 
 | `Esc` | Close a modal or cancel root input |
 | `←`/`→`, `[`/`]` | Adjust the workspace pane width in Config |
 | `↑`/`↓`, `j`/`k` | Scroll Help when the terminal is too short to show every shortcut |
-| `Enter` | Confirm the daemon shutdown in the `F6` modal |
+| `Enter` | Confirm the daemon shutdown in the `F9` modal |
 
 The configured workspace pane width is stored automatically and constrained to 18 through 40 columns, subject to the available terminal width.
 
@@ -173,7 +178,7 @@ The TUI communicates with a detached local daemon over a Unix socket. The socket
 
 New terminals start with the environment and `$SHELL` of the romty that asked for them, not the daemon's. The daemon may have been started days earlier from a different login session, so its own environment is not the one you are working in.
 
-Pressing `F6` opens a confirmation modal because stopping the daemon terminates every running shell. Once `Enter` confirms it the shutdown cannot be cancelled, so the modal stays until the daemon reports back. The `romty stop` command performs the same shutdown directly and is intended for explicit use from outside a romty terminal; stopping a daemon that is not running succeeds without output.
+Pressing `F9` opens a confirmation modal because stopping the daemon terminates every running shell. Once `Enter` confirms it the shutdown cannot be cancelled, so the modal stays until the daemon reports back. The `romty stop` command performs the same shutdown directly and is intended for explicit use from outside a romty terminal; stopping a daemon that is not running succeeds without output.
 
 Reattaching replays the recorded output so the screen comes back as it was, preceded by the terminal modes the shell has set. Modes are sticky — a shell turns bracketed paste on once and never mentions it again — so a session long enough to fill the recording would otherwise lose them, and a shell that cannot tell pasted text from typed text runs a multi-line paste line by line. Tracking them separately from the recording keeps the answer independent of how much of it is left. Terminal queries are dropped from that replay: a query is an exchange that already finished, and a terminal emulator answering it a second time would send the reply to a shell that asked nothing, where it lands on the command line as typed text. Live queries are still answered normally.
 
