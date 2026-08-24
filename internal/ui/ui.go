@@ -387,8 +387,12 @@ func (m dashboard) handleKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, m.refresh()
 	case "?":
 		return m.openModal(helpModal)
+	case "s":
+		return m.toggleScrollback()
 	case "d":
 		return m.confirmRemoveRoot()
+	case "t":
+		return m.openModal(shutdownModal)
 	case "ctrl+\\":
 		// A second Ctrl+\ after leaving the terminal opens its scrollback.
 		return m.toggleScrollback()
@@ -490,7 +494,9 @@ func (m dashboard) handleScrollbackKey(message tea.KeyPressMsg) (tea.Model, tea.
 	}
 	page := m.scrollbackPage()
 	switch message.String() {
-	case "esc", "q", "ctrl+\\":
+	// s enters scrollback from the workspace pane, so it leaves it too rather
+	// than being the one alias that only works in one direction.
+	case "esc", "q", "s", "ctrl+\\":
 		m.stopScrollback()
 	case "up", "k":
 		m.scrollTerminal(1)
@@ -1427,10 +1433,10 @@ func (m dashboard) helpEntries() []string {
 		renderHelpShortcut(m.styles, "Config", "F3", ","),
 		renderHelpShortcut(m.styles, "Quit", "F4", "q"),
 		renderHelpShortcut(m.styles, "Refresh", "F5", "r"),
-		renderHelpShortcut(m.styles, "Scrollback", "F6"),
+		renderHelpShortcut(m.styles, "Scrollback", "F6", "s"),
 		renderHelpShortcut(m.styles, "Switch pane", "F7"),
 		renderHelpShortcut(m.styles, "Remove root", "F8", "d"),
-		renderHelpShortcut(m.styles, "Stop daemon", "F9"),
+		renderHelpShortcut(m.styles, "Stop daemon", "F9", "t"),
 		renderHelpShortcut(m.styles, "About", "i"),
 		renderHelpSection(m.styles, "NAVIGATION", "workspace area"),
 		renderHelpShortcut(m.styles, "Select workspace", "↑/↓", "j/k"),
