@@ -74,6 +74,7 @@ const (
 	aboutModal
 	helpModal
 	configModal
+	removeRootModal
 	shutdownModal
 )
 
@@ -116,7 +117,10 @@ type dashboard struct {
 	terminal            *embeddedTerminal
 	modal               modal
 	shutdownPending     bool
-	terminalExited      bool
+	// removeTarget is the root the confirmation modal is asking about, held
+	// so the answer applies to the root the question named.
+	removeTarget   model.Root
+	terminalExited bool
 	// reattachTab and reattachAttempts damp the loop a dropped connection
 	// used to start: romty reattached at once, the daemon replayed the whole
 	// recording, the client fell behind, and the daemon cut it off again.
@@ -319,6 +323,10 @@ var globalKeys = map[string]func(dashboard) (tea.Model, tea.Cmd){
 	"f5": func(m dashboard) (tea.Model, tea.Cmd) { return m, m.refresh() },
 	"f6": func(m dashboard) (tea.Model, tea.Cmd) { return m.toggleScrollback() },
 	"f7": func(m dashboard) (tea.Model, tea.Cmd) { return m.toggleFocus() },
+	// F8 is delete in the file managers this layout comes from. Removing a
+	// root was reachable from the workspace pane only, which left the terminal
+	// pane without it.
+	"f8": func(m dashboard) (tea.Model, tea.Cmd) { return m.confirmRemoveRoot() },
 	// Stopping the daemon kills every running shell. It used to sit at F6,
 	// one key from refresh; the destructive actions belong at the far end of
 	// the row instead, where a mistyped F5 cannot reach them.
@@ -380,7 +388,7 @@ func (m dashboard) handleKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "?":
 		return m.openModal(helpModal)
 	case "d":
-		return m, m.removeRoot()
+		return m.confirmRemoveRoot()
 	case "ctrl+\\":
 		// A second Ctrl+\ after leaving the terminal opens its scrollback.
 		return m.toggleScrollback()
@@ -444,6 +452,11 @@ func (m dashboard) handleModalKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 		return m, nil
 	}
 	switch m.modal {
+	case removeRootModal:
+		if message.String() == "enter" {
+			m.modal = noModal
+			return m, m.removeRoot()
+		}
 	case shutdownModal:
 		if message.String() == "enter" {
 			m.shutdownPending = true
@@ -834,14 +847,29 @@ func reattachBackoff(attempt int) time.Duration {
 	return min(backoff, maximumReattachBackoff)
 }
 
-// removeRoot forgets the root the cursor is on. Terminals under it keep
-// running in the daemon; they are simply no longer listed.
-func (m dashboard) removeRoot() tea.Cmd {
+// confirmRemoveRoot asks about the root the cursor is on. It used to go
+// straight through on one keypress, which stopping the daemon — the other
+// action with no undo — has always asked about first.
+//
+// The root is captured here rather than read again on confirmation: a snapshot
+// arriving while the modal is open can move the cursor, and the answer has to
+// apply to the root the question named.
+func (m dashboard) confirmRemoveRoot() (tea.Model, tea.Cmd) {
 	item, ok := m.navigationItem()
 	if !ok {
+		return m, nil
+	}
+	m.removeTarget = item.root
+	return m.openModal(removeRootModal)
+}
+
+// removeRoot forgets the root the modal named. Terminals under it keep
+// running in the daemon; they are simply no longer listed.
+func (m dashboard) removeRoot() tea.Cmd {
+	rootID := m.removeTarget.ID
+	if rootID == "" {
 		return nil
 	}
-	rootID := item.root.ID
 	return func() tea.Msg {
 		value, err := m.backend.RemoveRoot(rootID)
 		return snapshotMsg{value: value, err: err}
@@ -1276,6 +1304,11 @@ func (m dashboard) renderStatus(width, bodyHeight int) []string {
 			m.styles.promptLabel.Render(" STOPPING ")+" "+m.styles.shortcutDescription.Render("waiting for the daemon to stop"),
 			width,
 		)
+	case m.modal == removeRootModal:
+		status = renderShortcuts(m.styles, width,
+			shortcut{key: "Enter", description: "remove root"},
+			shortcut{key: "Esc", description: "cancel"},
+		)
 	case m.modal == shutdownModal:
 		status = renderShortcuts(m.styles, width,
 			shortcut{key: "Enter", description: "stop daemon"},
@@ -1346,6 +1379,15 @@ func (m dashboard) renderModal(width, height int) []string {
 		modalWidth = min(max(width-4, 40), 64)
 		return m.renderHelpModal(modalWidth, height)
 	}
+	if m.modal == removeRootModal {
+		return modalBox(m.styles, modalWidth, "Remove root",
+			"",
+			m.styles.modalStrong.Render("Forget "+m.removeTarget.Name+"?"),
+			"",
+			m.styles.modalBody.Render("Terminals under it keep running."),
+			"",
+		)
+	}
 	if m.modal == shutdownModal {
 		return modalBox(m.styles, modalWidth, "Stop daemon",
 			"",
@@ -1379,7 +1421,7 @@ func (m dashboard) helpEntries() []string {
 		renderHelpSection(m.styles, "COMMANDS", "F-keys work in both areas"),
 		renderHelpShortcut(m.styles, "Help", "F1", "?"),
 		renderHelpShortcut(m.styles, "Add root", "F2", "a"),
-		renderHelpShortcut(m.styles, "Remove root", "d"),
+		renderHelpShortcut(m.styles, "Remove root", "F8", "d"),
 		renderHelpShortcut(m.styles, "Config", "F3", ","),
 		renderHelpShortcut(m.styles, "Quit", "F4", "q"),
 		renderHelpShortcut(m.styles, "Refresh", "F5", "r"),
