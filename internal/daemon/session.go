@@ -81,7 +81,17 @@ func startSession(id, directory, shell string, environment []string, columns, ro
 	return value, nil
 }
 
+// read drains the PTY master until it is exhausted, and owns closing it. The
+// master outlives the shell: it stops answering once the slave is gone, but the
+// descriptor stays open, and by then wait has already told the server to drop
+// the session, so nothing holds the only reference that could close it. A
+// descriptor is not memory, so the finalizer that would eventually release it
+// is not pressured by running out of them — a daemon left running for days
+// leaked one per terminal that exited. Closing here rather than after Wait is
+// what keeps the shell's last words: the read loop ends when the master has
+// no more to give, not when the process does.
 func (s *session) read() {
+	defer s.pty.Close()
 	buffer := make([]byte, 32*1024)
 	for {
 		count, err := s.pty.Read(buffer)
