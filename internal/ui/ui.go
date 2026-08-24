@@ -98,10 +98,14 @@ type dashboard struct {
 	state   model.Snapshot
 	result  Result
 
-	width               int
-	height              int
-	focus               pane
-	navIndex            int
+	width    int
+	height   int
+	focus    pane
+	navIndex int
+	// cursorPath is what the cursor is actually on. navIndex is only where
+	// that lands in the tree as it stands, and the tree is rebuilt on every
+	// refresh.
+	cursorPath          string
 	tabIndex            int
 	selectedWorkspaceID string
 	selectedPath        string
@@ -906,11 +910,12 @@ func (m *dashboard) closeTerminal() {
 func (m *dashboard) moveNavigation(delta int) {
 	items := m.navigationItems()
 	if len(items) == 0 {
-		m.navIndex = 0
+		m.navIndex, m.cursorPath = 0, ""
 		m.tabIndex = 0
 		return
 	}
 	m.navIndex = (m.navIndex + delta + len(items)) % len(items)
+	m.cursorPath = items[m.navIndex].workspace.Path
 	m.syncTabCursor(runningTabs(items[m.navIndex].tabs))
 }
 
@@ -934,11 +939,39 @@ func (m *dashboard) clampTabIndex() {
 	}
 }
 
+// ensureWorkspaceCursor keeps the cursor on the item it was on, by path rather
+// than by position. The tree is rebuilt from the daemon on every refresh, so a
+// directory appearing above the cursor — a `git clone` finishing in another
+// terminal — used to slide the highlight onto its neighbour without the user
+// touching a key, and Enter then opened the wrong workspace.
 func (m *dashboard) ensureWorkspaceCursor() {
-	if _, ok := m.navigationItem(); ok {
+	items := m.navigationItems()
+	if len(items) == 0 {
+		m.navIndex, m.cursorPath = 0, ""
 		return
 	}
-	m.navIndex = 0
+	if m.cursorPath != "" {
+		for index, item := range items {
+			if item.workspace.Path == m.cursorPath {
+				m.navIndex = index
+				return
+			}
+		}
+	}
+	// The remembered item is gone, or there is none yet: fall back to the
+	// position and record whatever that lands on.
+	m.navIndex = min(max(m.navIndex, 0), len(items)-1)
+	m.cursorPath = items[m.navIndex].workspace.Path
+}
+
+// setNavigation moves the cursor and records what it landed on, so a rebuilt
+// tree can find the same item again. Setting navIndex alone leaves the two
+// disagreeing, and the next refresh undoes the move.
+func (m *dashboard) setNavigation(index int) {
+	m.navIndex = index
+	if item, ok := m.navigationItem(); ok {
+		m.cursorPath = item.workspace.Path
+	}
 }
 
 func (m *dashboard) focusNavigation() {
@@ -947,6 +980,7 @@ func (m *dashboard) focusNavigation() {
 	for index, item := range items {
 		if item.workspace.Path == m.selectedPath {
 			m.navIndex = index
+			m.cursorPath = item.workspace.Path
 			m.syncTabCursor(runningTabs(item.tabs))
 			return
 		}

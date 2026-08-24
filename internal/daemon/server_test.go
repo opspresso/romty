@@ -616,3 +616,61 @@ func TestServeCreatesAPrivateSocketAndDirectory(t *testing.T) {
 		t.Fatalf("romty home mode = %04o, want 0700 even though it existed as 0755", mode)
 	}
 }
+
+// A shell can exit before its tab has finished being registered — a command
+// that fails immediately, a login shell that refuses the directory. The tab
+// must not survive its shell.
+func TestCreateTabLeavesNoTabWhenTheShellExitsAtOnce(t *testing.T) {
+	base := testutil.ShortTempDir(t)
+	socket := filepath.Join(base, "daemon.sock")
+	// A "shell" that exits the moment it starts.
+	server, err := daemon.New(socket, filepath.Join(base, "state.json"), "/usr/bin/true")
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	server.SetLogger(testutil.QuietLogger())
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- server.Serve(ctx) }()
+	defer func() { cancel(); <-done }()
+	backend := client.New(socket)
+	testutil.WaitForDaemon(t, backend)
+
+	snapshot, err := backend.AddRoot(base)
+	if err != nil {
+		t.Fatalf("AddRoot() error = %v", err)
+	}
+	workspace, err := backend.EnsureWorkspace(snapshot.Roots[0].Root.ID, base)
+	if err != nil {
+		t.Fatalf("EnsureWorkspace() error = %v", err)
+	}
+	for range 5 {
+		if _, err := backend.CreateTab(workspace.ID, 80, 24); err != nil {
+			t.Fatalf("CreateTab() error = %v", err)
+		}
+	}
+
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		snapshot, err = backend.Snapshot()
+		if err != nil {
+			t.Fatalf("Snapshot() error = %v", err)
+		}
+		if countTabs(snapshot) == 0 {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("%d tabs outlived their shells", countTabs(snapshot))
+}
+
+func countTabs(snapshot model.Snapshot) int {
+	total := 0
+	for _, root := range snapshot.Roots {
+		total += len(root.Tabs)
+		for _, directory := range root.Directories {
+			total += len(directory.Tabs)
+		}
+	}
+	return total
+}
