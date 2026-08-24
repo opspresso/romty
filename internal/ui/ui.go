@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/opspresso/romty/internal/model"
+	"github.com/opspresso/romty/internal/version"
 )
 
 const (
@@ -1453,7 +1454,7 @@ func (m dashboard) renderModal(width, height int) []string {
 	}
 	return modalBox(m.styles, modalWidth, "About",
 		"",
-		m.styles.modalStrong.Render("romty"),
+		m.styles.modalStrong.Render("romty")+"  "+m.styles.empty.Render(version.String()),
 		m.styles.modalBody.Render(tagline),
 		"",
 	)
