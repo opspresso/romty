@@ -52,18 +52,33 @@ func TestStrippedHistoryStaysSilentAcrossResize(t *testing.T) {
 	emulator, replies := newProbeEmulator(t)
 	emulator.Write(stripQueries([]byte("\x1b[?2048h")))
 	emulator.Resize(100, 30)
-	time.Sleep(30 * time.Millisecond)
-	if answer := replies.String(); answer != "" {
+	if answer := settle(replies); answer != "" {
 		t.Fatalf("resizing after replay answered %q", answer)
 	}
 }
 
+// replyTo returns what the emulator sends back after being fed history. The
+// answer, when there is one, arrives on the copy goroutine, so wait for it
+// rather than guessing a duration that -race can outlast.
 func replyTo(t *testing.T, history string) string {
 	t.Helper()
 	emulator, replies := newProbeEmulator(t)
 	emulator.Write([]byte(history))
-	time.Sleep(30 * time.Millisecond)
-	return replies.String()
+	return settle(replies)
+}
+
+// settle waits until the reply buffer stops growing, so a silent result means
+// the emulator had nothing to say rather than that it was still saying it.
+func settle(replies *syncBuffer) string {
+	previous := replies.String()
+	for stable := 0; stable < 3; stable++ {
+		time.Sleep(20 * time.Millisecond)
+		if current := replies.String(); current != previous {
+			previous = current
+			stable = 0
+		}
+	}
+	return previous
 }
 
 func newProbeEmulator(t *testing.T) (*vt.SafeEmulator, *syncBuffer) {
