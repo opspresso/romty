@@ -59,16 +59,29 @@
     document.querySelectorAll("[data-copy]").forEach(function (button) {
       button.addEventListener("click", function () {
         var text = button.getAttribute("data-copy");
-        if (!navigator.clipboard) {
-          return;
-        }
-        navigator.clipboard.writeText(text).then(function () {
-          var original = button.textContent;
-          button.textContent = "copied";
+        var original = button.textContent;
+        function restore() {
           setTimeout(function () {
             button.textContent = original;
           }, 1400);
-        });
+        }
+        if (!navigator.clipboard) {
+          button.textContent = "select it";
+          restore();
+          return;
+        }
+        // Permissions policy, an insecure context, and Safari's own rules all
+        // reject this. Saying nothing would look like the button is broken.
+        navigator.clipboard.writeText(text).then(
+          function () {
+            button.textContent = "copied";
+            restore();
+          },
+          function () {
+            button.textContent = "select it";
+            restore();
+          }
+        );
       });
     });
   });

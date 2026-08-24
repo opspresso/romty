@@ -427,9 +427,20 @@ pre {
   }
 }
 
+/* The blinking caret is the loudest motion here, but the lifting cards and
+   buttons are motion too. Someone who asked for less of it meant all of it. */
 @media (prefers-reduced-motion: reduce) {
-  .caret {
-    animation: none;
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+
+  .btn:hover,
+  .card:hover,
+  .theme-toggle:hover {
+    transform: none;
   }
 }
 
