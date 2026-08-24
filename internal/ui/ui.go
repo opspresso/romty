@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -16,6 +17,10 @@ import (
 const (
 	terminalTop        = 2
 	helpKeyColumnWidth = 20
+
+	maximumReattachAttempts = 3
+	initialReattachBackoff  = 250 * time.Millisecond
+	maximumReattachBackoff  = 2 * time.Second
 )
 
 type Backend interface {
@@ -85,13 +90,18 @@ type dashboard struct {
 	modal               modal
 	shutdownPending     bool
 	terminalExited      bool
-	scrollback          bool
-	scrollOffset        int
-	helpOffset          int
-	configPath          string
-	leftWidth           int
-	mousePassthrough    bool
-	styles              *uiStyles
+	// reattachTab and reattachAttempts damp the loop a dropped connection
+	// used to start: romty reattached at once, the daemon replayed the whole
+	// recording, the client fell behind, and the daemon cut it off again.
+	reattachTab      string
+	reattachAttempts int
+	scrollback       bool
+	scrollOffset     int
+	helpOffset       int
+	configPath       string
+	leftWidth        int
+	mousePassthrough bool
+	styles           *uiStyles
 }
 
 type snapshotMsg struct {
@@ -127,6 +137,10 @@ type configSavedMsg struct {
 type daemonStoppedMsg struct {
 	err error
 }
+
+// reopenTerminalMsg arrives after a backoff, so a terminal that keeps dropping
+// is retried at a pace that leaves the daemon and the UI usable.
+type reopenTerminalMsg struct{}
 
 func Run(backend Backend, initial model.Snapshot, configPath string) (Result, error) {
 	config, err := loadConfig(configPath)
@@ -229,6 +243,8 @@ func (m dashboard) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.errorMessage = ""
 		return m, m.resizeTerminal()
+	case reopenTerminalMsg:
+		return m, m.openSelectedTerminal()
 	case daemonStoppedMsg:
 		if message.err != nil {
 			m.modal = noModal
@@ -588,6 +604,7 @@ func (m dashboard) handleWorkspace(message workspaceMsg) (tea.Model, tea.Cmd) {
 	}
 	m.selectedWorkspaceID = message.value.ID
 	m.selectedPath = message.value.Path
+	m.reattachTab, m.reattachAttempts = "", 0
 	m.state = message.snapshot
 	tabs := m.selectedTabs()
 	m.focus = leftPane
@@ -684,7 +701,32 @@ func (m dashboard) settleAfterExit() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.tabIndex = min(m.tabIndex, len(tabs)-1)
-	return m, m.openSelectedTerminal()
+
+	// Reattaching to the tab that just dropped is a retry, not a move, and a
+	// retry that fails the same way immediately is a loop. Space them out and
+	// stop after a few, leaving the choice to reconnect with the user.
+	tab := tabs[m.tabIndex]
+	if tab.ID != m.reattachTab {
+		m.reattachTab, m.reattachAttempts = tab.ID, 0
+		return m, m.openSelectedTerminal()
+	}
+	m.reattachAttempts++
+	if m.reattachAttempts > maximumReattachAttempts {
+		m.focusNavigation()
+		m.errorMessage = "terminal keeps disconnecting; press Enter to try again"
+		m.reattachTab, m.reattachAttempts = "", 0
+		return m, nil
+	}
+	return m, tea.Tick(reattachBackoff(m.reattachAttempts), func(time.Time) tea.Msg {
+		return reopenTerminalMsg{}
+	})
+}
+
+// reattachBackoff doubles with each consecutive retry so a terminal that keeps
+// dropping cannot spin, while a one-off drop still reconnects promptly.
+func reattachBackoff(attempt int) time.Duration {
+	backoff := initialReattachBackoff << (attempt - 1)
+	return min(backoff, maximumReattachBackoff)
 }
 
 // removeRoot forgets the root the cursor is on. Terminals under it keep
