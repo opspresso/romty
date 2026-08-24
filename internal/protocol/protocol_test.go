@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/nalbam/romty/internal/protocol"
@@ -22,5 +23,39 @@ func TestMessageRoundTrip(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("Read() = %#v, want %#v", got, want)
+	}
+}
+
+// A peer that never sends a newline must not be able to grow the reader
+// without end: the daemon is a long-lived process reachable by anything
+// running as the same user.
+func TestReadRefusesAnUnboundedMessage(t *testing.T) {
+	var flood bytes.Buffer
+	flood.WriteString(`{"action":"`)
+	flood.Write(bytes.Repeat([]byte("x"), protocol.MaxMessageBytes+1024))
+
+	var request protocol.Request
+	err := protocol.Read(bufio.NewReader(&flood), &request)
+	if err == nil {
+		t.Fatal("Read() accepted a message with no newline in sight")
+	}
+	if !strings.Contains(err.Error(), "exceeds") {
+		t.Fatalf("Read() error = %v, want the size limit", err)
+	}
+}
+
+func TestReadAcceptsAMessageLargerThanTheReadBuffer(t *testing.T) {
+	long := strings.Repeat("d", 128*1024)
+	var encoded bytes.Buffer
+	if err := protocol.Write(&encoded, protocol.Request{Action: protocol.ActionAddRoot, Path: long}); err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+
+	var request protocol.Request
+	if err := protocol.Read(bufio.NewReader(&encoded), &request); err != nil {
+		t.Fatalf("Read() error = %v", err)
+	}
+	if request.Path != long {
+		t.Fatalf("Path length = %d, want %d", len(request.Path), len(long))
 	}
 }

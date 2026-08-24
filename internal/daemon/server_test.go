@@ -570,3 +570,41 @@ func TestSnapshotSurvivesAnUnreadableRoot(t *testing.T) {
 		t.Fatal("removing an unknown root reported success")
 	}
 }
+
+// The socket is the only thing between another local process and every shell
+// romty owns, so it must never be reachable by anyone else — not even during
+// the instant between bind and chmod.
+func TestServeCreatesAPrivateSocketAndDirectory(t *testing.T) {
+	base := testutil.ShortTempDir(t)
+	home := filepath.Join(base, "home")
+	// A romty home that already exists with a permissive mode, which MkdirAll
+	// would leave exactly as it found it.
+	if err := os.MkdirAll(home, 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	socket := filepath.Join(home, "daemon.sock")
+	server, err := daemon.New(socket, filepath.Join(home, "state.json"), "/bin/sh")
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- server.Serve(ctx) }()
+	defer func() { cancel(); <-done }()
+	testutil.WaitForDaemon(t, client.New(socket))
+
+	info, err := os.Stat(socket)
+	if err != nil {
+		t.Fatalf("Stat(socket) error = %v", err)
+	}
+	if mode := info.Mode().Perm(); mode != 0o600 {
+		t.Fatalf("socket mode = %04o, want 0600", mode)
+	}
+	directory, err := os.Stat(home)
+	if err != nil {
+		t.Fatalf("Stat(home) error = %v", err)
+	}
+	if mode := directory.Mode().Perm(); mode != 0o700 {
+		t.Fatalf("romty home mode = %04o, want 0700 even though it existed as 0755", mode)
+	}
+}

@@ -169,7 +169,7 @@ A root romty cannot read — unmounted, deleted, or with its permissions changed
 
 ## Session lifecycle
 
-The TUI communicates with a detached local daemon over a Unix socket. The daemon owns the shell PTYs, so closing the TUI or its host terminal does not terminate running sessions. Reopening romty reconnects to those sessions and replays their buffered output.
+The TUI communicates with a detached local daemon over a Unix socket. The socket and the directory holding it are created private to your user, which is the only thing separating another local process from every shell romty owns: connecting to it is enough to read and write any terminal, start new ones, or stop the daemon. The daemon owns the shell PTYs, so closing the TUI or its host terminal does not terminate running sessions. Reopening romty reconnects to those sessions and replays their buffered output.
 
 Pressing `F6` opens a confirmation modal because stopping the daemon terminates every running shell. Once `Enter` confirms it the shutdown cannot be cancelled, so the modal stays until the daemon reports back. The `romty stop` command performs the same shutdown directly and is intended for explicit use from outside a romty terminal; stopping a daemon that is not running succeeds without output.
 
