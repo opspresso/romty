@@ -915,6 +915,143 @@ func TestDashboardKeepsWorkspaceFocusWhenTheTerminalIsGone(t *testing.T) {
 	}
 }
 
+// exitedDashboard opens a terminal on a workspace holding the given tabs, then
+// ends its stream the way a shell exiting does, and returns the dashboard plus
+// the refresh command it asked for.
+func exitedDashboard(t *testing.T, tabs []model.Tab, open int) (dashboard, *fakeBackend, tea.Cmd) {
+	t.Helper()
+	workspace := model.Workspace{ID: "workspace-1", RootID: "root-1", Name: "alpha", Path: "/projects/alpha"}
+	snapshot := model.Snapshot{Roots: []model.RootView{{
+		Root:        model.Root{ID: "root-1", Name: "projects", Path: "/projects"},
+		Directories: []model.WorkspaceView{{Workspace: workspace, Tabs: tabs}},
+	}}}
+	backend := &fakeBackend{snapshot: snapshot, workspace: workspace}
+	value := newDashboard(backend, snapshot)
+	value.width = 120
+	value.height = 40
+	value.selectedWorkspaceID = workspace.ID
+	value.selectedPath = workspace.Path
+	value.navIndex = 1
+	value.tabIndex = open
+	value.focus = terminalPane
+	value.terminal = newEmbeddedTerminal(tabs[open].ID, newMemoryStream(""), 89, 36)
+	t.Cleanup(value.closeTerminal)
+
+	updated, refresh := value.Update(terminalOutputMsg{terminal: value.terminal, err: io.EOF})
+	value = updated.(dashboard)
+	if value.terminal != nil {
+		t.Fatal("the exited terminal is still attached")
+	}
+	if refresh == nil {
+		t.Fatal("an exited terminal did not ask for a fresh snapshot")
+	}
+	return value, backend, refresh
+}
+
+func TestDashboardMovesToASiblingTabWhenTheShellExits(t *testing.T) {
+	tabs := []model.Tab{
+		{ID: "tab-1", WorkspaceID: "workspace-1", Name: "1", Running: true},
+		{ID: "tab-2", WorkspaceID: "workspace-1", Name: "2", Running: true},
+		{ID: "tab-3", WorkspaceID: "workspace-1", Name: "3", Running: true},
+	}
+	value, backend, refresh := exitedDashboard(t, tabs, 1)
+
+	// The daemon drops the tab whose shell exited.
+	backend.snapshot.Roots[0].Directories[0].Tabs = []model.Tab{tabs[0], tabs[2]}
+	updated, open := value.Update(refresh())
+	value = updated.(dashboard)
+	if open == nil {
+		t.Fatal("no sibling tab was opened after the shell exited")
+	}
+	if value.tabIndex != 1 {
+		t.Fatalf("tab index = %d, want the tab that took the exited one's place", value.tabIndex)
+	}
+	updated, _ = value.Update(open())
+	value = updated.(dashboard)
+	defer value.closeTerminal()
+	if backend.openedTab != "tab-3" || value.focus != terminalPane {
+		t.Fatalf("opened %q with focus %v, want tab-3 in the terminal pane", backend.openedTab, value.focus)
+	}
+}
+
+func TestDashboardMovesToTheLastTabWhenTheLastShellExits(t *testing.T) {
+	tabs := []model.Tab{
+		{ID: "tab-1", WorkspaceID: "workspace-1", Name: "1", Running: true},
+		{ID: "tab-2", WorkspaceID: "workspace-1", Name: "2", Running: true},
+	}
+	value, backend, refresh := exitedDashboard(t, tabs, 1)
+
+	backend.snapshot.Roots[0].Directories[0].Tabs = tabs[:1]
+	updated, open := value.Update(refresh())
+	value = updated.(dashboard)
+	if open == nil || value.tabIndex != 0 {
+		t.Fatalf("trailing exit = (command %v, tab index %d), want the previous tab", open, value.tabIndex)
+	}
+	updated, _ = value.Update(open())
+	value = updated.(dashboard)
+	defer value.closeTerminal()
+	if backend.openedTab != "tab-1" {
+		t.Fatalf("opened %q, want tab-1", backend.openedTab)
+	}
+}
+
+func TestDashboardReturnsToTheWorkspaceWhenTheLastTabExits(t *testing.T) {
+	tabs := []model.Tab{{ID: "tab-1", WorkspaceID: "workspace-1", Name: "1", Running: true}}
+	value, backend, refresh := exitedDashboard(t, tabs, 0)
+
+	backend.snapshot.Roots[0].Directories[0].Tabs = nil
+	updated, open := value.Update(refresh())
+	value = updated.(dashboard)
+	if open != nil {
+		t.Fatalf("a terminal was opened with no tabs left: %v", open)
+	}
+	if value.focus != leftPane || value.navIndex != 1 {
+		t.Fatalf("focus = %v at nav index %d, want the workspace pane on the same workspace",
+			value.focus, value.navIndex)
+	}
+	rendered := ansi.Strip(value.render())
+	if !strings.Contains(rendered, "Select + and press Enter") || value.View().Cursor != nil {
+		t.Fatalf("the exited terminal is still on screen:\n%s", rendered)
+	}
+}
+
+// A stream that drops while the tab keeps running is a lost connection, not an
+// exit, and the same walk reattaches to it.
+func TestDashboardReattachesWhenTheConnectionDrops(t *testing.T) {
+	tabs := []model.Tab{{ID: "tab-1", WorkspaceID: "workspace-1", Name: "1", Running: true}}
+	value, backend, refresh := exitedDashboard(t, tabs, 0)
+
+	updated, open := value.Update(refresh())
+	value = updated.(dashboard)
+	if open == nil {
+		t.Fatal("a still running tab was not reattached")
+	}
+	updated, _ = value.Update(open())
+	value = updated.(dashboard)
+	defer value.closeTerminal()
+	if backend.openedTab != "tab-1" || value.terminal == nil {
+		t.Fatalf("reattached to %q with terminal %v, want tab-1 open", backend.openedTab, value.terminal)
+	}
+}
+
+// A shell exiting in the background must not pull the user out of the tree.
+func TestDashboardKeepsWorkspaceFocusWhenABackgroundShellExits(t *testing.T) {
+	tabs := []model.Tab{
+		{ID: "tab-1", WorkspaceID: "workspace-1", Name: "1", Running: true},
+		{ID: "tab-2", WorkspaceID: "workspace-1", Name: "2", Running: true},
+	}
+	value, backend, _ := exitedDashboard(t, tabs, 0)
+	value.focus = leftPane
+	value.terminalExited = true
+
+	backend.snapshot.Roots[0].Directories[0].Tabs = tabs[1:]
+	updated, open := value.Update(snapshotMsg{value: backend.snapshot})
+	value = updated.(dashboard)
+	if open != nil || value.focus != leftPane {
+		t.Fatalf("background exit = (command %v, focus %v), want the workspace pane untouched", open, value.focus)
+	}
+}
+
 func TestDashboardRefusesScrollbackWithoutTerminal(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, model.Snapshot{})
 

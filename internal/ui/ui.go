@@ -80,6 +80,7 @@ type dashboard struct {
 	terminal            *embeddedTerminal
 	modal               modal
 	shutdownPending     bool
+	terminalExited      bool
 	scrollback          bool
 	scrollOffset        int
 	helpOffset          int
@@ -194,6 +195,9 @@ func (m dashboard) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.ensureWorkspaceCursor()
 		m.clampTabIndex()
 		m.errorMessage = ""
+		if m.terminalExited {
+			return m.settleAfterExit()
+		}
 		return m, nil
 	case workspaceMsg:
 		return m.handleWorkspace(message)
@@ -641,12 +645,33 @@ func (m dashboard) handleTerminalOutput(message terminalOutputMsg) (tea.Model, t
 		}
 	}
 	if message.err != nil {
-		m.terminal.disconnect()
-		m.focus = leftPane
-		m.errorMessage = "terminal session disconnected"
+		// Drop the dead terminal now, but let the fresh snapshot decide where
+		// the cursor lands: only the daemon knows whether the tab is gone.
+		m.closeTerminal()
+		m.stopScrollback()
+		m.terminalExited = true
 		return m, m.refresh()
 	}
 	return m, m.terminal.read()
+}
+
+// settleAfterExit moves off a terminal whose stream ended. A shell that exited
+// leaves the tab behind in the daemon, so the cursor goes to a sibling tab of
+// the same workspace, or back to the workspace pane when none are left. A
+// connection that merely dropped leaves the tab running, and the same walk
+// reattaches to it.
+func (m dashboard) settleAfterExit() (tea.Model, tea.Cmd) {
+	m.terminalExited = false
+	if m.focus != terminalPane {
+		return m, nil
+	}
+	tabs := m.selectedTabs()
+	if len(tabs) == 0 {
+		m.focusNavigation()
+		return m, nil
+	}
+	m.tabIndex = min(m.tabIndex, len(tabs)-1)
+	return m, m.openSelectedTerminal()
 }
 
 func (m dashboard) refresh() tea.Cmd {
