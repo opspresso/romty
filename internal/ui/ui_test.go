@@ -1052,6 +1052,39 @@ func TestDashboardKeepsWorkspaceFocusWhenABackgroundShellExits(t *testing.T) {
 	}
 }
 
+// The move off an exited terminal is deferred until a snapshot says where to
+// go. If that snapshot never arrives the move must be settled, not left armed
+// to fire on whatever refresh comes next.
+func TestDashboardSettlesAnExitWhenTheSnapshotFails(t *testing.T) {
+	tabs := []model.Tab{
+		{ID: "tab-1", WorkspaceID: "workspace-1", Name: "1", Running: true},
+		{ID: "tab-2", WorkspaceID: "workspace-1", Name: "2", Running: true},
+	}
+	value, backend, _ := exitedDashboard(t, tabs, 0)
+
+	updated, _ := value.Update(snapshotMsg{err: errors.New("connect to daemon: no such file")})
+	value = updated.(dashboard)
+	if value.terminalExited || value.focus != leftPane {
+		t.Fatalf("failed refresh = (pending %v, focus %v), want the exit settled on the workspace pane",
+			value.terminalExited, value.focus)
+	}
+	if !strings.Contains(value.errorMessage, "connect to daemon") {
+		t.Fatalf("error message = %q, want the refresh failure", value.errorMessage)
+	}
+
+	// A healthy terminal opened afterwards must survive an ordinary refresh.
+	value.terminal = newEmbeddedTerminal("tab-2", newMemoryStream(""), 89, 36)
+	t.Cleanup(value.closeTerminal)
+	value.focus = terminalPane
+	value.tabIndex = 1
+	updated, command := value.Update(snapshotMsg{value: backend.snapshot})
+	value = updated.(dashboard)
+	if command != nil || value.terminal == nil {
+		t.Fatalf("later refresh = (command %v, terminal %v), want the open terminal left alone",
+			command, value.terminal != nil)
+	}
+}
+
 func TestDashboardRefusesScrollbackWithoutTerminal(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, model.Snapshot{})
 
