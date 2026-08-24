@@ -78,6 +78,30 @@ func (t *embeddedTerminal) render() []string {
 	return splitLines(t.emulator.Render(), t.emulator.Height())
 }
 
+func (t *embeddedTerminal) scrollbackLen() int {
+	return t.emulator.ScrollbackLen()
+}
+
+// renderViewport returns one screen worth of rows ending offset lines above the
+// live output. An offset of zero renders the live screen unchanged.
+func (t *embeddedTerminal) renderViewport(offset int) []string {
+	screen := t.render()
+	history := t.emulator.Scrollback()
+	offset = min(max(offset, 0), history.Len())
+	if offset == 0 {
+		return screen
+	}
+	lines := make([]string, 0, len(screen))
+	for index := history.Len() - offset; len(lines) < len(screen); index++ {
+		if index < history.Len() {
+			lines = append(lines, history.Line(index).Render())
+			continue
+		}
+		lines = append(lines, screen[index-history.Len()])
+	}
+	return lines
+}
+
 func (t *embeddedTerminal) cursorPosition() uv.Position {
 	return t.emulator.CursorPosition()
 }
