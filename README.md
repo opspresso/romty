@@ -103,8 +103,10 @@ These function keys work from either pane, with a modal open, and with non-Engli
 | `F3`, `,` | Open Config |
 | `F4`, `q` | Quit romty |
 | `F5`, `r` | Refresh roots, workspaces, and sessions |
+| `F6`, `s` | Enter or leave scrollback for the open terminal |
 | `F7`, `Tab` | Focus the active terminal |
 | `F8`, `d` | Ask for confirmation, then forget the selected root; terminals under it keep running |
+| `F9`, `t` | Ask for confirmation, then stop the daemon and all running terminal sessions |
 | `i` | Open About |
 | `↑`/`↓`, `j`/`k` | Move between roots and workspaces |
 | `←`/`→`, `h`/`l` | Move between terminal tabs and the `+` tab |
@@ -126,7 +128,7 @@ Except for the global function keys and `Ctrl+\`, keyboard and paste input is fo
 
 ### Scrollback
 
-romty keeps the last 10,000 lines that scrolled off each terminal. Enter scrollback with `F6`, `Shift`+`PgUp`, or a second `Ctrl+\`, and leave it with `F6`, `Ctrl+\`, `Esc`, or `q`. New output does not move the view while you are scrolled back; leaving returns to the live screen.
+romty keeps the last 10,000 lines that scrolled off each terminal. Enter scrollback with `F6`, `s`, `Shift`+`PgUp`, or a second `Ctrl+\`, and leave it with `F6`, `s`, `Ctrl+\`, `Esc`, or `q`. New output does not move the view while you are scrolled back; leaving returns to the live screen.
 
 Full-screen applications such as `vim`, `less`, and Claude Code switch the terminal to its alternate screen, which keeps no history — the application owns every row and scrolls its own content. romty says so instead of opening scrollback, because the history from before the application started is not what you asked for. `Shift`+`PgUp`/`PgDn` reaches such an application as a plain `PgUp`/`PgDn` so its own paging still works.
 
@@ -148,7 +150,7 @@ romty then mirrors whatever mouse mode the application asks for, and returns the
 | `↑`/`↓`, `j`/`k` | Scroll one line |
 | `PgUp`/`PgDn`, `Ctrl+B`/`Ctrl+F` | Scroll one page |
 | `Home`/`End`, `g`/`G` | Jump to the oldest retained line or back to the live screen |
-| `F6`, `Ctrl+\`, `Esc`, `q` | Leave scrollback for the terminal |
+| `F6`, `s`, `Ctrl+\`, `Esc`, `q` | Leave scrollback for the terminal |
 | `F7` | Leave scrollback for the workspace pane |
 
 Scrollback hides the workspace pane and draws the terminal across the full width. That is what makes the text selectable: in the split layout every row of the host terminal holds the workspace tree, a divider, and terminal output on one line, so dragging across several lines copies the tree along with them. With one pane on screen, a plain drag selects terminal output and nothing else.

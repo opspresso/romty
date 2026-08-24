@@ -1360,6 +1360,47 @@ func twoRootSnapshot() model.Snapshot {
 
 // Esc has to mean no. Removing a root has no undo beyond adding it back and
 // rebuilding the tree by hand.
+// Every command reachable from the workspace pane has a letter next to its
+// function key. Scrollback and stopping the daemon were the two without one.
+func TestDashboardGivesScrollbackAndShutdownALetter(t *testing.T) {
+	value := scrolledDashboard(t, 200)
+	value.focus = leftPane
+
+	updated, _ := value.Update(key('s', "s"))
+	value = updated.(dashboard)
+	if !value.scrollback {
+		t.Fatal("s did not open scrollback")
+	}
+	// The letter toggles, like the function key it stands in for; being the
+	// one alias that only worked one way would be a trap.
+	updated, _ = value.Update(key('s', "s"))
+	value = updated.(dashboard)
+	if value.scrollback {
+		t.Fatal("a second s did not leave scrollback")
+	}
+
+	value.focus = leftPane
+	updated, command := value.Update(key('t', "t"))
+	value = updated.(dashboard)
+	if value.modal != shutdownModal || command != nil {
+		t.Fatalf("t = (modal %v, command %v), want the shutdown confirmation", value.modal, command)
+	}
+}
+
+// The letters belong to the workspace pane; the terminal owns its own input.
+func TestDashboardSendsTheNewLettersToTheShell(t *testing.T) {
+	value := scrolledDashboard(t, 200)
+
+	for _, letter := range []rune{'s', 't'} {
+		updated, _ := value.Update(key(letter, string(letter)))
+		value = updated.(dashboard)
+		if value.scrollback || value.modal != noModal {
+			t.Fatalf("%q in the terminal = (scrollback %v, modal %v), want it forwarded to the shell",
+				letter, value.scrollback, value.modal)
+		}
+	}
+}
+
 func TestDashboardCancelsRemovingARoot(t *testing.T) {
 	snapshot := twoRootSnapshot()
 	backend := &fakeBackend{snapshot: snapshot}
@@ -2213,9 +2254,9 @@ func TestDashboardShowsAllShortcutsInHelpModal(t *testing.T) {
 		{keys: []string{",", "F3"}, description: "Config"},
 		{keys: []string{"q", "F4"}, description: "Quit"},
 		{keys: []string{"r", "F5"}, description: "Refresh"},
-		{keys: []string{"F6"}, description: "Scrollback"},
+		{keys: []string{"F6", "s"}, description: "Scrollback"},
 		{keys: []string{"F7"}, description: "Switch pane"},
-		{keys: []string{"F9"}, description: "Stop daemon"},
+		{keys: []string{"F9", "t"}, description: "Stop daemon"},
 		{keys: []string{"↑/↓", "j/k"}, description: "Select workspace"},
 		{keys: []string{"←/→", "h/l"}, description: "Select tab / +"},
 		{keys: []string{"Enter"}, description: "Open / confirm"},
@@ -2246,8 +2287,10 @@ func TestDashboardShowsAllShortcutsInHelpModal(t *testing.T) {
 		{description: "Config", first: "F3", second: ","},
 		{description: "Quit", first: "F4", second: "q"},
 		{description: "Refresh", first: "F5", second: "r"},
+		{description: "Scrollback", first: "F6", second: "s"},
 		{description: "Focus terminal", first: "F7", second: "Tab"},
 		{description: "Remove root", first: "F8", second: "d"},
+		{description: "Stop daemon", first: "F9", second: "t"},
 	} {
 		line := helpLine(plainLines, row.description, row.first, row.second)
 		if first, second := strings.Index(line, row.first), strings.Index(line, row.second); first < 0 || first > second {
