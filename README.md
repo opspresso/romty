@@ -170,7 +170,7 @@ The TUI communicates with a detached local daemon over a Unix socket. The daemon
 
 Pressing `F6` opens a confirmation modal because stopping the daemon terminates every running shell. Once `Enter` confirms it the shutdown cannot be cancelled, so the modal stays until the daemon reports back. The `romty stop` command performs the same shutdown directly and is intended for explicit use from outside a romty terminal; stopping a daemon that is not running succeeds without output.
 
-When a shell exits, its tab is removed from the daemon state. If the daemon stops or the operating system restarts, roots and workspace metadata remain available, but stale terminal tabs are discarded because their PTY processes can no longer be reattached.
+When a shell exits, its tab is removed from the daemon state. If you were in that terminal, romty moves to the tab that took its place in the same workspace, or to the workspace pane when it held the last one. A shell that exits in the background leaves the workspace tree where it is. If the daemon stops or the operating system restarts, roots and workspace metadata remain available, but stale terminal tabs are discarded because their PTY processes can no longer be reattached.
 
 romty refuses to start inside one of its own terminal sessions to avoid nesting the TUI.
 
