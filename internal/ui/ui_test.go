@@ -2641,6 +2641,46 @@ func TestOpenTabMarkersUseAgentColors(t *testing.T) {
 	}
 }
 
+func TestNavigationShowsGitBehindBesideOpenTabs(t *testing.T) {
+	workspace := model.Workspace{ID: "workspace-1", RootID: "root-1", Name: "SnowClash", Path: "/projects/SnowClash"}
+	snapshot := model.Snapshot{Roots: []model.RootView{{
+		Root: model.Root{ID: "root-1", Name: "projects", Path: "/projects"},
+		Directories: []model.WorkspaceView{{
+			Workspace: workspace,
+			Tabs:      []model.Tab{{ID: "tab-1", Running: true}},
+		}},
+	}}}
+	value := newDashboard(&fakeBackend{}, snapshot)
+	value.gitBehind = map[string]int{workspace.Path: 3}
+	value.width = 120
+	value.height = 40
+
+	navigation := ansi.Strip(strings.Join(value.renderNavigation(28, 36), "\n"))
+	for _, line := range strings.Split(navigation, "\n") {
+		if strings.Contains(line, workspace.Name) && !strings.HasSuffix(strings.TrimRight(line, " "), "↓3 ●") {
+			t.Fatalf("workspace row = %q, want Git and terminal markers", line)
+		}
+	}
+	marker := value.styles.navigationItem.Foreground(value.styles.gitBehind.GetForeground()).Render("↓3")
+	if rendered := strings.Join(value.renderNavigation(28, 36), "\n"); !strings.Contains(rendered, marker) {
+		t.Fatalf("navigation does not contain styled Git marker:\n%s", rendered)
+	}
+}
+
+func TestGitStatusUpdatesStateAndSchedulesAnotherRefresh(t *testing.T) {
+	value := newDashboard(&fakeBackend{}, model.Snapshot{})
+	value.gitBehind = map[string]int{"/old": 2}
+
+	updated, command := value.Update(gitStatusMsg{value: map[string]int{"/new": 1}})
+	value = updated.(dashboard)
+	if !reflect.DeepEqual(value.gitBehind, map[string]int{"/new": 1}) {
+		t.Fatalf("Git status = %#v, want only the current result", value.gitBehind)
+	}
+	if command == nil {
+		t.Fatal("Git status did not schedule another refresh")
+	}
+}
+
 func TestAgentSnapshotUpdatesStateAndSchedulesAnotherRefresh(t *testing.T) {
 	snapshot := model.Snapshot{Roots: []model.RootView{{
 		Root: model.Root{ID: "root-1", Name: "projects", Path: "/projects"},

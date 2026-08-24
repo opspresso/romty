@@ -11,6 +11,7 @@ type uiStyles struct {
 	navigationSelected  lipgloss.Style
 	agentClaude         lipgloss.Style
 	agentCodex          lipgloss.Style
+	gitBehind           lipgloss.Style
 	tab                 lipgloss.Style
 	tabSelected         lipgloss.Style
 	tabRail             lipgloss.Style
@@ -53,6 +54,7 @@ func newUIStyles(hasDarkBackground bool) *uiStyles {
 		navigationSelected:  lipgloss.NewStyle().Foreground(accentText).Background(accentSurface).Bold(true),
 		agentClaude:         lipgloss.NewStyle().Foreground(lipgloss.Color("#D97757")),
 		agentCodex:          lipgloss.NewStyle().Foreground(lipgloss.Color("#3B82F6")),
+		gitBehind:           lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B")),
 		tab:                 lipgloss.NewStyle().Foreground(muted).Background(surface),
 		tabSelected:         lipgloss.NewStyle().Foreground(accentText).Background(accentSurface).Bold(true),
 		tabRail:             lipgloss.NewStyle().Foreground(border),

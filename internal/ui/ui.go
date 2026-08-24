@@ -31,6 +31,7 @@ const (
 	initialReattachBackoff  = 250 * time.Millisecond
 	maximumReattachBackoff  = 2 * time.Second
 	agentRefreshInterval    = 2 * time.Second
+	gitRefreshInterval      = 10 * time.Second
 	// healthyAttachInterval is how long a terminal has to stay attached before
 	// a later drop counts as a fresh incident rather than another turn of the
 	// loop. What the backoff damps — replay, fall behind, get cut — turns over
@@ -99,6 +100,7 @@ type navItem struct {
 	root      model.Root
 	workspace model.Workspace
 	tabs      []model.Tab
+	gitBehind int
 	isRoot    bool
 	lastChild bool
 	// failure is set on a root romty could not read, so the tree can say why
@@ -164,6 +166,7 @@ type dashboard struct {
 	config           Config
 	leftWidth        int
 	mousePassthrough bool
+	gitBehind        map[string]int
 	styles           *uiStyles
 }
 
@@ -175,6 +178,10 @@ type snapshotMsg struct {
 type agentSnapshotMsg struct {
 	value map[string]model.Agent
 	err   error
+}
+
+type gitStatusMsg struct {
+	value map[string]int
 }
 
 type workspaceMsg struct {
@@ -272,7 +279,7 @@ func (m dashboard) Init() tea.Cmd {
 	// The host starts with alternate scroll on, which is what turns a wheel
 	// notch into arrow keys romty cannot tell from typed ones. Only scrollback
 	// wants them, so the mode is off until it opens.
-	return tea.Batch(tea.RequestBackgroundColor, m.refreshAgents(), altScrollCommand(false))
+	return tea.Batch(tea.RequestBackgroundColor, m.refreshAgents(), m.readGitStatus(), altScrollCommand(false))
 }
 
 // Update wraps the state machine so every path that opens or leaves scrollback
@@ -363,6 +370,9 @@ func (m dashboard) update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.updateAgents(message.value)
 		}
 		return m, m.refreshAgents()
+	case gitStatusMsg:
+		m.gitBehind = message.value
+		return m, m.refreshGitStatus()
 	case workspaceMsg:
 		return m.handleWorkspace(message)
 	case tabMsg:
@@ -1077,6 +1087,31 @@ func (m *dashboard) updateAgents(agents map[string]model.Agent) {
 	}
 }
 
+func (m dashboard) readGitStatus() tea.Cmd {
+	paths := m.workspacePaths()
+	return func() tea.Msg {
+		return gitStatusMsg{value: gitBehindWorkspaces(paths)}
+	}
+}
+
+func (m dashboard) refreshGitStatus() tea.Cmd {
+	paths := m.workspacePaths()
+	return tea.Tick(gitRefreshInterval, func(time.Time) tea.Msg {
+		return gitStatusMsg{value: gitBehindWorkspaces(paths)}
+	})
+}
+
+func (m dashboard) workspacePaths() []string {
+	paths := make([]string, 0)
+	for _, root := range m.state.Roots {
+		paths = append(paths, root.Root.Path)
+		for _, directory := range root.Directories {
+			paths = append(paths, directory.Workspace.Path)
+		}
+	}
+	return paths
+}
+
 func (m dashboard) selectWorkspace() tea.Cmd {
 	item, ok := m.navigationItem()
 	if !ok {
@@ -1440,15 +1475,17 @@ func (m dashboard) navigationItems() []navItem {
 				Name:   root.Root.Name,
 				Path:   root.Root.Path,
 			},
-			tabs:    root.Tabs,
-			isRoot:  true,
-			failure: root.Error,
+			tabs:      root.Tabs,
+			gitBehind: m.gitBehind[root.Root.Path],
+			isRoot:    true,
+			failure:   root.Error,
 		})
 		for index, directory := range root.Directories {
 			result = append(result, navItem{
 				root:      root.Root,
 				workspace: directory.Workspace,
 				tabs:      directory.Tabs,
+				gitBehind: m.gitBehind[directory.Workspace.Path],
 				lastChild: index == len(root.Directories)-1,
 			})
 		}
@@ -1986,6 +2023,15 @@ func (m dashboard) renderNavigationItem(item navItem, index, width int) string {
 		style = m.styles.navigationSelected
 	}
 	markers := openTabMarkers(m.styles, style, item.tabs)
+	if item.gitBehind > 0 {
+		gitStyle := style.Foreground(m.styles.gitBehind.GetForeground())
+		gitMarker := gitStyle.Render(fmt.Sprintf("↓%d", item.gitBehind))
+		if markers != "" {
+			markers = gitMarker + style.Render(" ") + markers
+		} else {
+			markers = gitMarker
+		}
+	}
 	if markers != "" {
 		available := width - lipgloss.Width(markers) - 2
 		if available > 0 {
