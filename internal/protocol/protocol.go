@@ -10,6 +10,12 @@ import (
 	"github.com/nalbam/romty/internal/model"
 )
 
+// Version is the protocol romty speaks. The daemon outlives the client binary
+// — `brew upgrade` replaces romty while the old daemon keeps running — so a new
+// client can meet an old daemon. Without a version that showed up as
+// `unknown action "remove_root"`, or as a field silently missing from a reply.
+const Version = 1
+
 const (
 	ActionPing            = "ping"
 	ActionSnapshot        = "snapshot"
@@ -23,17 +29,29 @@ const (
 )
 
 type Request struct {
-	Action      string `json:"action"`
+	Action string `json:"action"`
+	// Version is what the client speaks. A daemon that predates the field
+	// leaves it zero, which is how an old daemon is recognised.
+	Version     int    `json:"version,omitempty"`
 	Path        string `json:"path,omitempty"`
 	RootID      string `json:"root_id,omitempty"`
 	WorkspaceID string `json:"workspace_id,omitempty"`
 	TabID       string `json:"tab_id,omitempty"`
 	Columns     uint16 `json:"columns,omitempty"`
 	Rows        uint16 `json:"rows,omitempty"`
+	// Environment is the client's environment, sent with create_tab. The
+	// daemon may have been started days ago from a different shell, so its
+	// own environment is not the one the user is working in.
+	Environment []string `json:"environment,omitempty"`
+	// Shell is what the client wants to run, for the same reason.
+	Shell string `json:"shell,omitempty"`
 }
 
 type Response struct {
-	Error     string           `json:"error,omitempty"`
+	Error string `json:"error,omitempty"`
+	// Version is what the daemon speaks, so a client can say which side is
+	// out of date instead of reporting a puzzling missing field.
+	Version   int              `json:"version,omitempty"`
 	Snapshot  *model.Snapshot  `json:"snapshot,omitempty"`
 	Workspace *model.Workspace `json:"workspace,omitempty"`
 	Tab       *model.Tab       `json:"tab,omitempty"`

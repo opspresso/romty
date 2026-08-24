@@ -623,7 +623,9 @@ func TestServeCreatesAPrivateSocketAndDirectory(t *testing.T) {
 func TestCreateTabLeavesNoTabWhenTheShellExitsAtOnce(t *testing.T) {
 	base := testutil.ShortTempDir(t)
 	socket := filepath.Join(base, "daemon.sock")
-	// A "shell" that exits the moment it starts.
+	// A "shell" that exits the moment it starts. The client sends its own
+	// SHELL with each tab, so that is where this has to be set.
+	t.Setenv("SHELL", "/usr/bin/true")
 	server, err := daemon.New(socket, filepath.Join(base, "state.json"), "/usr/bin/true")
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -673,4 +675,47 @@ func countTabs(snapshot model.Snapshot) int {
 		}
 	}
 	return total
+}
+
+// The daemon can be days older than the shell the user is working in, so a tab
+// must start with that shell's environment rather than whatever the daemon
+// inherited when it was first launched.
+func TestCreateTabUsesTheClientEnvironment(t *testing.T) {
+	base := testutil.ShortTempDir(t)
+	socket := filepath.Join(base, "daemon.sock")
+	server, err := daemon.New(socket, filepath.Join(base, "state.json"), "/bin/sh")
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	server.SetLogger(testutil.QuietLogger())
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- server.Serve(ctx) }()
+	defer func() { cancel(); <-done }()
+	backend := client.New(socket)
+	testutil.WaitForDaemon(t, backend)
+
+	snapshot, err := backend.AddRoot(base)
+	if err != nil {
+		t.Fatalf("AddRoot() error = %v", err)
+	}
+	workspace, err := backend.EnsureWorkspace(snapshot.Roots[0].Root.ID, base)
+	if err != nil {
+		t.Fatalf("EnsureWorkspace() error = %v", err)
+	}
+
+	// Set after the daemon started, the way a user's PATH changes under a
+	// daemon that has been running for days.
+	t.Setenv("ROMTY_AUDIT_MARKER", "from-the-client")
+	tab, err := backend.CreateTab(workspace.ID, 80, 24)
+	if err != nil {
+		t.Fatalf("CreateTab() error = %v", err)
+	}
+	connection, reader, err := backend.OpenAttach(tab.ID)
+	if err != nil {
+		t.Fatalf("OpenAttach() error = %v", err)
+	}
+	defer connection.Close()
+	writeCommand(t, connection, `printf 'marker=%s\n' "$ROMTY_AUDIT_MARKER"`)
+	readUntil(t, connection, reader, "marker=from-the-client")
 }

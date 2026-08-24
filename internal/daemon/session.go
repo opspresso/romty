@@ -46,7 +46,7 @@ type attachment struct {
 	live    bool
 }
 
-func startSession(id, directory, shell string, columns, rows uint16, onExit func()) (*session, error) {
+func startSession(id, directory, shell string, environment []string, columns, rows uint16, onExit func()) (*session, error) {
 	if columns == 0 {
 		columns = 80
 	}
@@ -56,7 +56,13 @@ func startSession(id, directory, shell string, columns, rows uint16, onExit func
 
 	command := exec.Command(shell)
 	command.Dir = directory
-	command.Env = append(os.Environ(), "TERM=xterm-256color", "ROMTY=1")
+	// The client's environment, not the daemon's. A daemon started days ago
+	// from another login session would otherwise hand every new shell that
+	// session's PATH and variables.
+	if environment == nil {
+		environment = os.Environ()
+	}
+	command.Env = append(environment, "TERM=xterm-256color", "ROMTY=1")
 	terminal, err := pty.StartWithSize(command, &pty.Winsize{Cols: columns, Rows: rows})
 	if err != nil {
 		return nil, fmt.Errorf("start shell PTY: %w", err)
