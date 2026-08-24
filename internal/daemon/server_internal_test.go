@@ -456,3 +456,53 @@ func TestServeReportsAlreadyRunningWhenAnotherDaemonHoldsTheLock(t *testing.T) {
 		t.Fatal("the daemon that lost the lock still went on to bind the socket")
 	}
 }
+
+// The tabs a state file carries name shells that died with the last daemon, so
+// they are cleared before the socket exists. A daemon that cannot clear them
+// has nothing consistent to serve, and must not have touched the socket path a
+// working daemon still owns.
+func TestServeClearsStaleTabsBeforeTouchingTheSocket(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("root writes into a directory it has no write permission on")
+	}
+	base, err := os.MkdirTemp("/tmp", "romty-stale-")
+	if err != nil {
+		t.Fatalf("MkdirTemp() error = %v", err)
+	}
+	t.Cleanup(func() { os.RemoveAll(base) })
+
+	// The state file lives where it cannot be rewritten. Its own directory,
+	// because Serve narrows the socket's directory and would undo the mode.
+	stateDirectory := filepath.Join(base, "state")
+	if err := os.MkdirAll(stateDirectory, 0o700); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	statePath := filepath.Join(stateDirectory, "state.json")
+	stale := `{"roots":[],"workspaces":[],"tabs":[{"id":"tab-1","workspace_id":"workspace-1","name":"1","running":true}]}`
+	if err := os.WriteFile(statePath, []byte(stale), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	if err := os.Chmod(stateDirectory, 0o500); err != nil {
+		t.Fatalf("Chmod() error = %v", err)
+	}
+	t.Cleanup(func() { os.Chmod(stateDirectory, 0o700) })
+
+	// A file standing at the socket path, the way a crash leaves one. Only a
+	// daemon that got as far as prepareSocket removes it.
+	socket := filepath.Join(base, "daemon.sock")
+	if err := os.WriteFile(socket, nil, 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	server, err := New(socket, statePath, "/bin/sh")
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	server.SetLogger(log.New(io.Discard, "", 0))
+	if err := server.Serve(context.Background()); err == nil {
+		t.Fatal("Serve() started on a state file it could not clear")
+	}
+	if _, err := os.Lstat(socket); err != nil {
+		t.Fatalf("the socket path was disturbed by a daemon that never served: %v", err)
+	}
+}

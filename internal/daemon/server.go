@@ -101,6 +101,14 @@ func (s *Server) Serve(ctx context.Context) error {
 	// Released after shutdown removes the socket, so the next daemon to take
 	// the lock never finds this one's socket standing.
 	defer lock.Close()
+	// Before the socket exists, not after. The tabs in the state file name
+	// shells that died with the last daemon, and clearing them once the socket
+	// was up raced the client that is already polling for it: EnsureDaemon
+	// pings every 25ms and asks for a snapshot the moment one answers, so the
+	// first tree a user saw could list terminals that were never there.
+	if err := s.removeStaleTabs(); err != nil {
+		return err
+	}
 	if err := prepareSocket(s.socket); err != nil {
 		return err
 	}
@@ -112,9 +120,6 @@ func (s *Server) Serve(ctx context.Context) error {
 		return err
 	}
 	defer s.shutdown()
-	if err := s.removeStaleTabs(); err != nil {
-		return err
-	}
 	s.logger.Printf("listening on %s", s.socket)
 	defer s.logger.Printf("stopped")
 
