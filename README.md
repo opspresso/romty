@@ -170,6 +170,8 @@ Set `mouse_passthrough` in `config.json` — see [Data and configuration](#data-
 
 romty then mirrors whatever mouse mode the application asks for, and returns the mouse to the terminal as soon as the application exits or scrollback opens. This is the same trade as `set -g mouse on` in tmux: the wheel and clicks reach the application, and the terminal's drag selection needs its bypass modifier — `Option` on macOS, `Shift` elsewhere — for as long as the application is running.
 
+Outside scrollback the wheel does nothing. Terminals showing a full-screen program send a wheel notch as three arrow key presses, which romty cannot tell from typed ones: they walked the workspace tree three rows at a time and reached the shell as history keys nobody pressed. romty asks the terminal to stop sending them — DEC private mode 1007, alternate scroll — for as long as it is not in scrollback, and turns the mode back on when it exits. A terminal that does not implement 1007 keeps sending the arrow keys, and scrolling over romty moves the cursor as it did before.
+
 | Key | Action |
 |---|---|
 | Wheel | Scroll, through the terminal's own alternate scroll |
@@ -181,9 +183,9 @@ romty then mirrors whatever mouse mode the application asks for, and returns the
 
 Scrollback hides the workspace pane and draws the terminal across the full width. That is what makes the text selectable: in the split layout every row of the host terminal holds the workspace tree, a divider, and terminal output on one line, so dragging across several lines copies the tree along with them. With one pane on screen, a plain drag selects terminal output and nothing else.
 
-romty never asks the terminal for mouse events here. The xterm protocol has no wheel-only reporting mode, so requesting the wheel would take drag selection away — the very thing scrollback exists to give you. The wheel still scrolls because terminals in the alternate screen send it as arrow keys, which scrollback already handles. Selection and copying stay with the terminal, exactly as they behave outside romty.
+romty never asks the terminal for mouse events here. The xterm protocol has no wheel-only reporting mode, so requesting the wheel would take drag selection away — the very thing scrollback exists to give you. The wheel still scrolls because scrollback turns alternate scroll back on, and the arrow keys it sends are the ones the keys above already handle. Selection and copying stay with the terminal, exactly as they behave outside romty.
 
-If your terminal has alternate scroll turned off, the wheel does nothing here and the keys above still work.
+If your terminal does not implement alternate scroll, the wheel does nothing here and the keys above still work.
 
 While scrollback is open it owns the keyboard, so navigation and terminal input resume only after you leave it. Leaving focuses the terminal, which is what the full-width view was already showing, so `Ctrl+\` cycles terminal → workspace → scrollback → terminal. `F7` is the exception: it switches panes, so it leaves scrollback for the workspace pane. A terminal whose shell has exited is not focused; the workspace pane keeps the keyboard instead.
 

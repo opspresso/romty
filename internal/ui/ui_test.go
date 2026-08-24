@@ -723,17 +723,20 @@ func TestDashboardScrollsTerminalHistory(t *testing.T) {
 
 	updated, command := value.Update(key(tea.KeyF6, ""))
 	value = updated.(dashboard)
-	if !value.scrollback || value.scrollOffset != 0 || command != nil {
-		t.Fatalf("F6 = (scrollback %v, offset %d, command %v), want the live view in scrollback mode",
-			value.scrollback, value.scrollOffset, command)
+	if !value.scrollback || value.scrollOffset != 0 {
+		t.Fatalf("F6 = (scrollback %v, offset %d), want the live view in scrollback mode",
+			value.scrollback, value.scrollOffset)
+	}
+	if sequences := rawSequences(command); !slices.Contains(sequences, ansi.SetMode(altScrollMode)) {
+		t.Fatalf("F6 sequences = %q, want alternate scroll asked for", sequences)
 	}
 	view := value.View()
 	if view.MouseMode != tea.MouseModeNone || view.Cursor != nil {
 		t.Fatalf("copy mode view = (mouse %v, cursor %v), want the mouse left with the host", view.MouseMode, view.Cursor)
 	}
 
-	// The wheel arrives as arrow keys through the terminal's alternate scroll,
-	// which is what keeps the host's drag selection alive in copy mode.
+	// The wheel arrives as arrow keys through the alternate scroll copy mode
+	// just asked for, which is what keeps the host's drag selection alive.
 	updated, _ = value.Update(key(tea.KeyUp, ""))
 	value = updated.(dashboard)
 	if value.scrollOffset != 1 {
@@ -769,12 +772,75 @@ func TestDashboardScrollsTerminalHistory(t *testing.T) {
 		t.Fatalf("End offset = %d, want the live screen", value.scrollOffset)
 	}
 
-	updated, _ = value.Update(key(tea.KeyEscape, ""))
+	updated, command = value.Update(key(tea.KeyEscape, ""))
 	value = updated.(dashboard)
 	if value.scrollback || value.scrollOffset != 0 || value.View().MouseMode != tea.MouseModeNone {
 		t.Fatalf("Esc = (scrollback %v, offset %d, mouse %v), want the mouse returned to the host",
 			value.scrollback, value.scrollOffset, value.View().MouseMode)
 	}
+	if sequences := rawSequences(command); !slices.Contains(sequences, ansi.ResetMode(altScrollMode)) {
+		t.Fatalf("Esc sequences = %q, want alternate scroll given up", sequences)
+	}
+}
+
+// Outside scrollback the host's alternate scroll turns a wheel notch into three
+// arrow presses romty cannot tell from typed ones, which walked the workspace
+// tree and reached the shell as history keys. romty holds the mode off until
+// scrollback, the one state that wants those keys, opens.
+func TestDashboardHoldsAlternateScrollForScrollback(t *testing.T) {
+	value := scrolledDashboard(t, 200)
+
+	if sequences := rawSequences(value.Init()); !slices.Contains(sequences, ansi.ResetMode(altScrollMode)) {
+		t.Fatalf("startup sequences = %q, want alternate scroll turned off", sequences)
+	}
+
+	// A key that changes nothing about scrollback repeats no sequence: the mode
+	// moves on the transitions, not on every message.
+	updated, command := value.Update(key(tea.KeyDown, ""))
+	value = updated.(dashboard)
+	if sequences := rawSequences(command); len(sequences) != 0 {
+		t.Fatalf("sequences without a transition = %q, want none", sequences)
+	}
+
+	updated, command = value.Update(key(tea.KeyF6, ""))
+	value = updated.(dashboard)
+	if sequences := rawSequences(command); !slices.Contains(sequences, ansi.SetMode(altScrollMode)) {
+		t.Fatalf("entering scrollback = %q, want alternate scroll asked for", sequences)
+	}
+	updated, command = value.Update(key(tea.KeyUp, ""))
+	value = updated.(dashboard)
+	if sequences := rawSequences(command); len(sequences) != 0 {
+		t.Fatalf("scrolling inside scrollback = %q, want the mode left alone", sequences)
+	}
+
+	// F7 leaves scrollback for the workspace pane, which is one of the seven
+	// paths out: the mode follows the state rather than a particular key.
+	updated, command = value.Update(key(tea.KeyF7, ""))
+	value = updated.(dashboard)
+	if value.scrollback {
+		t.Fatal("F7 left scrollback open")
+	}
+	if sequences := rawSequences(command); !slices.Contains(sequences, ansi.ResetMode(altScrollMode)) {
+		t.Fatalf("leaving scrollback = %q, want alternate scroll given up", sequences)
+	}
+}
+
+// rawSequences runs a command the way the runtime does, flattening batches, and
+// returns the escape sequences it asked the host terminal for.
+func rawSequences(command tea.Cmd) []string {
+	if command == nil {
+		return nil
+	}
+	var sequences []string
+	switch message := command().(type) {
+	case tea.RawMsg:
+		sequences = append(sequences, fmt.Sprint(message.Msg))
+	case tea.BatchMsg:
+		for _, batched := range message {
+			sequences = append(sequences, rawSequences(batched)...)
+		}
+	}
+	return sequences
 }
 
 func TestDashboardEntersScrollbackFromEveryBinding(t *testing.T) {
@@ -2217,6 +2283,10 @@ func TestDashboardSwitchesTabsWithCtrlShiftArrows(t *testing.T) {
 	// from it lands on the new terminal's live screen.
 	value.tabIndex = 0
 	value.scrollback = true
+	// altScroll comes with scrollback everywhere else, so the shortcut sets it
+	// too: a dashboard that disagreed with the host would spend this switch
+	// correcting the mode instead of opening the tab.
+	value.altScroll = true
 	value.scrollOffset = 5
 	value = pressSwitchTab(t, value, tea.KeyRight)
 	if value.scrollback || value.scrollOffset != 0 || value.terminal.id != tabs[1].ID {

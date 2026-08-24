@@ -148,9 +148,12 @@ type dashboard struct {
 	// a drop that continues a loop from one that starts a new incident.
 	terminalOpenedAt time.Time
 	scrollback       bool
-	scrollOffset     int
-	helpOffset       int
-	configPath       string
+	// altScroll is the host's alternate scroll as romty last set it, so the
+	// sequence is sent on the transitions and not on every message.
+	altScroll    bool
+	scrollOffset int
+	helpOffset   int
+	configPath   string
 	// homePath is where the root picker opens, resolved once at startup.
 	homePath string
 	// browse is the root picker's state, kept on the dashboard so the modal
@@ -229,6 +232,10 @@ func Run(backend Backend, initial model.Snapshot, configPath string) (Result, er
 	}
 	program := tea.NewProgram(newDashboardWithConfig(backend, initial, configPath, config))
 	final, err := program.Run()
+	// romty held the host's alternate scroll off while it ran. Leaving it that
+	// way would follow the user out of romty and into every full-screen program
+	// they open next, so it goes back on — the state terminals ship with.
+	fmt.Print(ansi.SetMode(altScrollMode))
 	if err != nil {
 		return Result{}, fmt.Errorf("run dashboard: %w", err)
 	}
@@ -262,10 +269,50 @@ func newDashboardWithConfig(backend Backend, initial model.Snapshot, configPath 
 }
 
 func (m dashboard) Init() tea.Cmd {
-	return tea.Batch(tea.RequestBackgroundColor, m.refreshAgents())
+	// The host starts with alternate scroll on, which is what turns a wheel
+	// notch into arrow keys romty cannot tell from typed ones. Only scrollback
+	// wants them, so the mode is off until it opens.
+	return tea.Batch(tea.RequestBackgroundColor, m.refreshAgents(), altScrollCommand(false))
 }
 
+// Update wraps the state machine so every path that opens or leaves scrollback
+// moves the host's alternate scroll with it, rather than each of the seven
+// transitions having to remember the sequence.
 func (m dashboard) Update(message tea.Msg) (tea.Model, tea.Cmd) {
+	updated, command := m.update(message)
+	value, ok := updated.(dashboard)
+	if !ok {
+		return updated, command
+	}
+	return value.syncAltScroll(command)
+}
+
+// syncAltScroll asks the host for alternate scroll while scrollback is open and
+// gives it up on the way out. Outside scrollback the arrow keys it sends have
+// nowhere good to go: over the workspace pane they walk the tree three rows per
+// notch, and over the terminal they reach the shell as history keys nobody
+// pressed.
+func (m dashboard) syncAltScroll(command tea.Cmd) (tea.Model, tea.Cmd) {
+	if m.altScroll == m.scrollback {
+		return m, command
+	}
+	m.altScroll = m.scrollback
+	return m, tea.Batch(command, altScrollCommand(m.altScroll))
+}
+
+// altScrollMode is DEC private mode 1007, which the ansi package has no
+// constant for. A terminal that does not implement it ignores both sequences,
+// leaving the wheel exactly as it behaves today.
+const altScrollMode = ansi.DECMode(1007)
+
+func altScrollCommand(enabled bool) tea.Cmd {
+	if enabled {
+		return tea.Raw(ansi.SetMode(altScrollMode))
+	}
+	return tea.Raw(ansi.ResetMode(altScrollMode))
+}
+
+func (m dashboard) update(message tea.Msg) (tea.Model, tea.Cmd) {
 	switch message := message.(type) {
 	case tea.WindowSizeMsg:
 		m.width = message.Width
@@ -573,9 +620,10 @@ func (m dashboard) handleModalKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 	return m, nil
 }
 
-// Scrollback mode is the only state where romty asks the host terminal for
-// mouse events. Everywhere else the mouse belongs to the host so its native
-// drag selection keeps working, which is why this is an explicit mode.
+// Scrollback mode is the only state where romty wants the wheel, and it takes
+// it as the arrow keys the host's alternate scroll sends rather than by asking
+// for mouse events, which would take the host's native drag selection away —
+// the very thing scrollback exists to give you.
 func (m dashboard) handleScrollbackKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.terminal == nil {
 		m.stopScrollback()
@@ -1123,10 +1171,9 @@ func (m *dashboard) moveNavigation(delta int) {
 		m.tabIndex = 0
 		return
 	}
-	// Stopping at the ends rather than wrapping: the wheel reaches romty as
-	// arrow keys — three per notch, through the terminal's alternate scroll —
-	// and a list that wraps sends one notch at the bottom back to the top.
-	// The picker, help and scrollback all stop; the tree used to be alone.
+	// Stopping at the ends rather than wrapping, as the picker, help and
+	// scrollback all do; the tree used to be alone in sending a press past the
+	// last row back to the first.
 	m.navIndex = min(max(m.navIndex+delta, 0), len(items)-1)
 	m.cursorPath = items[m.navIndex].workspace.Path
 	m.syncTabCursor(runningTabs(items[m.navIndex].tabs))
@@ -1535,8 +1582,8 @@ func (m dashboard) View() tea.View {
 }
 
 // mouseMode keeps the mouse with the host terminal, where its native drag
-// selection lives. Copy mode relies on the terminal's alternate scroll to turn
-// the wheel into arrow keys instead of claiming the mouse. The only handover is
+// selection lives. Copy mode takes the wheel through alternate scroll, which
+// arrives as arrow keys, instead of claiming the mouse. The only handover is
 // to a guest application that asked for the mouse, and only when the user
 // opted in, which is the same trade tmux makes for `set -g mouse on`.
 func (m dashboard) mouseMode() tea.MouseMode {
