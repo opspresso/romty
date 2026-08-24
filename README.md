@@ -227,6 +227,7 @@ romty stores its files in `romty` under the user config directory — `~/Library
 | `state.json` | Roots, workspaces, and terminal tab metadata |
 | `config.json` | TUI settings such as workspace pane width |
 | `daemon.sock` | Local client-daemon Unix socket |
+| `daemon.sock.lock` | Held by the running daemon, so only one owns the socket |
 | `daemon.log` | Detached daemon output |
 
 Set `ROMTY_HOME` to use a different directory, which is useful for development or isolated testing:

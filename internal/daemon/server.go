@@ -87,6 +87,20 @@ func (s *Server) Serve(ctx context.Context) error {
 	if err := os.Chmod(directory, 0o700); err != nil {
 		return fmt.Errorf("set socket directory permissions: %w", err)
 	}
+	// One daemon at a time, decided before anything touches the socket.
+	// prepareSocket unlinks a socket nothing answers on, which is right for
+	// one a crash left behind and wrong for one another daemon bound a moment
+	// ago: two daemons starting together could both find nothing to dial, and
+	// the second would unlink the first's socket and bind its own. The first
+	// kept running, listening on a name no client could reach any more, and
+	// kept writing the state file the second now owned.
+	lock, err := lockDaemon(s.socket + lockSuffix)
+	if err != nil {
+		return err
+	}
+	// Released after shutdown removes the socket, so the next daemon to take
+	// the lock never finds this one's socket standing.
+	defer lock.Close()
 	if err := prepareSocket(s.socket); err != nil {
 		return err
 	}
@@ -137,6 +151,30 @@ func (s *Server) removeStaleTabs() error {
 		return fmt.Errorf("remove stale terminal tabs: %w", err)
 	}
 	return nil
+}
+
+// lockSuffix names the lock beside the socket it guards. It is derived rather
+// than configured because the two only mean anything together: a lock pointed
+// at another path guards nothing.
+const lockSuffix = ".lock"
+
+// lockDaemon takes the exclusive lock that says which daemon owns the socket.
+// The kernel releases it when the process ends however it ends, so a daemon
+// that was killed outright leaves nothing to clean up — which a PID file, the
+// other way to answer this, would.
+func lockDaemon(path string) (*os.File, error) {
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return nil, fmt.Errorf("open daemon lock: %w", err)
+	}
+	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		file.Close()
+		if errors.Is(err, syscall.EWOULDBLOCK) {
+			return nil, ErrAlreadyRunning
+		}
+		return nil, fmt.Errorf("lock daemon: %w", err)
+	}
+	return file, nil
 }
 
 func prepareSocket(path string) error {

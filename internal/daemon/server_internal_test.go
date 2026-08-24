@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"log"
 	"net"
 	"os"
@@ -408,5 +409,50 @@ func TestReplyGivesUpOnAPeerThatStoppedReading(t *testing.T) {
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("reply() blocked on a peer that never read")
+	}
+}
+
+// Two daemons starting together could both find nothing to dial, and the
+// second would unlink the first's socket and bind its own — leaving the first
+// listening on a name no client could reach and still writing the state file
+// the second now owned. The lock decides ownership before the socket is
+// touched at all.
+func TestServeReportsAlreadyRunningWhenAnotherDaemonHoldsTheLock(t *testing.T) {
+	base, err := os.MkdirTemp("/tmp", "romty-lock-")
+	if err != nil {
+		t.Fatalf("MkdirTemp() error = %v", err)
+	}
+	t.Cleanup(func() { os.RemoveAll(base) })
+	socket := filepath.Join(base, "daemon.sock")
+
+	held, err := lockDaemon(socket + lockSuffix)
+	if err != nil {
+		t.Fatalf("lockDaemon() error = %v", err)
+	}
+	defer held.Close()
+
+	server, err := New(socket, filepath.Join(base, "state.json"), "/bin/sh")
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	server.SetLogger(log.New(io.Discard, "", 0))
+
+	// Serve runs on its own goroutine because a daemon that takes the lock
+	// does not return: the failure this guards against is one that serves on
+	// regardless, which as a direct call would simply never come back.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- server.Serve(ctx) }()
+	select {
+	case err := <-done:
+		if !errors.Is(err, ErrAlreadyRunning) {
+			t.Fatalf("Serve() error = %v, want ErrAlreadyRunning", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("the daemon that lost the lock is serving anyway")
+	}
+	if _, err := os.Lstat(socket); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("the daemon that lost the lock still went on to bind the socket")
 	}
 }
