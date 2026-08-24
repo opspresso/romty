@@ -154,6 +154,45 @@ func TestAttachHandsOffToLiveOutputInOrder(t *testing.T) {
 	<-attached
 }
 
+// A client that keeps reading must not be cut off for taking a while. One
+// deadline over the whole replay bounded the transfer rather than a stall, and
+// the TUI takes 32 KiB per turn of its event loop with a render between them,
+// so a full recording is hundreds of turns. An attach that was making steady
+// progress was dropped, romty reattached, the daemon replayed the same
+// recording, and it was dropped again.
+func TestAttachSurvivesAClientThatReadsSteadilyButSlowly(t *testing.T) {
+	withHistoryLimit(t, 256*1024)
+	previous := replayTimeout
+	replayTimeout = 150 * time.Millisecond
+	t.Cleanup(func() { replayTimeout = previous })
+
+	client, daemonSide := net.Pipe()
+	defer daemonSide.Close()
+
+	value := newSessionForTest()
+	value.history.append(bytes.Repeat([]byte("R"), maxHistoryBytes))
+
+	attached := make(chan error, 1)
+	go func() { attached <- value.attach(client) }()
+
+	// Small reads with a pause between them, the way a client that renders
+	// between turns of its event loop consumes a replay. The whole transfer
+	// takes several times replayTimeout while never stalling for one.
+	buffer := make([]byte, 8*1024)
+	seen := 0
+	for seen < maxHistoryBytes {
+		time.Sleep(10 * time.Millisecond)
+		daemonSide.SetReadDeadline(time.Now().Add(3 * time.Second))
+		count, err := daemonSide.Read(buffer)
+		if err != nil {
+			t.Fatalf("the replay was cut off after %d of %d bytes: %v", seen, maxHistoryBytes, err)
+		}
+		seen += bytes.Count(buffer[:count], []byte("R"))
+	}
+	client.Close()
+	<-attached
+}
+
 // The recording handed to the replay must be a copy: the ring is written in
 // place, so an aliased slice would be rewritten under the replay's feet.
 func TestAttachCopiesTheRecordingItReplays(t *testing.T) {
