@@ -51,7 +51,7 @@ Start romty:
 romty
 ```
 
-The daemon starts automatically on the first run. Press `F2`, enter a root directory, and press `Enter`. romty displays the root and its direct child directories as a workspace tree:
+The daemon starts automatically on the first run. Press `F2` to open a picker on your home directory, walk to a directory with `→` and `←`, and press `Enter` to add it. romty displays the root and its direct child directories as a workspace tree:
 
 ```text
 ▾ projects
@@ -75,6 +75,21 @@ The left pane shows the workspace tree, which scrolls with the selection when th
 
 The status bar shows `F1` through `F7` in both panes and adds navigation keys for the active pane. Press `F1` in either pane to see every shortcut, including aliases hidden from the status bar.
 
+### Adding a root
+
+`F2`, or `a` in the workspace pane, opens a picker on the home directory listing the directories inside it.
+
+| Key | Action |
+|---|---|
+| `↑`/`↓`, `k`/`j` | Move between directories |
+| `→`, `l` | Open the highlighted directory |
+| `←`, `h` | Go to the parent directory; the cursor lands on the directory just left |
+| `Enter` | Add the highlighted directory as a root |
+| `/` | Type a path instead |
+| `Esc` | Close the picker |
+
+Files and dot-directories are left out, and a linked directory is listed as the directory it points at. A directory with no subdirectories to highlight adds itself, so walking into an empty one is not a dead end. The picker always opens on the home directory rather than where it was left, so `F2` lands somewhere predictable; `/` reaches everything else, including a path that is faster to paste than to walk to.
+
 ### Global keys
 
 These function keys work from either pane, with a modal open, and with non-English keyboard input modes. The root input prompt is the one exception: while it is open every key belongs to the prompt, so a typed path is never discarded by a function key.
@@ -82,7 +97,7 @@ These function keys work from either pane, with a modal open, and with non-Engli
 | Key | Action |
 |---|---|
 | `F1` | Open Help |
-| `F2` | Add a root directory |
+| `F2` | Open the root directory picker |
 | `F3` | Open Config |
 | `F4` | Quit romty |
 | `F5` | Refresh roots, workspaces, and sessions |
@@ -97,7 +112,7 @@ The row stops at `F7`. A full-screen program binds the whole function key row �
 | Key | Action |
 |---|---|
 | `F1`, `?` | Open Help |
-| `F2`, `a` | Add a root directory |
+| `F2`, `a` | Open the root directory picker |
 | `F3`, `,` | Open Config |
 | `F4`, `q` | Quit romty |
 | `F5`, `r` | Refresh roots, workspaces, and sessions |
