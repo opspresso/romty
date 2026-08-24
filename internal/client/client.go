@@ -16,6 +16,14 @@ import (
 	"github.com/opspresso/romty/internal/protocol"
 )
 
+// dialTimeout bounds reaching the socket, and handshakeTimeout the request and
+// the reply that answers it. Neither bounds the attach that may follow, which
+// is a terminal a user leaves open. handshakeTimeout is a variable so tests
+// need not wait it out, the way the daemon's request timeout is one.
+const dialTimeout = 2 * time.Second
+
+var handshakeTimeout = 3 * time.Second
+
 type Client struct {
 	socket string
 }
@@ -150,9 +158,18 @@ func Unavailable(err error) bool {
 }
 
 func (c *Client) OpenAttach(tabID string) (net.Conn, *bufio.Reader, error) {
-	connection, err := net.DialTimeout("unix", c.socket, 2*time.Second)
+	connection, err := net.DialTimeout("unix", c.socket, dialTimeout)
 	if err != nil {
 		return nil, nil, fmt.Errorf("connect to daemon: %w", err)
+	}
+	// Bound the handshake alone. A daemon that accepts the connection and then
+	// says nothing — stopped, wedged, or another program holding the socket
+	// path — used to leave this read blocked for good, and with it the command
+	// goroutine that opens a terminal: the tab simply never appeared, with
+	// nothing on the status bar to say why.
+	if err := connection.SetDeadline(time.Now().Add(handshakeTimeout)); err != nil {
+		connection.Close()
+		return nil, nil, fmt.Errorf("set daemon deadline: %w", err)
 	}
 	if err := sendRequest(connection, protocol.Request{Action: protocol.ActionAttach, TabID: tabID}); err != nil {
 		connection.Close()
@@ -171,6 +188,12 @@ func (c *Client) OpenAttach(tabID string) (net.Conn, *bufio.Reader, error) {
 	if err := checkResponse(response); err != nil {
 		connection.Close()
 		return nil, nil, err
+	}
+	// The handshake is done; what follows is a terminal that stays open for as
+	// long as the user keeps it, and wants no deadline at all.
+	if err := connection.SetDeadline(time.Time{}); err != nil {
+		connection.Close()
+		return nil, nil, fmt.Errorf("clear daemon deadline: %w", err)
 	}
 	return connection, reader, nil
 }
@@ -201,12 +224,12 @@ func outdatedDaemon(daemonVersion int) error {
 }
 
 func (c *Client) call(request protocol.Request) (protocol.Response, error) {
-	connection, err := net.DialTimeout("unix", c.socket, 2*time.Second)
+	connection, err := net.DialTimeout("unix", c.socket, dialTimeout)
 	if err != nil {
 		return protocol.Response{}, fmt.Errorf("connect to daemon: %w", err)
 	}
 	defer connection.Close()
-	if err := connection.SetDeadline(time.Now().Add(3 * time.Second)); err != nil {
+	if err := connection.SetDeadline(time.Now().Add(handshakeTimeout)); err != nil {
 		return protocol.Response{}, fmt.Errorf("set daemon deadline: %w", err)
 	}
 	if err := sendRequest(connection, request); err != nil {

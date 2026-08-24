@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestNormalizePathExpandsHome(t *testing.T) {
@@ -59,4 +60,60 @@ func TestCallReportsAnOutdatedDaemon(t *testing.T) {
 			t.Fatalf("error = %q, want it to mention %q", err, want)
 		}
 	}
+}
+
+// A daemon can accept a connection and then say nothing — stopped, wedged, or
+// another program holding the socket path. Attach has to give up on that: it
+// runs on the goroutine that opens a terminal, so a read with no deadline
+// leaves the tab never appearing and nothing to say why.
+func TestOpenAttachGivesUpOnADaemonThatNeverAnswers(t *testing.T) {
+	socket := filepath.Join(shortTempDir(t), "daemon.sock")
+	listener, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatalf("Listen() error = %v", err)
+	}
+	defer listener.Close()
+
+	accepted := make(chan net.Conn, 1)
+	go func() {
+		connection, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		// Accepted and then ignored, which is the whole of this daemon.
+		accepted <- connection
+	}()
+
+	previous := handshakeTimeout
+	handshakeTimeout = 200 * time.Millisecond
+	defer func() { handshakeTimeout = previous }()
+
+	done := make(chan error, 1)
+	go func() {
+		_, _, err := New(socket).OpenAttach("tab-1")
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("OpenAttach() succeeded against a daemon that never answered")
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("OpenAttach() is still waiting on a daemon that never answers")
+	}
+	if connection := <-accepted; connection != nil {
+		connection.Close()
+	}
+}
+
+// shortTempDir keeps the socket path within the portable 104-byte limit, which
+// the per-user temporary directory on macOS does not leave room for.
+func shortTempDir(t *testing.T) string {
+	t.Helper()
+	directory, err := os.MkdirTemp("/tmp", "romty-client-")
+	if err != nil {
+		t.Fatalf("MkdirTemp() error = %v", err)
+	}
+	t.Cleanup(func() { os.RemoveAll(directory) })
+	return directory
 }
