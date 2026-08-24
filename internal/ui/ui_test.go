@@ -2252,6 +2252,18 @@ func TestDashboardShowsAllShortcutsInHelpModal(t *testing.T) {
 			t.Fatalf("%q row = %q, want %s before %s", row.description, line, row.first, row.second)
 		}
 	}
+	// The COMMANDS list is a function key row, so it reads in that order.
+	order := make([]string, 0, 9)
+	for _, line := range commandSection(plainLines) {
+		for _, name := range []string{"F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9"} {
+			if strings.Contains(line, name) {
+				order = append(order, name)
+			}
+		}
+	}
+	if len(order) != 9 || !slices.IsSorted(order) {
+		t.Fatalf("COMMANDS function keys read %v, want F1 through F9 in order:\n%s", order, plain)
+	}
 	if len(modalLines) > value.height-2 {
 		t.Fatalf("help modal height = %d, want at most %d", len(modalLines), value.height-2)
 	}
@@ -2295,6 +2307,26 @@ func TestDashboardScrollsHelpModalOnShortTerminals(t *testing.T) {
 	if strings.Contains(plain, "About") {
 		t.Fatalf("help modal kept the first shortcut after scrolling to the end:\n%s", plain)
 	}
+}
+
+// commandSection returns the help modal's COMMANDS rows, which end where the
+// next section header begins.
+func commandSection(lines []string) []string {
+	section := make([]string, 0, len(lines))
+	inside := false
+	for _, line := range lines {
+		if strings.Contains(line, "── ") {
+			if inside {
+				break
+			}
+			inside = strings.Contains(line, "COMMANDS")
+			continue
+		}
+		if inside {
+			section = append(section, line)
+		}
+	}
+	return section
 }
 
 // helpLine wants the shortcut row, not any line mentioning the description:
