@@ -251,7 +251,7 @@ func TestDashboardSelectsRootAndCreatesTerminal(t *testing.T) {
 	value := newDashboard(backend, snapshot)
 	value.width = 120
 	value.height = 40
-	value.navIndex = 0
+	value.setNavigation(0)
 
 	if rendered := ansi.Strip(value.render()); !strings.Contains(rendered, "▌ ▾ projects") || !strings.Contains(rendered, "  └─ cloned") {
 		t.Fatalf("root and indented workspace are not distinguishable:\n%s", rendered)
@@ -324,7 +324,7 @@ func TestDashboardOpensExistingWorkspaceTabWithoutCreatingOne(t *testing.T) {
 	}}}
 	backend := &fakeBackend{snapshot: snapshot, workspace: workspace}
 	value := newDashboard(backend, snapshot)
-	value.navIndex = 1
+	value.setNavigation(1)
 
 	command := value.selectWorkspace()
 	updated, openCommand := value.Update(command())
@@ -995,7 +995,7 @@ func exitedDashboard(t *testing.T, tabs []model.Tab, open int) (dashboard, *fake
 	value.height = 40
 	value.selectedWorkspaceID = workspace.ID
 	value.selectedPath = workspace.Path
-	value.navIndex = 1
+	value.setNavigation(1)
 	value.tabIndex = open
 	value.focus = terminalPane
 	value.terminal = newEmbeddedTerminal(tabs[open].ID, newMemoryStream(""), 89, 36)
@@ -1190,7 +1190,7 @@ func TestDashboardReportsBackendFailures(t *testing.T) {
 			value := newDashboard(backend, snapshot)
 			value.width = 120
 			value.height = 40
-			value.navIndex = 1
+			value.setNavigation(1)
 
 			updated, command := probe.act(value)
 			value = updated.(dashboard)
@@ -1280,7 +1280,7 @@ func TestDashboardShowsAndRemovesAnUnreadableRoot(t *testing.T) {
 		t.Fatalf("the healthy root did not survive its neighbour:\n%s", rendered)
 	}
 
-	value.navIndex = 0
+	value.setNavigation(0)
 	updated, command := value.Update(key('d', "d"))
 	value = updated.(dashboard)
 	if command == nil {
@@ -1552,6 +1552,55 @@ func TestDashboardReportsAFailedResizeAsItsOwnFailure(t *testing.T) {
 	}
 }
 
+// The tree is rebuilt from the daemon on every refresh, so a directory
+// appearing above the cursor — a `git clone` finishing in another terminal —
+// used to slide the highlight onto its neighbour without the user touching a
+// key. Enter then opened a workspace they had not chosen.
+func TestDashboardKeepsTheCursorOnTheSameWorkspace(t *testing.T) {
+	tree := func(names ...string) model.Snapshot {
+		directories := make([]model.WorkspaceView, 0, len(names))
+		for _, name := range names {
+			directories = append(directories, model.WorkspaceView{
+				Workspace: model.Workspace{ID: name, RootID: "root-1", Name: name, Path: "/projects/" + name},
+			})
+		}
+		return model.Snapshot{Roots: []model.RootView{{
+			Root:        model.Root{ID: "root-1", Name: "projects", Path: "/projects"},
+			Directories: directories,
+		}}}
+	}
+
+	value := newDashboard(&fakeBackend{}, tree("beta", "gamma"))
+	value.width = 120
+	value.height = 40
+	// The tree is root, beta, gamma; move onto the last of them.
+	value.moveNavigation(1)
+	value.moveNavigation(1)
+	item, _ := value.navigationItem()
+	if item.workspace.Name != "gamma" {
+		t.Fatalf("the cursor starts on %q, want gamma", item.workspace.Name)
+	}
+
+	// A clone finishes and sorts above the cursor.
+	updated, _ := value.Update(snapshotMsg{value: tree("alpha", "beta", "gamma")})
+	value = updated.(dashboard)
+	item, ok := value.navigationItem()
+	if !ok || item.workspace.Name != "gamma" {
+		t.Fatalf("after the refresh the cursor is on %q, want gamma", item.workspace.Name)
+	}
+	if !strings.Contains(ansi.Strip(value.render()), "▌ └─ gamma") {
+		t.Fatalf("the highlight is not on gamma:\n%s", ansi.Strip(value.render()))
+	}
+
+	// The workspace the cursor was on disappears: fall back rather than
+	// pointing at nothing.
+	updated, _ = value.Update(snapshotMsg{value: tree("alpha", "beta")})
+	value = updated.(dashboard)
+	if _, ok := value.navigationItem(); !ok {
+		t.Fatal("the cursor points outside the tree after its workspace was removed")
+	}
+}
+
 func TestDashboardRefusesScrollbackWithoutTerminal(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, model.Snapshot{})
 
@@ -1736,7 +1785,7 @@ func TestDashboardSelectsPlusAndCreatesTabOnEnter(t *testing.T) {
 		createdTab: model.Tab{ID: "tab-3", WorkspaceID: workspace.ID, Name: "3", Running: true},
 	}
 	value := newDashboard(backend, snapshot)
-	value.navIndex = 1
+	value.setNavigation(1)
 	value.selectedWorkspaceID = workspace.ID
 	value.selectedPath = workspace.Path
 
@@ -1788,7 +1837,7 @@ func TestDashboardHighlightsNavigationAndShowsOpenTabs(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, snapshot)
 	value.width = 120
 	value.height = 40
-	value.navIndex = 1
+	value.setNavigation(1)
 	value.selectedWorkspaceID = "workspace-1"
 	value.selectedPath = "/projects/SnowClash"
 
@@ -1887,7 +1936,7 @@ func TestDashboardKeepsWideWorkspaceNamesWithinViewport(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, snapshot)
 	value.width = 40
 	value.height = 12
-	value.navIndex = 1
+	value.setNavigation(1)
 
 	for index, line := range strings.Split(value.render(), "\n") {
 		if lineWidth := lipgloss.Width(line); lineWidth > value.width {

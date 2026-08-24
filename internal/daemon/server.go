@@ -392,6 +392,11 @@ func (s *Server) createTab(workspaceID string, columns, rows uint16) protocol.Re
 		Running:     true,
 	}
 
+	// The shell is started, registered and persisted without releasing the
+	// lock. startSession begins waiting on the process immediately, so a shell
+	// that exits at once calls sessionExited straight away; holding the lock
+	// makes that wait until the tab exists, rather than removing a tab that is
+	// not there yet and leaving a dead one behind afterwards.
 	value, err := startSession(tab.ID, workspace.Path, s.shell, columns, rows, func() {
 		s.sessionExited(tab.ID)
 	})
