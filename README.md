@@ -13,6 +13,7 @@ romty is a terminal workspace manager that keeps shell sessions running while it
 - Use native terminal mouse selection and copy behavior.
 - Adapt colors to light and dark terminal backgrounds.
 - Control the interface with IME-independent function keys.
+- Stop the daemon and all running shells through a confirmed TUI action or CLI command.
 - Prevent nested romty sessions.
 
 ## Requirements
@@ -60,11 +61,17 @@ Use `↑`/`↓` to choose a root or workspace. Use `←`/`→` to choose an exis
 
 Both roots and workspaces can host terminal tabs. A root tab starts its shell in the root directory; a workspace tab starts in that direct child directory.
 
+To stop the daemon and every running terminal session from outside the TUI:
+
+```sh
+romty stop
+```
+
 ## Interface
 
 The left pane shows the workspace tree. A `●` after an item represents one running terminal tab. The right pane contains the tab rail and the embedded terminal. Accent colors distinguish the current selection, active tab, and focused pane; the arrow beside the vertical divider points to the active pane.
 
-The status bar shows `F1` through `F5` in both panes and adds navigation keys for the active pane. Press `?` in the workspace pane to see every shortcut, including aliases hidden from the status bar.
+The status bar shows `F1` through `F6` in both panes and adds navigation keys for the active pane. Press `?` in the workspace pane to see every shortcut, including aliases hidden from the status bar.
 
 ### Global keys
 
@@ -77,6 +84,7 @@ These function keys work from either pane and with non-English keyboard input mo
 | `F3` | Open Config |
 | `F4` | Quit romty |
 | `F5` | Refresh roots, workspaces, and sessions |
+| `F6` | Ask for confirmation, then stop the daemon and all running terminal sessions |
 
 ### Workspace pane
 
@@ -120,6 +128,8 @@ romty discovers only direct child directories of each root. If a command such as
 ## Session lifecycle
 
 The TUI communicates with a detached local daemon over a Unix socket. The daemon owns the shell PTYs, so closing the TUI or its host terminal does not terminate running sessions. Reopening romty reconnects to those sessions and replays their buffered output.
+
+Pressing `F6` opens a confirmation modal because stopping the daemon terminates every running shell. The `romty stop` command performs the same shutdown directly and is intended for explicit use from outside a romty terminal.
 
 When a shell exits, its tab is removed from the daemon state. If the daemon stops or the operating system restarts, roots and workspace metadata remain available, but stale terminal tabs are discarded because their PTY processes can no longer be reattached.
 

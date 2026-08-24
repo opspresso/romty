@@ -31,6 +31,8 @@ type Server struct {
 	value    model.State
 	sessions map[string]*session
 	listener net.Listener
+	stop     chan struct{}
+	stopOnce sync.Once
 }
 
 func New(socket, statePath, shell string) (*Server, error) {
@@ -51,6 +53,7 @@ func New(socket, statePath, shell string) (*Server, error) {
 		shell:    shell,
 		value:    value,
 		sessions: make(map[string]*session),
+		stop:     make(chan struct{}),
 	}, nil
 }
 
@@ -76,14 +79,17 @@ func (s *Server) Serve(ctx context.Context) error {
 	}
 
 	go func() {
-		<-ctx.Done()
+		select {
+		case <-ctx.Done():
+		case <-s.stop:
+		}
 		listener.Close()
 	}()
 
 	for {
 		connection, err := listener.Accept()
 		if err != nil {
-			if ctx.Err() != nil {
+			if ctx.Err() != nil || s.stopped() {
 				return nil
 			}
 			return fmt.Errorf("accept daemon connection: %w", err)
@@ -151,8 +157,23 @@ func (s *Server) handle(connection net.Conn) {
 		s.handleAttach(connection, request.TabID)
 		return
 	}
+	if request.Action == protocol.ActionShutdown {
+		if err := protocol.Write(connection, protocol.Response{}); err == nil {
+			s.stopOnce.Do(func() { close(s.stop) })
+		}
+		return
+	}
 	response := s.dispatch(request)
 	_ = protocol.Write(connection, response)
+}
+
+func (s *Server) stopped() bool {
+	select {
+	case <-s.stop:
+		return true
+	default:
+		return false
+	}
 }
 
 func (s *Server) dispatch(request protocol.Request) protocol.Response {

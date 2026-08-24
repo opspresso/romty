@@ -298,6 +298,70 @@ func TestEnsureWorkspaceRejectsNestedDirectory(t *testing.T) {
 	}
 }
 
+func TestServerStopsAfterAcknowledgingShutdown(t *testing.T) {
+	base := shortTempDir(t)
+	root := filepath.Join(base, "projects")
+	if err := os.Mkdir(root, 0o755); err != nil {
+		t.Fatalf("Mkdir() error = %v", err)
+	}
+	socket := filepath.Join(base, "daemon.sock")
+	server, err := daemon.New(socket, filepath.Join(base, "state.json"), "/bin/sh")
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- server.Serve(ctx) }()
+
+	backend := client.New(socket)
+	waitForDaemon(t, backend)
+	snapshot, err := backend.AddRoot(root)
+	if err != nil {
+		t.Fatalf("AddRoot() error = %v", err)
+	}
+	workspace, err := backend.EnsureWorkspace(snapshot.Roots[0].Root.ID, root)
+	if err != nil {
+		t.Fatalf("EnsureWorkspace() error = %v", err)
+	}
+	tab, err := backend.CreateTab(workspace.ID, 80, 24)
+	if err != nil {
+		t.Fatalf("CreateTab() error = %v", err)
+	}
+	connection, reader, err := backend.OpenAttach(tab.ID)
+	if err != nil {
+		t.Fatalf("OpenAttach() error = %v", err)
+	}
+	defer connection.Close()
+
+	if err := backend.Shutdown(); err != nil {
+		t.Fatalf("Shutdown() error = %v", err)
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Serve() error = %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("Serve() did not stop after Shutdown()")
+	}
+	if err := backend.Ping(); err == nil {
+		t.Fatal("Ping() after Shutdown() error = nil")
+	}
+	if err := connection.SetReadDeadline(time.Now().Add(3 * time.Second)); err != nil {
+		t.Fatalf("SetReadDeadline() error = %v", err)
+	}
+	buffer := make([]byte, 4096)
+	for {
+		if _, err := reader.Read(buffer); err != nil {
+			if timeout, ok := err.(net.Error); ok && timeout.Timeout() {
+				t.Fatal("terminal connection remained open after Shutdown()")
+			}
+			break
+		}
+	}
+}
+
 func waitForDaemon(t *testing.T, backend *client.Client) {
 	t.Helper()
 	deadline := time.Now().Add(3 * time.Second)
