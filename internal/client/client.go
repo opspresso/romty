@@ -81,6 +81,17 @@ func normalizePath(path string) (string, error) {
 	return filepath.Clean(absolute), nil
 }
 
+func (c *Client) RemoveRoot(rootID string) (model.Snapshot, error) {
+	response, err := c.call(protocol.Request{Action: protocol.ActionRemoveRoot, RootID: rootID})
+	if err != nil {
+		return model.Snapshot{}, err
+	}
+	if response.Snapshot == nil {
+		return model.Snapshot{}, fmt.Errorf("daemon returned no snapshot")
+	}
+	return *response.Snapshot, nil
+}
+
 func (c *Client) EnsureWorkspace(rootID, path string) (model.Workspace, error) {
 	response, err := c.call(protocol.Request{
 		Action: protocol.ActionEnsureWorkspace,

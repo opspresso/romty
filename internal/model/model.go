@@ -31,8 +31,12 @@ type Snapshot struct {
 }
 
 type RootView struct {
-	Root        Root            `json:"root"`
-	Tabs        []Tab           `json:"tabs"`
+	Root Root  `json:"root"`
+	Tabs []Tab `json:"tabs"`
+	// Error explains why Directories is empty: a root can be unmounted,
+	// deleted, or made unreadable while romty is running, and one such root
+	// must not take the whole snapshot with it.
+	Error       string          `json:"error,omitempty"`
 	Directories []WorkspaceView `json:"directories"`
 }
 

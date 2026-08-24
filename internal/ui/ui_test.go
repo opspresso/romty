@@ -29,6 +29,7 @@ type fakeBackend struct {
 	createdRows    uint16
 	createCount    int
 	addedPath      string
+	removedRootID  string
 	ensuredRootID  string
 	ensuredPath    string
 	openedTab      string
@@ -91,6 +92,21 @@ func (f *fakeBackend) AddRoot(path string) (model.Snapshot, error) {
 	if err := f.failure("AddRoot"); err != nil {
 		return model.Snapshot{}, err
 	}
+	return f.snapshot, nil
+}
+
+func (f *fakeBackend) RemoveRoot(rootID string) (model.Snapshot, error) {
+	f.removedRootID = rootID
+	if err := f.failure("RemoveRoot"); err != nil {
+		return model.Snapshot{}, err
+	}
+	remaining := make([]model.RootView, 0, len(f.snapshot.Roots))
+	for _, root := range f.snapshot.Roots {
+		if root.Root.ID != rootID {
+			remaining = append(remaining, root)
+		}
+	}
+	f.snapshot.Roots = remaining
 	return f.snapshot, nil
 }
 
@@ -1232,6 +1248,51 @@ func TestDashboardReturnsToTheTreeWhenOpeningFails(t *testing.T) {
 	}
 	if !strings.Contains(value.errorMessage, "session not found") {
 		t.Fatalf("error message = %q, want the attach failure", value.errorMessage)
+	}
+}
+
+// A root romty cannot read has to say so, and be removable: it used to make
+// every snapshot fail, and there was no way to forget it short of editing the
+// state file.
+func TestDashboardShowsAndRemovesAnUnreadableRoot(t *testing.T) {
+	snapshot := model.Snapshot{Roots: []model.RootView{
+		{
+			Root:        model.Root{ID: "root-1", Name: "gone", Path: "/volumes/gone"},
+			Error:       "open /volumes/gone: no such file or directory",
+			Directories: []model.WorkspaceView{},
+		},
+		{
+			Root:        model.Root{ID: "root-2", Name: "projects", Path: "/projects"},
+			Directories: []model.WorkspaceView{{Workspace: model.Workspace{ID: "w", Name: "alpha", Path: "/projects/alpha"}}},
+		},
+	}}
+	backend := &fakeBackend{snapshot: snapshot}
+	value := newDashboard(backend, snapshot)
+	value.width = 120
+	value.height = 40
+
+	rendered := ansi.Strip(value.render())
+	if !strings.Contains(rendered, "✗ gone") {
+		t.Fatalf("the unreadable root is not marked:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, "▾ projects") || !strings.Contains(rendered, "alpha") {
+		t.Fatalf("the healthy root did not survive its neighbour:\n%s", rendered)
+	}
+
+	value.navIndex = 0
+	updated, command := value.Update(key('d', "d"))
+	value = updated.(dashboard)
+	if command == nil {
+		t.Fatal("d produced no removal command")
+	}
+	updated, _ = value.Update(command())
+	value = updated.(dashboard)
+	if backend.removedRootID != "root-1" {
+		t.Fatalf("removed %q, want root-1", backend.removedRootID)
+	}
+	rendered = ansi.Strip(value.render())
+	if strings.Contains(rendered, "gone") || !strings.Contains(rendered, "projects") {
+		t.Fatalf("removal left the wrong tree:\n%s", rendered)
 	}
 }
 

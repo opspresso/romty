@@ -490,3 +490,83 @@ func TestAttachDoesNotReplayTerminalQueries(t *testing.T) {
 		t.Fatalf("replayed history lost the output around the queries:\n%q", replay.String())
 	}
 }
+
+// A root can be unmounted, deleted, or made unreadable while romty is running.
+// One such root used to fail every snapshot, and with it every path that needs
+// one — including startup, which left romty unable to open at all.
+func TestSnapshotSurvivesAnUnreadableRoot(t *testing.T) {
+	base := testutil.ShortTempDir(t)
+	socket := filepath.Join(base, "daemon.sock")
+	server, err := daemon.New(socket, filepath.Join(base, "state.json"), "/bin/sh")
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- server.Serve(ctx) }()
+	defer func() { cancel(); <-done }()
+	backend := client.New(socket)
+	testutil.WaitForDaemon(t, backend)
+
+	healthy := filepath.Join(base, "healthy")
+	doomed := filepath.Join(base, "doomed")
+	for _, path := range []string{healthy, doomed, filepath.Join(healthy, "alpha")} {
+		if err := os.MkdirAll(path, 0o700); err != nil {
+			t.Fatalf("MkdirAll(%q) error = %v", path, err)
+		}
+	}
+	if _, err := backend.AddRoot(healthy); err != nil {
+		t.Fatalf("AddRoot(healthy) error = %v", err)
+	}
+	snapshot, err := backend.AddRoot(doomed)
+	if err != nil {
+		t.Fatalf("AddRoot(doomed) error = %v", err)
+	}
+	// Compared by name: the daemon stores the canonical path, which on macOS
+	// gains a /private prefix that the caller's path does not have.
+	var doomedID string
+	for _, root := range snapshot.Roots {
+		if root.Root.Name == "doomed" {
+			doomedID = root.Root.ID
+		}
+	}
+	if doomedID == "" {
+		t.Fatalf("the second root is missing from %#v", snapshot.Roots)
+	}
+
+	if err := os.RemoveAll(doomed); err != nil {
+		t.Fatalf("RemoveAll() error = %v", err)
+	}
+	snapshot, err = backend.Snapshot()
+	if err != nil {
+		t.Fatalf("Snapshot() error = %v, want the healthy root still reported", err)
+	}
+	if len(snapshot.Roots) != 2 {
+		t.Fatalf("roots = %d, want both still listed", len(snapshot.Roots))
+	}
+	for _, root := range snapshot.Roots {
+		switch root.Root.Name {
+		case "healthy":
+			if root.Error != "" || len(root.Directories) != 1 {
+				t.Fatalf("healthy root = (error %q, directories %d), want it unaffected",
+					root.Error, len(root.Directories))
+			}
+		case "doomed":
+			if root.Error == "" {
+				t.Fatal("the unreadable root reports no error")
+			}
+		}
+	}
+
+	// And it can be forgotten, which was impossible without editing state.json.
+	snapshot, err = backend.RemoveRoot(doomedID)
+	if err != nil {
+		t.Fatalf("RemoveRoot() error = %v", err)
+	}
+	if len(snapshot.Roots) != 1 || snapshot.Roots[0].Root.Name != "healthy" {
+		t.Fatalf("roots after removal = %#v, want only the healthy one", snapshot.Roots)
+	}
+	if _, err := backend.RemoveRoot(doomedID); err == nil {
+		t.Fatal("removing an unknown root reported success")
+	}
+}

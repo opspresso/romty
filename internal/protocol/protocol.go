@@ -13,6 +13,7 @@ const (
 	ActionPing            = "ping"
 	ActionSnapshot        = "snapshot"
 	ActionAddRoot         = "add_root"
+	ActionRemoveRoot      = "remove_root"
 	ActionEnsureWorkspace = "ensure_workspace"
 	ActionCreateTab       = "create_tab"
 	ActionAttach          = "attach"
