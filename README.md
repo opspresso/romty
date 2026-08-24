@@ -1,6 +1,7 @@
 # romty
 
-romty는 Root Folder 아래의 workspace와 persistent terminal tab을 관리하는 로컬 TUI다. 왼쪽에는 Root와 workspace를, 오른쪽에는 terminal tab과 현재 terminal 화면을 항상 함께 표시한다. tmux식 split pane, prefix key, copy mode는 만들지 않는다.
+> romty = roam + tty.
+> A persistent terminal workspace that keeps your sessions alive across disconnects.
 
 ## 요구 사항
 
