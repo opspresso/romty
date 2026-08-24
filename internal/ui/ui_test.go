@@ -1479,8 +1479,8 @@ func TestDashboardShowsAllShortcutsInHelpModal(t *testing.T) {
 		keys        []string
 		description string
 	}{
-		{keys: []string{"i", "F1"}, description: "About"},
-		{keys: []string{"a", "F2"}, description: "Add root"},
+		{keys: []string{"F1", "i"}, description: "About"},
+		{keys: []string{"F2", "a"}, description: "Add root"},
 		{keys: []string{",", "F3"}, description: "Config"},
 		{keys: []string{"q", "F4"}, description: "Quit"},
 		{keys: []string{"r", "F5"}, description: "Refresh"},
@@ -1503,6 +1503,24 @@ func TestDashboardShowsAllShortcutsInHelpModal(t *testing.T) {
 	for _, shortcut := range shortcuts {
 		if !helpContainsShortcut(plainLines, shortcut.description, shortcut.keys...) {
 			t.Fatalf("help modal does not contain %v %q shortcut:\n%s", shortcut.keys, shortcut.description, plain)
+		}
+	}
+	// The function key is the one that works everywhere, so it leads the row
+	// and the pane-only alias follows it.
+	for _, row := range []struct {
+		description string
+		first       string
+		second      string
+	}{
+		{description: "About", first: "F1", second: "i"},
+		{description: "Add root", first: "F2", second: "a"},
+		{description: "Config", first: "F3", second: ","},
+		{description: "Quit", first: "F4", second: "q"},
+		{description: "Refresh", first: "F5", second: "r"},
+	} {
+		line := helpLine(plainLines, row.description)
+		if first, second := strings.Index(line, row.first), strings.Index(line, row.second); first < 0 || first > second {
+			t.Fatalf("%q row = %q, want %s before %s", row.description, line, row.first, row.second)
 		}
 	}
 	if len(modalLines) > value.height-2 {
@@ -1548,6 +1566,15 @@ func TestDashboardScrollsHelpModalOnShortTerminals(t *testing.T) {
 	if strings.Contains(plain, "About") {
 		t.Fatalf("help modal kept the first shortcut after scrolling to the end:\n%s", plain)
 	}
+}
+
+func helpLine(lines []string, description string) string {
+	for _, line := range lines {
+		if strings.Contains(line, description) {
+			return line
+		}
+	}
+	return ""
 }
 
 func helpContainsShortcut(lines []string, description string, keys ...string) bool {
