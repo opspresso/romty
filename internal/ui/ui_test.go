@@ -1329,8 +1329,16 @@ func TestDashboardShowsAndRemovesAnUnreadableRoot(t *testing.T) {
 	value.setNavigation(0)
 	updated, command := value.Update(key('d', "d"))
 	value = updated.(dashboard)
-	if command == nil {
-		t.Fatal("d produced no removal command")
+	if value.modal != removeRootModal || command != nil {
+		t.Fatalf("d = (modal %v, command %v), want a confirmation first", value.modal, command)
+	}
+	if body := ansi.Strip(strings.Join(value.renderModal(value.width, value.dimensions().bodyHeight), "\n")); !strings.Contains(body, "gone") {
+		t.Fatalf("the confirmation does not name the root it would remove:\n%s", body)
+	}
+	updated, command = value.Update(key(tea.KeyEnter, ""))
+	value = updated.(dashboard)
+	if command == nil || value.modal != noModal {
+		t.Fatalf("Enter = (command %v, modal %v), want the removal", command, value.modal)
 	}
 	updated, _ = value.Update(command())
 	value = updated.(dashboard)
@@ -1340,6 +1348,105 @@ func TestDashboardShowsAndRemovesAnUnreadableRoot(t *testing.T) {
 	rendered = ansi.Strip(value.render())
 	if strings.Contains(rendered, "gone") || !strings.Contains(rendered, "projects") {
 		t.Fatalf("removal left the wrong tree:\n%s", rendered)
+	}
+}
+
+func twoRootSnapshot() model.Snapshot {
+	return model.Snapshot{Roots: []model.RootView{
+		{Root: model.Root{ID: "root-1", Name: "first", Path: "/first"}, Directories: []model.WorkspaceView{}},
+		{Root: model.Root{ID: "root-2", Name: "second", Path: "/second"}, Directories: []model.WorkspaceView{}},
+	}}
+}
+
+// Esc has to mean no. Removing a root has no undo beyond adding it back and
+// rebuilding the tree by hand.
+func TestDashboardCancelsRemovingARoot(t *testing.T) {
+	snapshot := twoRootSnapshot()
+	backend := &fakeBackend{snapshot: snapshot}
+	value := newDashboard(backend, snapshot)
+
+	updated, _ := value.Update(key(tea.KeyF8, ""))
+	value = updated.(dashboard)
+	if value.modal != removeRootModal {
+		t.Fatalf("F8 modal = %v, want the confirmation", value.modal)
+	}
+	updated, command := value.Update(key(tea.KeyEscape, ""))
+	value = updated.(dashboard)
+	if value.modal != noModal || command != nil {
+		t.Fatalf("Esc = (modal %v, command %v), want the confirmation closed", value.modal, command)
+	}
+	if backend.removedRootID != "" {
+		t.Fatalf("Esc removed %q", backend.removedRootID)
+	}
+}
+
+// Removing a root used to be a workspace-pane key, so the terminal pane could
+// not reach it at all.
+func TestDashboardRemovesARootFromTheTerminalPane(t *testing.T) {
+	snapshot := twoRootSnapshot()
+	backend := &fakeBackend{snapshot: snapshot}
+	value := newDashboard(backend, snapshot)
+	value.focus = terminalPane
+	value.terminal = newEmbeddedTerminal("tab-1", newMemoryStream(""), 40, 10)
+	value.setNavigation(1)
+
+	updated, _ := value.Update(key(tea.KeyF8, ""))
+	value = updated.(dashboard)
+	updated, command := value.Update(key(tea.KeyEnter, ""))
+	value = updated.(dashboard)
+	if command == nil {
+		t.Fatal("F8 then Enter produced no removal command")
+	}
+	value.Update(command())
+	if backend.removedRootID != "root-2" {
+		t.Fatalf("removed %q, want root-2", backend.removedRootID)
+	}
+}
+
+// A refresh landing while the confirmation is open can move the cursor: the
+// row it was on is gone, so the tree falls back to the position, which is now
+// a different root's row. The answer has to apply to the root the question
+// named, not to whatever the cursor drifted onto in between.
+func TestDashboardRemovesTheRootTheConfirmationNamed(t *testing.T) {
+	snapshot := model.Snapshot{Roots: []model.RootView{
+		{
+			Root:        model.Root{ID: "root-1", Name: "first", Path: "/first"},
+			Directories: []model.WorkspaceView{{Workspace: model.Workspace{ID: "w", Name: "alpha", Path: "/first/alpha"}}},
+		},
+		{Root: model.Root{ID: "root-2", Name: "second", Path: "/second"}, Directories: []model.WorkspaceView{}},
+	}}
+	backend := &fakeBackend{snapshot: snapshot}
+	value := newDashboard(backend, snapshot)
+
+	// The cursor sits on first's alpha directory, whose root is first.
+	value.setNavigation(1)
+	if item, _ := value.navigationItem(); item.root.ID != "root-1" {
+		t.Fatalf("the cursor starts on root %q, want root-1", item.root.ID)
+	}
+
+	updated, _ := value.Update(key(tea.KeyF8, ""))
+	value = updated.(dashboard)
+
+	// alpha is deleted on disk, so the row the cursor remembered is gone and
+	// index 1 is now second's own row.
+	pruned := model.Snapshot{Roots: []model.RootView{
+		{Root: snapshot.Roots[0].Root, Directories: []model.WorkspaceView{}},
+		snapshot.Roots[1],
+	}}
+	updated, _ = value.Update(snapshotMsg{value: pruned})
+	value = updated.(dashboard)
+	if item, _ := value.navigationItem(); item.root.ID != "root-2" {
+		t.Fatalf("the cursor drifted to root %q; the test needs it on root-2 to prove anything", item.root.ID)
+	}
+
+	updated, command := value.Update(key(tea.KeyEnter, ""))
+	value = updated.(dashboard)
+	if command == nil {
+		t.Fatal("Enter produced no removal command")
+	}
+	value.Update(command())
+	if backend.removedRootID != "root-1" {
+		t.Fatalf("removed %q, want root-1 — the root the confirmation named", backend.removedRootID)
 	}
 }
 
@@ -2102,6 +2209,7 @@ func TestDashboardShowsAllShortcutsInHelpModal(t *testing.T) {
 		{keys: []string{"F1", "?"}, description: "Help"},
 		{keys: []string{"i"}, description: "About"},
 		{keys: []string{"F2", "a"}, description: "Add root"},
+		{keys: []string{"F8", "d"}, description: "Remove root"},
 		{keys: []string{",", "F3"}, description: "Config"},
 		{keys: []string{"q", "F4"}, description: "Quit"},
 		{keys: []string{"r", "F5"}, description: "Refresh"},

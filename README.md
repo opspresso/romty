@@ -86,10 +86,11 @@ These function keys work from either pane, with a modal open, and with non-Engli
 | `F5` | Refresh roots, workspaces, and sessions |
 | `F6` | Enter or leave scrollback for the open terminal |
 | `F7` | Switch between the workspace and terminal panes |
+| `F8` | Ask for confirmation, then forget the selected root |
 | `F9` | Ask for confirmation, then stop the daemon and all running terminal sessions |
 | `Shift`+`PgUp`/`PgDn` | Enter scrollback and move one page at a time |
 
-`F9` is off the end of the status bar on purpose: stopping the daemon terminates every running shell, so it sits well away from `F5`, which refreshes. `F1` lists it with everything else.
+`F8` and `F9` are off the end of the status bar on purpose. Both undo something the tree or the daemon cannot get back, so they sit well away from `F5`, which refreshes; `F1` lists them with everything else.
 
 ### Workspace pane
 
@@ -101,7 +102,7 @@ These function keys work from either pane, with a modal open, and with non-Engli
 | `Tab` | Focus the active terminal |
 | `i` | Open About |
 | `a`, `F2` | Add a root directory |
-| `d` | Forget the selected root; terminals under it keep running |
+| `d`, `F8` | Ask for confirmation, then forget the selected root; terminals under it keep running |
 | `,`, `F3` | Open Config |
 | `q`, `F4` | Quit romty |
 | `r`, `F5` | Refresh roots, workspaces, and sessions |
@@ -170,7 +171,7 @@ The configured workspace pane width is stored automatically and constrained to 1
 
 romty discovers only direct child directories of each root. If a command such as `git clone` adds a directory, or a directory is removed, press `F5`.
 
-A root romty cannot read — unmounted, deleted, or with its permissions changed — is marked `✗` and listed with no directories. The other roots are unaffected, and `d` forgets it. Returning from the terminal pane with `Ctrl+\` also refreshes the tree.
+A root romty cannot read — unmounted, deleted, or with its permissions changed — is marked `✗` and listed with no directories. The other roots are unaffected, and `d` or `F8` forgets it. Returning from the terminal pane with `Ctrl+\` also refreshes the tree.
 
 ## Session lifecycle
 
