@@ -43,7 +43,6 @@ type Server struct {
 	mu       sync.Mutex
 	value    model.State
 	sessions map[string]*session
-	listener net.Listener
 	stop     chan struct{}
 	stopOnce sync.Once
 }
@@ -98,7 +97,6 @@ func (s *Server) Serve(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	s.listener = listener
 	defer s.shutdown()
 	if err := s.removeStaleTabs(); err != nil {
 		return err
@@ -306,10 +304,7 @@ func (s *Server) dispatch(request protocol.Request) protocol.Response {
 }
 
 func (s *Server) snapshotResponse() protocol.Response {
-	snapshot, err := s.snapshot()
-	if err != nil {
-		return protocol.Response{Error: err.Error()}
-	}
+	snapshot := s.snapshot()
 	return protocol.Response{Snapshot: &snapshot}
 }
 
@@ -526,7 +521,10 @@ func (s *Server) sessionExited(tabID string) {
 	}
 }
 
-func (s *Server) snapshot() (model.Snapshot, error) {
+// snapshot never fails: a root romty cannot read is reported as one unreadable
+// root rather than taken out of the tree, because one unmounted volume used to
+// fail every refresh, and with it every path that needs a snapshot.
+func (s *Server) snapshot() model.Snapshot {
 	s.mu.Lock()
 	value := cloneState(s.value)
 	s.mu.Unlock()
@@ -536,9 +534,6 @@ func (s *Server) snapshot() (model.Snapshot, error) {
 		rootWorkspace, _ := workspaceAt(value.Workspaces, root.ID, root.Path)
 		entries, err := os.ReadDir(root.Path)
 		if err != nil {
-			// Report the root as unreadable rather than failing the snapshot.
-			// One unmounted volume used to make every refresh fail, and with
-			// it every path that needs a snapshot, including startup.
 			result.Roots = append(result.Roots, model.RootView{
 				Root:        root,
 				Tabs:        tabsFor(value.Tabs, rootWorkspace.ID),
@@ -571,7 +566,7 @@ func (s *Server) snapshot() (model.Snapshot, error) {
 			Directories: directories,
 		})
 	}
-	return result, nil
+	return result
 }
 
 func canonicalDirectory(path string) (string, error) {
