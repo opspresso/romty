@@ -19,6 +19,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/opspresso/romty/internal/model"
+	"github.com/opspresso/romty/internal/version"
 )
 
 type fakeBackend struct {
@@ -2234,6 +2235,11 @@ func TestDashboardShowsAboutModalWithoutReplacingDashboard(t *testing.T) {
 	if !strings.Contains(rendered, "About") || !strings.Contains(rendered, "Persistent terminal workspace manager") ||
 		!strings.Contains(rendered, value.styles.paneTitleActive.Render(" romty ")) {
 		t.Fatalf("about modal or dashboard background is missing:\n%s", rendered)
+	}
+	// About is where a user reads which romty they are running, so it names
+	// the build rather than leaving a bug report to guess at it.
+	if !strings.Contains(ansi.Strip(rendered), version.String()) {
+		t.Fatalf("about modal does not show version %q:\n%s", version.String(), ansi.Strip(rendered))
 	}
 
 	updated, _ = value.Update(key(tea.KeyEscape, ""))

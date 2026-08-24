@@ -120,7 +120,7 @@ The row stops at `F7`. A full-screen program binds the whole function key row �
 | `F7`, `Tab` | Focus the active terminal |
 | `F8`, `d` | Ask for confirmation, then forget the selected root; terminals under it keep running |
 | `F9`, `t` | Ask for confirmation, then stop the daemon and all running terminal sessions |
-| `i` | Open About |
+| `i` | Open About, which names the version this build is |
 | `↑`/`↓`, `j`/`k` | Move between roots and workspaces |
 | `←`/`→`, `h`/`l` | Move between terminal tabs and the `+` tab |
 | `Enter` | Open the selected tab or create the selected `+` tab |

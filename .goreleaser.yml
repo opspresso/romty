@@ -17,7 +17,9 @@ builds:
     flags:
       - -trimpath
     ldflags:
-      - -s -w
+      # About reports the release it was built as; without the stamp it can
+      # only name the commit.
+      - -s -w -X github.com/opspresso/romty/internal/version.Value={{ .Version }}
     mod_timestamp: "{{ .CommitTimestamp }}"
 
 archives:
