@@ -317,8 +317,12 @@ var globalKeys = map[string]func(dashboard) (tea.Model, tea.Cmd){
 	"f3": func(m dashboard) (tea.Model, tea.Cmd) { return m.openModal(configModal) },
 	"f4": func(m dashboard) (tea.Model, tea.Cmd) { return m.quit() },
 	"f5": func(m dashboard) (tea.Model, tea.Cmd) { return m, m.refresh() },
-	"f6": func(m dashboard) (tea.Model, tea.Cmd) { return m.openModal(shutdownModal) },
-	"f7": func(m dashboard) (tea.Model, tea.Cmd) { return m.toggleScrollback() },
+	"f6": func(m dashboard) (tea.Model, tea.Cmd) { return m.toggleScrollback() },
+	"f7": func(m dashboard) (tea.Model, tea.Cmd) { return m.toggleFocus() },
+	// Stopping the daemon kills every running shell. It used to sit at F6,
+	// one key from refresh; the destructive actions belong at the far end of
+	// the row instead, where a mistyped F5 cannot reach them.
+	"f9": func(m dashboard) (tea.Model, tea.Cmd) { return m.openModal(shutdownModal) },
 	// Shift+PgUp reaches the history in one press by entering scrollback itself.
 	"shift+pgup":   func(m dashboard) (tea.Model, tea.Cmd) { return m.pageHistory(1) },
 	"shift+pgdown": func(m dashboard) (tea.Model, tea.Cmd) { return m.pageHistory(-1) },
@@ -527,6 +531,28 @@ func (m dashboard) translateMouse(mouse tea.Mouse) (uv.Mouse, bool) {
 		return uv.Mouse{}, false
 	}
 	return translated, true
+}
+
+// toggleFocus moves between the panes in one key. Tab and Ctrl+\ each did it
+// in one direction only, and on Windows Ctrl+\ often never arrives: whatever
+// claimed it as a global hotkey — 1Password, for one — takes it before the
+// terminal sees it, which left that pane with no way out.
+func (m dashboard) toggleFocus() (tea.Model, tea.Cmd) {
+	if m.scrollback {
+		// Scrollback fills the screen with the terminal, so leaving the
+		// terminal means leaving scrollback with it. stopScrollback lands in
+		// the terminal, which the branch below then moves away from.
+		m.stopScrollback()
+	}
+	if m.focus == terminalPane {
+		m.focusNavigation()
+		return m, m.refresh()
+	}
+	if m.terminal != nil && m.terminal.active {
+		m.focus = terminalPane
+		m.syncTabCursor(m.selectedTabs())
+	}
+	return m, nil
 }
 
 func (m dashboard) toggleScrollback() (tea.Model, tea.Cmd) {
@@ -1274,7 +1300,7 @@ func (m dashboard) renderStatus(width, bodyHeight int) []string {
 			{key: "Tab", description: "terminal"},
 		}
 		if m.focus == terminalPane {
-			contextShortcuts = []shortcut{{key: "Ctrl+\\", description: "navigation"}}
+			contextShortcuts = []shortcut{{key: "F7", description: "navigation"}, {key: "Ctrl+\\", description: "navigation"}}
 		}
 		rail = renderShortcutRail(m.styles, width, contextShortcuts...)
 		status = renderShortcuts(m.styles, width,
@@ -1283,8 +1309,8 @@ func (m dashboard) renderStatus(width, bodyHeight int) []string {
 			shortcut{key: "F3", description: "config"},
 			shortcut{key: "F4", description: "quit"},
 			shortcut{key: "F5", description: "refresh"},
-			shortcut{key: "F6", description: "stop daemon"},
-			shortcut{key: "F7", description: "scrollback"},
+			shortcut{key: "F6", description: "scrollback"},
+			shortcut{key: "F7", description: "focus"},
 		)
 	}
 	return []string{rail, status}
@@ -1357,18 +1383,19 @@ func (m dashboard) helpEntries() []string {
 		renderHelpShortcut(m.styles, "Config", "F3", ","),
 		renderHelpShortcut(m.styles, "Quit", "F4", "q"),
 		renderHelpShortcut(m.styles, "Refresh", "F5", "r"),
-		renderHelpShortcut(m.styles, "Stop daemon", "F6"),
-		renderHelpShortcut(m.styles, "Scrollback", "F7"),
+		renderHelpShortcut(m.styles, "Scrollback", "F6"),
+		renderHelpShortcut(m.styles, "Switch pane", "F7"),
+		renderHelpShortcut(m.styles, "Stop daemon", "F9"),
 		renderHelpShortcut(m.styles, "About", "i"),
 		renderHelpSection(m.styles, "NAVIGATION", "workspace area"),
 		renderHelpShortcut(m.styles, "Select workspace", "↑/↓", "j/k"),
 		renderHelpShortcut(m.styles, "Select tab / +", "←/→", "h/l"),
 		renderHelpShortcut(m.styles, "Open / confirm", "Enter"),
-		renderHelpShortcut(m.styles, "Focus terminal", "Tab"),
+		renderHelpShortcut(m.styles, "Focus terminal", "Tab", "F7"),
 		renderHelpSection(m.styles, "TERMINAL", "terminal area"),
-		renderHelpShortcut(m.styles, "Focus workspace", "Ctrl+\\"),
+		renderHelpShortcut(m.styles, "Focus workspace", "F7", "Ctrl+\\"),
 		renderHelpSection(m.styles, "SCROLLBACK", "mouse works here only"),
-		renderHelpShortcut(m.styles, "Enter / leave", "F7", "Ctrl+\\"),
+		renderHelpShortcut(m.styles, "Enter / leave", "F6", "Ctrl+\\"),
 		renderHelpShortcut(m.styles, "Scroll a line", "↑/↓", "j/k"),
 		renderHelpShortcut(m.styles, "Scroll a page", "PgUp/PgDn"),
 		renderHelpShortcut(m.styles, "Scroll with the mouse", "Wheel"),
