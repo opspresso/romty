@@ -30,7 +30,16 @@ const (
 	maximumReattachAttempts = 3
 	initialReattachBackoff  = 250 * time.Millisecond
 	maximumReattachBackoff  = 2 * time.Second
+	// healthyAttachInterval is how long a terminal has to stay attached before
+	// a later drop counts as a fresh incident rather than another turn of the
+	// loop. What the backoff damps — replay, fall behind, get cut — turns over
+	// in well under a second, so a terminal that lasted this long was not in it.
+	healthyAttachInterval = 10 * time.Second
 )
+
+// now is a variable so tests need not wait out healthyAttachInterval, the way
+// the daemon's request timeout is one so they need not wait out a handshake.
+var now = time.Now
 
 type Backend interface {
 	AddRoot(path string) (model.Snapshot, error)
@@ -133,6 +142,9 @@ type dashboard struct {
 	// recording, the client fell behind, and the daemon cut it off again.
 	reattachTab      string
 	reattachAttempts int
+	// terminalOpenedAt is when the open terminal attached, which is what tells
+	// a drop that continues a loop from one that starts a new incident.
+	terminalOpenedAt time.Time
 	scrollback       bool
 	scrollOffset     int
 	helpOffset       int
@@ -815,6 +827,7 @@ func (m dashboard) handleOpenedTerminal(message terminalOpenedMsg) (tea.Model, t
 	m.closeTerminal()
 	columns, rows := m.terminalSize()
 	m.terminal = newEmbeddedTerminal(message.tabID, message.stream, int(columns), int(rows))
+	m.terminalOpenedAt = now()
 	// The scrollback on screen belongs to the terminal that just went away, so
 	// a switch made from it lands on the new terminal's live screen.
 	m.stopScrollback()
@@ -875,7 +888,7 @@ func (m dashboard) settleAfterExit() (tea.Model, tea.Cmd) {
 	// retry that fails the same way immediately is a loop. Space them out and
 	// stop after a few, leaving the choice to reconnect with the user.
 	tab := tabs[m.tabIndex]
-	if tab.ID != m.reattachTab {
+	if tab.ID != m.reattachTab || m.attachWasHealthy() {
 		m.reattachTab, m.reattachAttempts = tab.ID, 0
 		return m, m.openSelectedTerminal()
 	}
@@ -889,6 +902,16 @@ func (m dashboard) settleAfterExit() (tea.Model, tea.Cmd) {
 	return m, tea.Tick(reattachBackoff(m.reattachAttempts), func(time.Time) tea.Msg {
 		return reopenTerminalMsg{}
 	})
+}
+
+// attachWasHealthy reports whether the terminal that just dropped had been
+// attached long enough that the drop starts a fresh incident. The counter only
+// ever went up without it: it measured how many times a tab had dropped rather
+// than whether it was dropping now, so four drops spread over an afternoon were
+// damped exactly like four in a second and a working terminal was eventually
+// left saying it keeps disconnecting.
+func (m dashboard) attachWasHealthy() bool {
+	return !m.terminalOpenedAt.IsZero() && now().Sub(m.terminalOpenedAt) >= healthyAttachInterval
 }
 
 // reattachBackoff doubles with each consecutive retry so a terminal that keeps
