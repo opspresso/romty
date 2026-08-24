@@ -18,7 +18,7 @@ type embeddedTerminal struct {
 	stream    io.ReadWriteCloser
 	emulator  *vt.SafeEmulator
 	active    bool
-	close     sync.Once
+	closeOnce sync.Once
 	inputDone chan struct{}
 	// applicationKeypad mirrors DECKPAM so keypad navigation and operators
 	// keep the mode the guest requested.
@@ -397,9 +397,14 @@ func (t *embeddedTerminal) cursorPosition() uv.Position {
 	return t.emulator.CursorPosition()
 }
 
-func (t *embeddedTerminal) disconnect() {
+// close lets go of the daemon and of everything the emulator holds. It had two
+// names — disconnect and closeTerminal — that did exactly the same thing, only
+// because the sync.Once above was called close and left the plain name taken.
+// Two names for one operation are two things to keep straight that are not
+// actually different.
+func (t *embeddedTerminal) close() {
 	t.active = false
-	t.close.Do(func() {
+	t.closeOnce.Do(func() {
 		_ = t.stream.Close()
 		if closer, ok := t.emulator.InputPipe().(io.Closer); ok {
 			_ = closer.Close()
@@ -407,10 +412,6 @@ func (t *embeddedTerminal) disconnect() {
 		<-t.inputDone
 		_ = t.emulator.Close()
 	})
-}
-
-func (t *embeddedTerminal) closeTerminal() {
-	t.disconnect()
 }
 
 func splitLines(value string, height int) []string {

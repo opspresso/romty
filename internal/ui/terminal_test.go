@@ -11,7 +11,7 @@ import (
 func TestEmbeddedTerminalForwardsKeysAndPaste(t *testing.T) {
 	stream := newMemoryStream("")
 	terminal := newEmbeddedTerminal("tab-1", stream, 40, 10)
-	defer terminal.closeTerminal()
+	defer terminal.close()
 
 	terminal.sendKey(key('x', "x"))
 	terminal.sendKey(key(tea.KeyEnter, ""))
@@ -30,7 +30,7 @@ func TestEmbeddedTerminalForwardsKeysAndPaste(t *testing.T) {
 func TestEmbeddedTerminalRendersANSIOutput(t *testing.T) {
 	stream := newMemoryStream("")
 	terminal := newEmbeddedTerminal("tab-1", stream, 20, 5)
-	defer terminal.closeTerminal()
+	defer terminal.close()
 
 	terminal.writeOutput([]byte("hello\r\n\x1b[31mred\x1b[0m"))
 	rendered := strings.Join(terminal.render(), "\n")
@@ -58,7 +58,7 @@ func TestEmbeddedTerminalForwardsKeypad(t *testing.T) {
 		t.Run(probe.name, func(t *testing.T) {
 			stream := newMemoryStream("")
 			terminal := newEmbeddedTerminal("tab-1", stream, 40, 10)
-			defer terminal.closeTerminal()
+			defer terminal.close()
 			if probe.application {
 				terminal.writeOutput([]byte("\x1b="))
 			}
@@ -134,7 +134,7 @@ func TestEmbeddedTerminalForwardsModifiedKeys(t *testing.T) {
 		t.Run(probe.name, func(t *testing.T) {
 			stream := newMemoryStream("")
 			terminal := newEmbeddedTerminal("tab-1", stream, 40, 10)
-			defer terminal.closeTerminal()
+			defer terminal.close()
 
 			terminal.sendKey(tea.KeyPressMsg(probe.key))
 			deadline := time.Now().Add(2 * time.Second)

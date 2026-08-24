@@ -1047,7 +1047,7 @@ func (m dashboard) resizeTerminal() tea.Cmd {
 
 func (m *dashboard) closeTerminal() {
 	if m.terminal != nil {
-		m.terminal.closeTerminal()
+		m.terminal.close()
 		m.terminal = nil
 	}
 }
