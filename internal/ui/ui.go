@@ -348,6 +348,13 @@ var globalKeys = map[string]func(dashboard) (tea.Model, tea.Cmd){
 	// Shift+PgUp reaches the history in one press by entering scrollback itself.
 	"shift+pgup":   func(m dashboard) (tea.Model, tea.Cmd) { return m.pageHistory(1) },
 	"shift+pgdown": func(m dashboard) (tea.Model, tea.Cmd) { return m.pageHistory(-1) },
+	// Switching tabs from the terminal pane took Ctrl+\ and then two more keys.
+	// Ctrl+Shift+Left/Right is the chord a terminal with tabs binds, and a
+	// terminal reports it distinctly — Ctrl+Shift+Tab is not, because most
+	// terminals send it as a plain Shift+Tab. The unshifted arrows stay with
+	// the shell, where word-wise movement lives.
+	"ctrl+shift+left":  func(m dashboard) (tea.Model, tea.Cmd) { return m.switchTab(-1) },
+	"ctrl+shift+right": func(m dashboard) (tea.Model, tea.Cmd) { return m.switchTab(1) },
 }
 
 func (m dashboard) handleKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
@@ -808,6 +815,9 @@ func (m dashboard) handleOpenedTerminal(message terminalOpenedMsg) (tea.Model, t
 	m.closeTerminal()
 	columns, rows := m.terminalSize()
 	m.terminal = newEmbeddedTerminal(message.tabID, message.stream, int(columns), int(rows))
+	// The scrollback on screen belongs to the terminal that just went away, so
+	// a switch made from it lands on the new terminal's live screen.
+	m.stopScrollback()
 	m.focus = terminalPane
 	// A terminal that opened supersedes any complaint about terminals.
 	m.clearError(terminalError)
@@ -1029,6 +1039,61 @@ func (m *dashboard) moveTab(delta int) {
 	}
 	count := len(m.navigationTabs()) + 1
 	m.tabIndex = (m.tabIndex + delta + count) % count
+}
+
+// switchTab opens the tab one step along the row the user is looking at, which
+// is what Left/Right and Enter do together. The row is the one renderTerminal
+// draws: the open terminal's tabs everywhere but the workspace pane, where the
+// cursor may sit on a workspace other than the open one. Switching along the
+// row that is not on screen would open a tab from a workspace the user is not
+// looking at.
+func (m dashboard) switchTab(delta int) (tea.Model, tea.Cmd) {
+	if m.modal != noModal {
+		// A modal is a question waiting for an answer, and the switch would
+		// land behind it.
+		return m, nil
+	}
+	cursorRow := m.focus == leftPane && !m.scrollback
+	tabs := m.selectedTabs()
+	if cursorRow {
+		tabs = m.navigationTabs()
+	}
+	next, ok := m.nextTab(tabs, delta)
+	if !ok {
+		return m, nil
+	}
+	m.tabIndex = next
+	if cursorRow {
+		// The workspace under the cursor is not necessarily the open one, so
+		// it has to be selected before one of its tabs can be opened.
+		return m, m.selectWorkspace()
+	}
+	return m, m.openSelectedTerminal()
+}
+
+// nextTab is the tab delta steps along tabs, wrapping at both ends and never
+// landing on the new-tab slot: a key that switches tabs must not create one. It
+// reports false when there is nothing to switch to, which includes the tab that
+// is already open — reopening it would tear a live terminal down and attach a
+// new one in its place.
+func (m dashboard) nextTab(tabs []model.Tab, delta int) (int, bool) {
+	if len(tabs) == 0 {
+		return 0, false
+	}
+	current := m.tabIndex
+	if current >= len(tabs) {
+		// The new-tab slot sits past the last tab, so stepping right from it
+		// wraps to the first tab and stepping left lands on the last.
+		current = len(tabs)
+		if delta > 0 {
+			current = -1
+		}
+	}
+	next := (current + delta + len(tabs)) % len(tabs)
+	if m.terminal != nil && m.terminal.id == tabs[next].ID {
+		return 0, false
+	}
+	return next, true
 }
 
 func (m *dashboard) clampTabIndex() {
@@ -1509,6 +1574,7 @@ func (m dashboard) helpEntries() []string {
 		renderHelpShortcut(m.styles, "Refresh", "F5"),
 		renderHelpShortcut(m.styles, "Scrollback", "F6"),
 		renderHelpShortcut(m.styles, "Switch pane", "F7"),
+		renderHelpShortcut(m.styles, "Switch tab", "Ctrl+Shift+←/→"),
 		renderHelpSection(m.styles, "NAVIGATION", "workspace area"),
 		renderHelpShortcut(m.styles, "Remove root", "F8", "d"),
 		renderHelpShortcut(m.styles, "Stop daemon", "F9", "t"),

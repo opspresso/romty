@@ -2072,6 +2072,150 @@ func TestDashboardMovesWorkspaceAndTabCursorBeforeConfirming(t *testing.T) {
 	}
 }
 
+// Ctrl+Shift+Left/Right is the one tab key that reaches the terminal pane, so
+// it has to switch on its own: moving the cursor and waiting for Enter is what
+// the plain arrows already do.
+func TestDashboardSwitchesTabsWithCtrlShiftArrows(t *testing.T) {
+	workspace := model.Workspace{ID: "workspace-1", RootID: "root-1", Name: "alpha", Path: "/projects/alpha"}
+	tabs := []model.Tab{
+		{ID: "tab-1", WorkspaceID: workspace.ID, Name: "1", Running: true},
+		{ID: "tab-2", WorkspaceID: workspace.ID, Name: "2", Running: true},
+		{ID: "tab-3", WorkspaceID: workspace.ID, Name: "3", Running: true},
+	}
+	snapshot := model.Snapshot{Roots: []model.RootView{{
+		Root:        model.Root{ID: "root-1", Name: "projects", Path: "/projects"},
+		Directories: []model.WorkspaceView{{Workspace: workspace, Tabs: tabs}},
+	}}}
+	backend := &fakeBackend{snapshot: snapshot, workspace: workspace}
+	value := newDashboard(backend, snapshot)
+	value.setNavigation(1)
+	value.selectedWorkspaceID = workspace.ID
+	value.selectedPath = workspace.Path
+	value.terminal = newEmbeddedTerminal(tabs[0].ID, newMemoryStream(""), 40, 10)
+	value.focus = terminalPane
+	defer func() { value.closeTerminal() }()
+
+	// The terminal pane keeps the key rather than sending it to the shell.
+	value = pressSwitchTab(t, value, tea.KeyRight)
+	if value.tabIndex != 1 || backend.openedTab != tabs[1].ID || value.terminal.id != tabs[1].ID {
+		t.Fatalf("Ctrl+Shift+Right = (index %d, opened %q, terminal %q), want the second tab open",
+			value.tabIndex, backend.openedTab, value.terminal.id)
+	}
+
+	// Left from the first tab wraps to the last rather than stopping there.
+	value = pressSwitchTab(t, value, tea.KeyLeft)
+	value = pressSwitchTab(t, value, tea.KeyLeft)
+	last := len(tabs) - 1
+	if value.tabIndex != last || value.terminal.id != tabs[last].ID {
+		t.Fatalf("Ctrl+Shift+Left twice = (index %d, terminal %q), want the last tab open",
+			value.tabIndex, value.terminal.id)
+	}
+
+	// The new-tab slot is a cursor position, not a tab to switch to.
+	value.tabIndex = len(tabs)
+	value = pressSwitchTab(t, value, tea.KeyRight)
+	if value.tabIndex != 0 || value.terminal.id != tabs[0].ID {
+		t.Fatalf("Ctrl+Shift+Right from + = (index %d, terminal %q), want the first tab open",
+			value.tabIndex, value.terminal.id)
+	}
+
+	// The tab that is already open is left alone: reopening it would tear a
+	// live terminal down and attach a new one in its place.
+	backend.openedTab = ""
+	value.tabIndex = 1
+	updated, command := value.Update(switchTabKey(tea.KeyLeft))
+	value = updated.(dashboard)
+	if command != nil || backend.openedTab != "" || value.tabIndex != 1 {
+		t.Fatalf("switching to the open tab = (command %v, opened %q, index %d), want nothing done",
+			command, backend.openedTab, value.tabIndex)
+	}
+
+	// Scrollback belongs to the terminal it was opened on, so a switch made
+	// from it lands on the new terminal's live screen.
+	value.tabIndex = 0
+	value.scrollback = true
+	value.scrollOffset = 5
+	value = pressSwitchTab(t, value, tea.KeyRight)
+	if value.scrollback || value.scrollOffset != 0 || value.terminal.id != tabs[1].ID {
+		t.Fatalf("switching from scrollback = (scrollback %v, offset %d, terminal %q), want the live screen",
+			value.scrollback, value.scrollOffset, value.terminal.id)
+	}
+
+	// A modal is a question waiting for an answer; switching behind it would
+	// change the terminal the answer applies to.
+	value.modal = shutdownModal
+	backend.openedTab = ""
+	updated, command = value.Update(switchTabKey(tea.KeyRight))
+	value = updated.(dashboard)
+	if command != nil || backend.openedTab != "" {
+		t.Fatalf("switching with a modal open = (command %v, opened %q), want nothing done",
+			command, backend.openedTab)
+	}
+}
+
+func switchTabKey(code rune) tea.KeyPressMsg {
+	return tea.KeyPressMsg(tea.Key{Code: code, Mod: tea.ModCtrl | tea.ModShift})
+}
+
+// pressSwitchTab presses Ctrl+Shift+code and runs the commands the switch
+// produces until it has settled: the workspace pane selects a workspace before
+// opening a tab, the terminal pane opens one straight away, and either way the
+// terminal that comes back has to be attached. The read command that ends the
+// chain is left alone; reading is what the terminal does from then on.
+func pressSwitchTab(t *testing.T, value dashboard, code rune) dashboard {
+	t.Helper()
+	updated, command := value.Update(switchTabKey(code))
+	value = updated.(dashboard)
+	if command == nil {
+		t.Fatalf("Ctrl+Shift+%s produced no command", switchTabKey(code).String())
+	}
+	for step := 0; command != nil && step < 4; step++ {
+		message := command()
+		if _, reading := message.(terminalOutputMsg); reading {
+			break
+		}
+		updated, command = value.Update(message)
+		value = updated.(dashboard)
+	}
+	return value
+}
+
+// The tab rail in the terminal pane shows the open terminal's tabs, not the
+// cursor's: the workspace cursor is free to wander while a terminal is open.
+// Switching has to move along the row on screen.
+func TestDashboardSwitchesTabsOfTheOpenTerminalNotTheCursor(t *testing.T) {
+	open := model.Workspace{ID: "workspace-1", RootID: "root-1", Name: "alpha", Path: "/projects/alpha"}
+	other := model.Workspace{ID: "workspace-2", RootID: "root-1", Name: "beta", Path: "/projects/beta"}
+	openTabs := []model.Tab{
+		{ID: "tab-1", WorkspaceID: open.ID, Name: "1", Running: true},
+		{ID: "tab-2", WorkspaceID: open.ID, Name: "2", Running: true},
+	}
+	otherTab := model.Tab{ID: "tab-3", WorkspaceID: other.ID, Name: "1", Running: true}
+	snapshot := model.Snapshot{Roots: []model.RootView{{
+		Root: model.Root{ID: "root-1", Name: "projects", Path: "/projects"},
+		Directories: []model.WorkspaceView{
+			{Workspace: open, Tabs: openTabs},
+			{Workspace: other, Tabs: []model.Tab{otherTab}},
+		},
+	}}}
+	backend := &fakeBackend{snapshot: snapshot, workspace: other}
+	value := newDashboard(backend, snapshot)
+	value.selectedWorkspaceID = open.ID
+	value.selectedPath = open.Path
+	value.terminal = newEmbeddedTerminal(openTabs[0].ID, newMemoryStream(""), 40, 10)
+	value.focus = terminalPane
+	// The cursor was left on the other workspace, which is what the workspace
+	// pane would switch along.
+	value.setNavigation(2)
+	defer func() { value.closeTerminal() }()
+
+	value = pressSwitchTab(t, value, tea.KeyRight)
+	if value.terminal.id != openTabs[1].ID || backend.ensuredPath != "" {
+		t.Fatalf("Ctrl+Shift+Right = (terminal %q, ensured %q), want the open workspace's second tab",
+			value.terminal.id, backend.ensuredPath)
+	}
+}
+
 func TestDashboardSelectsPlusAndCreatesTabOnEnter(t *testing.T) {
 	workspace := model.Workspace{ID: "workspace-1", RootID: "root-1", Name: "alpha", Path: "/projects/alpha"}
 	tabs := []model.Tab{
