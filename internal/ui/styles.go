@@ -52,7 +52,7 @@ func newUIStyles(hasDarkBackground bool) *uiStyles {
 		navigationCurrent:   lipgloss.NewStyle().Foreground(accent).Bold(true),
 		navigationSelected:  lipgloss.NewStyle().Foreground(accentText).Background(accentSurface).Bold(true),
 		agentClaude:         lipgloss.NewStyle().Foreground(lipgloss.Color("#D97757")),
-		agentCodex:          lipgloss.NewStyle().Foreground(lipgloss.Color("#10A37F")),
+		agentCodex:          lipgloss.NewStyle().Foreground(lipgloss.Color("#3B82F6")),
 		tab:                 lipgloss.NewStyle().Foreground(muted).Background(surface),
 		tabSelected:         lipgloss.NewStyle().Foreground(accentText).Background(accentSurface).Bold(true),
 		tabRail:             lipgloss.NewStyle().Foreground(border),

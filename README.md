@@ -71,7 +71,7 @@ romty stop
 
 ## Interface
 
-The left pane shows the workspace tree, which scrolls with the selection when the tree is taller than the pane. A `●` after an item represents one running terminal tab. A dot turns Claude orange while Claude Code is in the foreground and OpenAI green while Codex is in the foreground; other terminals keep the normal row color. The right pane contains the tab rail and the embedded terminal. Accent colors distinguish the current selection, active tab, and focused pane; the arrow beside the vertical divider points to the active pane.
+The left pane shows the workspace tree, which scrolls with the selection when the tree is taller than the pane. A `●` after an item represents one running terminal tab. A dot turns Claude orange while Claude Code is in the foreground and Codex blue while Codex is in the foreground; other terminals keep the normal row color. The right pane contains the tab rail and the embedded terminal. Accent colors distinguish the current selection, active tab, and focused pane; the arrow beside the vertical divider points to the active pane.
 
 The status bar shows `F1` through `F7` in both panes and adds navigation keys for the active pane. Press `F1` in either pane to see every shortcut, including aliases hidden from the status bar.
 
