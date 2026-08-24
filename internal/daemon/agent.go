@@ -22,7 +22,7 @@ var listProcesses = func() ([]byte, error) {
 func sessionAgents(sessions map[string]*session) map[string]model.Agent {
 	groups := make(map[string]int, len(sessions))
 	for tabID, value := range sessions {
-		group, err := foregroundProcessGroup(value.pty)
+		group, err := value.foregroundProcessGroup()
 		if err == nil {
 			groups[tabID] = group
 		}
@@ -43,6 +43,15 @@ func sessionAgents(sessions map[string]*session) map[string]model.Agent {
 		}
 	}
 	return result
+}
+
+func (s *session) foregroundProcessGroup() (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return 0, os.ErrClosed
+	}
+	return foregroundProcessGroup(s.pty)
 }
 
 func processAgents(output []byte) map[int]model.Agent {

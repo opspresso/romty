@@ -98,7 +98,11 @@ func startSession(id, directory, shell string, environment []string, columns, ro
 // what keeps the shell's last words: the read loop ends when the master has
 // no more to give, not when the process does.
 func (s *session) read() {
-	defer s.pty.Close()
+	defer func() {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		_ = s.pty.Close()
+	}()
 	buffer := make([]byte, 32*1024)
 	for {
 		count, err := s.pty.Read(buffer)
@@ -277,6 +281,11 @@ func (s *session) resize(columns, rows uint16) error {
 	if columns == 0 || rows == 0 {
 		return fmt.Errorf("terminal size must be greater than zero")
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return fmt.Errorf("terminal session has exited")
+	}
 	if err := pty.Setsize(s.pty, &pty.Winsize{Cols: columns, Rows: rows}); err != nil {
 		return fmt.Errorf("resize terminal: %w", err)
 	}
@@ -290,8 +299,8 @@ func (s *session) close() {
 		return
 	}
 	s.closed = true
-	s.mu.Unlock()
 	_ = s.pty.Close()
+	s.mu.Unlock()
 	if s.command.Process != nil {
 		_ = s.command.Process.Kill()
 	}
