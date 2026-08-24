@@ -47,6 +47,7 @@ type memoryStream struct {
 	reader  *bytes.Reader
 	mu      sync.Mutex
 	written bytes.Buffer
+	closed  bool
 }
 
 func newMemoryStream(output string) *memoryStream {
@@ -64,7 +65,16 @@ func (s *memoryStream) Write(data []byte) (int, error) {
 }
 
 func (s *memoryStream) Close() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.closed = true
 	return nil
+}
+
+func (s *memoryStream) isClosed() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.closed
 }
 
 func (s *memoryStream) String() string {
@@ -2804,5 +2814,57 @@ func TestDashboardStillBacksOffWhenDropsAreImmediate(t *testing.T) {
 	}
 	if message := command(); message != (reopenTerminalMsg{}) {
 		t.Fatalf("an immediate drop returned %T, want a delayed reopen", message)
+	}
+}
+
+// Opening a terminal is a round trip to the daemon, so two quick switches
+// leave two of them in flight and nothing orders the answers. The one for the
+// tab the user left must not be adopted: it would show that terminal under the
+// next tab's name and take the keyboard with it.
+func TestDashboardIgnoresATerminalOpenedForTheTabItLeft(t *testing.T) {
+	workspace := model.Workspace{ID: "workspace-1", RootID: "root-1", Name: "alpha", Path: "/projects/alpha"}
+	tabs := []model.Tab{
+		{ID: "tab-1", WorkspaceID: workspace.ID, Name: "1", Running: true},
+		{ID: "tab-2", WorkspaceID: workspace.ID, Name: "2", Running: true},
+		{ID: "tab-3", WorkspaceID: workspace.ID, Name: "3", Running: true},
+	}
+	snapshot := model.Snapshot{Roots: []model.RootView{{
+		Root:        model.Root{ID: "root-1", Name: "projects", Path: "/projects"},
+		Directories: []model.WorkspaceView{{Workspace: workspace, Tabs: tabs}},
+	}}}
+	backend := &fakeBackend{snapshot: snapshot, workspace: workspace}
+	value := newDashboard(backend, snapshot)
+	value.setNavigation(1)
+	value.selectedWorkspaceID = workspace.ID
+	value.selectedPath = workspace.Path
+	value.terminal = newEmbeddedTerminal(tabs[0].ID, newMemoryStream(""), 40, 10)
+	value.focus = terminalPane
+	t.Cleanup(value.closeTerminal)
+
+	// Two presses before either answer lands.
+	updated, toSecond := value.Update(switchTabKey(tea.KeyRight))
+	value = updated.(dashboard)
+	updated, toThird := value.Update(switchTabKey(tea.KeyRight))
+	value = updated.(dashboard)
+	if toSecond == nil || toThird == nil {
+		t.Fatal("two switches did not both ask the daemon for a terminal")
+	}
+	second, third := toSecond().(terminalOpenedMsg), toThird().(terminalOpenedMsg)
+
+	// The later answer arrives first, which is what the daemon is free to do.
+	updated, _ = value.Update(third)
+	value = updated.(dashboard)
+	updated, _ = value.Update(second)
+	value = updated.(dashboard)
+
+	if value.terminal == nil || value.terminal.id != tabs[2].ID {
+		t.Fatalf("terminal = %v, want the tab the cursor is on", value.terminal)
+	}
+	stale, ok := second.stream.(*memoryStream)
+	if !ok {
+		t.Fatalf("stale stream = %T, want a memory stream", second.stream)
+	}
+	if !stale.isClosed() {
+		t.Fatal("the terminal romty walked away from is still attached to the daemon")
 	}
 }

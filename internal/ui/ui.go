@@ -819,6 +819,17 @@ func (m dashboard) handleCreatedTab(message tabMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m dashboard) handleOpenedTerminal(message terminalOpenedMsg) (tea.Model, tea.Cmd) {
+	if message.tabID != m.selectedTabID() {
+		// A second switch overtook the first. Opening a terminal is a round
+		// trip to the daemon, so two quick presses of Ctrl+Shift+Right leave
+		// two of them in flight, and nothing orders their answers: the one for
+		// the tab the user left could land last and be adopted, showing that
+		// terminal under the next tab's name and typing into it.
+		if message.stream != nil {
+			message.stream.Close()
+		}
+		return m, nil
+	}
 	if message.err != nil {
 		m.setError(terminalError, message.err.Error())
 		m.focus = leftPane
@@ -1001,7 +1012,9 @@ func (m dashboard) openSelectedTerminal() tea.Cmd {
 	tab := tabs[m.tabIndex]
 	if !tab.Running {
 		return func() tea.Msg {
-			return terminalOpenedMsg{err: fmt.Errorf("terminal session has exited")}
+			// Named, like every other answer, so the handler can tell a
+			// failure meant for the tab on screen from one the user left.
+			return terminalOpenedMsg{tabID: tab.ID, err: fmt.Errorf("terminal session has exited")}
 		}
 	}
 	columns, rows := m.terminalSize()
@@ -1287,6 +1300,18 @@ func (m dashboard) selectedTabs() []model.Tab {
 		}
 	}
 	return nil
+}
+
+// selectedTabID names the tab the cursor is on among the open workspace's
+// tabs, and is empty on the new-tab slot. It reads exactly what
+// openSelectedTerminal reads, so it answers "is this still the tab romty asked
+// for" rather than approximating it.
+func (m dashboard) selectedTabID() string {
+	tabs := m.selectedTabs()
+	if m.tabIndex < 0 || m.tabIndex >= len(tabs) {
+		return ""
+	}
+	return tabs[m.tabIndex].ID
 }
 
 func runningTabs(tabs []model.Tab) []model.Tab {
