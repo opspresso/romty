@@ -165,6 +165,14 @@ func listenPrivately(path string) (net.Listener, error) {
 	listener, err := net.Listen("unix", path)
 	syscall.Umask(previous)
 	if err != nil {
+		// The bind is what decides who owns the socket, not the probe in
+		// prepareSocket: two daemons starting at once can both find nothing to
+		// dial and race to create it. The one that loses is not broken, and
+		// reporting that as a bind failure sent it to daemon.log as an error
+		// and exited non-zero for what is the ordinary outcome of a race.
+		if errors.Is(err, syscall.EADDRINUSE) {
+			return nil, ErrAlreadyRunning
+		}
 		return nil, fmt.Errorf("listen on unix socket: %w", err)
 	}
 	if err := os.Chmod(path, 0o600); err != nil {
