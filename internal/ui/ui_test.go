@@ -1452,6 +1452,106 @@ func TestLayoutMatchesWhatIsRendered(t *testing.T) {
 	}
 }
 
+// The status bar has one slot, and a refresh used to empty it whatever was in
+// it. So the F5 a user presses right after a failure erased the reason for it,
+// and an in-flight refresh could erase one at random.
+func TestDashboardKeepsErrorsARefreshDoesNotAnswer(t *testing.T) {
+	snapshot := model.Snapshot{Roots: []model.RootView{{
+		Root:        model.Root{ID: "root-1", Name: "projects", Path: "/projects"},
+		Directories: []model.WorkspaceView{{Workspace: model.Workspace{ID: "w", Name: "alpha", Path: "/projects/alpha"}}},
+	}}}
+
+	for _, probe := range []struct {
+		name     string
+		raise    func(dashboard) dashboard
+		survives bool
+	}{
+		{
+			name: "a failed resize",
+			raise: func(m dashboard) dashboard {
+				updated, _ := m.Update(resizeFailedMsg{err: errors.New("terminal session not found")})
+				return updated.(dashboard)
+			},
+			survives: true,
+		},
+		{
+			name: "a daemon that would not stop",
+			raise: func(m dashboard) dashboard {
+				updated, _ := m.Update(daemonStoppedMsg{err: errors.New("connection reset")})
+				return updated.(dashboard)
+			},
+			survives: true,
+		},
+		{
+			name: "config that could not be written",
+			raise: func(m dashboard) dashboard {
+				updated, _ := m.Update(configSavedMsg{err: errors.New("read-only file system")})
+				return updated.(dashboard)
+			},
+			survives: true,
+		},
+		{
+			name: "a snapshot that failed",
+			raise: func(m dashboard) dashboard {
+				updated, _ := m.Update(snapshotMsg{err: errors.New("daemon: read root")})
+				return updated.(dashboard)
+			},
+			survives: false,
+		},
+	} {
+		t.Run(probe.name, func(t *testing.T) {
+			value := newDashboard(&fakeBackend{snapshot: snapshot}, snapshot)
+			value.width = 120
+			value.height = 40
+			value = probe.raise(value)
+			raised := value.errorMessage
+			if raised == "" {
+				t.Fatal("nothing was raised")
+			}
+
+			updated, _ := value.Update(snapshotMsg{value: snapshot})
+			value = updated.(dashboard)
+			if probe.survives && value.errorMessage != raised {
+				t.Fatalf("a refresh erased %q, which it does not answer", raised)
+			}
+			if !probe.survives && value.errorMessage != "" {
+				t.Fatalf("a refresh left %q standing, which it does answer", value.errorMessage)
+			}
+		})
+	}
+}
+
+// A resize failure is not a snapshot: borrowing snapshotMsg for it meant the
+// handler could not trust message.value, and the failure erased itself.
+func TestDashboardReportsAFailedResizeAsItsOwnFailure(t *testing.T) {
+	backend := &fakeBackend{}
+	backend.fail("Resize", errors.New("terminal session not found"))
+	value := newDashboard(backend, model.Snapshot{})
+	value.terminal = newEmbeddedTerminal("tab-1", newMemoryStream(""), 40, 10)
+	t.Cleanup(value.closeTerminal)
+
+	updated, command := value.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	value = updated.(dashboard)
+	if command == nil {
+		t.Fatal("a resize produced no command")
+	}
+	message := command()
+	if _, ok := message.(resizeFailedMsg); !ok {
+		t.Fatalf("a failed resize produced %T, want resizeFailedMsg", message)
+	}
+	updated, _ = value.Update(message)
+	value = updated.(dashboard)
+	if !strings.Contains(value.errorMessage, "resize terminal") {
+		t.Fatalf("error message = %q, want the resize failure", value.errorMessage)
+	}
+	// The emulator has taken the new size even though the daemon refused.
+	columns, rows := value.terminalSize()
+	if value.terminal.emulator.Width() != int(columns) || value.terminal.emulator.Height() != int(rows) {
+		t.Fatalf("emulator = %dx%d, want %dx%d",
+			value.terminal.emulator.Width(), value.terminal.emulator.Height(), columns, rows)
+	}
+}
+
 func TestDashboardRefusesScrollbackWithoutTerminal(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, model.Snapshot{})
 
