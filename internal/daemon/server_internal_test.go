@@ -155,6 +155,98 @@ func TestAttachHandsOffToLiveOutputInOrder(t *testing.T) {
 	<-attached
 }
 
+// A daemon killed outright leaves its socket standing with nothing answering
+// on it, because only an orderly shutdown removes it. The next daemon has to
+// unlink that one and bind its own, or romty never starts again after a crash.
+func TestServeReplacesASocketNothingAnswersOn(t *testing.T) {
+	base, err := os.MkdirTemp("/tmp", "romty-stale-")
+	if err != nil {
+		t.Fatalf("MkdirTemp() error = %v", err)
+	}
+	t.Cleanup(func() { os.RemoveAll(base) })
+	socket := filepath.Join(base, "daemon.sock")
+
+	leaveStaleSocket(t, socket)
+
+	server, err := New(socket, filepath.Join(base, "state.json"), "/bin/sh")
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	server.SetLogger(log.New(io.Discard, "", 0))
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- server.Serve(ctx) }()
+	defer func() { cancel(); <-done }()
+
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		connection, err := net.Dial("unix", socket)
+		if err == nil {
+			connection.Close()
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("the daemon never bound over the socket its predecessor left behind")
+}
+
+// The other half of the same decision: a socket that answers belongs to a
+// running daemon. Unlinking it would leave that daemon listening on a name no
+// client can reach while it kept writing the state file.
+func TestPrepareSocketRefusesOneThatAnswers(t *testing.T) {
+	base, err := os.MkdirTemp("/tmp", "romty-live-")
+	if err != nil {
+		t.Fatalf("MkdirTemp() error = %v", err)
+	}
+	t.Cleanup(func() { os.RemoveAll(base) })
+	socket := filepath.Join(base, "daemon.sock")
+
+	listener, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatalf("Listen() error = %v", err)
+	}
+	defer listener.Close()
+	go func() {
+		for {
+			connection, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			connection.Close()
+		}
+	}()
+
+	if err := prepareSocket(socket); !errors.Is(err, ErrAlreadyRunning) {
+		t.Fatalf("prepareSocket() error = %v, want ErrAlreadyRunning", err)
+	}
+	if _, err := os.Lstat(socket); err != nil {
+		t.Fatalf("the socket a daemon is answering on was removed: %v", err)
+	}
+}
+
+// leaveStaleSocket puts a socket file in place with nothing listening on it,
+// which is what a daemon that was killed rather than stopped leaves behind.
+func leaveStaleSocket(t *testing.T, path string) {
+	t.Helper()
+	address, err := net.ResolveUnixAddr("unix", path)
+	if err != nil {
+		t.Fatalf("ResolveUnixAddr() error = %v", err)
+	}
+	listener, err := net.ListenUnix("unix", address)
+	if err != nil {
+		t.Fatalf("ListenUnix() error = %v", err)
+	}
+	// Closing a unix listener normally unlinks its socket, which is exactly
+	// what a killed daemon never gets to do.
+	listener.SetUnlinkOnClose(false)
+	if err := listener.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	if _, err := os.Lstat(path); err != nil {
+		t.Fatalf("no socket was left behind: %v", err)
+	}
+}
+
 // A shell that the daemon killed on its way out must not be persisted one tab
 // at a time. The process exits as soon as shutdown returns, so each of those
 // saves is a race it can lose halfway through — leaving a temporary file in
