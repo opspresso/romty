@@ -32,6 +32,7 @@ type Snapshot struct {
 
 type RootView struct {
 	Root        Root            `json:"root"`
+	Tabs        []Tab           `json:"tabs"`
 	Directories []WorkspaceView `json:"directories"`
 }
 

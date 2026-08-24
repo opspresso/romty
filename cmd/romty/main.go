@@ -48,7 +48,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	_, err = ui.Run(backend, snapshot)
+	_, err = ui.Run(backend, snapshot, runtime.Config)
 	return err
 }
 

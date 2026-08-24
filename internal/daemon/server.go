@@ -218,8 +218,8 @@ func (s *Server) ensureWorkspace(rootID, path string) protocol.Response {
 	if !ok {
 		return protocol.Response{Error: "root not found"}
 	}
-	if filepath.Dir(canonical) != root.Path {
-		return protocol.Response{Error: "workspace must be a direct child of its root"}
+	if canonical != root.Path && filepath.Dir(canonical) != root.Path {
+		return protocol.Response{Error: "workspace must be its root or a direct child"}
 	}
 	for _, workspace := range s.value.Workspaces {
 		if workspace.RootID == rootID && workspace.Path == canonical {
@@ -345,7 +345,12 @@ func (s *Server) snapshot() (model.Snapshot, error) {
 		sort.Slice(directories, func(i, j int) bool {
 			return directories[i].Workspace.Name < directories[j].Workspace.Name
 		})
-		result.Roots = append(result.Roots, model.RootView{Root: root, Directories: directories})
+		rootWorkspace, _ := workspaceAt(value.Workspaces, root.ID, root.Path)
+		result.Roots = append(result.Roots, model.RootView{
+			Root:        root,
+			Tabs:        tabsFor(value.Tabs, rootWorkspace.ID),
+			Directories: directories,
+		})
 	}
 	return result, nil
 }

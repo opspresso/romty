@@ -10,6 +10,7 @@ type Paths struct {
 	Directory string
 	Socket    string
 	State     string
+	Config    string
 	Log       string
 }
 
@@ -31,6 +32,7 @@ func Resolve() (Paths, error) {
 		Directory: absolute,
 		Socket:    filepath.Join(absolute, "daemon.sock"),
 		State:     filepath.Join(absolute, "state.json"),
+		Config:    filepath.Join(absolute, "config.json"),
 		Log:       filepath.Join(absolute, "daemon.log"),
 	}, nil
 }

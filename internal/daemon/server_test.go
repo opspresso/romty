@@ -209,6 +209,63 @@ func TestServerDiscoversWorkspacesAndReattachesSession(t *testing.T) {
 	}
 }
 
+func TestServerOpensRootTerminalAndReloadsDirectories(t *testing.T) {
+	base := shortTempDir(t)
+	root := filepath.Join(base, "projects")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+
+	socket := filepath.Join(base, "daemon.sock")
+	statePath := filepath.Join(base, "state.json")
+	server, err := daemon.New(socket, statePath, "/bin/sh")
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- server.Serve(ctx) }()
+	defer func() {
+		cancel()
+		<-done
+	}()
+
+	backend := client.New(socket)
+	waitForDaemon(t, backend)
+	snapshot, err := backend.AddRoot(root)
+	if err != nil {
+		t.Fatalf("AddRoot() error = %v", err)
+	}
+	rootID := snapshot.Roots[0].Root.ID
+	workspace, err := backend.EnsureWorkspace(rootID, root)
+	if err != nil {
+		t.Fatalf("EnsureWorkspace() root error = %v", err)
+	}
+	tab, err := backend.CreateTab(workspace.ID, 80, 24)
+	if err != nil {
+		t.Fatalf("CreateTab() root error = %v", err)
+	}
+	connection, reader, err := backend.OpenAttach(tab.ID)
+	if err != nil {
+		t.Fatalf("OpenAttach() root error = %v", err)
+	}
+	defer connection.Close()
+
+	writeCommand(t, connection, "pwd")
+	readUntil(t, connection, reader, root)
+	writeCommand(t, connection, "mkdir cloned")
+	snapshot = waitForRootDirectoryCount(t, backend, 1)
+	if len(snapshot.Roots[0].Tabs) != 1 || len(snapshot.Roots[0].Directories) != 1 || snapshot.Roots[0].Directories[0].Workspace.Name != "cloned" {
+		t.Fatalf("root snapshot after create = %#v", snapshot.Roots[0])
+	}
+
+	writeCommand(t, connection, "rmdir cloned")
+	snapshot = waitForRootDirectoryCount(t, backend, 0)
+	if len(snapshot.Roots[0].Tabs) != 1 || len(snapshot.Roots[0].Directories) != 0 {
+		t.Fatalf("root snapshot after delete = %#v", snapshot.Roots[0])
+	}
+}
+
 func TestEnsureWorkspaceRejectsNestedDirectory(t *testing.T) {
 	base := shortTempDir(t)
 	root := filepath.Join(base, "projects")
@@ -270,6 +327,20 @@ func waitForTabCount(t *testing.T, backend *client.Client, workspaceID string, c
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatalf("workspace %q tab count did not become %d", workspaceID, count)
+}
+
+func waitForRootDirectoryCount(t *testing.T, backend *client.Client, count int) model.Snapshot {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		snapshot, err := backend.Snapshot()
+		if err == nil && len(snapshot.Roots) == 1 && len(snapshot.Roots[0].Directories) == count {
+			return snapshot
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("root directory count did not become %d", count)
+	return model.Snapshot{}
 }
 
 func shortTempDir(t *testing.T) string {

@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	terminalTop    = 4
+	terminalTop    = 2
 	focusStyle     = "\x1b[1;96m"
 	selectStyle    = "\x1b[1;92m"
 	activeTabStyle = "\x1b[1;30;106m"
@@ -37,6 +37,14 @@ type pane int
 const (
 	leftPane pane = iota
 	terminalPane
+)
+
+type modal int
+
+const (
+	noModal modal = iota
+	aboutModal
+	configModal
 )
 
 type navItem struct {
@@ -69,10 +77,12 @@ type dashboard struct {
 	selectedWorkspaceID string
 	selectedPath        string
 	inputMode           bool
-	mouseFocusMode      bool
 	input               string
 	errorMessage        string
 	terminal            *embeddedTerminal
+	modal               modal
+	configPath          string
+	leftWidth           int
 }
 
 type snapshotMsg struct {
@@ -81,9 +91,11 @@ type snapshotMsg struct {
 }
 
 type workspaceMsg struct {
-	value    model.Workspace
-	snapshot model.Snapshot
-	err      error
+	value     model.Workspace
+	snapshot  model.Snapshot
+	tabID     string
+	createTab bool
+	err       error
 }
 
 type tabMsg struct {
@@ -98,8 +110,17 @@ type terminalOpenedMsg struct {
 	err    error
 }
 
-func Run(backend Backend, initial model.Snapshot) (Result, error) {
-	program := tea.NewProgram(newDashboard(backend, initial))
+type configSavedMsg struct {
+	leftWidth int
+	err       error
+}
+
+func Run(backend Backend, initial model.Snapshot, configPath string) (Result, error) {
+	config, err := loadConfig(configPath)
+	if err != nil {
+		return Result{}, fmt.Errorf("load UI config: %w", err)
+	}
+	program := tea.NewProgram(newDashboardWithConfig(backend, initial, configPath, config))
 	final, err := program.Run()
 	if err != nil {
 		return Result{}, fmt.Errorf("run dashboard: %w", err)
@@ -113,7 +134,20 @@ func Run(backend Backend, initial model.Snapshot) (Result, error) {
 }
 
 func newDashboard(backend Backend, initial model.Snapshot) dashboard {
-	return dashboard{backend: backend, state: initial, width: 80, height: 24}
+	return newDashboardWithConfig(backend, initial, "", Config{})
+}
+
+func newDashboardWithConfig(backend Backend, initial model.Snapshot, configPath string, config Config) dashboard {
+	value := dashboard{
+		backend:    backend,
+		state:      initial,
+		width:      80,
+		height:     24,
+		configPath: configPath,
+		leftWidth:  config.LeftWidth,
+	}
+	value.ensureWorkspaceCursor()
+	return value
 }
 
 func (m dashboard) Init() tea.Cmd {
@@ -128,8 +162,6 @@ func (m dashboard) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.resizeTerminal()
 	case tea.KeyPressMsg:
 		return m.handleKey(message)
-	case tea.MouseClickMsg:
-		return m.handleMouseClick(message)
 	case tea.PasteMsg:
 		if m.inputMode {
 			m.input += message.Content
@@ -144,6 +176,7 @@ func (m dashboard) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.state = message.value
 		m.syncSelection()
+		m.ensureWorkspaceCursor()
 		m.clampTabIndex()
 		m.errorMessage = ""
 		return m, nil
@@ -155,6 +188,16 @@ func (m dashboard) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleOpenedTerminal(message)
 	case terminalOutputMsg:
 		return m.handleTerminalOutput(message)
+	case configSavedMsg:
+		if message.leftWidth != m.leftWidth {
+			return m, m.saveConfig()
+		}
+		if message.err != nil {
+			m.errorMessage = message.err.Error()
+			return m, m.resizeTerminal()
+		}
+		m.errorMessage = ""
+		return m, m.resizeTerminal()
 	}
 	return m, nil
 }
@@ -163,18 +206,13 @@ func (m dashboard) handleKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.inputMode {
 		return m.handleInput(message)
 	}
-	if message.String() == "ctrl+g" {
-		m.mouseFocusMode = true
-		return m, nil
-	}
-	if m.mouseFocusMode && message.String() == "esc" {
-		m.mouseFocusMode = false
-		return m, nil
+	if m.modal != noModal {
+		return m.handleModalKey(message)
 	}
 	if m.focus == terminalPane {
 		if message.String() == "ctrl+\\" {
-			m.focus = leftPane
-			return m, nil
+			m.focusNavigation()
+			return m, m.refresh()
 		}
 		if m.terminal != nil {
 			m.terminal.sendKey(message)
@@ -190,46 +228,62 @@ func (m dashboard) handleKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "tab":
 		if m.terminal != nil && m.terminal.active {
 			m.focus = terminalPane
+			m.syncTabCursor(m.selectedTabs())
 		}
-	case "a":
+	case "a", "f2":
 		m.inputMode = true
 		m.input = ""
 		m.errorMessage = ""
-	case "r":
+	case "r", "f5":
 		return m, m.refresh()
-	case "+":
-		return m, m.createTab()
+	case "?", "f1":
+		m.modal = aboutModal
+	case ",":
+		m.modal = configModal
 	case "up", "k":
 		m.moveNavigation(-1)
 	case "down", "j":
 		m.moveNavigation(1)
 	case "left", "h":
 		m.moveTab(-1)
-		return m, m.openSelectedTerminal()
 	case "right", "l":
 		m.moveTab(1)
-		return m, m.openSelectedTerminal()
 	case "enter":
 		return m, m.selectWorkspace()
 	}
 	return m, nil
 }
 
-func (m dashboard) handleMouseClick(message tea.MouseClickMsg) (tea.Model, tea.Cmd) {
-	if !m.mouseFocusMode || message.Button != tea.MouseLeft {
+func (m dashboard) handleModalKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if message.String() == "esc" {
+		m.modal = noModal
 		return m, nil
 	}
-	m.mouseFocusMode = false
-	leftWidth, _, bodyHeight, _ := m.dimensions()
-	if message.Y < 0 || message.Y >= bodyHeight {
+	if m.modal != configModal {
 		return m, nil
 	}
-	if message.X >= 0 && message.X < leftWidth {
-		m.focus = leftPane
-	} else if message.X >= leftWidth+3 && m.terminal != nil && m.terminal.active {
-		m.focus = terminalPane
+	switch message.String() {
+	case "left", "[":
+		return m.adjustLeftWidth(-1)
+	case "right", "]":
+		return m.adjustLeftWidth(1)
 	}
 	return m, nil
+}
+
+func (m dashboard) adjustLeftWidth(delta int) (tea.Model, tea.Cmd) {
+	current, _, _, _ := m.dimensions()
+	maximum := min(maximumLeftWidth, max(m.width, 40)-20)
+	m.leftWidth = min(max(current+delta, minimumLeftWidth), maximum)
+	return m, m.saveConfig()
+}
+
+func (m dashboard) saveConfig() tea.Cmd {
+	path := m.configPath
+	config := Config{LeftWidth: m.leftWidth}
+	return func() tea.Msg {
+		return configSavedMsg{leftWidth: config.LeftWidth, err: saveConfig(path, config)}
+	}
 }
 
 func (m dashboard) handleInput(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
@@ -267,18 +321,25 @@ func (m dashboard) handleWorkspace(message workspaceMsg) (tea.Model, tea.Cmd) {
 		m.errorMessage = message.err.Error()
 		return m, nil
 	}
-	m.closeTerminal()
 	m.selectedWorkspaceID = message.value.ID
 	m.selectedPath = message.value.Path
 	m.state = message.snapshot
 	tabs := m.selectedTabs()
-	m.tabIndex = firstRunningTab(tabs)
 	m.focus = leftPane
 	m.errorMessage = ""
-	if len(tabs) == 0 {
+	if message.createTab {
+		m.tabIndex = len(tabs)
 		return m, m.createTab()
 	}
-	return m, m.openSelectedTerminal()
+	for index, tab := range tabs {
+		if tab.ID == message.tabID {
+			m.tabIndex = index
+			return m, m.openSelectedTerminal()
+		}
+	}
+	m.clampTabIndex()
+	m.errorMessage = "selected terminal is no longer running"
+	return m, nil
 }
 
 func (m dashboard) handleCreatedTab(message tabMsg) (tea.Model, tea.Cmd) {
@@ -336,18 +397,23 @@ func (m dashboard) refresh() tea.Cmd {
 }
 
 func (m dashboard) selectWorkspace() tea.Cmd {
-	items := m.navigationItems()
-	if len(items) == 0 || m.navIndex >= len(items) || items[m.navIndex].isRoot {
+	item, ok := m.navigationItem()
+	if !ok {
 		return nil
 	}
-	item := items[m.navIndex]
+	tabs := runningTabs(item.tabs)
+	createTab := m.tabIndex >= len(tabs)
+	tabID := ""
+	if !createTab {
+		tabID = tabs[m.tabIndex].ID
+	}
 	return func() tea.Msg {
 		workspace, err := m.backend.EnsureWorkspace(item.root.ID, item.workspace.Path)
 		if err != nil {
 			return workspaceMsg{err: err}
 		}
 		snapshot, err := m.backend.Snapshot()
-		return workspaceMsg{value: workspace, snapshot: snapshot, err: err}
+		return workspaceMsg{value: workspace, snapshot: snapshot, tabID: tabID, createTab: createTab, err: err}
 	}
 }
 
@@ -413,34 +479,76 @@ func (m *dashboard) closeTerminal() {
 }
 
 func (m *dashboard) moveNavigation(delta int) {
-	count := len(m.navigationItems())
-	if count == 0 {
+	items := m.navigationItems()
+	if len(items) == 0 {
 		m.navIndex = 0
-		return
-	}
-	m.navIndex = (m.navIndex + delta + count) % count
-}
-
-func (m *dashboard) moveTab(delta int) {
-	count := len(m.selectedTabs())
-	if count == 0 {
 		m.tabIndex = 0
 		return
 	}
+	m.navIndex = (m.navIndex + delta + len(items)) % len(items)
+	m.syncTabCursor(runningTabs(items[m.navIndex].tabs))
+}
+
+func (m *dashboard) moveTab(delta int) {
+	if _, ok := m.navigationItem(); !ok {
+		m.tabIndex = 0
+		return
+	}
+	count := len(m.navigationTabs()) + 1
 	m.tabIndex = (m.tabIndex + delta + count) % count
 }
 
 func (m *dashboard) clampTabIndex() {
-	count := len(m.selectedTabs())
-	if count == 0 {
+	if _, ok := m.navigationItem(); !ok {
 		m.tabIndex = 0
-	} else if m.tabIndex >= count {
-		m.tabIndex = count - 1
+		return
+	}
+	count := len(m.navigationTabs())
+	if m.tabIndex > count {
+		m.tabIndex = count
+	}
+}
+
+func (m *dashboard) ensureWorkspaceCursor() {
+	if _, ok := m.navigationItem(); ok {
+		return
+	}
+	m.navIndex = 0
+}
+
+func (m *dashboard) focusNavigation() {
+	m.focus = leftPane
+	items := m.navigationItems()
+	for index, item := range items {
+		if item.workspace.Path == m.selectedPath {
+			m.navIndex = index
+			m.syncTabCursor(runningTabs(item.tabs))
+			return
+		}
+	}
+}
+
+func (m *dashboard) syncTabCursor(tabs []model.Tab) {
+	m.tabIndex = 0
+	if m.terminal == nil {
+		return
+	}
+	for index, tab := range tabs {
+		if tab.ID == m.terminal.id {
+			m.tabIndex = index
+			return
+		}
 	}
 }
 
 func (m *dashboard) syncSelection() {
 	for _, root := range m.state.Roots {
+		if root.Root.Path == m.selectedPath {
+			if len(root.Tabs) > 0 {
+				m.selectedWorkspaceID = root.Tabs[0].WorkspaceID
+			}
+			return
+		}
 		for _, directory := range root.Directories {
 			if directory.Workspace.Path == m.selectedPath {
 				m.selectedWorkspaceID = directory.Workspace.ID
@@ -455,12 +563,37 @@ func (m *dashboard) syncSelection() {
 func (m dashboard) navigationItems() []navItem {
 	result := make([]navItem, 0)
 	for _, root := range m.state.Roots {
-		result = append(result, navItem{root: root.Root, isRoot: true})
+		result = append(result, navItem{
+			root: root.Root,
+			workspace: model.Workspace{
+				RootID: root.Root.ID,
+				Name:   root.Root.Name,
+				Path:   root.Root.Path,
+			},
+			tabs:   root.Tabs,
+			isRoot: true,
+		})
 		for _, directory := range root.Directories {
 			result = append(result, navItem{root: root.Root, workspace: directory.Workspace, tabs: directory.Tabs})
 		}
 	}
 	return result
+}
+
+func (m dashboard) navigationItem() (navItem, bool) {
+	items := m.navigationItems()
+	if m.navIndex < 0 || m.navIndex >= len(items) {
+		return navItem{}, false
+	}
+	return items[m.navIndex], true
+}
+
+func (m dashboard) navigationTabs() []model.Tab {
+	item, ok := m.navigationItem()
+	if !ok {
+		return nil
+	}
+	return runningTabs(item.tabs)
 }
 
 func openTabMarkers(tabs []model.Tab) string {
@@ -475,34 +608,38 @@ func openTabMarkers(tabs []model.Tab) string {
 
 func (m dashboard) selectedTabs() []model.Tab {
 	for _, root := range m.state.Roots {
+		for _, tab := range root.Tabs {
+			if tab.WorkspaceID == m.selectedWorkspaceID {
+				return runningTabs(root.Tabs)
+			}
+		}
 		for _, directory := range root.Directories {
 			if directory.Workspace.ID == m.selectedWorkspaceID {
-				result := make([]model.Tab, 0, len(directory.Tabs))
-				for _, tab := range directory.Tabs {
-					if tab.Running {
-						result = append(result, tab)
-					}
-				}
-				return result
+				return runningTabs(directory.Tabs)
 			}
 		}
 	}
 	return nil
 }
 
-func firstRunningTab(tabs []model.Tab) int {
-	for index, tab := range tabs {
+func runningTabs(tabs []model.Tab) []model.Tab {
+	result := make([]model.Tab, 0, len(tabs))
+	for _, tab := range tabs {
 		if tab.Running {
-			return index
+			result = append(result, tab)
 		}
 	}
-	return 0
+	return result
 }
 
 func (m dashboard) dimensions() (int, int, int, int) {
 	width := max(m.width, 40)
 	height := max(m.height, 10)
-	leftWidth := min(max(width/3, 20), 40)
+	leftWidth := m.leftWidth
+	if leftWidth == 0 {
+		leftWidth = min(max(width/4, minimumLeftWidth), 28)
+	}
+	leftWidth = min(leftWidth, width-20)
 	rightWidth := max(width-leftWidth-3, 17)
 	bodyHeight := height - 2
 	return leftWidth, rightWidth, bodyHeight, max(bodyHeight-terminalTop, 1)
@@ -519,9 +656,6 @@ func (m dashboard) View() tea.View {
 	view.AltScreen = true
 	view.WindowTitle = "romty"
 	view.MouseMode = tea.MouseModeNone
-	if m.mouseFocusMode {
-		view.MouseMode = tea.MouseModeCellMotion
-	}
 	if m.focus == terminalPane && m.terminal != nil && m.terminal.active {
 		leftWidth, _, _, _ := m.dimensions()
 		position := m.terminal.cursorPosition()
@@ -545,45 +679,103 @@ func (m dashboard) render() string {
 			rightLine = right[row]
 		}
 		leftLine = pad(truncate(leftLine, leftWidth), leftWidth)
-		if row == 0 {
-			if m.focus == leftPane {
-				leftLine = focusStyle + leftLine + resetStyle
-			} else {
-				rightLine = focusStyle + rightLine + resetStyle
-			}
-		} else if row == m.navIndex+2 {
+		if row == m.navIndex+2 {
 			leftLine = selectStyle + leftLine + resetStyle
 		}
-		lines = append(lines, leftLine+" │ "+rightLine)
+		lines = append(lines, leftLine+m.paneSeparator(row)+rightLine)
 	}
 	width := max(m.width, 40)
+	if m.modal != noModal {
+		lines = m.overlayModal(lines, width)
+	}
 	status := renderShortcuts(width,
-		shortcut{key: "a", description: "add root"},
-		shortcut{key: "Enter", description: "workspace"},
-		shortcut{key: "+", description: "new tab"},
-		shortcut{key: "h/l", description: "tabs"},
+		shortcut{key: "F1", description: "about"},
+		shortcut{key: ",", description: "config"},
+		shortcut{key: "F2", description: "add"},
+		shortcut{key: "F5", description: "refresh"},
+		shortcut{key: "↑/↓", description: "tree"},
+		shortcut{key: "←/→", description: "tabs/+"},
+		shortcut{key: "Enter", description: "select"},
 		shortcut{key: "Tab", description: "terminal"},
-		shortcut{key: "Ctrl+G", description: "mouse"},
-		shortcut{key: "q", description: "quit"},
+		shortcut{key: "Ctrl+C", description: "quit"},
 	)
 	if m.focus == terminalPane {
 		status = renderShortcuts(width,
-			shortcut{key: "Ctrl+G", description: "mouse focus"},
-			shortcut{key: "Ctrl+\\", description: "workspaces"},
+			shortcut{key: "Ctrl+\\", description: "navigation"},
 		)
 	}
 	if m.inputMode {
 		status = truncate("Root folder: "+m.input+"_", width)
-	} else if m.mouseFocusMode {
-		status = renderShortcuts(width,
-			shortcut{key: "Click", description: "focus pane"},
-			shortcut{key: "Esc", description: "cancel"},
-		)
 	} else if m.errorMessage != "" {
 		status = truncate("Error: "+m.errorMessage, width)
+	} else if m.modal == aboutModal {
+		status = renderShortcuts(width, shortcut{key: "Esc", description: "close"})
+	} else if m.modal == configModal {
+		status = renderShortcuts(width,
+			shortcut{key: "←/→", description: "adjust width"},
+			shortcut{key: "Esc", description: "close"},
+		)
 	}
 	lines = append(lines, strings.Repeat("─", min(width, 120)), status)
 	return strings.Join(lines, "\n")
+}
+
+func (m dashboard) overlayModal(lines []string, width int) []string {
+	modalLines := m.renderModal(width)
+	top := max((len(lines)-len(modalLines))/2, 0)
+	for index, line := range modalLines {
+		row := top + index
+		if row >= len(lines) {
+			break
+		}
+		left := max((width-len([]rune(line)))/2, 0)
+		right := max(width-left-len([]rune(line)), 0)
+		lines[row] = strings.Repeat(" ", left) + focusStyle + line + resetStyle + strings.Repeat(" ", right)
+	}
+	return lines
+}
+
+func (m dashboard) renderModal(width int) []string {
+	modalWidth := min(max(width-8, 32), 56)
+	if m.modal == configModal {
+		leftWidth, _, _, _ := m.dimensions()
+		return modalBox(modalWidth,
+			"Config",
+			"",
+			fmt.Sprintf("Left pane width: %d", leftWidth),
+			"",
+			"←/→ or [/]  Adjust",
+			"Esc          Close",
+		)
+	}
+	return modalBox(modalWidth,
+		"About",
+		"",
+		"romty",
+		"Persistent terminal workspace manager",
+		"",
+		"Esc  Close",
+	)
+}
+
+func modalBox(width int, values ...string) []string {
+	interior := width - 2
+	lines := make([]string, 0, len(values)+2)
+	lines = append(lines, "╭"+strings.Repeat("─", interior)+"╮")
+	for _, value := range values {
+		lines = append(lines, "│"+pad(truncate(value, interior), interior)+"│")
+	}
+	return append(lines, "╰"+strings.Repeat("─", interior)+"╯")
+}
+
+func (m dashboard) paneSeparator(row int) string {
+	if row != 0 {
+		return " │ "
+	}
+	if m.focus == leftPane {
+		return focusStyle + "◀" + resetStyle + "│ "
+	}
+	return " │" + focusStyle + "▶" + resetStyle
 }
 
 func (m dashboard) renderNavigation() []string {
@@ -591,7 +783,11 @@ func (m dashboard) renderNavigation() []string {
 	items := m.navigationItems()
 	for _, item := range items {
 		if item.isRoot {
-			lines = append(lines, "▾ "+item.root.Name)
+			line := "▾ " + item.root.Name
+			if markers := openTabMarkers(item.tabs); markers != "" {
+				line += "  " + markers
+			}
+			lines = append(lines, line)
 		} else {
 			line := "  " + item.workspace.Name
 			if markers := openTabMarkers(item.tabs); markers != "" {
@@ -601,26 +797,27 @@ func (m dashboard) renderNavigation() []string {
 		}
 	}
 	if len(items) == 0 {
-		lines = append(lines, "  Press a to add a root")
+		lines = append(lines, "  Press F2 to add a root")
 	}
 	return lines
 }
 
 func (m dashboard) renderTerminal(width int) []string {
-	lines := []string{"Terminal"}
-	if m.selectedWorkspaceID == "" {
-		return append(lines, "", "Select a workspace on the left")
-	}
-	lines = append(lines, truncate(m.selectedPath, width))
 	tabs := m.selectedTabs()
+	if m.focus == leftPane {
+		tabs = m.navigationTabs()
+	}
+	lines := []string{renderTabBar(tabs, m.tabIndex, width), strings.Repeat("─", width)}
+	if m.terminal != nil {
+		return append(lines, m.terminal.render()...)
+	}
+	if _, ok := m.navigationItem(); m.focus == leftPane && !ok {
+		return append(lines, "Select a root or workspace on the left")
+	}
 	if len(tabs) == 0 {
-		return append(lines, renderTabBar(tabs, m.tabIndex, width), strings.Repeat("─", width), "Creating a terminal...")
+		return append(lines, "Select + and press Enter to create a terminal")
 	}
-	lines = append(lines, renderTabBar(tabs, m.tabIndex, width), strings.Repeat("─", width))
-	if m.terminal == nil {
-		return append(lines, "Select a running tab with h/l")
-	}
-	return append(lines, m.terminal.render()...)
+	return append(lines, "Select a tab and press Enter")
 }
 
 func renderTabBar(tabs []model.Tab, active, width int) string {
@@ -638,7 +835,11 @@ func renderTabBar(tabs []model.Tab, active, width int) string {
 	if len(tabs) > 0 {
 		segments = append(segments, styledSegment{text: " "})
 	}
-	segments = append(segments, styledSegment{text: " + ", style: tabStyle})
+	style := tabStyle
+	if active == len(tabs) {
+		style = activeTabStyle
+	}
+	segments = append(segments, styledSegment{text: " + ", style: style})
 	return renderStyled(width, segments)
 }
 
