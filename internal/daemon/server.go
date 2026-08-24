@@ -24,9 +24,10 @@ import (
 
 var ErrAlreadyRunning = errors.New("romty daemon is already running")
 
-// requestTimeout bounds the handshake, not the session that may follow it. A
-// local socket handshake takes microseconds; this only has to be long enough
-// that no honest client ever meets it. It is a variable so tests need not wait.
+// requestTimeout bounds both halves of the handshake — reading the request and
+// writing the reply — but not the session that may follow it. A local socket
+// handshake takes microseconds; this only has to be long enough that no honest
+// client ever meets it. It is a variable so tests need not wait.
 var requestTimeout = 10 * time.Second
 
 type Server struct {
@@ -258,9 +259,19 @@ func checkClientVersion(request protocol.Request) error {
 }
 
 // reply stamps every response with the protocol version, so a client can tell
-// an old daemon from a puzzling reply.
+// an old daemon from a puzzling reply, and bounds the write.
+//
+// The read that precedes it is bounded because a client that connects and never
+// finishes a request would hold a goroutine and a file descriptor for the
+// daemon's whole life. A client that sends its request and then stops reading
+// does the same thing from the other side, as soon as the reply outgrows the
+// socket buffer — which a snapshot of a large tree does.
 func reply(connection net.Conn, response protocol.Response) error {
 	response.Version = protocol.Version
+	if err := connection.SetWriteDeadline(time.Now().Add(requestTimeout)); err != nil {
+		return err
+	}
+	defer connection.SetWriteDeadline(time.Time{})
 	return protocol.Write(connection, response)
 }
 
