@@ -581,6 +581,31 @@ func TestDashboardReportsFailedShutdown(t *testing.T) {
 
 // plainRows drops styling and trailing padding so viewport rows can be compared
 // whether they are rendered from the live screen or from the scrollback.
+// waitForGuest blocks until the guest's stream holds want, so tests do not
+// race the goroutine that drains the emulator's input pipe. A fixed sleep is
+// long enough on an idle machine and too short under -race.
+func waitForGuest(t *testing.T, stream *memoryStream, want string) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if strings.Contains(stream.String(), want) {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("guest received %q, want it to contain %q", stream.String(), want)
+}
+
+// waitForGuestSilence gives the emulator a chance to speak and fails if it
+// does, which is the opposite assertion and cannot be polled for.
+func waitForGuestSilence(t *testing.T, stream *memoryStream, was string) {
+	t.Helper()
+	time.Sleep(100 * time.Millisecond)
+	if now := stream.String(); now != was {
+		t.Fatalf("guest received %q, want nothing beyond %q", now, was)
+	}
+}
+
 func plainRows(lines []string) []string {
 	rows := make([]string, 0, len(lines))
 	for _, line := range lines {
@@ -848,9 +873,7 @@ func TestDashboardKeepsMouseWithTheHostUnlessPassthroughIsOn(t *testing.T) {
 		t.Fatalf("mouse mode = %v, want the host to keep the mouse by default", value.View().MouseMode)
 	}
 	value.Update(tea.MouseWheelMsg{X: 40, Y: 6, Button: tea.MouseWheelUp})
-	if sent := value.terminal.stream.(*memoryStream).String(); sent != "" {
-		t.Fatalf("mouse reached the guest without passthrough: %q", sent)
-	}
+	waitForGuestSilence(t, value.terminal.stream.(*memoryStream), "")
 
 	value.mousePassthrough = true
 	if value.View().MouseMode != tea.MouseModeAllMotion {
@@ -858,19 +881,12 @@ func TestDashboardKeepsMouseWithTheHostUnlessPassthroughIsOn(t *testing.T) {
 	}
 	leftWidth, _, _, _ := value.dimensions()
 	value.Update(tea.MouseWheelMsg{X: leftWidth + 3 + 4, Y: terminalTop + 2, Button: tea.MouseWheelUp})
-	time.Sleep(30 * time.Millisecond)
+	waitForGuest(t, value.terminal.stream.(*memoryStream), "\x1b[<64;5;3")
 	sent := value.terminal.stream.(*memoryStream).String()
-	if !strings.HasPrefix(sent, "\x1b[<64;5;3") {
-		t.Fatalf("guest received %q, want an SGR wheel event at column 5, row 3", sent)
-	}
 
 	// Events over the workspace pane are not the guest's business.
 	value.Update(tea.MouseWheelMsg{X: 1, Y: terminalTop + 2, Button: tea.MouseWheelUp})
-	time.Sleep(30 * time.Millisecond)
-	if value.terminal.stream.(*memoryStream).String() != sent {
-		t.Fatalf("an event outside the terminal pane reached the guest: %q",
-			value.terminal.stream.(*memoryStream).String())
-	}
+	waitForGuestSilence(t, value.terminal.stream.(*memoryStream), sent)
 
 	// Copy mode takes the mouse back so the host can select the scrolled page.
 	updated, _ := value.Update(key(tea.KeyF7, ""))
@@ -888,12 +904,8 @@ func TestDashboardForwardsPagingToTheGuestThatOwnsTheScreen(t *testing.T) {
 	value.terminal.writeOutput([]byte("\x1b[?1049h"))
 
 	value.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyPgUp, Mod: tea.ModShift}))
-	time.Sleep(30 * time.Millisecond)
-	// Sent unmodified: the emulator has no encoding for Shift with a special
-	// key, and plain PgUp is the key such applications bind.
-	if sent := value.terminal.stream.(*memoryStream).String(); sent != "\x1b[5~" {
-		t.Fatalf("guest received %q for Shift+PgUp, want a plain PgUp", sent)
-	}
+	// Sent unmodified: plain PgUp is the key such applications bind.
+	waitForGuest(t, value.terminal.stream.(*memoryStream), "\x1b[5~")
 
 	// On the main screen it still belongs to romty's own scrollback.
 	value.terminal.writeOutput([]byte("\x1b[?1049l"))
