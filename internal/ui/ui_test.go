@@ -415,7 +415,7 @@ func TestDashboardSupportsHiddenWorkspaceShortcuts(t *testing.T) {
 	}
 
 	value = newDashboard(backend, model.Snapshot{})
-	updated, command = value.Update(key('r', "r"))
+	_, command = value.Update(key('r', "r"))
 	if command == nil {
 		t.Fatal("r refresh command = nil")
 	}
