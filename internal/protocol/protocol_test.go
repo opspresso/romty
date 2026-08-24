@@ -59,3 +59,22 @@ func TestReadAcceptsAMessageLargerThanTheReadBuffer(t *testing.T) {
 		t.Fatalf("Path length = %d, want %d", len(request.Path), len(long))
 	}
 }
+
+// The daemon outlives the client binary, so a new client can meet an old
+// daemon. A reply with no version is one that predates the field.
+func TestVersionDistinguishesAnOlderDaemon(t *testing.T) {
+	var encoded bytes.Buffer
+	if err := protocol.Write(&encoded, protocol.Response{}); err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+	var response protocol.Response
+	if err := protocol.Read(bufio.NewReader(&encoded), &response); err != nil {
+		t.Fatalf("Read() error = %v", err)
+	}
+	if response.Version != 0 {
+		t.Fatalf("an unstamped reply reports version %d, want 0", response.Version)
+	}
+	if protocol.Version == 0 {
+		t.Fatal("the current version is 0, so an old daemon is indistinguishable")
+	}
+}

@@ -108,11 +108,16 @@ func (c *Client) EnsureWorkspace(rootID, path string) (model.Workspace, error) {
 }
 
 func (c *Client) CreateTab(workspaceID string, columns, rows uint16) (model.Tab, error) {
+	// The daemon may predate this shell by days, so the environment and the
+	// shell to run come from here rather than from whatever the daemon
+	// inherited when it started.
 	response, err := c.call(protocol.Request{
 		Action:      protocol.ActionCreateTab,
 		WorkspaceID: workspaceID,
 		Columns:     columns,
 		Rows:        rows,
+		Environment: os.Environ(),
+		Shell:       os.Getenv("SHELL"),
 	})
 	if err != nil {
 		return model.Tab{}, err
@@ -175,6 +180,14 @@ func (c *Client) OpenTerminal(tabID string) (io.ReadWriteCloser, error) {
 	return &terminalStream{Conn: connection, reader: reader}, nil
 }
 
+// outdatedDaemon explains a mismatch in the terms a user can act on, rather
+// than leaving them with a puzzling error from a daemon that predates the
+// request they just made.
+func outdatedDaemon(daemonVersion int) error {
+	return fmt.Errorf("this romty speaks protocol %d but the running daemon speaks %d; run `romty stop` and start romty again",
+		protocol.Version, daemonVersion)
+}
+
 func (c *Client) call(request protocol.Request) (protocol.Response, error) {
 	connection, err := net.DialTimeout("unix", c.socket, 2*time.Second)
 	if err != nil {
@@ -184,6 +197,7 @@ func (c *Client) call(request protocol.Request) (protocol.Response, error) {
 	if err := connection.SetDeadline(time.Now().Add(3 * time.Second)); err != nil {
 		return protocol.Response{}, fmt.Errorf("set daemon deadline: %w", err)
 	}
+	request.Version = protocol.Version
 	if err := protocol.Write(connection, request); err != nil {
 		return protocol.Response{}, err
 	}
@@ -191,6 +205,9 @@ func (c *Client) call(request protocol.Request) (protocol.Response, error) {
 	var response protocol.Response
 	if err := protocol.Read(bufio.NewReader(connection), &response); err != nil {
 		return protocol.Response{}, err
+	}
+	if response.Version != protocol.Version {
+		return protocol.Response{}, outdatedDaemon(response.Version)
 	}
 	if response.Error != "" {
 		return protocol.Response{}, fmt.Errorf("daemon: %s", response.Error)

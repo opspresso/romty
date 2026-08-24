@@ -198,7 +198,7 @@ func (s *Server) handle(connection net.Conn) {
 	reader := bufio.NewReader(connection)
 	var request protocol.Request
 	if err := protocol.Read(reader, &request); err != nil {
-		_ = protocol.Write(connection, protocol.Response{Error: err.Error()})
+		_ = reply(connection, protocol.Response{Error: err.Error()})
 		return
 	}
 
@@ -214,12 +214,18 @@ func (s *Server) handle(connection net.Conn) {
 	if request.Action == protocol.ActionShutdown {
 		// Stop even when the acknowledgement cannot be delivered, so a client
 		// that already timed out never leaves the daemon running unnoticed.
-		_ = protocol.Write(connection, protocol.Response{})
+		_ = reply(connection, protocol.Response{})
 		s.stopOnce.Do(func() { close(s.stop) })
 		return
 	}
-	response := s.dispatch(request)
-	_ = protocol.Write(connection, response)
+	_ = reply(connection, s.dispatch(request))
+}
+
+// reply stamps every response with the protocol version, so a client can tell
+// an old daemon from a puzzling reply.
+func reply(connection net.Conn, response protocol.Response) error {
+	response.Version = protocol.Version
+	return protocol.Write(connection, response)
 }
 
 func (s *Server) stopped() bool {
@@ -244,7 +250,7 @@ func (s *Server) dispatch(request protocol.Request) protocol.Response {
 	case protocol.ActionEnsureWorkspace:
 		return s.ensureWorkspace(request.RootID, request.Path)
 	case protocol.ActionCreateTab:
-		return s.createTab(request.WorkspaceID, request.Columns, request.Rows)
+		return s.createTab(request)
 	case protocol.ActionResize:
 		return s.resize(request.TabID, request.Columns, request.Rows)
 	default:
@@ -378,7 +384,13 @@ func (s *Server) ensureWorkspace(rootID, path string) protocol.Response {
 	return protocol.Response{Workspace: &workspace}
 }
 
-func (s *Server) createTab(workspaceID string, columns, rows uint16) protocol.Response {
+func (s *Server) createTab(request protocol.Request) protocol.Response {
+	workspaceID := request.WorkspaceID
+	shell := s.shell
+	if request.Shell != "" {
+		shell = request.Shell
+	}
+
 	s.mu.Lock()
 	workspace, ok := findWorkspace(s.value.Workspaces, workspaceID)
 	if !ok {
@@ -397,9 +409,10 @@ func (s *Server) createTab(workspaceID string, columns, rows uint16) protocol.Re
 	// that exits at once calls sessionExited straight away; holding the lock
 	// makes that wait until the tab exists, rather than removing a tab that is
 	// not there yet and leaving a dead one behind afterwards.
-	value, err := startSession(tab.ID, workspace.Path, s.shell, columns, rows, func() {
-		s.sessionExited(tab.ID)
-	})
+	value, err := startSession(tab.ID, workspace.Path, shell, request.Environment,
+		request.Columns, request.Rows, func() {
+			s.sessionExited(tab.ID)
+		})
 	if err != nil {
 		s.mu.Unlock()
 		return protocol.Response{Error: err.Error()}
@@ -435,10 +448,10 @@ func (s *Server) handleAttach(connection net.Conn, tabID string) {
 	value, ok := s.sessions[tabID]
 	s.mu.Unlock()
 	if !ok {
-		_ = protocol.Write(connection, protocol.Response{Error: "running terminal session not found"})
+		_ = reply(connection, protocol.Response{Error: "running terminal session not found"})
 		return
 	}
-	if err := protocol.Write(connection, protocol.Response{}); err != nil {
+	if err := reply(connection, protocol.Response{}); err != nil {
 		return
 	}
 	if err := value.attach(connection); err != nil {
