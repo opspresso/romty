@@ -24,6 +24,8 @@ jobs:
         with:
           go-version-file: go.mod
 
+      # CI already gates every pull request and push to main; this is the last
+      # check before artifacts go out.
       - name: Validate
         run: |
           unformatted="$(gofmt -s -l .)"
@@ -33,7 +35,7 @@ jobs:
             exit 1
           fi
           go vet ./...
-          go test ./...
+          go test -race ./...
 
       - name: Release
         uses: goreleaser/goreleaser-action@v7
