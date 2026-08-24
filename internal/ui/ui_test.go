@@ -434,8 +434,8 @@ func TestDashboardSupportsIMEIndependentShortcuts(t *testing.T) {
 	value := newDashboard(backend, model.Snapshot{})
 	updated, command := value.Update(key(tea.KeyF1, ""))
 	value = updated.(dashboard)
-	if value.modal != aboutModal || command != nil {
-		t.Fatalf("F1 result = (modal %v, command %v), want about modal", value.modal, command)
+	if value.modal != helpModal || command != nil {
+		t.Fatalf("F1 result = (modal %v, command %v), want help modal", value.modal, command)
 	}
 
 	value = newDashboard(backend, model.Snapshot{})
@@ -1629,10 +1629,10 @@ func TestDashboardKeepsGlobalKeysAtOnePrecedence(t *testing.T) {
 		message tea.KeyPressMsg
 		want    modal
 	}{
-		{message: key(tea.KeyF1, ""), want: aboutModal},
+		{message: key(tea.KeyF1, ""), want: helpModal},
 		{message: key(tea.KeyF3, ""), want: configModal},
 		{message: key(tea.KeyF6, ""), want: shutdownModal},
-		{message: key(tea.KeyF1, ""), want: aboutModal},
+		{message: key(tea.KeyF1, ""), want: helpModal},
 	} {
 		updated, command := value.Update(step.message)
 		value = updated.(dashboard)
@@ -1984,7 +1984,7 @@ func TestDashboardShowsAboutModalWithoutReplacingDashboard(t *testing.T) {
 	value.width = 100
 	value.height = 30
 
-	updated, _ := value.Update(key(tea.KeyF1, ""))
+	updated, _ := value.Update(key('i', "i"))
 	value = updated.(dashboard)
 	if value.modal != aboutModal {
 		t.Fatalf("modal = %v, want about", value.modal)
@@ -2001,6 +2001,27 @@ func TestDashboardShowsAboutModalWithoutReplacingDashboard(t *testing.T) {
 	value = updated.(dashboard)
 	if value.modal != noModal || strings.Contains(value.render(), "Persistent terminal workspace manager") {
 		t.Fatalf("about modal did not close:\n%s", value.render())
+	}
+}
+
+// Help used to answer to `?` alone, which the terminal pane forwards to the
+// shell, so the pane whose shortcuts are hardest to remember was the one with
+// no way to look them up.
+func TestDashboardOpensHelpFromTheTerminalPane(t *testing.T) {
+	value := newDashboard(&fakeBackend{}, model.Snapshot{})
+	value.focus = terminalPane
+	value.terminal = newEmbeddedTerminal("tab-1", newMemoryStream(""), 40, 10)
+
+	updated, command := value.Update(key('?', "?"))
+	value = updated.(dashboard)
+	if value.modal != noModal || command != nil {
+		t.Fatalf("? in the terminal = (modal %v, command %v), want it forwarded to the shell", value.modal, command)
+	}
+
+	updated, command = value.Update(key(tea.KeyF1, ""))
+	value = updated.(dashboard)
+	if value.modal != helpModal || command != nil {
+		t.Fatalf("F1 in the terminal = (modal %v, command %v), want the help modal", value.modal, command)
 	}
 }
 
@@ -2032,14 +2053,14 @@ func TestDashboardShowsAllShortcutsInHelpModal(t *testing.T) {
 		keys        []string
 		description string
 	}{
-		{keys: []string{"F1", "i"}, description: "About"},
+		{keys: []string{"F1", "?"}, description: "Help"},
+		{keys: []string{"i"}, description: "About"},
 		{keys: []string{"F2", "a"}, description: "Add root"},
 		{keys: []string{",", "F3"}, description: "Config"},
 		{keys: []string{"q", "F4"}, description: "Quit"},
 		{keys: []string{"r", "F5"}, description: "Refresh"},
 		{keys: []string{"F6"}, description: "Stop daemon"},
 		{keys: []string{"F7"}, description: "Scrollback"},
-		{keys: []string{"?"}, description: "Help"},
 		{keys: []string{"↑/↓", "j/k"}, description: "Select workspace"},
 		{keys: []string{"←/→", "h/l"}, description: "Select tab / +"},
 		{keys: []string{"Enter"}, description: "Open / confirm"},
@@ -2065,13 +2086,13 @@ func TestDashboardShowsAllShortcutsInHelpModal(t *testing.T) {
 		first       string
 		second      string
 	}{
-		{description: "About", first: "F1", second: "i"},
+		{description: "Help", first: "F1", second: "?"},
 		{description: "Add root", first: "F2", second: "a"},
 		{description: "Config", first: "F3", second: ","},
 		{description: "Quit", first: "F4", second: "q"},
 		{description: "Refresh", first: "F5", second: "r"},
 	} {
-		line := helpLine(plainLines, row.description)
+		line := helpLine(plainLines, row.description, row.first, row.second)
 		if first, second := strings.Index(line, row.first), strings.Index(line, row.second); first < 0 || first > second {
 			t.Fatalf("%q row = %q, want %s before %s", row.description, line, row.first, row.second)
 		}
@@ -2121,9 +2142,18 @@ func TestDashboardScrollsHelpModalOnShortTerminals(t *testing.T) {
 	}
 }
 
-func helpLine(lines []string, description string) string {
+// helpLine wants the shortcut row, not any line mentioning the description:
+// the modal's own title border says "Help" too.
+func helpLine(lines []string, description string, keys ...string) string {
 	for _, line := range lines {
-		if strings.Contains(line, description) {
+		if !strings.Contains(line, description) {
+			continue
+		}
+		matches := true
+		for _, key := range keys {
+			matches = matches && strings.Contains(line, key)
+		}
+		if matches {
 			return line
 		}
 	}

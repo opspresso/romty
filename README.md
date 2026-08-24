@@ -71,7 +71,7 @@ romty stop
 
 The left pane shows the workspace tree, which scrolls with the selection when the tree is taller than the pane. A `●` after an item represents one running terminal tab. The right pane contains the tab rail and the embedded terminal. Accent colors distinguish the current selection, active tab, and focused pane; the arrow beside the vertical divider points to the active pane.
 
-The status bar shows `F1` through `F7` in both panes and adds navigation keys for the active pane. Press `?` in the workspace pane to see every shortcut, including aliases hidden from the status bar.
+The status bar shows `F1` through `F7` in both panes and adds navigation keys for the active pane. Press `F1` in either pane to see every shortcut, including aliases hidden from the status bar.
 
 ### Global keys
 
@@ -79,7 +79,7 @@ These function keys work from either pane, with a modal open, and with non-Engli
 
 | Key | Action |
 |---|---|
-| `F1` | Open About |
+| `F1` | Open Help |
 | `F2` | Add a root directory |
 | `F3` | Open Config |
 | `F4` | Quit romty |
@@ -96,13 +96,13 @@ These function keys work from either pane, with a modal open, and with non-Engli
 | `←`/`→`, `h`/`l` | Move between terminal tabs and the `+` tab |
 | `Enter` | Open the selected tab or create the selected `+` tab |
 | `Tab` | Focus the active terminal |
-| `i`, `F1` | Open About |
+| `i` | Open About |
 | `a`, `F2` | Add a root directory |
 | `d` | Forget the selected root; terminals under it keep running |
 | `,`, `F3` | Open Config |
 | `q`, `F4` | Quit romty |
 | `r`, `F5` | Refresh roots, workspaces, and sessions |
-| `?` | Open Help |
+| `?`, `F1` | Open Help |
 | `Ctrl+C` | Quit romty |
 
 The `+` key itself is not a shortcut. Select the `+` tab with `←`/`→` and confirm it with `Enter`.
