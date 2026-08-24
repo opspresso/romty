@@ -188,6 +188,14 @@ func (m dashboard) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	case snapshotMsg:
 		if message.err != nil {
 			m.errorMessage = message.err.Error()
+			if m.terminalExited {
+				// The snapshot that would have picked a sibling tab never
+				// arrived. Settle on the workspace pane now: leaving the move
+				// pending would fire it on an unrelated refresh much later and
+				// tear down a healthy terminal.
+				m.terminalExited = false
+				m.focusNavigation()
+			}
 			return m, nil
 		}
 		m.state = message.value
