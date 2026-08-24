@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"io"
 	"strings"
 	"sync"
@@ -65,6 +66,12 @@ func (t *embeddedTerminal) writeOutput(data []byte) {
 
 func (t *embeddedTerminal) sendKey(message tea.KeyPressMsg) {
 	key := tea.Key(message)
+	if sequence, ok := modifiedSpecialKey(key); ok {
+		// Written to the same pipe SendKey uses, so it keeps its place in the
+		// order the user typed.
+		_, _ = io.WriteString(t.emulator.InputPipe(), sequence)
+		return
+	}
 	t.emulator.SendKey(uv.KeyPressEvent(uv.Key{
 		Text:        key.Text,
 		Mod:         uv.KeyMod(key.Mod),
@@ -109,6 +116,60 @@ func (t *embeddedTerminal) guestMouseMode() tea.MouseMode {
 
 func (t *embeddedTerminal) sendMouse(event uv.MouseEvent) {
 	t.emulator.SendMouse(event)
+}
+
+// The emulator encodes unmodified special keys and Ctrl with a letter, but a
+// special key held with Shift, Ctrl or Meta falls through its table and
+// produces no bytes at all. Without the encodings below romty swallows
+// ctrl+left, shift+up, ctrl+home and their neighbours for every guest
+// application, with nothing to show the user why.
+//
+// xterm spells these as CSI with a modifier parameter: arrows, Home, End and
+// F1 to F4 take a letter final, the rest a number and a tilde.
+var (
+	modifiedKeyFinals = map[rune]byte{
+		tea.KeyUp: 'A', tea.KeyDown: 'B', tea.KeyRight: 'C', tea.KeyLeft: 'D',
+		tea.KeyBegin: 'E', tea.KeyEnd: 'F', tea.KeyHome: 'H',
+		tea.KeyF1: 'P', tea.KeyF2: 'Q', tea.KeyF3: 'R', tea.KeyF4: 'S',
+	}
+	modifiedKeyNumbers = map[rune]int{
+		tea.KeyInsert: 2, tea.KeyDelete: 3, tea.KeyPgUp: 5, tea.KeyPgDown: 6,
+		tea.KeyF5: 15, tea.KeyF6: 17, tea.KeyF7: 18, tea.KeyF8: 19,
+		tea.KeyF9: 20, tea.KeyF10: 21, tea.KeyF11: 23, tea.KeyF12: 24,
+	}
+)
+
+func modifiedSpecialKey(key tea.Key) (string, bool) {
+	if key.Mod&^tea.ModAlt == 0 {
+		// Unmodified, or Alt alone, which the emulator encodes by prefixing
+		// an escape. Leave both to it.
+		return "", false
+	}
+	parameter := modifierParameter(key.Mod)
+	if final, ok := modifiedKeyFinals[key.Code]; ok {
+		return fmt.Sprintf("\x1b[1;%d%c", parameter, final), true
+	}
+	if number, ok := modifiedKeyNumbers[key.Code]; ok {
+		return fmt.Sprintf("\x1b[%d;%d~", number, parameter), true
+	}
+	return "", false
+}
+
+// modifierParameter is xterm's one-based modifier encoding: shift 1, alt 2,
+// ctrl 4, meta 8, summed onto a base of 1.
+func modifierParameter(mod tea.KeyMod) int {
+	parameter := 1
+	for bit, weight := range map[tea.KeyMod]int{
+		tea.ModShift: 1,
+		tea.ModAlt:   2,
+		tea.ModCtrl:  4,
+		tea.ModMeta:  8,
+	} {
+		if mod&bit != 0 {
+			parameter += weight
+		}
+	}
+	return parameter
 }
 
 func (t *embeddedTerminal) paste(value string) {

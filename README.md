@@ -113,7 +113,7 @@ The `+` key itself is not a shortcut. Select the `+` tab with `←`/`→` and co
 | `Ctrl+\` | Focus the workspace pane and refresh the workspace tree |
 | `Ctrl+\` `Ctrl+\` | Pressing it a second time, from the workspace pane, opens the terminal's scrollback |
 
-Except for the global function keys and `Ctrl+\`, keyboard and paste input is forwarded to the PTY. Mouse tracking remains disabled so the host terminal can select and copy displayed text normally.
+Except for the global function keys and `Ctrl+\`, keyboard and paste input is forwarded to the PTY, including keys held with `Shift`, `Ctrl` or `Meta` such as `Ctrl`+`←` for word-wise movement. Mouse tracking remains disabled so the host terminal can select and copy displayed text normally.
 
 ### Scrollback
 

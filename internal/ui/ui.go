@@ -446,8 +446,7 @@ func (m dashboard) toggleScrollback() (tea.Model, tea.Cmd) {
 func (m dashboard) pageHistory(pages int) (tea.Model, tea.Cmd) {
 	if !m.scrollback && !m.startScrollback() {
 		// An application that owns the screen pages its own output. Send it the
-		// unmodified key: such applications bind plain PgUp/PgDn, and the
-		// emulator has no encoding for Shift with a special key anyway.
+		// unmodified key, because that is what such applications bind.
 		if pages != 0 && m.focus == terminalPane && m.terminal != nil && m.terminal.altScreen() {
 			m.terminal.sendKey(pagingKey(pages))
 			return m, nil
