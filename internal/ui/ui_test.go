@@ -2,13 +2,17 @@ package ui
 
 import (
 	"bytes"
+	"image/color"
 	"io"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/nalbam/romty/internal/model"
 )
@@ -188,7 +192,7 @@ func TestDashboardSelectsRootAndCreatesTerminal(t *testing.T) {
 	value.height = 40
 	value.navIndex = 0
 
-	if rendered := value.render(); !strings.Contains(rendered, selectStyle+"▾ projects") || !strings.Contains(rendered, "  cloned") {
+	if rendered := ansi.Strip(value.render()); !strings.Contains(rendered, "▌ ▾ projects") || !strings.Contains(rendered, "  └─ cloned") {
 		t.Fatalf("root and indented workspace are not distinguishable:\n%s", rendered)
 	}
 	updated, selectCommand := value.Update(key(tea.KeyEnter, ""))
@@ -212,7 +216,7 @@ func TestDashboardSelectsRootAndCreatesTerminal(t *testing.T) {
 	if value.terminal == nil || value.terminal.id != tab.ID || readCommand == nil {
 		t.Fatalf("root terminal = %v, read command = %v", value.terminal, readCommand)
 	}
-	if rendered := value.render(); !strings.Contains(rendered, "▾ projects  ●") {
+	if rendered := ansi.Strip(value.render()); !strings.Contains(rendered, "▎ ▾ projects") || !strings.Contains(rendered, "●") {
 		t.Fatalf("root tab marker is missing:\n%s", rendered)
 	}
 }
@@ -245,7 +249,7 @@ func TestDashboardReloadsWorkspacesWhenReturningFromTerminal(t *testing.T) {
 	}
 	updated, _ = value.Update(refreshCommand())
 	value = updated.(dashboard)
-	if backend.snapshotCount != 1 || !strings.Contains(value.render(), "  cloned") {
+	if backend.snapshotCount != 1 || !strings.Contains(ansi.Strip(value.render()), "  └─ cloned") {
 		t.Fatalf("reloaded workspace list = (snapshots %d):\n%s", backend.snapshotCount, value.render())
 	}
 }
@@ -276,7 +280,7 @@ func TestDashboardAddsRootFromPrompt(t *testing.T) {
 	backend := &fakeBackend{}
 	value := newDashboard(backend, model.Snapshot{})
 
-	updated, _ := value.Update(key('a', "a"))
+	updated, _ := value.Update(key(tea.KeyF2, ""))
 	value = updated.(dashboard)
 	updated, _ = value.Update(key(tea.KeyExtended, "/projects"))
 	value = updated.(dashboard)
@@ -296,7 +300,7 @@ func TestDashboardAcceptsPastedRootPath(t *testing.T) {
 	backend := &fakeBackend{}
 	value := newDashboard(backend, model.Snapshot{})
 
-	updated, _ := value.Update(key('a', "a"))
+	updated, _ := value.Update(key(tea.KeyF2, ""))
 	value = updated.(dashboard)
 	updated, _ = value.Update(tea.PasteMsg{Content: "/projects/with spaces"})
 	value = updated.(dashboard)
@@ -308,6 +312,58 @@ func TestDashboardAcceptsPastedRootPath(t *testing.T) {
 	value.Update(command())
 	if backend.addedPath != "/projects/with spaces" {
 		t.Fatalf("added path = %q, want pasted path", backend.addedPath)
+	}
+}
+
+func TestDashboardSupportsHiddenWorkspaceShortcuts(t *testing.T) {
+	backend := &fakeBackend{}
+
+	value := newDashboard(backend, model.Snapshot{})
+	updated, command := value.Update(key('i', "i"))
+	value = updated.(dashboard)
+	if value.modal != aboutModal || command != nil {
+		t.Fatalf("i result = (modal %v, command %v), want about modal", value.modal, command)
+	}
+
+	value = newDashboard(backend, model.Snapshot{})
+	updated, command = value.Update(key('a', "a"))
+	value = updated.(dashboard)
+	if !value.inputMode || command != nil {
+		t.Fatalf("a result = (input mode %v, command %v), want root input", value.inputMode, command)
+	}
+
+	value = newDashboard(backend, model.Snapshot{})
+	updated, command = value.Update(key(',', ","))
+	value = updated.(dashboard)
+	if value.modal != configModal || command != nil {
+		t.Fatalf(", result = (modal %v, command %v), want config modal", value.modal, command)
+	}
+
+	value = newDashboard(backend, model.Snapshot{})
+	updated, command = value.Update(key('q', "q"))
+	value = updated.(dashboard)
+	if !value.result.Quit || command == nil {
+		t.Fatalf("q result = (quit %v, command %v), want quit", value.result.Quit, command)
+	}
+
+	value = newDashboard(backend, model.Snapshot{})
+	updated, command = value.Update(key('r', "r"))
+	if command == nil {
+		t.Fatal("r refresh command = nil")
+	}
+	command()
+	if backend.snapshotCount != 1 {
+		t.Fatalf("r snapshot calls = %d, want 1", backend.snapshotCount)
+	}
+}
+
+func TestDashboardIgnoresRemovedPlusShortcut(t *testing.T) {
+	value := newDashboard(&fakeBackend{}, model.Snapshot{})
+
+	updated, command := value.Update(key('+', "+"))
+	value = updated.(dashboard)
+	if value.inputMode || command != nil {
+		t.Fatalf("+ result = (input mode %v, command %v), want no action", value.inputMode, command)
 	}
 }
 
@@ -329,6 +385,13 @@ func TestDashboardSupportsIMEIndependentShortcuts(t *testing.T) {
 	}
 
 	value = newDashboard(backend, model.Snapshot{})
+	updated, command = value.Update(key(tea.KeyF3, ""))
+	value = updated.(dashboard)
+	if value.modal != configModal || command != nil {
+		t.Fatalf("F3 result = (modal %v, command %v), want config modal", value.modal, command)
+	}
+
+	value = newDashboard(backend, model.Snapshot{})
 	updated, command = value.Update(key(tea.KeyF5, ""))
 	value = updated.(dashboard)
 	if command == nil {
@@ -346,14 +409,67 @@ func TestDashboardSupportsIMEIndependentShortcuts(t *testing.T) {
 		t.Fatalf("Ctrl+C result = (quit %v, command %v), want quit", value.result.Quit, command)
 	}
 
+	terminal := newEmbeddedTerminal("tab-1", newMemoryStream(""), 40, 10)
+	value = newDashboard(backend, model.Snapshot{})
+	value.focus = terminalPane
+	value.terminal = terminal
+	value.width = 120
+	if rendered := value.render(); !shortcutOrder(rendered, "F1", "F2", "F3", "F4", "F5") {
+		t.Fatalf("terminal shortcuts are not in F1-F5 order:\n%s", rendered)
+	} else if !strings.Contains(rendered, value.styles.shortcutKey.Render(" Ctrl+\\ ")) {
+		t.Fatalf("terminal status bar does not contain navigation shortcut:\n%s", rendered)
+	}
+	updated, command = value.Update(key(tea.KeyF3, ""))
+	value = updated.(dashboard)
+	if value.modal != configModal || command != nil {
+		t.Fatalf("terminal F3 result = (modal %v, command %v), want config modal", value.modal, command)
+	}
+	updated, command = value.Update(key(tea.KeyF4, ""))
+	value = updated.(dashboard)
+	if !value.result.Quit || command == nil || value.terminal != nil {
+		t.Fatalf("F4 result = (quit %v, command %v, terminal %v), want global quit", value.result.Quit, command, value.terminal)
+	}
+
 	value = newDashboard(backend, model.Snapshot{})
 	value.width = 120
 	rendered := value.render()
-	for _, status := range []string{"[F1]", "[F2]", "[F5]", "[Ctrl+C]"} {
-		if !strings.Contains(rendered, focusStyle+status+resetStyle) {
+	for _, status := range []string{"F1", "F2", "F3", "F4", "F5"} {
+		if !strings.Contains(rendered, value.styles.shortcutKey.Render(" "+status+" ")) {
 			t.Fatalf("status bar does not contain %s:\n%s", status, rendered)
 		}
 	}
+	if !shortcutOrder(rendered, "F1", "F2", "F3", "F4", "F5") {
+		t.Fatalf("workspace shortcuts are not in F1-F5 order:\n%s", rendered)
+	}
+	for _, key := range []string{"↑/↓", "←/→", "Enter", "Tab"} {
+		if !strings.Contains(rendered, value.styles.shortcutKey.Render(" "+key+" ")) {
+			t.Fatalf("workspace status bar does not contain %q navigation shortcut:\n%s", key, rendered)
+		}
+	}
+	for _, key := range []string{"i", "a", ",", "q", "r", "+", "?"} {
+		if strings.Contains(rendered, value.styles.shortcutKey.Render(" "+key+" ")) {
+			t.Fatalf("hidden shortcut %q is shown in the status bar:\n%s", key, rendered)
+		}
+	}
+	for _, description := range []string{"add root", "quit"} {
+		if !strings.Contains(rendered, value.styles.shortcutDescription.Render(description)) {
+			t.Fatalf("status bar does not contain %q description:\n%s", description, rendered)
+		}
+	}
+}
+
+func shortcutOrder(rendered string, values ...string) bool {
+	lines := strings.Split(ansi.Strip(rendered), "\n")
+	status := lines[len(lines)-1]
+	previous := -1
+	for _, value := range values {
+		index := strings.Index(status, value)
+		if index <= previous {
+			return false
+		}
+		previous = index
+	}
+	return true
 }
 
 func TestDashboardKeepsNativeMouseSelectionAndUsesKeyboardFocus(t *testing.T) {
@@ -379,7 +495,8 @@ func TestDashboardKeepsNativeMouseSelectionAndUsesKeyboardFocus(t *testing.T) {
 	if value.focus != leftPane {
 		t.Fatalf("Ctrl+\\ focus = %v, want workspace pane", value.focus)
 	}
-	if rendered := value.render(); !strings.Contains(rendered, "\x1b[1;96m◀\x1b[0m│ ") {
+	separator := value.styles.dividerActive.Render("◀") + value.styles.divider.Render("│") + " "
+	if rendered := value.render(); !strings.Contains(rendered, separator) {
 		t.Fatalf("workspace focus is not visible:\n%s", rendered)
 	}
 	if view := value.View(); view.MouseMode != tea.MouseModeNone {
@@ -418,7 +535,7 @@ func TestDashboardMovesWorkspaceAndTabCursorBeforeConfirming(t *testing.T) {
 	if command != nil || value.navIndex != 2 || value.terminal.id != firstTab.ID {
 		t.Fatalf("workspace cursor move = (command %v, index %d, terminal %q)", command, value.navIndex, value.terminal.id)
 	}
-	if rendered := value.render(); !strings.Contains(rendered, activeTabStyle+" two "+resetStyle) {
+	if rendered := value.render(); !strings.Contains(rendered, value.styles.tabSelected.Render(" two ")) {
 		t.Fatalf("candidate workspace tabs are not visible:\n%s", rendered)
 	}
 
@@ -469,7 +586,7 @@ func TestDashboardSelectsPlusAndCreatesTabOnEnter(t *testing.T) {
 	if command != nil || value.tabIndex != len(tabs) {
 		t.Fatalf("left from first tab = (command %v, index %d), want + index %d", command, value.tabIndex, len(tabs))
 	}
-	if rendered := value.render(); !strings.Contains(rendered, activeTabStyle+" + "+resetStyle) {
+	if rendered := value.render(); !strings.Contains(rendered, value.styles.tabSelected.Render(" + ")) {
 		t.Fatalf("+ cursor is not visible:\n%s", rendered)
 	}
 
@@ -517,28 +634,30 @@ func TestDashboardHighlightsNavigationAndShowsOpenTabs(t *testing.T) {
 	value.selectedPath = "/projects/SnowClash"
 
 	rendered := value.render()
+	plain := ansi.Strip(rendered)
 	if strings.Contains(rendered, "Terminal") || strings.Contains(rendered, "/projects/SnowClash") {
 		t.Fatalf("terminal title or workspace path is still visible:\n%s", rendered)
 	}
-	if strings.Contains(rendered, "> ") {
+	if strings.Contains(plain, "> ") {
 		t.Fatalf("navigation still contains arrow cursor:\n%s", rendered)
 	}
-	if !strings.Contains(rendered, "▾ nalbam") || !strings.Contains(rendered, "\x1b[1;92m  SnowClash  ●●") {
+	if !strings.Contains(plain, "▾ nalbam") || !strings.Contains(plain, "▌ ├─ SnowClash") || !strings.Contains(plain, "●●") {
 		t.Fatalf("navigation tree or selection color is missing:\n%s", rendered)
 	}
-	if strings.Contains(rendered, "SnowClash  ●●●") {
+	if strings.Contains(plain, "SnowClash  ●●●") {
 		t.Fatalf("exited tab was included in workspace markers:\n%s", rendered)
 	}
-	if strings.Contains(rendered, "2 exited") {
+	if strings.Contains(plain, "2 exited") {
 		t.Fatalf("exited tab was included in terminal tabs:\n%s", rendered)
 	}
-	if !strings.Contains(rendered, "\x1b[1;30;106m 1 \x1b[0m") || !strings.Contains(rendered, "\x1b[36m 3 \x1b[0m") {
+	if !strings.Contains(rendered, value.styles.tabSelected.Render(" 1 ")) || !strings.Contains(rendered, value.styles.tab.Render(" 3 ")) {
 		t.Fatalf("terminal tabs are not styled as active and inactive tabs:\n%s", rendered)
 	}
-	if !strings.Contains(rendered, "\x1b[1;96m[F2]\x1b[0m add") {
+	status := value.styles.shortcutKey.Render(" F2 ") + " " + value.styles.shortcutDescription.Render("add root")
+	if !strings.Contains(rendered, status) {
 		t.Fatalf("status shortcuts and descriptions are not separated:\n%s", rendered)
 	}
-	if !strings.Contains(rendered, "  TankClash") {
+	if !strings.Contains(plain, "  └─ TankClash") {
 		t.Fatalf("workspace without tabs is missing:\n%s", rendered)
 	}
 
@@ -568,18 +687,57 @@ func TestDashboardUsesCompactLeftPane(t *testing.T) {
 	}
 }
 
+func TestDashboardAdaptsChromeToTerminalBackground(t *testing.T) {
+	value := newDashboard(&fakeBackend{}, model.Snapshot{})
+	if value.Init() == nil {
+		t.Fatal("Init() did not request the terminal background color")
+	}
+	darkAccent := value.styles.paneTitleActive.GetForeground()
+
+	updated, command := value.Update(tea.BackgroundColorMsg{Color: color.White})
+	value = updated.(dashboard)
+	if command != nil {
+		t.Fatalf("background color update command = %v, want nil", command)
+	}
+	if reflect.DeepEqual(darkAccent, value.styles.paneTitleActive.GetForeground()) {
+		t.Fatal("light and dark palettes use the same accent color")
+	}
+	if !strings.Contains(value.render(), value.styles.paneTitleActive.Render(" romty ")) {
+		t.Fatal("light palette was not applied to the dashboard")
+	}
+}
+
+func TestDashboardKeepsWideWorkspaceNamesWithinViewport(t *testing.T) {
+	snapshot := model.Snapshot{Roots: []model.RootView{{
+		Root: model.Root{ID: "root-1", Name: "플랫폼-프로젝트-모음", Path: "/projects"},
+		Directories: []model.WorkspaceView{{
+			Workspace: model.Workspace{ID: "workspace-1", RootID: "root-1", Name: "아주-긴-워크스페이스-이름", Path: "/projects/long"},
+		}},
+	}}}
+	value := newDashboard(&fakeBackend{}, snapshot)
+	value.width = 40
+	value.height = 12
+	value.navIndex = 1
+
+	for index, line := range strings.Split(value.render(), "\n") {
+		if lineWidth := lipgloss.Width(line); lineWidth > value.width {
+			t.Fatalf("rendered line %d width = %d, want at most %d:\n%s", index, lineWidth, value.width, line)
+		}
+	}
+}
+
 func TestDashboardShowsAboutModalWithoutReplacingDashboard(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, model.Snapshot{})
 	value.width = 100
 	value.height = 30
 
-	updated, _ := value.Update(key('?', "?"))
+	updated, _ := value.Update(key(tea.KeyF1, ""))
 	value = updated.(dashboard)
 	if value.modal != aboutModal {
 		t.Fatalf("modal = %v, want about", value.modal)
 	}
 	rendered := value.render()
-	if !strings.Contains(rendered, "About") || !strings.Contains(rendered, "Persistent terminal workspace manager") || !strings.Contains(rendered, "Workspaces") {
+	if !strings.Contains(rendered, "About") || !strings.Contains(rendered, "Persistent terminal workspace manager") || !strings.Contains(rendered, "romty") {
 		t.Fatalf("about modal or dashboard background is missing:\n%s", rendered)
 	}
 
@@ -587,6 +745,97 @@ func TestDashboardShowsAboutModalWithoutReplacingDashboard(t *testing.T) {
 	value = updated.(dashboard)
 	if value.modal != noModal || strings.Contains(value.render(), "Persistent terminal workspace manager") {
 		t.Fatalf("about modal did not close:\n%s", value.render())
+	}
+}
+
+func TestDashboardShowsAllShortcutsInHelpModal(t *testing.T) {
+	value := newDashboard(&fakeBackend{}, model.Snapshot{})
+	value.width = 100
+	value.height = 24
+	lines := strings.Split(value.render(), "\n")
+	status := lines[len(lines)-1]
+	if strings.Contains(status, value.styles.shortcutKey.Render(" + ")) || strings.Contains(status, value.styles.shortcutKey.Render(" , ")) {
+		t.Fatalf("hidden workspace shortcuts are shown in the status bar:\n%s", status)
+	}
+
+	updated, command := value.Update(key('?', "?"))
+	value = updated.(dashboard)
+	if value.modal != helpModal || command != nil {
+		t.Fatalf("? result = (modal %v, command %v), want help modal", value.modal, command)
+	}
+	modalLines := value.renderModal(value.width)
+	plainLines := strings.Split(ansi.Strip(strings.Join(modalLines, "\n")), "\n")
+	plain := strings.Join(plainLines, "\n")
+	for _, section := range []string{"COMMANDS", "NAVIGATION", "TERMINAL", "OTHER"} {
+		if !strings.Contains(plain, section) {
+			t.Fatalf("help modal does not contain %q section:\n%s", section, plain)
+		}
+	}
+	shortcuts := []struct {
+		keys        []string
+		description string
+	}{
+		{keys: []string{"i", "F1"}, description: "About"},
+		{keys: []string{"a", "F2"}, description: "Add root"},
+		{keys: []string{",", "F3"}, description: "Config"},
+		{keys: []string{"q", "F4"}, description: "Quit"},
+		{keys: []string{"r", "F5"}, description: "Refresh"},
+		{keys: []string{"?"}, description: "Help"},
+		{keys: []string{"↑/↓", "j/k"}, description: "Select workspace"},
+		{keys: []string{"←/→", "h/l"}, description: "Select tab / +"},
+		{keys: []string{"Enter"}, description: "Open / confirm"},
+		{keys: []string{"Tab"}, description: "Focus terminal"},
+		{keys: []string{"Ctrl+\\"}, description: "Focus workspace"},
+		{keys: []string{"Ctrl+C"}, description: "Quit"},
+		{keys: []string{"←/→", "[/]"}, description: "Resize workspace pane"},
+		{keys: []string{"Esc"}, description: "Close / cancel"},
+	}
+	for _, shortcut := range shortcuts {
+		if !helpContainsShortcut(plainLines, shortcut.description, shortcut.keys...) {
+			t.Fatalf("help modal does not contain %v %q shortcut:\n%s", shortcut.keys, shortcut.description, plain)
+		}
+	}
+	if len(modalLines) > value.height-2 {
+		t.Fatalf("help modal height = %d, want at most %d", len(modalLines), value.height-2)
+	}
+	for index, line := range modalLines {
+		if lineWidth := lipgloss.Width(line); lineWidth > 64 {
+			t.Fatalf("help modal line %d width = %d, want at most 64", index, lineWidth)
+		}
+	}
+}
+
+func helpContainsShortcut(lines []string, description string, keys ...string) bool {
+	for _, line := range lines {
+		if !strings.Contains(line, description) {
+			continue
+		}
+		matches := true
+		for _, key := range keys {
+			matches = matches && strings.Contains(line, key)
+		}
+		if matches {
+			return true
+		}
+	}
+	return false
+}
+
+func TestDashboardDoesNotCaptureWorkspaceShortcutsInTerminal(t *testing.T) {
+	terminal := newEmbeddedTerminal("tab-1", newMemoryStream(""), 40, 10)
+	defer terminal.closeTerminal()
+	value := newDashboard(&fakeBackend{}, model.Snapshot{})
+	value.focus = terminalPane
+	value.terminal = terminal
+
+	for _, message := range []tea.KeyPressMsg{
+		key('i', "i"), key('a', "a"), key(',', ","), key('q', "q"), key('r', "r"), key('+', "+"), key('?', "?"),
+	} {
+		updated, command := value.Update(message)
+		value = updated.(dashboard)
+		if command != nil || value.inputMode || value.modal != noModal {
+			t.Fatalf("terminal key %q was captured: command=%v input=%v modal=%v", message.String(), command, value.inputMode, value.modal)
+		}
 	}
 }
 
