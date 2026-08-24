@@ -170,6 +170,8 @@ The TUI communicates with a detached local daemon over a Unix socket. The daemon
 
 Pressing `F6` opens a confirmation modal because stopping the daemon terminates every running shell. Once `Enter` confirms it the shutdown cannot be cancelled, so the modal stays until the daemon reports back. The `romty stop` command performs the same shutdown directly and is intended for explicit use from outside a romty terminal; stopping a daemon that is not running succeeds without output.
 
+Reattaching replays the recorded output so the screen comes back as it was. Terminal queries are dropped from that replay: a query is an exchange that already finished, and a terminal emulator answering it a second time would send the reply to a shell that asked nothing, where it lands on the command line as typed text. Live queries are still answered normally.
+
 When a shell exits, its tab is removed from the daemon state. If you were in that terminal, romty moves to the tab that took its place in the same workspace, or to the workspace pane when it held the last one. A shell that exits in the background leaves the workspace tree where it is. If the daemon stops or the operating system restarts, roots and workspace metadata remain available, but stale terminal tabs are discarded because their PTY processes can no longer be reattached.
 
 romty refuses to start inside one of its own terminal sessions to avoid nesting the TUI.

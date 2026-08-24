@@ -420,3 +420,70 @@ func readUntil(t *testing.T, connection net.Conn, reader *bufio.Reader, marker s
 		output.Write(buffer[:count])
 	}
 }
+
+// A terminal query the guest emitted is recorded in the history like any other
+// output. Replaying it makes the reattaching client's emulator answer a
+// question that was asked and answered long ago, and the answer lands on the
+// shell's command line as if typed.
+func TestAttachDoesNotReplayTerminalQueries(t *testing.T) {
+	base := testutil.ShortTempDir(t)
+	socket := filepath.Join(base, "daemon.sock")
+	server, err := daemon.New(socket, filepath.Join(base, "state.json"), "/bin/sh")
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go server.Serve(ctx)
+	backend := client.New(socket)
+	testutil.WaitForDaemon(t, backend)
+
+	snapshot, err := backend.AddRoot(base)
+	if err != nil {
+		t.Fatalf("AddRoot() error = %v", err)
+	}
+	workspace, err := backend.EnsureWorkspace(snapshot.Roots[0].Root.ID, base)
+	if err != nil {
+		t.Fatalf("EnsureWorkspace() error = %v", err)
+	}
+	tab, err := backend.CreateTab(workspace.ID, 80, 24)
+	if err != nil {
+		t.Fatalf("CreateTab() error = %v", err)
+	}
+
+	first, reader, err := backend.OpenAttach(tab.ID)
+	if err != nil {
+		t.Fatalf("OpenAttach() error = %v", err)
+	}
+	// The shell echoes the command line, so the marker is split in the source
+	// and only whole in the output: waiting on the echo would race the history.
+	writeCommand(t, first, `printf 'MARK\033[6n\033[c\033]11;?\033\\END'; echo SETT''LED`)
+	readUntil(t, first, reader, "SETTLED")
+	first.Close()
+
+	second, secondReader, err := backend.OpenAttach(tab.ID)
+	if err != nil {
+		t.Fatalf("second OpenAttach() error = %v", err)
+	}
+	defer second.Close()
+	if err := second.SetReadDeadline(time.Now().Add(2 * time.Second)); err != nil {
+		t.Fatalf("SetReadDeadline() error = %v", err)
+	}
+	var replay strings.Builder
+	buffer := make([]byte, 4096)
+	for {
+		count, err := secondReader.Read(buffer)
+		replay.Write(buffer[:count])
+		if err != nil {
+			break
+		}
+	}
+	for _, query := range []string{"\x1b[6n", "\x1b[c", "\x1b]11;?"} {
+		if strings.Contains(replay.String(), query) {
+			t.Fatalf("replayed history still contains the query %q:\n%q", query, replay.String())
+		}
+	}
+	if !strings.Contains(replay.String(), "MARKEND") {
+		t.Fatalf("replayed history lost the output around the queries:\n%q", replay.String())
+	}
+}
