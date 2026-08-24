@@ -308,7 +308,11 @@ func (m dashboard) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 // globalKeys are handled in both panes and with a modal open. Routing every
 // function key through one table keeps their precedence at a single point.
 var globalKeys = map[string]func(dashboard) (tea.Model, tea.Cmd){
-	"f1": func(m dashboard) (tea.Model, tea.Cmd) { return m.openModal(aboutModal) },
+	// F1 is help everywhere else in computing, and romty used to spend it on
+	// About while help sat on `?` in the workspace pane only. That left the
+	// terminal pane, where the shortcuts are hardest to remember, with no way
+	// to look them up at all.
+	"f1": func(m dashboard) (tea.Model, tea.Cmd) { return m.openModal(helpModal) },
 	"f2": func(m dashboard) (tea.Model, tea.Cmd) { return m.startRootInput() },
 	"f3": func(m dashboard) (tea.Model, tea.Cmd) { return m.openModal(configModal) },
 	"f4": func(m dashboard) (tea.Model, tea.Cmd) { return m.quit() },
@@ -1274,7 +1278,7 @@ func (m dashboard) renderStatus(width, bodyHeight int) []string {
 		}
 		rail = renderShortcutRail(m.styles, width, contextShortcuts...)
 		status = renderShortcuts(m.styles, width,
-			shortcut{key: "F1", description: "about"},
+			shortcut{key: "F1", description: "help"},
 			shortcut{key: "F2", description: "add root"},
 			shortcut{key: "F3", description: "config"},
 			shortcut{key: "F4", description: "quit"},
@@ -1344,8 +1348,10 @@ func (m dashboard) renderModal(width, height int) []string {
 
 func (m dashboard) helpEntries() []string {
 	return []string{
+		// About lost its function key to help, so help carries what it said.
+		m.styles.modalStrong.Render("romty") + m.styles.modalBody.Render("  Persistent terminal workspace manager"),
 		renderHelpSection(m.styles, "COMMANDS", "F-keys work in both areas"),
-		renderHelpShortcut(m.styles, "About", "F1", "i"),
+		renderHelpShortcut(m.styles, "Help", "F1", "?"),
 		renderHelpShortcut(m.styles, "Add root", "F2", "a"),
 		renderHelpShortcut(m.styles, "Remove root", "d"),
 		renderHelpShortcut(m.styles, "Config", "F3", ","),
@@ -1353,7 +1359,7 @@ func (m dashboard) helpEntries() []string {
 		renderHelpShortcut(m.styles, "Refresh", "F5", "r"),
 		renderHelpShortcut(m.styles, "Stop daemon", "F6"),
 		renderHelpShortcut(m.styles, "Scrollback", "F7"),
-		renderHelpShortcut(m.styles, "Help", "?"),
+		renderHelpShortcut(m.styles, "About", "i"),
 		renderHelpSection(m.styles, "NAVIGATION", "workspace area"),
 		renderHelpShortcut(m.styles, "Select workspace", "↑/↓", "j/k"),
 		renderHelpShortcut(m.styles, "Select tab / +", "←/→", "h/l"),
