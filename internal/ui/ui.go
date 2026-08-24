@@ -1436,7 +1436,7 @@ func (m dashboard) helpEntries() []string {
 		renderHelpShortcut(m.styles, "Select workspace", "↑/↓", "j/k"),
 		renderHelpShortcut(m.styles, "Select tab / +", "←/→", "h/l"),
 		renderHelpShortcut(m.styles, "Open / confirm", "Enter"),
-		renderHelpShortcut(m.styles, "Focus terminal", "Tab", "F7"),
+		renderHelpShortcut(m.styles, "Focus terminal", "F7", "Tab"),
 		renderHelpSection(m.styles, "TERMINAL", "terminal area"),
 		renderHelpShortcut(m.styles, "Focus workspace", "F7", "Ctrl+\\"),
 		renderHelpSection(m.styles, "SCROLLBACK", "mouse works here only"),

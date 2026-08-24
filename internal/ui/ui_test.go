@@ -2219,7 +2219,7 @@ func TestDashboardShowsAllShortcutsInHelpModal(t *testing.T) {
 		{keys: []string{"↑/↓", "j/k"}, description: "Select workspace"},
 		{keys: []string{"←/→", "h/l"}, description: "Select tab / +"},
 		{keys: []string{"Enter"}, description: "Open / confirm"},
-		{keys: []string{"Tab"}, description: "Focus terminal"},
+		{keys: []string{"F7", "Tab"}, description: "Focus terminal"},
 		{keys: []string{"Ctrl+\\"}, description: "Focus workspace"},
 		{keys: []string{"F6", "Ctrl+\\"}, description: "Enter / leave"},
 		{keys: []string{"PgUp/PgDn"}, description: "Scroll a page"},
@@ -2246,6 +2246,8 @@ func TestDashboardShowsAllShortcutsInHelpModal(t *testing.T) {
 		{description: "Config", first: "F3", second: ","},
 		{description: "Quit", first: "F4", second: "q"},
 		{description: "Refresh", first: "F5", second: "r"},
+		{description: "Focus terminal", first: "F7", second: "Tab"},
+		{description: "Remove root", first: "F8", second: "d"},
 	} {
 		line := helpLine(plainLines, row.description, row.first, row.second)
 		if first, second := strings.Index(line, row.first), strings.Index(line, row.second); first < 0 || first > second {

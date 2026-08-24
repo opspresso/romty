@@ -96,17 +96,17 @@ These function keys work from either pane, with a modal open, and with non-Engli
 
 | Key | Action |
 |---|---|
+| `F1`, `?` | Open Help |
+| `F2`, `a` | Add a root directory |
+| `F3`, `,` | Open Config |
+| `F4`, `q` | Quit romty |
+| `F5`, `r` | Refresh roots, workspaces, and sessions |
+| `F7`, `Tab` | Focus the active terminal |
+| `F8`, `d` | Ask for confirmation, then forget the selected root; terminals under it keep running |
+| `i` | Open About |
 | `↑`/`↓`, `j`/`k` | Move between roots and workspaces |
 | `←`/`→`, `h`/`l` | Move between terminal tabs and the `+` tab |
 | `Enter` | Open the selected tab or create the selected `+` tab |
-| `Tab`, `F7` | Focus the active terminal |
-| `i` | Open About |
-| `a`, `F2` | Add a root directory |
-| `d`, `F8` | Ask for confirmation, then forget the selected root; terminals under it keep running |
-| `,`, `F3` | Open Config |
-| `q`, `F4` | Quit romty |
-| `r`, `F5` | Refresh roots, workspaces, and sessions |
-| `?`, `F1` | Open Help |
 | `Ctrl+C` | Quit romty |
 
 The `+` key itself is not a shortcut. Select the `+` tab with `←`/`→` and confirm it with `Enter`.
