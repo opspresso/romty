@@ -13,8 +13,47 @@ import (
 
 	"github.com/nalbam/romty/internal/client"
 	"github.com/nalbam/romty/internal/daemon"
+	"github.com/nalbam/romty/internal/model"
 	"github.com/nalbam/romty/internal/state"
 )
+
+func TestServeRemovesPersistedTerminalTabs(t *testing.T) {
+	base := shortTempDir(t)
+	socket := filepath.Join(base, "daemon.sock")
+	statePath := filepath.Join(base, "state.json")
+	store := state.New(statePath)
+	if err := store.Save(model.State{Tabs: []model.Tab{{ID: "stale-tab", Running: true}}}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	server, err := daemon.New(socket, statePath, "/bin/sh")
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	persisted, err := store.Load()
+	if err != nil {
+		t.Fatalf("Load() before Serve error = %v", err)
+	}
+	if len(persisted.Tabs) != 1 {
+		t.Fatalf("persisted tabs before Serve = %#v, want tabs unchanged", persisted.Tabs)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- server.Serve(ctx) }()
+	defer func() {
+		cancel()
+		<-done
+	}()
+	waitForDaemon(t, client.New(socket))
+	persisted, err = store.Load()
+	if err != nil {
+		t.Fatalf("Load() after Serve error = %v", err)
+	}
+	if len(persisted.Tabs) != 0 {
+		t.Fatalf("persisted tabs = %#v, want stale tabs removed", persisted.Tabs)
+	}
+}
 
 func TestServerDiscoversWorkspacesAndReattachesSession(t *testing.T) {
 	base := shortTempDir(t)
@@ -141,6 +180,33 @@ func TestServerDiscoversWorkspacesAndReattachesSession(t *testing.T) {
 	if len(persisted.Roots) != 2 || len(persisted.Workspaces) != 1 || len(persisted.Tabs) != 2 {
 		t.Fatalf("persisted state = %#v, want two roots, one workspace, and two tabs", persisted)
 	}
+
+	writeCommand(t, secondConnection, "exit")
+	waitForTabCount(t, restartedClient, workspace.ID, 1)
+	replacementTab, err := restartedClient.CreateTab(workspace.ID, 90, 25)
+	if err != nil {
+		t.Fatalf("CreateTab() replacement error = %v", err)
+	}
+	if replacementTab.Name == secondTab.Name {
+		t.Fatalf("replacement tab name = %q, want a unique name", replacementTab.Name)
+	}
+	replacementConnection, _, err := restartedClient.OpenAttach(replacementTab.ID)
+	if err != nil {
+		t.Fatalf("OpenAttach() replacement error = %v", err)
+	}
+	defer replacementConnection.Close()
+	writeCommand(t, thirdConnection, "exit")
+	waitForTabCount(t, restartedClient, workspace.ID, 1)
+	writeCommand(t, replacementConnection, "exit")
+	waitForTabCount(t, restartedClient, workspace.ID, 0)
+
+	persisted, err = state.New(statePath).Load()
+	if err != nil {
+		t.Fatalf("Load() state after terminal exits error = %v", err)
+	}
+	if len(persisted.Tabs) != 0 {
+		t.Fatalf("persisted tabs = %#v, want exited tabs removed", persisted.Tabs)
+	}
 }
 
 func TestEnsureWorkspaceRejectsNestedDirectory(t *testing.T) {
@@ -185,6 +251,25 @@ func waitForDaemon(t *testing.T, backend *client.Client) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatal("daemon did not become ready")
+}
+
+func waitForTabCount(t *testing.T, backend *client.Client, workspaceID string, count int) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		snapshot, err := backend.Snapshot()
+		if err == nil {
+			for _, root := range snapshot.Roots {
+				for _, directory := range root.Directories {
+					if directory.Workspace.ID == workspaceID && len(directory.Tabs) == count {
+						return
+					}
+				}
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("workspace %q tab count did not become %d", workspaceID, count)
 }
 
 func shortTempDir(t *testing.T) string {

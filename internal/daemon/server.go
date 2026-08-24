@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"sync"
 	"time"
 
@@ -37,9 +38,6 @@ func New(socket, statePath, shell string) (*Server, error) {
 	value, err := store.Load()
 	if err != nil {
 		return nil, err
-	}
-	for index := range value.Tabs {
-		value.Tabs[index].Running = false
 	}
 	if shell == "" {
 		shell = os.Getenv("SHELL")
@@ -73,6 +71,9 @@ func (s *Server) Serve(ctx context.Context) error {
 		return fmt.Errorf("set socket permissions: %w", err)
 	}
 	defer s.shutdown()
+	if err := s.removeStaleTabs(); err != nil {
+		return err
+	}
 
 	go func() {
 		<-ctx.Done()
@@ -89,6 +90,21 @@ func (s *Server) Serve(ctx context.Context) error {
 		}
 		go s.handle(connection)
 	}
+}
+
+func (s *Server) removeStaleTabs() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.value.Tabs) == 0 {
+		return nil
+	}
+	tabs := s.value.Tabs
+	s.value.Tabs = []model.Tab{}
+	if err := s.store.Save(s.value); err != nil {
+		s.value.Tabs = tabs
+		return fmt.Errorf("remove stale terminal tabs: %w", err)
+	}
+	return nil
 }
 
 func prepareSocket(path string) error {
@@ -236,7 +252,7 @@ func (s *Server) createTab(workspaceID string, columns, rows uint16) protocol.Re
 	tab := model.Tab{
 		ID:          newID(),
 		WorkspaceID: workspaceID,
-		Name:        fmt.Sprintf("%d", tabCount(s.value.Tabs, workspaceID)+1),
+		Name:        nextTabName(s.value.Tabs, workspaceID),
 		Running:     true,
 	}
 
@@ -293,7 +309,7 @@ func (s *Server) sessionExited(tabID string) {
 	delete(s.sessions, tabID)
 	for index := range s.value.Tabs {
 		if s.value.Tabs[index].ID == tabID {
-			s.value.Tabs[index].Running = false
+			s.value.Tabs = append(s.value.Tabs[:index], s.value.Tabs[index+1:]...)
 			break
 		}
 	}
@@ -401,14 +417,19 @@ func tabsFor(values []model.Tab, workspaceID string) []model.Tab {
 	return result
 }
 
-func tabCount(values []model.Tab, workspaceID string) int {
-	count := 0
+func nextTabName(values []model.Tab, workspaceID string) string {
+	names := make(map[string]struct{})
 	for _, value := range values {
 		if value.WorkspaceID == workspaceID {
-			count++
+			names[value.Name] = struct{}{}
 		}
 	}
-	return count
+	for number := 1; ; number++ {
+		name := strconv.Itoa(number)
+		if _, exists := names[name]; !exists {
+			return name
+		}
+	}
 }
 
 func cloneState(value model.State) model.State {

@@ -190,6 +190,104 @@ func TestDashboardAcceptsPastedRootPath(t *testing.T) {
 	}
 }
 
+func TestDashboardFocusesPanesWithOneShotMouseMode(t *testing.T) {
+	stream := newMemoryStream("")
+	terminal := newEmbeddedTerminal("tab-1", stream, 40, 10)
+	defer terminal.closeTerminal()
+
+	value := newDashboard(&fakeBackend{}, model.Snapshot{})
+	value.width = 120
+	value.height = 40
+	value.terminal = terminal
+
+	if view := value.View(); view.MouseMode != tea.MouseModeNone {
+		t.Fatalf("initial mouse mode = %v, want none", view.MouseMode)
+	}
+	updated, _ := value.Update(tea.KeyPressMsg(tea.Key{Code: 'g', Mod: tea.ModCtrl}))
+	value = updated.(dashboard)
+	if view := value.View(); view.MouseMode != tea.MouseModeCellMotion {
+		t.Fatalf("armed mouse mode = %v, want cell motion", view.MouseMode)
+	}
+
+	updated, _ = value.Update(tea.MouseClickMsg{X: 60, Y: 5, Button: tea.MouseLeft})
+	value = updated.(dashboard)
+	if value.focus != terminalPane || value.mouseFocusMode {
+		t.Fatalf("right click focus = %v, mouse focus mode = %v", value.focus, value.mouseFocusMode)
+	}
+	if view := value.View(); view.MouseMode != tea.MouseModeNone {
+		t.Fatalf("mouse mode after right click = %v, want none", view.MouseMode)
+	}
+	if rendered := value.render(); strings.Contains(rendered, "[FOCUS]") || !strings.Contains(rendered, "\x1b[1;96mTerminal") {
+		t.Fatalf("terminal focus is not visible:\n%s", rendered)
+	}
+
+	updated, _ = value.Update(tea.KeyPressMsg(tea.Key{Code: 'g', Mod: tea.ModCtrl}))
+	value = updated.(dashboard)
+	updated, _ = value.Update(tea.MouseClickMsg{X: 10, Y: 5, Button: tea.MouseLeft})
+	value = updated.(dashboard)
+	if value.focus != leftPane || value.mouseFocusMode {
+		t.Fatalf("left click focus = %v, mouse focus mode = %v", value.focus, value.mouseFocusMode)
+	}
+	if rendered := value.render(); strings.Contains(rendered, "[FOCUS]") || !strings.Contains(rendered, "\x1b[1;96mWorkspaces") {
+		t.Fatalf("workspace focus is not visible:\n%s", rendered)
+	}
+
+	updated, _ = value.Update(tea.KeyPressMsg(tea.Key{Code: 'g', Mod: tea.ModCtrl}))
+	value = updated.(dashboard)
+	updated, _ = value.Update(key(tea.KeyEscape, ""))
+	value = updated.(dashboard)
+	if view := value.View(); view.MouseMode != tea.MouseModeNone {
+		t.Fatalf("mouse mode after escape = %v, want none", view.MouseMode)
+	}
+}
+
+func TestDashboardHighlightsNavigationAndShowsOpenTabs(t *testing.T) {
+	snapshot := model.Snapshot{Roots: []model.RootView{{
+		Root: model.Root{ID: "root-1", Name: "nalbam", Path: "/projects"},
+		Directories: []model.WorkspaceView{
+			{
+				Workspace: model.Workspace{ID: "workspace-1", RootID: "root-1", Name: "SnowClash", Path: "/projects/SnowClash"},
+				Tabs: []model.Tab{
+					{ID: "tab-1", Name: "1", Running: true},
+					{ID: "tab-2", Name: "2", Running: false},
+					{ID: "tab-3", Name: "3", Running: true},
+				},
+			},
+			{Workspace: model.Workspace{ID: "workspace-2", RootID: "root-1", Name: "TankClash", Path: "/projects/TankClash"}},
+		},
+	}}}
+	value := newDashboard(&fakeBackend{}, snapshot)
+	value.width = 120
+	value.height = 40
+	value.navIndex = 1
+	value.selectedWorkspaceID = "workspace-1"
+	value.selectedPath = "/projects/SnowClash"
+
+	rendered := value.render()
+	if strings.Contains(rendered, "> ") {
+		t.Fatalf("navigation still contains arrow cursor:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, "▾ nalbam") || !strings.Contains(rendered, "\x1b[1;92m  SnowClash  ●●") {
+		t.Fatalf("navigation tree or selection color is missing:\n%s", rendered)
+	}
+	if strings.Contains(rendered, "SnowClash  ●●●") {
+		t.Fatalf("exited tab was included in workspace markers:\n%s", rendered)
+	}
+	if strings.Contains(rendered, "2 exited") {
+		t.Fatalf("exited tab was included in terminal tabs:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, "  TankClash") {
+		t.Fatalf("workspace without tabs is missing:\n%s", rendered)
+	}
+
+	value.tabIndex = 2
+	updated, _ := value.Update(snapshotMsg{value: snapshot})
+	value = updated.(dashboard)
+	if value.tabIndex != 1 {
+		t.Fatalf("tab index after exited tab removal = %d, want 1", value.tabIndex)
+	}
+}
+
 func key(code rune, text string) tea.KeyPressMsg {
 	return tea.KeyPressMsg(tea.Key{Code: code, Text: text})
 }
