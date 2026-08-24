@@ -57,11 +57,17 @@
     apply(stored() || preferred());
 
     document.querySelectorAll("[data-copy]").forEach(function (button) {
+      // Read once, outside the handler. Reading it per click means a second
+      // click within the restore window captures "copied" as the label to go
+      // back to, and the button says "copied" from then on.
+      var original = button.textContent;
+      var pending = null;
+
       button.addEventListener("click", function () {
         var text = button.getAttribute("data-copy");
-        var original = button.textContent;
         function restore() {
-          setTimeout(function () {
+          clearTimeout(pending);
+          pending = setTimeout(function () {
             button.textContent = original;
           }, 1400);
         }

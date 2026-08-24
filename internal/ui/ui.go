@@ -15,6 +15,10 @@ import (
 )
 
 const (
+	// tagline is what About says romty is, and what help repeats now that
+	// About has no function key. Two copies of one sentence drift apart.
+	tagline = "Persistent terminal workspace manager"
+
 	terminalTop        = 2
 	helpKeyColumnWidth = 20
 	// separatorWidth is the width of what paneSeparators draws between the
@@ -323,14 +327,13 @@ var globalKeys = map[string]func(dashboard) (tea.Model, tea.Cmd){
 	"f5": func(m dashboard) (tea.Model, tea.Cmd) { return m, m.refresh() },
 	"f6": func(m dashboard) (tea.Model, tea.Cmd) { return m.toggleScrollback() },
 	"f7": func(m dashboard) (tea.Model, tea.Cmd) { return m.toggleFocus() },
-	// F8 is delete in the file managers this layout comes from. Removing a
-	// root was reachable from the workspace pane only, which left the terminal
-	// pane without it.
-	"f8": func(m dashboard) (tea.Model, tea.Cmd) { return m.confirmRemoveRoot() },
-	// Stopping the daemon kills every running shell. It used to sit at F6,
-	// one key from refresh; the destructive actions belong at the far end of
-	// the row instead, where a mistyped F5 cannot reach them.
-	"f9": func(m dashboard) (tea.Model, tea.Cmd) { return m.openModal(shutdownModal) },
+	// F8 and F9 are deliberately absent. They belong to the workspace pane
+	// only, so romty keeps taking exactly F1-F7 from the shell and no more.
+	// A full-screen program binds the whole row — htop puts Kill on F9 and
+	// answers it with Enter, which is the same Enter that confirms stopping
+	// the daemon. Intercepting F9 would turn that habit into every session
+	// dying at once.
+	//
 	// Shift+PgUp reaches the history in one press by entering scrollback itself.
 	"shift+pgup":   func(m dashboard) (tea.Model, tea.Cmd) { return m.pageHistory(1) },
 	"shift+pgdown": func(m dashboard) (tea.Model, tea.Cmd) { return m.pageHistory(-1) },
@@ -371,10 +374,7 @@ func (m dashboard) handleKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "ctrl+c":
 		return m.quit()
 	case "tab":
-		if m.terminal != nil && m.terminal.active {
-			m.focus = terminalPane
-			m.syncTabCursor(m.selectedTabs())
-		}
+		m.focusTerminal()
 	case "i":
 		return m.openModal(aboutModal)
 	case "a":
@@ -389,9 +389,9 @@ func (m dashboard) handleKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.openModal(helpModal)
 	case "s":
 		return m.toggleScrollback()
-	case "d":
+	case "d", "f8":
 		return m.confirmRemoveRoot()
-	case "t":
+	case "t", "f9":
 		return m.openModal(shutdownModal)
 	case "ctrl+\\":
 		// A second Ctrl+\ after leaving the terminal opens its scrollback.
@@ -553,9 +553,10 @@ func (m dashboard) translateMouse(mouse tea.Mouse) (uv.Mouse, bool) {
 }
 
 // toggleFocus moves between the panes in one key. Tab and Ctrl+\ each did it
-// in one direction only, and on Windows Ctrl+\ often never arrives: whatever
-// claimed it as a global hotkey — 1Password, for one — takes it before the
-// terminal sees it, which left that pane with no way out.
+// in one direction only, and Ctrl+\ does not always arrive: an application or
+// desktop environment can hold that chord as a global hotkey — 1Password does
+// — and romty never sees a key the system intercepted first, which left the
+// terminal pane with no way out.
 func (m dashboard) toggleFocus() (tea.Model, tea.Cmd) {
 	if m.scrollback {
 		// Scrollback fills the screen with the terminal, so leaving the
@@ -567,10 +568,7 @@ func (m dashboard) toggleFocus() (tea.Model, tea.Cmd) {
 		m.focusNavigation()
 		return m, m.refresh()
 	}
-	if m.terminal != nil && m.terminal.active {
-		m.focus = terminalPane
-		m.syncTabCursor(m.selectedTabs())
-	}
+	m.focusTerminal()
 	return m, nil
 }
 
@@ -631,11 +629,10 @@ func (m *dashboard) stopScrollback() {
 	m.scrollback = false
 	m.scrollOffset = 0
 	// Copy mode fills the screen with the terminal, so leaving it lands in the
-	// terminal rather than back in the workspace tree.
-	if m.terminal != nil && m.terminal.active {
-		m.focus = terminalPane
-		m.syncTabCursor(m.selectedTabs())
-	}
+	// terminal rather than back in the workspace tree — including when
+	// scrollback was opened from the tree, because the tree is not what was
+	// on screen.
+	m.focusTerminal()
 }
 
 // scrollTerminal moves the viewport by delta lines, positive towards the oldest
@@ -1038,6 +1035,17 @@ func (m *dashboard) setNavigation(index int) {
 	}
 }
 
+// focusTerminal moves the keyboard into the terminal, if there is one still
+// running to move into. A terminal whose shell has exited is not somewhere the
+// keyboard can go, so the workspace pane keeps it.
+func (m *dashboard) focusTerminal() {
+	if m.terminal == nil || !m.terminal.active {
+		return
+	}
+	m.focus = terminalPane
+	m.syncTabCursor(m.selectedTabs())
+}
+
 func (m *dashboard) focusNavigation() {
 	m.focus = leftPane
 	items := m.navigationItems()
@@ -1339,9 +1347,10 @@ func (m dashboard) renderStatus(width, bodyHeight int) []string {
 			{key: "Tab", description: "terminal"},
 		}
 		if m.focus == terminalPane {
-			// Ctrl+\ still works and help still lists it, but the rail names
-			// the key that works on every platform.
-			contextShortcuts = []shortcut{{key: "F7", description: "navigation"}}
+			// F7 is already in the status row below, so naming it here too
+			// stacked one keycap over itself under two different labels. The
+			// rail carries what the row cannot.
+			contextShortcuts = []shortcut{{key: "Ctrl+\\", description: "navigation"}}
 		}
 		rail = renderShortcutRail(m.styles, width, contextShortcuts...)
 		status = renderShortcuts(m.styles, width,
@@ -1417,7 +1426,7 @@ func (m dashboard) renderModal(width, height int) []string {
 	return modalBox(m.styles, modalWidth, "About",
 		"",
 		m.styles.modalStrong.Render("romty"),
-		m.styles.modalBody.Render("Persistent terminal workspace manager"),
+		m.styles.modalBody.Render(tagline),
 		"",
 	)
 }
@@ -1425,20 +1434,26 @@ func (m dashboard) renderModal(width, height int) []string {
 func (m dashboard) helpEntries() []string {
 	return []string{
 		// About lost its function key to help, so help carries what it said.
-		m.styles.modalStrong.Render("romty") + m.styles.modalBody.Render("  Persistent terminal workspace manager"),
-		renderHelpSection(m.styles, "COMMANDS", "F-keys work in both areas"),
+		m.styles.modalStrong.Render("romty") + m.styles.modalBody.Render("  "+tagline),
+		// The split is the point: this is the only reference the terminal pane
+		// can reach, so it has to say which of these keys reach it too. The
+		// letters and F8/F9 do not — the shell gets those.
+		renderHelpSection(m.styles, "COMMANDS", "work in both areas"),
 		// In function key order: the row itself is what the reader is scanning.
-		renderHelpShortcut(m.styles, "Help", "F1", "?"),
-		renderHelpShortcut(m.styles, "Add root", "F2", "a"),
-		renderHelpShortcut(m.styles, "Config", "F3", ","),
-		renderHelpShortcut(m.styles, "Quit", "F4", "q"),
-		renderHelpShortcut(m.styles, "Refresh", "F5", "r"),
-		renderHelpShortcut(m.styles, "Scrollback", "F6", "s"),
+		renderHelpShortcut(m.styles, "Help", "F1"),
+		renderHelpShortcut(m.styles, "Add root", "F2"),
+		renderHelpShortcut(m.styles, "Config", "F3"),
+		renderHelpShortcut(m.styles, "Quit", "F4"),
+		renderHelpShortcut(m.styles, "Refresh", "F5"),
+		renderHelpShortcut(m.styles, "Scrollback", "F6"),
 		renderHelpShortcut(m.styles, "Switch pane", "F7"),
+		renderHelpSection(m.styles, "NAVIGATION", "workspace area"),
 		renderHelpShortcut(m.styles, "Remove root", "F8", "d"),
 		renderHelpShortcut(m.styles, "Stop daemon", "F9", "t"),
-		renderHelpShortcut(m.styles, "About", "i"),
-		renderHelpSection(m.styles, "NAVIGATION", "workspace area"),
+		renderHelpShortcut(m.styles, "Help / About", "?", "i"),
+		renderHelpShortcut(m.styles, "Add root / config", "a", ","),
+		renderHelpShortcut(m.styles, "Quit / refresh", "q", "r"),
+		renderHelpShortcut(m.styles, "Scrollback", "s"),
 		renderHelpShortcut(m.styles, "Select workspace", "↑/↓", "j/k"),
 		renderHelpShortcut(m.styles, "Select tab / +", "←/→", "h/l"),
 		renderHelpShortcut(m.styles, "Open / confirm", "Enter"),

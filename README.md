@@ -88,11 +88,9 @@ These function keys work from either pane, with a modal open, and with non-Engli
 | `F5` | Refresh roots, workspaces, and sessions |
 | `F6` | Enter or leave scrollback for the open terminal |
 | `F7` | Switch between the workspace and terminal panes |
-| `F8` | Ask for confirmation, then forget the selected root |
-| `F9` | Ask for confirmation, then stop the daemon and all running terminal sessions |
 | `Shift`+`PgUp`/`PgDn` | Enter scrollback and move one page at a time |
 
-`F8` and `F9` are off the end of the status bar on purpose. Both undo something the tree or the daemon cannot get back, so they sit well away from `F5`, which refreshes; `F1` lists them with everything else.
+The row stops at `F7`. A full-screen program binds the whole function key row — `htop` puts Kill on `F9` and answers it with `Enter`, which is the same `Enter` that would confirm stopping the daemon — so romty takes `F1` through `F7` from the shell and no more. `F8` and `F9` belong to the workspace pane, below.
 
 ### Workspace pane
 
@@ -122,9 +120,9 @@ The `+` key itself is not a shortcut. Select the `+` tab with `←`/`→` and co
 | `F7`, `Ctrl+\` | Focus the workspace pane and refresh the workspace tree |
 | `Ctrl+\` `Ctrl+\` | Pressing it a second time, from the workspace pane, opens the terminal's scrollback |
 
-On Windows, `Ctrl+\` frequently never reaches the terminal — 1Password and other tools claim it as a global hotkey — so `F7` is the way out of the terminal pane there. It also works in the other direction, which `Tab` and `Ctrl+\` each did one way only.
+`F7` moves in both directions, which `Tab` and `Ctrl+\` each did one way only. It is also the way out when `Ctrl+\` never arrives: an application or the desktop environment can claim that chord as a global hotkey — 1Password does, and a Windows host running romty over WSL sees it taken before the terminal does — and romty cannot receive a key the system intercepted first.
 
-Except for the global function keys and `Ctrl+\`, keyboard and paste input is forwarded to the PTY, including keys held with `Shift`, `Ctrl` or `Meta` such as `Ctrl`+`←` for word-wise movement. Mouse tracking remains disabled so the host terminal can select and copy displayed text normally.
+Except for `F1` through `F7` and `Ctrl+\`, keyboard and paste input is forwarded to the PTY — `F8` and `F9` included, so a full-screen program keeps the keys it binds — along with keys held with `Shift`, `Ctrl` or `Meta` such as `Ctrl`+`←` for word-wise movement. Mouse tracking remains disabled so the host terminal can select and copy displayed text normally.
 
 ### Scrollback
 

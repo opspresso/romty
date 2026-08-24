@@ -477,7 +477,9 @@ func TestDashboardSupportsIMEIndependentShortcuts(t *testing.T) {
 	value.width = 120
 	if rendered := value.render(); !shortcutOrder(rendered, "F1", "F2", "F3", "F4", "F5", "F6") {
 		t.Fatalf("terminal shortcuts are not in F1-F6 order:\n%s", rendered)
-	} else if !strings.Contains(rendered, value.styles.shortcutKey.Render(" F7 ")) {
+	} else if !strings.Contains(rendered, value.styles.shortcutKey.Render(" Ctrl+\\ ")) {
+		// Assert on a key the fixed status row does not also carry, or the
+		// check passes with the contextual rail deleted outright.
 		t.Fatalf("terminal status bar does not contain navigation shortcut:\n%s", rendered)
 	}
 	updated, command = value.Update(key(tea.KeyF3, ""))
@@ -523,7 +525,6 @@ func TestDashboardConfirmsDaemonShutdown(t *testing.T) {
 	backend := &fakeBackend{}
 	terminal := newEmbeddedTerminal("tab-1", newMemoryStream(""), 40, 10)
 	value := newDashboard(backend, model.Snapshot{})
-	value.focus = terminalPane
 	value.terminal = terminal
 	value.width = 100
 	value.height = 24
@@ -531,7 +532,7 @@ func TestDashboardConfirmsDaemonShutdown(t *testing.T) {
 	updated, command := value.Update(key(tea.KeyF9, ""))
 	value = updated.(dashboard)
 	if value.modal != shutdownModal || command != nil || backend.shutdownCount != 0 {
-		t.Fatalf("F6 result = (modal %v, command %v, shutdowns %d), want confirmation", value.modal, command, backend.shutdownCount)
+		t.Fatalf("F9 result = (modal %v, command %v, shutdowns %d), want confirmation", value.modal, command, backend.shutdownCount)
 	}
 	if rendered := ansi.Strip(value.render()); !strings.Contains(rendered, "Stop daemon") || !strings.Contains(rendered, "all running terminal sessions") {
 		t.Fatalf("shutdown warning is missing:\n%s", rendered)
@@ -667,7 +668,7 @@ func TestDashboardScrollsTerminalHistory(t *testing.T) {
 	updated, command := value.Update(key(tea.KeyF6, ""))
 	value = updated.(dashboard)
 	if !value.scrollback || value.scrollOffset != 0 || command != nil {
-		t.Fatalf("F7 = (scrollback %v, offset %d, command %v), want the live view in scrollback mode",
+		t.Fatalf("F6 = (scrollback %v, offset %d, command %v), want the live view in scrollback mode",
 			value.scrollback, value.scrollOffset, command)
 	}
 	view := value.View()
@@ -1358,8 +1359,6 @@ func twoRootSnapshot() model.Snapshot {
 	}}
 }
 
-// Esc has to mean no. Removing a root has no undo beyond adding it back and
-// rebuilding the tree by hand.
 // Every command reachable from the workspace pane has a letter next to its
 // function key. Scrollback and stopping the daemon were the two without one.
 func TestDashboardGivesScrollbackAndShutdownALetter(t *testing.T) {
@@ -1401,6 +1400,46 @@ func TestDashboardSendsTheNewLettersToTheShell(t *testing.T) {
 	}
 }
 
+// romty takes F1-F7 from the shell and stops there. A full-screen program
+// binds the whole function key row: htop puts Kill on F9 and answers it with
+// Enter, which is the same Enter that confirms stopping the daemon. Taking F9
+// would turn that habit into every session dying at once, and F8 is Delete in
+// the file managers this layout comes from.
+func TestDashboardLeavesTheHighFunctionKeysToTheShell(t *testing.T) {
+	snapshot := twoRootSnapshot()
+	value := newDashboard(&fakeBackend{snapshot: snapshot}, snapshot)
+	value.width, value.height = 120, 30
+	value.terminal = newEmbeddedTerminal("tab-1", newMemoryStream(""), 60, 10)
+	t.Cleanup(value.closeTerminal)
+	value.focus = terminalPane
+
+	for _, code := range []rune{tea.KeyF8, tea.KeyF9} {
+		updated, command := value.Update(key(code, ""))
+		value = updated.(dashboard)
+		if value.modal != noModal || command != nil {
+			t.Fatalf("%v in the terminal = (modal %v, command %v), want it forwarded to the shell",
+				code, value.modal, command)
+		}
+	}
+
+	// The workspace pane still answers them, next to their letters.
+	value.focus = leftPane
+	updated, _ := value.Update(key(tea.KeyF8, ""))
+	value = updated.(dashboard)
+	if value.modal != removeRootModal {
+		t.Fatalf("F8 in the workspace = modal %v, want the removal confirmation", value.modal)
+	}
+	updated, _ = value.Update(key(tea.KeyEscape, ""))
+	value = updated.(dashboard)
+	updated, _ = value.Update(key(tea.KeyF9, ""))
+	value = updated.(dashboard)
+	if value.modal != shutdownModal {
+		t.Fatalf("F9 in the workspace = modal %v, want the shutdown confirmation", value.modal)
+	}
+}
+
+// Esc has to mean no. Removing a root has no undo beyond adding it back and
+// rebuilding the tree by hand.
 func TestDashboardCancelsRemovingARoot(t *testing.T) {
 	snapshot := twoRootSnapshot()
 	backend := &fakeBackend{snapshot: snapshot}
@@ -1421,14 +1460,11 @@ func TestDashboardCancelsRemovingARoot(t *testing.T) {
 	}
 }
 
-// Removing a root used to be a workspace-pane key, so the terminal pane could
-// not reach it at all.
-func TestDashboardRemovesARootFromTheTerminalPane(t *testing.T) {
+// F8 removes the root the cursor is on, not the first one in the tree.
+func TestDashboardRemovesTheSelectedRoot(t *testing.T) {
 	snapshot := twoRootSnapshot()
 	backend := &fakeBackend{snapshot: snapshot}
 	value := newDashboard(backend, snapshot)
-	value.focus = terminalPane
-	value.terminal = newEmbeddedTerminal("tab-1", newMemoryStream(""), 40, 10)
 	value.setNavigation(1)
 
 	updated, _ := value.Update(key(tea.KeyF8, ""))
@@ -1825,7 +1861,6 @@ func TestDashboardKeepsGlobalKeysAtOnePrecedence(t *testing.T) {
 	}{
 		{message: key(tea.KeyF1, ""), want: helpModal},
 		{message: key(tea.KeyF3, ""), want: configModal},
-		{message: key(tea.KeyF9, ""), want: shutdownModal},
 		{message: key(tea.KeyF1, ""), want: helpModal},
 	} {
 		updated, command := value.Update(step.message)
@@ -2247,16 +2282,19 @@ func TestDashboardShowsAllShortcutsInHelpModal(t *testing.T) {
 		keys        []string
 		description string
 	}{
-		{keys: []string{"F1", "?"}, description: "Help"},
-		{keys: []string{"i"}, description: "About"},
-		{keys: []string{"F2", "a"}, description: "Add root"},
-		{keys: []string{"F8", "d"}, description: "Remove root"},
-		{keys: []string{",", "F3"}, description: "Config"},
-		{keys: []string{"q", "F4"}, description: "Quit"},
-		{keys: []string{"r", "F5"}, description: "Refresh"},
-		{keys: []string{"F6", "s"}, description: "Scrollback"},
+		{keys: []string{"F1"}, description: "Help"},
+		{keys: []string{"F2"}, description: "Add root"},
+		{keys: []string{"F3"}, description: "Config"},
+		{keys: []string{"F4"}, description: "Quit"},
+		{keys: []string{"F5"}, description: "Refresh"},
+		{keys: []string{"F6"}, description: "Scrollback"},
 		{keys: []string{"F7"}, description: "Switch pane"},
+		{keys: []string{"F8", "d"}, description: "Remove root"},
 		{keys: []string{"F9", "t"}, description: "Stop daemon"},
+		{keys: []string{"?", "i"}, description: "Help / About"},
+		{keys: []string{"a", ","}, description: "Add root / config"},
+		{keys: []string{"q", "r"}, description: "Quit / refresh"},
+		{keys: []string{"s"}, description: "Scrollback"},
 		{keys: []string{"↑/↓", "j/k"}, description: "Select workspace"},
 		{keys: []string{"←/→", "h/l"}, description: "Select tab / +"},
 		{keys: []string{"Enter"}, description: "Open / confirm"},
@@ -2282,12 +2320,6 @@ func TestDashboardShowsAllShortcutsInHelpModal(t *testing.T) {
 		first       string
 		second      string
 	}{
-		{description: "Help", first: "F1", second: "?"},
-		{description: "Add root", first: "F2", second: "a"},
-		{description: "Config", first: "F3", second: ","},
-		{description: "Quit", first: "F4", second: "q"},
-		{description: "Refresh", first: "F5", second: "r"},
-		{description: "Scrollback", first: "F6", second: "s"},
 		{description: "Focus terminal", first: "F7", second: "Tab"},
 		{description: "Remove root", first: "F8", second: "d"},
 		{description: "Stop daemon", first: "F9", second: "t"},
@@ -2297,8 +2329,11 @@ func TestDashboardShowsAllShortcutsInHelpModal(t *testing.T) {
 			t.Fatalf("%q row = %q, want %s before %s", row.description, line, row.first, row.second)
 		}
 	}
-	// The COMMANDS list is a function key row, so it reads in that order.
-	order := make([]string, 0, 9)
+	// COMMANDS holds exactly the keys that reach both panes — F1 through F7,
+	// in row order. F8, F9 and the letters are workspace-pane only and belong
+	// under NAVIGATION; listing them here would tell a terminal-pane reader to
+	// press keys their shell will swallow.
+	order := make([]string, 0, 7)
 	for _, line := range commandSection(plainLines) {
 		for _, name := range []string{"F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9"} {
 			if strings.Contains(line, name) {
@@ -2306,8 +2341,8 @@ func TestDashboardShowsAllShortcutsInHelpModal(t *testing.T) {
 			}
 		}
 	}
-	if len(order) != 9 || !slices.IsSorted(order) {
-		t.Fatalf("COMMANDS function keys read %v, want F1 through F9 in order:\n%s", order, plain)
+	if len(order) != 7 || !slices.IsSorted(order) {
+		t.Fatalf("COMMANDS function keys read %v, want F1 through F7 in order:\n%s", order, plain)
 	}
 	if len(modalLines) > value.height-2 {
 		t.Fatalf("help modal height = %d, want at most %d", len(modalLines), value.height-2)
