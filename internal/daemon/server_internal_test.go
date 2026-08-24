@@ -312,3 +312,43 @@ func TestAttachRestoresModesTheRecordingNoLongerHolds(t *testing.T) {
 	client.Close()
 	<-attached
 }
+
+// The environment must come from the request, not from the daemon's own. In
+// tests both are the same process, so this passes one the daemon does not have.
+func TestStartSessionUsesTheEnvironmentItIsGiven(t *testing.T) {
+	if _, present := os.LookupEnv("ROMTY_ONLY_IN_THE_REQUEST"); present {
+		t.Skip("the marker is already in the daemon's environment")
+	}
+	value, err := startSession("tab-1", t.TempDir(), "/bin/sh",
+		append(os.Environ(), "ROMTY_ONLY_IN_THE_REQUEST=yes"), 80, 24, func() {})
+	if err != nil {
+		t.Fatalf("startSession() error = %v", err)
+	}
+	t.Cleanup(value.close)
+
+	local, remote := net.Pipe()
+	defer local.Close()
+	defer remote.Close()
+	go value.attach(local)
+
+	seen := make(chan string, 1)
+	go func() {
+		buffer := make([]byte, 4096)
+		var output []byte
+		for {
+			remote.SetReadDeadline(time.Now().Add(3 * time.Second))
+			count, err := remote.Read(buffer)
+			output = append(output, buffer[:count]...)
+			if err != nil || bytes.Contains(output, []byte("marker=yes")) {
+				seen <- string(output)
+				return
+			}
+		}
+	}()
+	if err := value.write([]byte("printf 'marker=%s\\n' \"$ROMTY_ONLY_IN_THE_REQUEST\"\n")); err != nil {
+		t.Fatalf("write() error = %v", err)
+	}
+	if output := <-seen; !bytes.Contains([]byte(output), []byte("marker=yes")) {
+		t.Fatalf("the shell did not receive the request's environment: %q", output)
+	}
+}
