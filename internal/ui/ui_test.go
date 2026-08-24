@@ -637,7 +637,8 @@ func scrolledDashboard(t *testing.T, lines int) dashboard {
 	value := newDashboard(&fakeBackend{}, model.Snapshot{})
 	value.width = 120
 	value.height = 30
-	_, rightWidth, _, terminalHeight := value.dimensions()
+	view := value.dimensions()
+	rightWidth, terminalHeight := view.rightWidth, view.terminalHeight
 	value.terminal = newEmbeddedTerminal("tab-1", newMemoryStream(""), rightWidth, terminalHeight)
 	t.Cleanup(value.closeTerminal)
 	value.focus = terminalPane
@@ -860,7 +861,7 @@ func TestDashboardRendersCopyModeFullWidth(t *testing.T) {
 
 	updated, _ := value.Update(key(tea.KeyF7, ""))
 	value = updated.(dashboard)
-	_, _, bodyHeight, _ := value.dimensions()
+	bodyHeight := value.dimensions().bodyHeight
 	body := strings.Split(ansi.Strip(value.render()), "\n")[:bodyHeight]
 	joined := strings.Join(body, "\n")
 	if strings.Contains(joined, "SnowClash") || strings.Contains(joined, "nalbam") || strings.Contains(joined, "│") {
@@ -895,7 +896,7 @@ func TestDashboardKeepsMouseWithTheHostUnlessPassthroughIsOn(t *testing.T) {
 	if value.View().MouseMode != tea.MouseModeAllMotion {
 		t.Fatalf("mouse mode = %v, want the guest's own mode mirrored", value.View().MouseMode)
 	}
-	leftWidth, _, _, _ := value.dimensions()
+	leftWidth := value.dimensions().leftWidth
 	value.Update(tea.MouseWheelMsg{X: leftWidth + 3 + 4, Y: terminalTop + 2, Button: tea.MouseWheelUp})
 	waitForGuest(t, value.terminal.stream.(*memoryStream), "\x1b[<64;5;3")
 	sent := value.terminal.stream.(*memoryStream).String()
@@ -1416,6 +1417,41 @@ func TestReattachBackoffGrowsAndIsCapped(t *testing.T) {
 	}
 }
 
+// The terminal's origin, the right pane's width and the mouse translation all
+// assume the separator and tab bar are exactly as wide and tall as drawn. That
+// agreement is not something the compiler can check, so check it here: change
+// either and the cursor and the mouse silently point at the wrong cell.
+func TestLayoutMatchesWhatIsRendered(t *testing.T) {
+	value := newDashboard(&fakeBackend{}, model.Snapshot{})
+	value.width = 120
+	value.height = 40
+
+	head, body := value.paneSeparators()
+	for name, separator := range map[string]string{"first row": head, "other rows": body} {
+		if width := lipgloss.Width(ansi.Strip(separator)); width != separatorWidth {
+			t.Fatalf("the %s separator is %d cells wide, but the layout assumes %d",
+				name, width, separatorWidth)
+		}
+	}
+
+	bar := renderTabBar(value.styles, nil, 0, 40)
+	if len(bar) != terminalTop {
+		t.Fatalf("the tab bar is %d rows tall, but terminalTop is %d", len(bar), terminalTop)
+	}
+
+	// The origin has to be where the terminal's first cell actually lands.
+	view := value.dimensions()
+	originX, originY := view.terminalOrigin()
+	if originX != view.leftWidth+separatorWidth || originY != terminalTop {
+		t.Fatalf("terminal origin = (%d,%d), want (%d,%d)",
+			originX, originY, view.leftWidth+separatorWidth, terminalTop)
+	}
+	if view.leftWidth+separatorWidth+view.rightWidth != value.width {
+		t.Fatalf("panes and separator cover %d columns, want the full %d",
+			view.leftWidth+separatorWidth+view.rightWidth, value.width)
+	}
+}
+
 func TestDashboardRefusesScrollbackWithoutTerminal(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, model.Snapshot{})
 
@@ -1667,7 +1703,8 @@ func TestDashboardHighlightsNavigationAndShowsOpenTabs(t *testing.T) {
 	if !strings.Contains(plain, "▾ nalbam") || !strings.Contains(plain, "▌ ├─ SnowClash") {
 		t.Fatalf("navigation tree or selection color is missing:\n%s", rendered)
 	}
-	leftWidth, _, bodyHeight, _ := value.dimensions()
+	view := value.dimensions()
+	leftWidth, bodyHeight := view.leftWidth, view.bodyHeight
 	navigation := ansi.Strip(strings.Join(value.renderNavigation(leftWidth, bodyHeight), "\n"))
 	snowClash := ""
 	for _, line := range strings.Split(navigation, "\n") {
@@ -1705,14 +1742,16 @@ func TestDashboardUsesCompactLeftPane(t *testing.T) {
 	value.width = 120
 	value.height = 40
 
-	leftWidth, rightWidth, _, _ := value.dimensions()
+	view := value.dimensions()
+	leftWidth, rightWidth := view.leftWidth, view.rightWidth
 	if leftWidth != 28 || rightWidth != 89 {
 		t.Fatalf("pane widths = %d/%d, want 28/89", leftWidth, rightWidth)
 	}
 
 	value = newDashboardWithConfig(&fakeBackend{}, model.Snapshot{}, "", Config{LeftWidth: 24})
 	value.width = 120
-	leftWidth, rightWidth, _, _ = value.dimensions()
+	view = value.dimensions()
+	leftWidth, rightWidth = view.leftWidth, view.rightWidth
 	if leftWidth != 24 || rightWidth != 93 {
 		t.Fatalf("configured pane widths = %d/%d, want 24/93", leftWidth, rightWidth)
 	}
@@ -1771,7 +1810,8 @@ func TestDashboardKeepsNavigationCursorVisible(t *testing.T) {
 	}}})
 	value.width = 120
 	value.height = 30
-	leftWidth, _, bodyHeight, _ := value.dimensions()
+	view := value.dimensions()
+	leftWidth, bodyHeight := view.leftWidth, view.bodyHeight
 
 	for _, navIndex := range []int{0, 20, len(directories)} {
 		value.navIndex = navIndex
@@ -1830,7 +1870,7 @@ func TestDashboardShowsAllShortcutsInHelpModal(t *testing.T) {
 	if value.modal != helpModal || command != nil {
 		t.Fatalf("? result = (modal %v, command %v), want help modal", value.modal, command)
 	}
-	_, _, bodyHeight, _ := value.dimensions()
+	bodyHeight := value.dimensions().bodyHeight
 	modalLines := value.renderModal(value.width, bodyHeight)
 	plainLines := strings.Split(ansi.Strip(strings.Join(modalLines, "\n")), "\n")
 	plain := strings.Join(plainLines, "\n")
@@ -1904,7 +1944,7 @@ func TestDashboardScrollsHelpModalOnShortTerminals(t *testing.T) {
 	updated, _ := value.Update(key('?', "?"))
 	value = updated.(dashboard)
 
-	_, _, bodyHeight, _ := value.dimensions()
+	bodyHeight := value.dimensions().bodyHeight
 	lines := strings.Split(value.render(), "\n")
 	modalLines := value.renderModal(value.width, bodyHeight)
 	if len(modalLines) > bodyHeight {
@@ -1989,7 +2029,7 @@ func TestDashboardAdjustsAndPersistsLeftPaneWidth(t *testing.T) {
 	}
 	updated, saveCommand := value.Update(key(tea.KeyRight, ""))
 	value = updated.(dashboard)
-	leftWidth, _, _, _ := value.dimensions()
+	leftWidth := value.dimensions().leftWidth
 	if saveCommand == nil || leftWidth != 29 {
 		t.Fatalf("right adjustment = (command %v, width %d), want saved width 29", saveCommand, leftWidth)
 	}
