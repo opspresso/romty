@@ -2868,3 +2868,33 @@ func TestDashboardIgnoresATerminalOpenedForTheTabItLeft(t *testing.T) {
 		t.Fatal("the terminal romty walked away from is still attached to the daemon")
 	}
 }
+
+// Dragging a window makes a burst of resizes, each asking the daemon on its
+// own goroutine, and nothing orders the round trips. Whichever lands last has
+// to leave the PTY at the size on screen, not at one the window had on the way
+// past — a shell told the wrong size wraps its output wrongly until something
+// resizes again.
+func TestDashboardResizesToTheSizeOnScreenWhateverTheOrder(t *testing.T) {
+	value := newDashboard(&fakeBackend{}, model.Snapshot{})
+	backend := value.backend.(*fakeBackend)
+	value.terminal = newEmbeddedTerminal("tab-1", newMemoryStream(""), 40, 10)
+	t.Cleanup(value.closeTerminal)
+
+	updated, wide := value.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	value = updated.(dashboard)
+	updated, narrow := value.Update(tea.WindowSizeMsg{Width: 60, Height: 20})
+	value = updated.(dashboard)
+	if wide == nil || narrow == nil {
+		t.Fatal("a window resize did not ask the daemon to resize the PTY")
+	}
+	wantColumns, wantRows := value.terminalSize()
+
+	// The earlier request lands last, which is what two goroutines are free to
+	// do.
+	narrow()
+	wide()
+	if backend.createdColumns != wantColumns || backend.createdRows != wantRows {
+		t.Fatalf("resized the PTY to %dx%d, want the %dx%d that is on screen",
+			backend.createdColumns, backend.createdRows, wantColumns, wantRows)
+	}
+}

@@ -355,6 +355,21 @@ func (t *embeddedTerminal) resize(width, height int) {
 	t.emulator.Resize(width, height)
 }
 
+// size is what the emulator is showing right now, which is what the guest has
+// to be told. A resize command reads it when it runs rather than carrying the
+// size it was made with: dragging a window makes a burst of them, each on its
+// own goroutine, and nothing orders their round trips to the daemon. Every one
+// of them then reports the size that is on screen, so whichever lands last
+// leaves the PTY agreeing with the emulator rather than a size the window had
+// on the way past.
+func (t *embeddedTerminal) size() (uint16, uint16) {
+	return clampSize(t.emulator.Width()), clampSize(t.emulator.Height())
+}
+
+func clampSize(value int) uint16 {
+	return uint16(min(max(value, 0), 65535))
+}
+
 func (t *embeddedTerminal) render() []string {
 	return splitLines(t.emulator.Render(), t.emulator.Height())
 }
