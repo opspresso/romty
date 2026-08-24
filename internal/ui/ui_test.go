@@ -8,6 +8,7 @@ import (
 	"io"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -542,6 +543,194 @@ func TestDashboardReportsFailedShutdown(t *testing.T) {
 	}
 }
 
+// plainRows drops styling and trailing padding so viewport rows can be compared
+// whether they are rendered from the live screen or from the scrollback.
+func plainRows(lines []string) []string {
+	rows := make([]string, 0, len(lines))
+	for _, line := range lines {
+		rows = append(rows, strings.TrimRight(ansi.Strip(line), " "))
+	}
+	return rows
+}
+
+// scrolledDashboard returns a dashboard whose terminal holds `lines` rows of
+// numbered output, all but the last screen of which sits in the scrollback.
+func scrolledDashboard(t *testing.T, lines int) dashboard {
+	t.Helper()
+	value := newDashboard(&fakeBackend{}, model.Snapshot{})
+	value.width = 120
+	value.height = 30
+	_, rightWidth, _, terminalHeight := value.dimensions()
+	value.terminal = newEmbeddedTerminal("tab-1", newMemoryStream(""), rightWidth, terminalHeight)
+	t.Cleanup(value.closeTerminal)
+	value.focus = terminalPane
+
+	var output strings.Builder
+	for index := range lines {
+		fmt.Fprintf(&output, "line-%03d\r\n", index)
+	}
+	value.terminal.writeOutput([]byte(output.String()))
+	if value.terminal.scrollbackLen() == 0 {
+		t.Fatalf("terminal produced no scrollback for %d lines at height %d", lines, terminalHeight)
+	}
+	return value
+}
+
+func TestDashboardScrollsTerminalHistory(t *testing.T) {
+	value := scrolledDashboard(t, 200)
+	history := value.terminal.scrollbackLen()
+
+	// The mouse stays with the host terminal until scrollback mode is entered.
+	if value.View().MouseMode != tea.MouseModeNone {
+		t.Fatalf("mouse mode outside scrollback = %v, want none", value.View().MouseMode)
+	}
+	live := plainRows(value.terminal.renderViewport(0))
+
+	updated, command := value.Update(key(tea.KeyF7, ""))
+	value = updated.(dashboard)
+	if !value.scrollback || value.scrollOffset != 0 || command != nil {
+		t.Fatalf("F7 = (scrollback %v, offset %d, command %v), want the live view in scrollback mode",
+			value.scrollback, value.scrollOffset, command)
+	}
+	view := value.View()
+	if view.MouseMode != tea.MouseModeCellMotion || view.Cursor != nil {
+		t.Fatalf("scrollback view = (mouse %v, cursor %v), want mouse on and no cursor", view.MouseMode, view.Cursor)
+	}
+
+	updated, _ = value.Update(tea.MouseWheelMsg{Button: tea.MouseWheelUp})
+	value = updated.(dashboard)
+	if value.scrollOffset != wheelScrollLines {
+		t.Fatalf("wheel up offset = %d, want %d", value.scrollOffset, wheelScrollLines)
+	}
+	if slices.Equal(plainRows(value.terminal.renderViewport(value.scrollOffset)), live) {
+		t.Fatal("scrolling up did not change the rendered viewport")
+	}
+	updated, _ = value.Update(tea.MouseWheelMsg{Button: tea.MouseWheelDown})
+	value = updated.(dashboard)
+	if value.scrollOffset != 0 {
+		t.Fatalf("wheel down offset = %d, want back at the live screen", value.scrollOffset)
+	}
+
+	// Home reaches the oldest retained line and clamps there.
+	updated, _ = value.Update(key(tea.KeyHome, ""))
+	value = updated.(dashboard)
+	if value.scrollOffset != history {
+		t.Fatalf("Home offset = %d, want the full history %d", value.scrollOffset, history)
+	}
+	oldest := plainRows(value.terminal.renderViewport(value.scrollOffset))[0]
+	retained := plainRows([]string{value.terminal.emulator.Scrollback().Line(0).Render()})[0]
+	if oldest != retained {
+		t.Fatalf("oldest visible row = %q, want the first retained line %q", oldest, retained)
+	}
+	if rendered := ansi.Strip(value.render()); !strings.Contains(rendered, "SCROLLBACK") ||
+		!strings.Contains(rendered, fmt.Sprintf("%d/%d", history, history)) {
+		t.Fatalf("status bar does not report the scrollback position:\n%s", rendered)
+	}
+	updated, _ = value.Update(key(tea.KeyEnd, ""))
+	value = updated.(dashboard)
+	if value.scrollOffset != 0 {
+		t.Fatalf("End offset = %d, want the live screen", value.scrollOffset)
+	}
+
+	updated, _ = value.Update(key(tea.KeyEscape, ""))
+	value = updated.(dashboard)
+	if value.scrollback || value.scrollOffset != 0 || value.View().MouseMode != tea.MouseModeNone {
+		t.Fatalf("Esc = (scrollback %v, offset %d, mouse %v), want the mouse returned to the host",
+			value.scrollback, value.scrollOffset, value.View().MouseMode)
+	}
+}
+
+func TestDashboardEntersScrollbackFromEveryBinding(t *testing.T) {
+	page := scrolledDashboard(t, 200).scrollbackPage()
+
+	for _, step := range []struct {
+		name    string
+		enter   []tea.KeyPressMsg
+		focus   pane
+		offset  int
+		wheelOK bool
+	}{
+		{name: "F7", enter: []tea.KeyPressMsg{key(tea.KeyF7, "")}, focus: terminalPane},
+		{
+			name:  "Ctrl+\\ twice",
+			enter: []tea.KeyPressMsg{tea.KeyPressMsg(tea.Key{Code: '\\', Mod: tea.ModCtrl}), tea.KeyPressMsg(tea.Key{Code: '\\', Mod: tea.ModCtrl})},
+			focus: terminalPane,
+		},
+		{
+			name:   "Shift+PgUp",
+			enter:  []tea.KeyPressMsg{tea.KeyPressMsg(tea.Key{Code: tea.KeyPgUp, Mod: tea.ModShift})},
+			focus:  terminalPane,
+			offset: page,
+		},
+		{
+			name:   "Shift+PgUp from the workspace pane",
+			enter:  []tea.KeyPressMsg{tea.KeyPressMsg(tea.Key{Code: tea.KeyPgUp, Mod: tea.ModShift})},
+			focus:  leftPane,
+			offset: page,
+		},
+	} {
+		t.Run(step.name, func(t *testing.T) {
+			value := scrolledDashboard(t, 200)
+			value.focus = step.focus
+			for _, message := range step.enter {
+				updated, _ := value.Update(message)
+				value = updated.(dashboard)
+			}
+			if !value.scrollback || value.scrollOffset != step.offset {
+				t.Fatalf("%s = (scrollback %v, offset %d), want scrollback at offset %d",
+					step.name, value.scrollback, value.scrollOffset, step.offset)
+			}
+		})
+	}
+}
+
+func TestDashboardHoldsScrollbackViewportOnNewOutput(t *testing.T) {
+	value := scrolledDashboard(t, 200)
+	updated, _ := value.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyPgUp, Mod: tea.ModShift}))
+	value = updated.(dashboard)
+	anchored := plainRows(value.terminal.renderViewport(value.scrollOffset))
+	before := value.scrollOffset
+
+	updated, _ = value.Update(terminalOutputMsg{terminal: value.terminal, data: []byte("fresh-a\r\nfresh-b\r\n")})
+	value = updated.(dashboard)
+	if value.scrollOffset == before {
+		t.Fatalf("offset stayed at %d while new output pushed lines into the scrollback", before)
+	}
+	if !slices.Equal(plainRows(value.terminal.renderViewport(value.scrollOffset)), anchored) {
+		t.Fatalf("viewport drifted when new output arrived while scrolled back:\n%s\nwant\n%s",
+			strings.Join(plainRows(value.terminal.renderViewport(value.scrollOffset)), "\n"), strings.Join(anchored, "\n"))
+	}
+
+	// Leaving scrollback returns to the live screen, which has the new output.
+	updated, _ = value.Update(key('q', "q"))
+	value = updated.(dashboard)
+	if value.scrollback || value.scrollOffset != 0 {
+		t.Fatalf("q = (scrollback %v, offset %d), want the live screen", value.scrollback, value.scrollOffset)
+	}
+	if !strings.Contains(ansi.Strip(strings.Join(value.terminal.renderViewport(0), "\n")), "fresh-b") {
+		t.Fatal("live screen does not show the output that arrived during scrollback")
+	}
+}
+
+func TestDashboardRefusesScrollbackWithoutTerminal(t *testing.T) {
+	value := newDashboard(&fakeBackend{}, model.Snapshot{})
+
+	for _, message := range []tea.KeyPressMsg{
+		key(tea.KeyF7, ""),
+		tea.KeyPressMsg(tea.Key{Code: tea.KeyPgUp, Mod: tea.ModShift}),
+		tea.KeyPressMsg(tea.Key{Code: '\\', Mod: tea.ModCtrl}),
+	} {
+		updated, _ := value.Update(message)
+		value = updated.(dashboard)
+		if value.scrollback {
+			t.Fatalf("%q entered scrollback with no terminal open", message.String())
+		}
+	}
+	if value.View().MouseMode != tea.MouseModeNone {
+		t.Fatalf("mouse mode = %v, want none", value.View().MouseMode)
+	}
+}
+
 func TestDashboardKeepsGlobalKeysAtOnePrecedence(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, model.Snapshot{})
 	value.errorMessage = "boom"
@@ -925,7 +1114,7 @@ func TestDashboardShowsAboutModalWithoutReplacingDashboard(t *testing.T) {
 func TestDashboardShowsAllShortcutsInHelpModal(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, model.Snapshot{})
 	value.width = 100
-	value.height = 24
+	value.height = 40
 	lines := strings.Split(value.render(), "\n")
 	status := lines[len(lines)-1]
 	if strings.Contains(status, value.styles.shortcutKey.Render(" + ")) || strings.Contains(status, value.styles.shortcutKey.Render(" , ")) {
@@ -956,12 +1145,17 @@ func TestDashboardShowsAllShortcutsInHelpModal(t *testing.T) {
 		{keys: []string{"q", "F4"}, description: "Quit"},
 		{keys: []string{"r", "F5"}, description: "Refresh"},
 		{keys: []string{"F6"}, description: "Stop daemon"},
+		{keys: []string{"F7"}, description: "Scrollback"},
 		{keys: []string{"?"}, description: "Help"},
 		{keys: []string{"↑/↓", "j/k"}, description: "Select workspace"},
 		{keys: []string{"←/→", "h/l"}, description: "Select tab / +"},
 		{keys: []string{"Enter"}, description: "Open / confirm"},
 		{keys: []string{"Tab"}, description: "Focus terminal"},
 		{keys: []string{"Ctrl+\\"}, description: "Focus workspace"},
+		{keys: []string{"F7", "Ctrl+\\"}, description: "Enter / leave"},
+		{keys: []string{"PgUp/PgDn"}, description: "Scroll a page"},
+		{keys: []string{"Shift+PgUp"}, description: "Enter at a page back"},
+		{keys: []string{"Wheel"}, description: "Scroll with the mouse"},
 		{keys: []string{"Ctrl+C"}, description: "Quit"},
 		{keys: []string{"←/→", "[/]"}, description: "Resize workspace pane"},
 		{keys: []string{"Esc"}, description: "Close / cancel"},

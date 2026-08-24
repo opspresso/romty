@@ -15,6 +15,8 @@ import (
 const (
 	terminalTop        = 2
 	helpKeyColumnWidth = 20
+	// wheelScrollLines is the conventional number of rows one wheel notch moves.
+	wheelScrollLines = 3
 )
 
 type Backend interface {
@@ -79,6 +81,8 @@ type dashboard struct {
 	terminal            *embeddedTerminal
 	modal               modal
 	shutdownPending     bool
+	scrollback          bool
+	scrollOffset        int
 	helpOffset          int
 	configPath          string
 	leftWidth           int
@@ -170,6 +174,8 @@ func (m dashboard) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case tea.KeyPressMsg:
 		return m.handleKey(message)
+	case tea.MouseWheelMsg:
+		return m.handleWheel(message)
 	case tea.PasteMsg:
 		if m.inputMode {
 			m.input += message.Content
@@ -227,6 +233,10 @@ var globalKeys = map[string]func(dashboard) (tea.Model, tea.Cmd){
 	"f4": func(m dashboard) (tea.Model, tea.Cmd) { return m.quit() },
 	"f5": func(m dashboard) (tea.Model, tea.Cmd) { return m, m.refresh() },
 	"f6": func(m dashboard) (tea.Model, tea.Cmd) { return m.openModal(shutdownModal) },
+	"f7": func(m dashboard) (tea.Model, tea.Cmd) { return m.toggleScrollback() },
+	// Shift+PgUp reaches the history in one press by entering scrollback itself.
+	"shift+pgup":   func(m dashboard) (tea.Model, tea.Cmd) { return m.pageHistory(1) },
+	"shift+pgdown": func(m dashboard) (tea.Model, tea.Cmd) { return m.pageHistory(-1) },
 }
 
 func (m dashboard) handleKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
@@ -245,6 +255,9 @@ func (m dashboard) handleKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 	if m.modal != noModal {
 		return m.handleModalKey(message)
+	}
+	if m.scrollback {
+		return m.handleScrollbackKey(message)
 	}
 	if m.focus == terminalPane {
 		if message.String() == "ctrl+\\" {
@@ -277,6 +290,9 @@ func (m dashboard) handleKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, m.refresh()
 	case "?":
 		return m.openModal(helpModal)
+	case "ctrl+\\":
+		// A second Ctrl+\ after leaving the terminal opens its scrollback.
+		return m.toggleScrollback()
 	case "up", "k":
 		m.moveNavigation(-1)
 	case "down", "j":
@@ -339,6 +355,95 @@ func (m dashboard) handleModalKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 		}
 	}
 	return m, nil
+}
+
+// Scrollback mode is the only state where romty asks the host terminal for
+// mouse events. Everywhere else the mouse belongs to the host so its native
+// drag selection keeps working, which is why this is an explicit mode.
+func (m dashboard) handleScrollbackKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if m.terminal == nil {
+		m.stopScrollback()
+		return m, nil
+	}
+	page := m.scrollbackPage()
+	switch message.String() {
+	case "esc", "q", "ctrl+\\":
+		m.stopScrollback()
+	case "up", "k":
+		m.scrollTerminal(1)
+	case "down", "j":
+		m.scrollTerminal(-1)
+	case "pgup", "ctrl+b":
+		m.scrollTerminal(page)
+	case "pgdown", "ctrl+f":
+		m.scrollTerminal(-page)
+	case "home", "g":
+		m.scrollTerminal(m.terminal.scrollbackLen())
+	case "end", "G":
+		m.scrollTerminal(-m.terminal.scrollbackLen())
+	}
+	return m, nil
+}
+
+func (m dashboard) handleWheel(message tea.MouseWheelMsg) (tea.Model, tea.Cmd) {
+	if !m.scrollback {
+		return m, nil
+	}
+	switch message.Button {
+	case tea.MouseWheelUp:
+		m.scrollTerminal(wheelScrollLines)
+	case tea.MouseWheelDown:
+		m.scrollTerminal(-wheelScrollLines)
+	}
+	return m, nil
+}
+
+func (m dashboard) toggleScrollback() (tea.Model, tea.Cmd) {
+	if m.scrollback {
+		m.stopScrollback()
+		return m, nil
+	}
+	if !m.startScrollback() {
+		m.errorMessage = "no terminal output to scroll"
+	}
+	return m, nil
+}
+
+func (m dashboard) pageHistory(pages int) (tea.Model, tea.Cmd) {
+	if !m.scrollback && !m.startScrollback() {
+		return m, nil
+	}
+	m.scrollTerminal(pages * m.scrollbackPage())
+	return m, nil
+}
+
+func (m *dashboard) startScrollback() bool {
+	if m.terminal == nil {
+		return false
+	}
+	m.scrollback = true
+	m.modal = noModal
+	m.errorMessage = ""
+	return true
+}
+
+func (m *dashboard) stopScrollback() {
+	m.scrollback = false
+	m.scrollOffset = 0
+}
+
+// scrollTerminal moves the viewport by delta lines, positive towards the oldest
+// output. Offset zero is the live screen.
+func (m *dashboard) scrollTerminal(delta int) {
+	if m.terminal == nil {
+		return
+	}
+	m.scrollOffset = min(max(m.scrollOffset+delta, 0), m.terminal.scrollbackLen())
+}
+
+func (m dashboard) scrollbackPage() int {
+	_, _, _, terminalHeight := m.dimensions()
+	return max(terminalHeight-1, 1)
 }
 
 func (m dashboard) scrollHelp(delta int) (tea.Model, tea.Cmd) {
@@ -464,7 +569,13 @@ func (m dashboard) handleTerminalOutput(message terminalOutputMsg) (tea.Model, t
 		return m, nil
 	}
 	if len(message.data) > 0 {
+		before := m.terminal.scrollbackLen()
 		m.terminal.writeOutput(message.data)
+		if m.scrollback {
+			// Hold the viewport on the same content as new output pushes
+			// older lines into the scrollback.
+			m.scrollTerminal(m.terminal.scrollbackLen() - before)
+		}
 	}
 	if message.err != nil {
 		m.terminal.disconnect()
@@ -746,8 +857,13 @@ func (m dashboard) View() tea.View {
 	view := tea.NewView(content)
 	view.AltScreen = true
 	view.WindowTitle = "romty"
+	// Mouse reporting takes drag selection away from the host terminal, so it
+	// stays off outside scrollback mode.
 	view.MouseMode = tea.MouseModeNone
-	if m.focus == terminalPane && m.terminal != nil && m.terminal.active {
+	if m.scrollback {
+		view.MouseMode = tea.MouseModeCellMotion
+	}
+	if !m.scrollback && m.focus == terminalPane && m.terminal != nil && m.terminal.active {
 		leftWidth, _, _, _ := m.dimensions()
 		position := m.terminal.cursorPosition()
 		view.Cursor = tea.NewCursor(leftWidth+3+position.X, terminalTop+position.Y)
@@ -823,6 +939,17 @@ func (m dashboard) renderStatus(width, bodyHeight int) []string {
 			shortcut{key: "Enter", description: "stop daemon"},
 			shortcut{key: "Esc", description: "cancel"},
 		)
+	case m.scrollback:
+		status = truncate(
+			m.styles.promptLabel.Render(" SCROLLBACK ")+" "+
+				m.styles.shortcutDescription.Render(m.scrollbackPosition())+"  "+
+				renderShortcuts(m.styles, width,
+					shortcut{key: "↑/↓", description: "line"},
+					shortcut{key: "PgUp/PgDn", description: "page"},
+					shortcut{key: "Esc", description: "exit"},
+				),
+			width,
+		)
 	default:
 		contextShortcuts := []shortcut{
 			{key: "↑/↓", description: "workspace"},
@@ -841,9 +968,18 @@ func (m dashboard) renderStatus(width, bodyHeight int) []string {
 			shortcut{key: "F4", description: "quit"},
 			shortcut{key: "F5", description: "refresh"},
 			shortcut{key: "F6", description: "stop daemon"},
+			shortcut{key: "F7", description: "scrollback"},
 		)
 	}
 	return []string{rail, status}
+}
+
+// scrollbackPosition reports how far back the viewport sits in the history.
+func (m dashboard) scrollbackPosition() string {
+	if m.terminal == nil {
+		return "0/0"
+	}
+	return fmt.Sprintf("%d/%d", m.scrollOffset, m.terminal.scrollbackLen())
 }
 
 func (m dashboard) overlayModal(lines []string, width, height int) []string {
@@ -904,6 +1040,7 @@ func (m dashboard) helpEntries() []string {
 		renderHelpShortcut(m.styles, "Quit", "q", "F4"),
 		renderHelpShortcut(m.styles, "Refresh", "r", "F5"),
 		renderHelpShortcut(m.styles, "Stop daemon", "F6"),
+		renderHelpShortcut(m.styles, "Scrollback", "F7"),
 		renderHelpShortcut(m.styles, "Help", "?"),
 		renderHelpSection(m.styles, "NAVIGATION", "workspace area"),
 		renderHelpShortcut(m.styles, "Select workspace", "↑/↓", "j/k"),
@@ -912,6 +1049,13 @@ func (m dashboard) helpEntries() []string {
 		renderHelpShortcut(m.styles, "Focus terminal", "Tab"),
 		renderHelpSection(m.styles, "TERMINAL", "terminal area"),
 		renderHelpShortcut(m.styles, "Focus workspace", "Ctrl+\\"),
+		renderHelpSection(m.styles, "SCROLLBACK", "mouse works here only"),
+		renderHelpShortcut(m.styles, "Enter / leave", "F7", "Ctrl+\\"),
+		renderHelpShortcut(m.styles, "Scroll a line", "↑/↓", "j/k"),
+		renderHelpShortcut(m.styles, "Scroll a page", "PgUp/PgDn"),
+		renderHelpShortcut(m.styles, "Scroll with the mouse", "Wheel"),
+		renderHelpShortcut(m.styles, "Enter at a page back", "Shift+PgUp"),
+		renderHelpShortcut(m.styles, "Oldest / newest", "Home/End"),
 		renderHelpSection(m.styles, "OTHER", "contextual"),
 		renderHelpShortcut(m.styles, "Quit", "Ctrl+C"),
 		renderHelpShortcut(m.styles, "Resize workspace pane", "←/→", "[/]"),
@@ -1051,7 +1195,7 @@ func (m dashboard) renderTerminal(width int) []string {
 	}
 	lines := renderTabBar(m.styles, tabs, m.tabIndex, width)
 	if m.terminal != nil {
-		return append(lines, m.terminal.render()...)
+		return append(lines, m.terminal.renderViewport(m.scrollOffset)...)
 	}
 	if _, ok := m.navigationItem(); m.focus == leftPane && !ok {
 		return append(lines, m.styles.empty.Render("  Select a root or workspace"))

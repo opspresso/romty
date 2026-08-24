@@ -71,7 +71,7 @@ romty stop
 
 The left pane shows the workspace tree, which scrolls with the selection when the tree is taller than the pane. A `●` after an item represents one running terminal tab. The right pane contains the tab rail and the embedded terminal. Accent colors distinguish the current selection, active tab, and focused pane; the arrow beside the vertical divider points to the active pane.
 
-The status bar shows `F1` through `F6` in both panes and adds navigation keys for the active pane. Press `?` in the workspace pane to see every shortcut, including aliases hidden from the status bar.
+The status bar shows `F1` through `F7` in both panes and adds navigation keys for the active pane. Press `?` in the workspace pane to see every shortcut, including aliases hidden from the status bar.
 
 ### Global keys
 
@@ -85,6 +85,8 @@ These function keys work from either pane, with a modal open, and with non-Engli
 | `F4` | Quit romty |
 | `F5` | Refresh roots, workspaces, and sessions |
 | `F6` | Ask for confirmation, then stop the daemon and all running terminal sessions |
+| `F7` | Enter or leave scrollback for the open terminal |
+| `Shift`+`PgUp`/`PgDn` | Enter scrollback and move one page at a time |
 
 ### Workspace pane
 
@@ -109,8 +111,25 @@ The `+` key itself is not a shortcut. Select the `+` tab with `←`/`→` and co
 | Key | Action |
 |---|---|
 | `Ctrl+\` | Focus the workspace pane and refresh the workspace tree |
+| `Ctrl+\` `Ctrl+\` | Pressing it a second time, from the workspace pane, opens the terminal's scrollback |
 
 Except for the global function keys and `Ctrl+\`, keyboard and paste input is forwarded to the PTY. Mouse tracking remains disabled so the host terminal can select and copy displayed text normally.
+
+### Scrollback
+
+romty keeps the last 10,000 lines that scrolled off each terminal. Enter scrollback with `F7`, `Shift`+`PgUp`, or a second `Ctrl+\`, and leave it with `Esc`, `q`, `F7`, or `Ctrl+\`. New output does not move the view while you are scrolled back; leaving returns to the live screen.
+
+| Key | Action |
+|---|---|
+| Wheel | Scroll three lines |
+| `↑`/`↓`, `j`/`k` | Scroll one line |
+| `PgUp`/`PgDn`, `Ctrl+B`/`Ctrl+F` | Scroll one page |
+| `Home`/`End`, `g`/`G` | Jump to the oldest retained line or back to the live screen |
+| `Esc`, `q` | Leave scrollback |
+
+Scrollback mode is the only state in which romty asks the terminal for mouse events. The xterm protocol has no wheel-only reporting mode, so requesting the wheel also takes drag selection away from the host terminal. Keeping the request scoped to this one mode means the mouse selects and copies text natively everywhere else. Inside scrollback, hold the modifier your terminal uses to bypass mouse reporting — `Option` on macOS, `Shift` elsewhere — to select text as usual.
+
+While scrollback is open it owns the keyboard, so navigation and terminal input resume only after you leave it.
 
 ### Modals and prompts
 
