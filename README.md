@@ -175,6 +175,8 @@ Pressing `F6` opens a confirmation modal because stopping the daemon terminates 
 
 Reattaching replays the recorded output so the screen comes back as it was. Terminal queries are dropped from that replay: a query is an exchange that already finished, and a terminal emulator answering it a second time would send the reply to a shell that asked nothing, where it lands on the command line as typed text. Live queries are still answered normally.
 
+A terminal whose connection drops is reconnected automatically. Repeated drops are retried more slowly each time and then left alone, with a message, rather than reconnecting in a loop; press `Enter` on the tab to try again.
+
 When a shell exits, its tab is removed from the daemon state. If you were in that terminal, romty moves to the tab that took its place in the same workspace, or to the workspace pane when it held the last one. A shell that exits in the background leaves the workspace tree where it is. If the daemon stops or the operating system restarts, roots and workspace metadata remain available, but stale terminal tabs are discarded because their PTY processes can no longer be reattached.
 
 The daemon writes what it is doing, and every failure it cannot report to a client, to `~/.config/romty/daemon.log`. That is the place to look when romty will not start or a session behaves oddly, because the daemon runs detached with nobody watching its output.

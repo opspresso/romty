@@ -1296,6 +1296,126 @@ func TestDashboardShowsAndRemovesAnUnreadableRoot(t *testing.T) {
 	}
 }
 
+// A connection that drops used to be retried at once: the daemon replayed the
+// whole recording, the client fell behind, the daemon cut it off, and round it
+// went. Retries are spaced and bounded, and the last word is the user's.
+func TestDashboardBacksOffRepeatedReattaches(t *testing.T) {
+	tabs := []model.Tab{{ID: "tab-1", WorkspaceID: "workspace-1", Name: "1", Running: true}}
+	value, backend, refresh := exitedDashboard(t, tabs, 0)
+
+	// drop reopens the terminal the way a completed attach does, then ends its
+	// stream, which is what a connection the daemon cut off looks like.
+	drop := func(t *testing.T, value dashboard, open tea.Cmd) dashboard {
+		t.Helper()
+		updated, _ := value.Update(open())
+		value = updated.(dashboard)
+		if value.terminal == nil {
+			t.Fatal("the reattach did not open a terminal")
+		}
+		updated, _ = value.Update(terminalOutputMsg{terminal: value.terminal, err: io.EOF})
+		return updated.(dashboard)
+	}
+
+	// The first drop reconnects at once: a one-off should recover unnoticed.
+	updated, open := value.Update(refresh())
+	value = updated.(dashboard)
+	if open == nil || value.reattachAttempts != 0 {
+		t.Fatalf("first reattach = (command %v, retries %d), want an immediate reconnect",
+			open, value.reattachAttempts)
+	}
+	value = drop(t, value, open)
+
+	// Each further drop is a retry: spaced, and counted.
+	for attempt := 1; attempt <= maximumReattachAttempts; attempt++ {
+		updated, delayed := value.Update(refresh())
+		value = updated.(dashboard)
+		if delayed == nil {
+			t.Fatalf("retry %d produced no command", attempt)
+		}
+		if value.reattachAttempts != attempt {
+			t.Fatalf("retry %d recorded %d attempts", attempt, value.reattachAttempts)
+		}
+		// The command must be a timer rather than an immediate open, or the
+		// loop this exists to damp is still a loop.
+		waited := time.Now()
+		message := delayed()
+		if _, ok := message.(reopenTerminalMsg); !ok {
+			t.Fatalf("retry %d returned %T, want a delayed reopen", attempt, message)
+		}
+		if elapsed := time.Since(waited); elapsed < initialReattachBackoff {
+			t.Fatalf("retry %d waited %v, want at least %v", attempt, elapsed, initialReattachBackoff)
+		}
+		updated, open = value.Update(message)
+		value = updated.(dashboard)
+		if open == nil {
+			t.Fatal("the backoff timer did not lead to a reattach")
+		}
+		value = drop(t, value, open)
+	}
+
+	// Past the ceiling romty stops on its own and says so.
+	updated, command := value.Update(refresh())
+	value = updated.(dashboard)
+	if command != nil {
+		t.Fatalf("romty kept retrying past %d attempts", maximumReattachAttempts)
+	}
+	if value.focus != leftPane || !strings.Contains(value.errorMessage, "keeps disconnecting") {
+		t.Fatalf("giving up = (focus %v, error %q)", value.focus, value.errorMessage)
+	}
+	if backend.openedTab != "tab-1" {
+		t.Fatalf("opened %q, want the dropping tab", backend.openedTab)
+	}
+
+}
+
+// Opening a workspace is the user asking again, so pending retries start over
+// and the next attach is immediate rather than delayed.
+func TestDashboardForgetsRetriesWhenTheUserSelectsAgain(t *testing.T) {
+	tabs := []model.Tab{{ID: "tab-1", WorkspaceID: "workspace-1", Name: "1", Running: true}}
+	value, backend, refresh := exitedDashboard(t, tabs, 0)
+
+	// One immediate reconnect, one drop, one counted retry.
+	updated, open := value.Update(refresh())
+	value = updated.(dashboard)
+	updated, _ = value.Update(open())
+	value = updated.(dashboard)
+	updated, _ = value.Update(terminalOutputMsg{terminal: value.terminal, err: io.EOF})
+	value = updated.(dashboard)
+	updated, _ = value.Update(refresh())
+	value = updated.(dashboard)
+	if value.reattachAttempts == 0 || value.reattachTab == "" {
+		t.Fatalf("no retry is pending: %d on %q", value.reattachAttempts, value.reattachTab)
+	}
+
+	updated, _ = value.Update(workspaceMsg{
+		value:    model.Workspace{ID: "workspace-1", Name: "alpha", Path: "/projects/alpha"},
+		snapshot: backend.snapshot,
+		tabID:    "tab-1",
+	})
+	value = updated.(dashboard)
+	if value.reattachTab != "" || value.reattachAttempts != 0 {
+		t.Fatalf("a user selection left %d retries pending on %q",
+			value.reattachAttempts, value.reattachTab)
+	}
+}
+
+func TestReattachBackoffGrowsAndIsCapped(t *testing.T) {
+	previous := time.Duration(0)
+	for attempt := 1; attempt <= 8; attempt++ {
+		backoff := reattachBackoff(attempt)
+		if backoff < previous {
+			t.Fatalf("backoff shrank at attempt %d: %v after %v", attempt, backoff, previous)
+		}
+		if backoff > maximumReattachBackoff {
+			t.Fatalf("backoff at attempt %d = %v, want at most %v", attempt, backoff, maximumReattachBackoff)
+		}
+		previous = backoff
+	}
+	if reattachBackoff(1) != initialReattachBackoff {
+		t.Fatalf("first backoff = %v, want %v", reattachBackoff(1), initialReattachBackoff)
+	}
+}
+
 func TestDashboardRefusesScrollbackWithoutTerminal(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, model.Snapshot{})
 
