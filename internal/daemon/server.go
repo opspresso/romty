@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strconv"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/nalbam/romty/internal/model"
@@ -21,6 +22,11 @@ import (
 )
 
 var ErrAlreadyRunning = errors.New("romty daemon is already running")
+
+// requestTimeout bounds the handshake, not the session that may follow it. A
+// local socket handshake takes microseconds; this only has to be long enough
+// that no honest client ever meets it. It is a variable so tests need not wait.
+var requestTimeout = 10 * time.Second
 
 type Server struct {
 	socket string
@@ -58,21 +64,28 @@ func New(socket, statePath, shell string) (*Server, error) {
 }
 
 func (s *Server) Serve(ctx context.Context) error {
-	if err := os.MkdirAll(filepath.Dir(s.socket), 0o700); err != nil {
+	directory := filepath.Dir(s.socket)
+	if err := os.MkdirAll(directory, 0o700); err != nil {
 		return fmt.Errorf("create socket directory: %w", err)
+	}
+	// MkdirAll leaves an existing directory's mode alone, so a romty home that
+	// was created group- or world-readable would stay that way. The socket is
+	// the only thing standing between another local process and every shell
+	// romty owns, so narrow the directory too.
+	if err := os.Chmod(directory, 0o700); err != nil {
+		return fmt.Errorf("set socket directory permissions: %w", err)
 	}
 	if err := prepareSocket(s.socket); err != nil {
 		return err
 	}
-	listener, err := net.Listen("unix", s.socket)
+	// The socket is created with the process umask applied to 0777, so it is
+	// briefly connectable by anyone. Clamp the umask across the bind rather
+	// than widening and narrowing again.
+	listener, err := listenPrivately(s.socket)
 	if err != nil {
-		return fmt.Errorf("listen on unix socket: %w", err)
+		return err
 	}
 	s.listener = listener
-	if err := os.Chmod(s.socket, 0o600); err != nil {
-		listener.Close()
-		return fmt.Errorf("set socket permissions: %w", err)
-	}
 	defer s.shutdown()
 	if err := s.removeStaleTabs(); err != nil {
 		return err
@@ -131,6 +144,22 @@ func prepareSocket(path string) error {
 	return nil
 }
 
+// listenPrivately binds the unix socket so that it is never, even for an
+// instant, reachable by another user.
+func listenPrivately(path string) (net.Listener, error) {
+	previous := syscall.Umask(0o177)
+	listener, err := net.Listen("unix", path)
+	syscall.Umask(previous)
+	if err != nil {
+		return nil, fmt.Errorf("listen on unix socket: %w", err)
+	}
+	if err := os.Chmod(path, 0o600); err != nil {
+		listener.Close()
+		return nil, fmt.Errorf("set socket permissions: %w", err)
+	}
+	return listener, nil
+}
+
 func (s *Server) shutdown() {
 	s.mu.Lock()
 	sessions := make([]*session, 0, len(s.sessions))
@@ -146,6 +175,12 @@ func (s *Server) shutdown() {
 
 func (s *Server) handle(connection net.Conn) {
 	defer connection.Close()
+	// A client that connects and never finishes a request would otherwise hold
+	// a goroutine and a file descriptor for the daemon's whole life, and could
+	// grow the read buffer without bound.
+	if err := connection.SetReadDeadline(time.Now().Add(requestTimeout)); err != nil {
+		return
+	}
 	reader := bufio.NewReader(connection)
 	var request protocol.Request
 	if err := protocol.Read(reader, &request); err != nil {
@@ -153,6 +188,11 @@ func (s *Server) handle(connection net.Conn) {
 		return
 	}
 
+	// The request is in; what follows is either a long-lived attach or a short
+	// reply, and neither wants the read deadline that bounded the handshake.
+	if err := connection.SetReadDeadline(time.Time{}); err != nil {
+		return
+	}
 	if request.Action == protocol.ActionAttach {
 		s.handleAttach(connection, request.TabID)
 		return

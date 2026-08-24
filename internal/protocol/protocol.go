@@ -3,6 +3,7 @@ package protocol
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 
@@ -50,13 +51,37 @@ func Write(w io.Writer, value any) error {
 	return nil
 }
 
+// MaxMessageBytes bounds one framed message. Requests are a handful of short
+// fields and responses a snapshot of a workspace tree, so this is far above any
+// real message while still refusing a peer that never sends a newline.
+const MaxMessageBytes = 8 << 20
+
 func Read(r *bufio.Reader, value any) error {
-	data, err := r.ReadBytes('\n')
+	data, err := readLine(r)
 	if err != nil {
-		return fmt.Errorf("read protocol message: %w", err)
+		return err
 	}
 	if err := json.Unmarshal(data, value); err != nil {
 		return fmt.Errorf("decode protocol message: %w", err)
 	}
 	return nil
+}
+
+// readLine reads one newline-framed message, refusing to buffer more than
+// maxMessageBytes so a peer cannot grow the reader without end.
+func readLine(r *bufio.Reader) ([]byte, error) {
+	var message []byte
+	for {
+		chunk, err := r.ReadSlice('\n')
+		message = append(message, chunk...)
+		if len(message) > MaxMessageBytes {
+			return nil, fmt.Errorf("protocol message exceeds %d bytes", MaxMessageBytes)
+		}
+		if err == nil {
+			return message, nil
+		}
+		if !errors.Is(err, bufio.ErrBufferFull) {
+			return nil, fmt.Errorf("read protocol message: %w", err)
+		}
+	}
 }
