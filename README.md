@@ -1,95 +1,182 @@
 # romty
 
-> romty = roam + tty.
+> romty = roam + tty
 
-A persistent terminal workspace that keeps your sessions alive across disconnects.
+romty is a terminal workspace manager that keeps shell sessions running while its TUI is closed or disconnected. It combines a workspace navigator, terminal tabs, and persistent PTY sessions in one process-light interface.
 
-## 요구 사항
+## Features
 
-- macOS 또는 Linux
-- Go 1.25 이상
+- Keep terminal sessions alive after leaving the TUI.
+- Organize projects as roots and their direct child directories.
+- Open multiple terminal tabs for a root or workspace.
+- Reconnect to a session with up to 8 MiB of terminal history.
+- Use native terminal mouse selection and copy behavior.
+- Adapt colors to light and dark terminal backgrounds.
+- Control the interface with IME-independent function keys.
+- Prevent nested romty sessions.
 
-## 설치
+## Requirements
 
-Homebrew를 사용한다.
+- macOS or Linux
+- Go 1.25 or later when building from source
+
+## Installation
+
+Install the Homebrew formula:
 
 ```sh
-brew tap opspresso/tap
 brew install opspresso/tap/romty
 ```
 
-소스에서 설치한다.
+Or install the latest version with Go:
 
 ```sh
-go install ./cmd/romty
+go install github.com/nalbam/romty/cmd/romty@latest
 ```
 
-또는 저장소 안에서 binary를 만든다.
+To build a local checkout:
 
 ```sh
 go build -o build/romty ./cmd/romty
 ```
 
-## 사용
+## Quick start
+
+Start romty:
 
 ```sh
 romty
 ```
 
-처음 실행하면 background daemon을 자동으로 시작한다. `a`를 눌러 Root Folder 경로를 입력한다. Root 아래의 1-depth directory가 왼쪽에 workspace 후보로 나타난다.
+The daemon starts automatically on the first run. Press `F2`, enter a root directory, and press `Enter`. romty displays the root and its direct child directories as a workspace tree:
 
-왼쪽 pane은 기본적으로 화면의 약 25%를 사용하며 폭은 18~28칸이다. 현재 탐색 항목은 green으로 표시한다. Root는 `▾ name`, 하위 workspace는 들여쓴 `  name`으로 구분한다. 각 Root와 workspace 이름 뒤의 `●` 개수는 실행 중인 terminal tab 수를 나타낸다. 오른쪽의 현재 tab cursor는 cyan 배경, 나머지 tab은 cyan 글자색으로 구분한다.
+```text
+▾ projects
+├─ api
+└─ web
+```
 
-| 키 | 동작 |
+Use `↑`/`↓` to choose a root or workspace. Use `←`/`→` to choose an existing terminal tab or the `+` tab, then press `Enter` to confirm. Selecting a workspace without an open tab creates one automatically.
+
+Both roots and workspaces can host terminal tabs. A root tab starts its shell in the root directory; a workspace tab starts in that direct child directory.
+
+## Interface
+
+The left pane shows the workspace tree. A `●` after an item represents one running terminal tab. The right pane contains the tab rail and the embedded terminal. Accent colors distinguish the current selection, active tab, and focused pane; the arrow beside the vertical divider points to the active pane.
+
+The status bar shows `F1` through `F5` in both panes and adds navigation keys for the active pane. Press `?` in the workspace pane to see every shortcut, including aliases hidden from the status bar.
+
+### Global keys
+
+These function keys work from either pane and with non-English keyboard input modes.
+
+| Key | Action |
 |---|---|
-| `F2`, `a` | Root Folder 등록 |
-| `F1`, `?` | 현재 화면 위에 About modal 표시 |
-| `,` | 현재 화면 위에 Config modal 표시 |
-| `←`/`→`, `[`/`]` | Config modal에서 왼쪽 pane 폭 조절 및 저장 |
-| `Esc` | About/Config modal 닫기 |
-| `↑`/`↓`, `j`/`k` | Root와 workspace cursor 이동 |
-| `Tab` | 선택된 terminal에 focus |
-| `←`/`→`, `h`/`l` | 선택한 Root 또는 workspace의 terminal tab과 `+` cursor 이동 |
-| `Enter` | cursor의 Root 또는 workspace와 terminal tab 확정, `+`에서는 새 tab 생성 |
-| `F5`, `r` | Root directory와 session 상태 새로고침 |
-| `Ctrl+\` | terminal focus에서 navigation으로 복귀하고 workspace 목록 갱신 |
-| `Ctrl+C`, `q` | navigation 상태에서 romty 종료 |
+| `F1` | Open About |
+| `F2` | Add a root directory |
+| `F3` | Open Config |
+| `F4` | Quit romty |
+| `F5` | Refresh roots, workspaces, and sessions |
 
-Root와 workspace 모두 `Enter`로 terminal을 열 수 있다. Root terminal에서 directory를 추가하거나 삭제한 뒤 `Ctrl+\`로 복귀하면 Root의 1-depth workspace 목록을 다시 읽는다.
+### Workspace pane
 
-terminal focus에서는 `Ctrl+\`를 제외한 key와 paste를 daemon이 소유한 PTY로 전달한다. PTY 출력은 VT emulator로 해석해 오른쪽 pane 안에 렌더링한다. mouse tracking을 끄므로 표시된 텍스트는 일반 terminal의 mouse selection과 copy를 사용한다.
+| Key | Action |
+|---|---|
+| `↑`/`↓`, `j`/`k` | Move between roots and workspaces |
+| `←`/`→`, `h`/`l` | Move between terminal tabs and the `+` tab |
+| `Enter` | Open the selected tab or create the selected `+` tab |
+| `Tab` | Focus the active terminal |
+| `i` | Open About |
+| `a` | Add a root directory |
+| `,` | Open Config |
+| `q` | Quit romty |
+| `r` | Refresh roots, workspaces, and sessions |
+| `?` | Open Help |
+| `Ctrl+C` | Quit romty |
 
-하단 status bar는 단축키를 `[key]` 형식과 색상으로 강조하고 동작 설명을 일반 글자색으로 표시한다.
+The `+` key itself is not a shortcut. Select the `+` tab with `←`/`→` and confirm it with `Enter`.
 
-romty terminal 안에서 `romty`를 다시 실행하는 중첩 TUI는 허용하지 않는다.
+### Terminal pane
 
-## 상태와 수명
+| Key | Action |
+|---|---|
+| `Ctrl+\` | Focus the workspace pane and refresh the workspace tree |
 
-Root, 선택된 Workspace, Tab metadata는 `os.UserConfigDir()/romty/state.json`에 저장한다. UI 설정은 같은 directory의 `config.json`에 저장한다. Unix socket과 daemon log도 같은 directory에 둔다. 테스트나 격리가 필요하면 `ROMTY_HOME`으로 directory를 바꿀 수 있다.
+Except for the global function keys and `Ctrl+\`, keyboard and paste input is forwarded to the PTY. Mouse tracking remains disabled so the host terminal can select and copy displayed text normally.
+
+### Modals and prompts
+
+| Key | Action |
+|---|---|
+| `Esc` | Close a modal or cancel root input |
+| `←`/`→`, `[`/`]` | Adjust the workspace pane width in Config |
+
+The configured workspace pane width is stored automatically and constrained to 18 through 40 columns, subject to the available terminal width.
+
+## Workspace refresh
+
+romty discovers only direct child directories of each root. If a command such as `git clone` adds a directory, or a directory is removed, press `F5`. Returning from the terminal pane with `Ctrl+\` also refreshes the tree.
+
+## Session lifecycle
+
+The TUI communicates with a detached local daemon over a Unix socket. The daemon owns the shell PTYs, so closing the TUI or its host terminal does not terminate running sessions. Reopening romty reconnects to those sessions and replays their buffered output.
+
+When a shell exits, its tab is removed from the daemon state. If the daemon stops or the operating system restarts, roots and workspace metadata remain available, but stale terminal tabs are discarded because their PTY processes can no longer be reattached.
+
+romty refuses to start inside one of its own terminal sessions to avoid nesting the TUI.
+
+## Data and configuration
+
+romty stores its files under `os.UserConfigDir()/romty`:
+
+| File | Purpose |
+|---|---|
+| `state.json` | Roots, workspaces, and terminal tab metadata |
+| `config.json` | TUI settings such as workspace pane width |
+| `daemon.sock` | Local client-daemon Unix socket |
+| `daemon.log` | Detached daemon output |
+
+Set `ROMTY_HOME` to use a different directory, which is useful for development or isolated testing:
 
 ```sh
 ROMTY_HOME=/tmp/romty-dev romty
 ```
 
-dashboard를 종료하거나 terminal window를 닫아도 daemon과 실행 중인 PTY process는 유지된다. `romty`를 다시 실행하면 기존 Root, Workspace, Tab을 불러오고 살아 있는 terminal session에 다시 연결한다.
-
-daemon 종료나 OS 재부팅 뒤에는 Root와 Workspace metadata만 복구한다. 다시 연결할 수 없는 이전 Tab metadata는 daemon 시작 시 제거한다. 실행 중인 shell이 종료된 Tab도 즉시 제거한다.
-
-## 구조
+## Architecture
 
 ```text
 romty TUI
-   ├─ Root / Workspace pane
-   └─ Terminal tabs / VT pane
-   │
-Unix Socket
-   │
-romty daemon
-   ├─ Root
-   │   └─ Workspace
-   │       ├─ PTY / Tab
-   │       └─ PTY / Tab
-   └─ ...
+   ├─ workspace tree
+   └─ terminal tabs and VT renderer
+            │
+       Unix socket
+            │
+       romty daemon
+            ├─ state store
+            └─ PTY sessions
+                 └─ shell process
 ```
 
-daemon은 PTY 출력을 계속 읽고 각 session별 최근 8 MiB를 보관한다. 재연결할 때 이 출력을 client의 VT emulator에 replay해 terminal 화면을 복원한다. Remote/SSH 기능은 제공하지 않는다.
+The daemon keeps up to 8 MiB of output history per session. The client replays that history through its VT emulator when attaching, then continues streaming output into the terminal pane.
+
+romty manages local shells only. It does not provide remote or SSH session management.
+
+## Development
+
+Run the standard checks:
+
+```sh
+go vet ./...
+go test ./...
+go build ./...
+```
+
+Run an isolated development instance:
+
+```sh
+ROMTY_HOME=/tmp/romty-dev go run ./cmd/romty
+```
+
+## Releases
+
+Pushing a version tag such as `v0.2.0` runs the release workflow. It validates the project, publishes macOS and Linux archives for amd64 and arm64 to GitHub Releases, and updates the `romty` formula in `opspresso/homebrew-tap`.
