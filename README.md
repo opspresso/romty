@@ -208,6 +208,8 @@ New terminals start with the environment and `$SHELL` of the romty that asked fo
 
 Pressing `F9` opens a confirmation modal because stopping the daemon terminates every running shell. Once `Enter` confirms it the shutdown cannot be cancelled, so the modal stays until the daemon reports back. The `romty stop` command performs the same shutdown directly and is intended for explicit use from outside a romty terminal; stopping a daemon that is not running succeeds without output.
 
+The daemon outlives the romty binary, so `brew upgrade` or `go install` can leave a new romty talking to a daemon the old one started. Both sides stamp the protocol they speak on every message and refuse to act on a mismatch, so the disagreement is reported as itself rather than as a missing field or an unknown action. Ping and shutdown are the exceptions, because they are how the remedy is carried out: an upgraded romty reports which side to restart, `romty stop` ends the old daemon, and the next run starts one that matches.
+
 Reattaching replays the recorded output so the screen comes back as it was, preceded by the terminal modes the shell has set. Modes are sticky — a shell turns bracketed paste on once and never mentions it again — so a session long enough to fill the recording would otherwise lose them, and a shell that cannot tell pasted text from typed text runs a multi-line paste line by line. Tracking them separately from the recording keeps the answer independent of how much of it is left. Terminal queries are dropped from that replay: a query is an exchange that already finished, and a terminal emulator answering it a second time would send the reply to a shell that asked nothing, where it lands on the command line as typed text. Live queries are still answered normally.
 
 A terminal whose connection drops is reconnected automatically. Repeated drops are retried more slowly each time and then left alone, with a message, rather than reconnecting in a loop; press `Enter` on the tab to try again.
@@ -261,9 +263,11 @@ Run the standard checks:
 
 ```sh
 go vet ./...
-go test ./...
+go test -race ./...
 go build ./...
 ```
+
+A session runs several goroutines around one emulator, so the race detector is the check that matters most here, and it is the one CI gates on.
 
 Run an isolated development instance:
 
