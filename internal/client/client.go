@@ -154,7 +154,7 @@ func (c *Client) OpenAttach(tabID string) (net.Conn, *bufio.Reader, error) {
 	if err != nil {
 		return nil, nil, fmt.Errorf("connect to daemon: %w", err)
 	}
-	if err := protocol.Write(connection, protocol.Request{Action: protocol.ActionAttach, TabID: tabID}); err != nil {
+	if err := sendRequest(connection, protocol.Request{Action: protocol.ActionAttach, TabID: tabID}); err != nil {
 		connection.Close()
 		return nil, nil, err
 	}
@@ -165,9 +165,12 @@ func (c *Client) OpenAttach(tabID string) (net.Conn, *bufio.Reader, error) {
 		connection.Close()
 		return nil, nil, err
 	}
-	if response.Error != "" {
+	// Attach used to skip the version check the short requests run, so a
+	// mismatch here arrived as whatever the old daemon streamed next rather
+	// than as the one message that says which side to restart.
+	if err := checkResponse(response); err != nil {
 		connection.Close()
-		return nil, nil, fmt.Errorf("daemon: %s", response.Error)
+		return nil, nil, err
 	}
 	return connection, reader, nil
 }
@@ -178,6 +181,15 @@ func (c *Client) OpenTerminal(tabID string) (io.ReadWriteCloser, error) {
 		return nil, err
 	}
 	return &terminalStream{Conn: connection, reader: reader}, nil
+}
+
+// sendRequest stamps the protocol version and writes the request. Both paths
+// go through it because only one of them used to: OpenAttach built its request
+// inline and sent it unversioned, so the daemon had no way to tell an attach
+// from a current client apart from one that predates the field.
+func sendRequest(w io.Writer, request protocol.Request) error {
+	request.Version = protocol.Version
+	return protocol.Write(w, request)
 }
 
 // outdatedDaemon explains a mismatch in the terms a user can act on, rather
@@ -197,8 +209,7 @@ func (c *Client) call(request protocol.Request) (protocol.Response, error) {
 	if err := connection.SetDeadline(time.Now().Add(3 * time.Second)); err != nil {
 		return protocol.Response{}, fmt.Errorf("set daemon deadline: %w", err)
 	}
-	request.Version = protocol.Version
-	if err := protocol.Write(connection, request); err != nil {
+	if err := sendRequest(connection, request); err != nil {
 		return protocol.Response{}, err
 	}
 
@@ -206,11 +217,21 @@ func (c *Client) call(request protocol.Request) (protocol.Response, error) {
 	if err := protocol.Read(bufio.NewReader(connection), &response); err != nil {
 		return protocol.Response{}, err
 	}
-	if response.Version != protocol.Version {
-		return protocol.Response{}, outdatedDaemon(response.Version)
-	}
-	if response.Error != "" {
-		return protocol.Response{}, fmt.Errorf("daemon: %s", response.Error)
+	if err := checkResponse(response); err != nil {
+		return protocol.Response{}, err
 	}
 	return response, nil
+}
+
+// checkResponse judges a reply before anything reads its fields. The version
+// comes first: a daemon that speaks another protocol may well have an error to
+// report, but the mismatch is what the user has to act on.
+func checkResponse(response protocol.Response) error {
+	if response.Version != protocol.Version {
+		return outdatedDaemon(response.Version)
+	}
+	if response.Error != "" {
+		return fmt.Errorf("daemon: %s", response.Error)
+	}
+	return nil
 }
