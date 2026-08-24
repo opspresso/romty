@@ -35,6 +35,10 @@ type fakeBackend struct {
 	snapshotCount  int
 	shutdownCount  int
 	stream         *memoryStream
+	// The real client fails: the daemon can be unreachable, past its
+	// deadline, or refuse the request. A fake that only ever succeeds hides
+	// every branch that handles those.
+	failures map[string]error
 }
 
 type memoryStream struct {
@@ -69,19 +73,41 @@ func (s *memoryStream) String() string {
 
 var _ io.ReadWriteCloser = (*memoryStream)(nil)
 
+// fail makes the named method return err until cleared, the way a daemon that
+// went away makes every call fail.
+func (f *fakeBackend) fail(method string, err error) {
+	if f.failures == nil {
+		f.failures = make(map[string]error)
+	}
+	f.failures[method] = err
+}
+
+func (f *fakeBackend) failure(method string) error {
+	return f.failures[method]
+}
+
 func (f *fakeBackend) AddRoot(path string) (model.Snapshot, error) {
 	f.addedPath = path
+	if err := f.failure("AddRoot"); err != nil {
+		return model.Snapshot{}, err
+	}
 	return f.snapshot, nil
 }
 
 func (f *fakeBackend) Snapshot() (model.Snapshot, error) {
 	f.snapshotCount++
+	if err := f.failure("Snapshot"); err != nil {
+		return model.Snapshot{}, err
+	}
 	return f.snapshot, nil
 }
 
 func (f *fakeBackend) EnsureWorkspace(rootID, path string) (model.Workspace, error) {
 	f.ensuredRootID = rootID
 	f.ensuredPath = path
+	if err := f.failure("EnsureWorkspace"); err != nil {
+		return model.Workspace{}, err
+	}
 	return f.workspace, nil
 }
 
@@ -89,6 +115,9 @@ func (f *fakeBackend) CreateTab(workspaceID string, columns, rows uint16) (model
 	f.createCount++
 	f.createdColumns = columns
 	f.createdRows = rows
+	if err := f.failure("CreateTab"); err != nil {
+		return model.Tab{}, err
+	}
 	for rootIndex := range f.snapshot.Roots {
 		root := &f.snapshot.Roots[rootIndex]
 		if f.workspace.ID == workspaceID && f.workspace.Path == root.Root.Path {
@@ -108,6 +137,9 @@ func (f *fakeBackend) CreateTab(workspaceID string, columns, rows uint16) (model
 
 func (f *fakeBackend) OpenTerminal(tabID string) (io.ReadWriteCloser, error) {
 	f.openedTab = tabID
+	if err := f.failure("OpenTerminal"); err != nil {
+		return nil, err
+	}
 	f.stream = newMemoryStream("\x1b[2J\x1b[Hembedded terminal")
 	return f.stream, nil
 }
@@ -115,11 +147,14 @@ func (f *fakeBackend) OpenTerminal(tabID string) (io.ReadWriteCloser, error) {
 func (f *fakeBackend) Resize(_ string, columns, rows uint16) error {
 	f.createdColumns = columns
 	f.createdRows = rows
-	return nil
+	return f.failure("Resize")
 }
 
 func (f *fakeBackend) Shutdown() error {
 	f.shutdownCount++
+	if err := f.failure("Shutdown"); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -1082,6 +1117,109 @@ func TestDashboardSettlesAnExitWhenTheSnapshotFails(t *testing.T) {
 	if command != nil || value.terminal == nil {
 		t.Fatalf("later refresh = (command %v, terminal %v), want the open terminal left alone",
 			command, value.terminal != nil)
+	}
+}
+
+// Every user-visible failure the backend can produce has to reach the status
+// bar and leave the dashboard usable. None of these branches had a test,
+// because the fake could not fail.
+func TestDashboardReportsBackendFailures(t *testing.T) {
+	workspace := model.Workspace{ID: "workspace-1", RootID: "root-1", Name: "alpha", Path: "/projects/alpha"}
+	snapshot := model.Snapshot{Roots: []model.RootView{{
+		Root:        model.Root{ID: "root-1", Name: "projects", Path: "/projects"},
+		Directories: []model.WorkspaceView{{Workspace: workspace}},
+	}}}
+
+	for _, probe := range []struct {
+		name   string
+		method string
+		act    func(dashboard) (tea.Model, tea.Cmd)
+	}{
+		{
+			name:   "refresh",
+			method: "Snapshot",
+			act:    func(m dashboard) (tea.Model, tea.Cmd) { return m.Update(key(tea.KeyF5, "")) },
+		},
+		{
+			name:   "opening a workspace",
+			method: "EnsureWorkspace",
+			act:    func(m dashboard) (tea.Model, tea.Cmd) { return m.Update(key(tea.KeyEnter, "")) },
+		},
+		{
+			name:   "adding a root",
+			method: "AddRoot",
+			act: func(m dashboard) (tea.Model, tea.Cmd) {
+				updated, _ := m.Update(key(tea.KeyF2, ""))
+				updated, _ = updated.(dashboard).Update(key('/', "/"))
+				return updated.(dashboard).Update(key(tea.KeyEnter, ""))
+			},
+		},
+	} {
+		t.Run(probe.name, func(t *testing.T) {
+			backend := &fakeBackend{snapshot: snapshot, workspace: workspace}
+			backend.fail(probe.method, errors.New("daemon: "+probe.method+" refused"))
+			value := newDashboard(backend, snapshot)
+			value.width = 120
+			value.height = 40
+			value.navIndex = 1
+
+			updated, command := probe.act(value)
+			value = updated.(dashboard)
+			if command == nil {
+				t.Fatalf("%s produced no command to fail", probe.name)
+			}
+			updated, _ = value.Update(command())
+			value = updated.(dashboard)
+			if !strings.Contains(value.errorMessage, probe.method+" refused") {
+				t.Fatalf("error message = %q, want the %s failure", value.errorMessage, probe.method)
+			}
+			if rendered := ansi.Strip(value.render()); !strings.Contains(rendered, "ERROR") {
+				t.Fatalf("the status bar does not show the failure:\n%s", rendered)
+			}
+			// The tree still renders and the keyboard still works.
+			if !strings.Contains(ansi.Strip(value.render()), "alpha") {
+				t.Fatalf("the workspace tree is gone after a failure:\n%s", ansi.Strip(value.render()))
+			}
+		})
+	}
+}
+
+// A tab whose creation failed must not leave the dashboard pointing at a
+// terminal that was never opened.
+func TestDashboardReportsAFailedTabCreation(t *testing.T) {
+	workspace := model.Workspace{ID: "workspace-1", RootID: "root-1", Name: "alpha", Path: "/projects/alpha"}
+	backend := &fakeBackend{
+		snapshot: model.Snapshot{Roots: []model.RootView{{
+			Root:        model.Root{ID: "root-1", Name: "projects", Path: "/projects"},
+			Directories: []model.WorkspaceView{{Workspace: workspace}},
+		}}},
+		workspace: workspace,
+	}
+	backend.fail("CreateTab", errors.New("daemon: start shell PTY: permission denied"))
+	value := newDashboard(backend, backend.snapshot)
+	value.selectedWorkspaceID = workspace.ID
+	value.selectedPath = workspace.Path
+
+	updated, _ := value.Update(tabMsg{err: backend.failure("CreateTab")})
+	value = updated.(dashboard)
+	if value.terminal != nil || !strings.Contains(value.errorMessage, "permission denied") {
+		t.Fatalf("failed creation = (terminal %v, error %q)", value.terminal != nil, value.errorMessage)
+	}
+}
+
+// Opening a terminal can fail between the snapshot and the attach, because the
+// shell may exit in between. The dashboard has to fall back to the tree.
+func TestDashboardReturnsToTheTreeWhenOpeningFails(t *testing.T) {
+	value := newDashboard(&fakeBackend{}, model.Snapshot{})
+	value.focus = terminalPane
+
+	updated, _ := value.Update(terminalOpenedMsg{err: errors.New("daemon: running terminal session not found")})
+	value = updated.(dashboard)
+	if value.focus != leftPane || value.terminal != nil {
+		t.Fatalf("failed open = (focus %v, terminal %v), want the workspace pane", value.focus, value.terminal != nil)
+	}
+	if !strings.Contains(value.errorMessage, "session not found") {
+		t.Fatalf("error message = %q, want the attach failure", value.errorMessage)
 	}
 }
 
