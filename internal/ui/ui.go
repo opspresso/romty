@@ -120,6 +120,7 @@ type dashboard struct {
 	input               string
 	errorMessage        string
 	errorFrom           errorSource
+	noticeMessage       bool
 	terminal            *embeddedTerminal
 	modal               modal
 	shutdownPending     bool
@@ -431,6 +432,16 @@ func (m dashboard) quit() (tea.Model, tea.Cmd) {
 func (m *dashboard) setError(source errorSource, message string) {
 	m.errorMessage = message
 	m.errorFrom = source
+	m.noticeMessage = false
+}
+
+// setNotice takes the status bar the way setError does, for a state romty is
+// reporting rather than a failure. Scrollback with nothing to show is not a
+// fault of the terminal or of the user, so the bar says NOTE in the muted
+// colours instead of raising a red ERROR.
+func (m *dashboard) setNotice(source errorSource, message string) {
+	m.setError(source, message)
+	m.noticeMessage = true
 }
 
 func (m *dashboard) clearError(source errorSource) {
@@ -609,7 +620,7 @@ func (m dashboard) pageHistory(pages int) (tea.Model, tea.Cmd) {
 			m.terminal.sendKey(pagingKey(pages))
 			return m, nil
 		}
-		m.setError(terminalError, m.scrollbackUnavailable())
+		m.setNotice(terminalError, m.scrollbackUnavailable())
 		return m, nil
 	}
 	m.scrollTerminal(pages * m.scrollbackPage())
@@ -815,7 +826,7 @@ func (m dashboard) handleTerminalOutput(message terminalOutputMsg) (tea.Model, t
 		case m.terminal.scrollbackLen() == 0:
 			// The application took over the screen; its history is its own.
 			m.stopScrollback()
-			m.setError(terminalError, m.scrollbackUnavailable())
+			m.setNotice(terminalError, m.scrollbackUnavailable())
 		default:
 			// Hold the viewport on the same content as new output pushes
 			// older lines into the scrollback.
@@ -1329,7 +1340,11 @@ func (m dashboard) renderStatus(width, bodyHeight int) []string {
 			width,
 		)
 	case m.errorMessage != "":
-		status = truncate(m.styles.errorLabel.Render(" ERROR ")+" "+m.styles.errorText.Render(m.errorMessage), width)
+		label, text, title := m.styles.errorLabel, m.styles.errorText, " ERROR "
+		if m.noticeMessage {
+			label, text, title = m.styles.noticeLabel, m.styles.noticeText, " NOTE "
+		}
+		status = truncate(label.Render(title)+" "+text.Render(m.errorMessage), width)
 	case m.modal == helpModal:
 		shortcuts := []shortcut{{key: "Esc", description: "close"}}
 		if m.maximumHelpOffset(bodyHeight) > 0 {

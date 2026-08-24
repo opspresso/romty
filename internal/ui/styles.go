@@ -21,6 +21,8 @@ type uiStyles struct {
 	promptText          lipgloss.Style
 	errorLabel          lipgloss.Style
 	errorText           lipgloss.Style
+	noticeLabel         lipgloss.Style
+	noticeText          lipgloss.Style
 	modalBorder         lipgloss.Style
 	modalTitle          lipgloss.Style
 	modalBody           lipgloss.Style
@@ -59,6 +61,8 @@ func newUIStyles(hasDarkBackground bool) *uiStyles {
 		promptText:          lipgloss.NewStyle().Foreground(text),
 		errorLabel:          lipgloss.NewStyle().Foreground(errorText).Background(errorColor).Bold(true),
 		errorText:           lipgloss.NewStyle().Foreground(errorColor),
+		noticeLabel:         lipgloss.NewStyle().Foreground(text).Background(surface).Bold(true),
+		noticeText:          lipgloss.NewStyle().Foreground(muted),
 		modalBorder:         lipgloss.NewStyle().Foreground(accent),
 		modalTitle:          lipgloss.NewStyle().Foreground(accent).Bold(true),
 		modalBody:           lipgloss.NewStyle().Foreground(text),

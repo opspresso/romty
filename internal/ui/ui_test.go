@@ -885,6 +885,36 @@ func TestDashboardRefusesScrollbackOnTheAlternateScreen(t *testing.T) {
 	}
 }
 
+// Scrollback with nothing to show is a state romty explains, not a failure it
+// suffered, so the status bar must not raise the red ERROR that a refused
+// daemon call or a dead terminal earns.
+func TestDashboardReportsEmptyScrollbackAsANotice(t *testing.T) {
+	value := newDashboard(&fakeBackend{}, model.Snapshot{})
+	value.width = 120
+	value.height = 30
+	view := value.dimensions()
+	value.terminal = newEmbeddedTerminal("tab-1", newMemoryStream(""), view.rightWidth, view.terminalHeight)
+	t.Cleanup(value.closeTerminal)
+	value.focus = terminalPane
+
+	updated, _ := value.Update(key(tea.KeyF6, ""))
+	value = updated.(dashboard)
+	if value.scrollback || !strings.Contains(value.errorMessage, "scrolled off") {
+		t.Fatalf("F6 with an empty scrollback = (scrollback %v, message %q)",
+			value.scrollback, value.errorMessage)
+	}
+	rendered := ansi.Strip(value.render())
+	if !strings.Contains(rendered, "NOTE") || strings.Contains(rendered, "ERROR") {
+		t.Fatalf("the status bar does not report the empty scrollback as a notice:\n%s", rendered)
+	}
+
+	// A failure after the notice still takes the bar as an error.
+	value.setError(terminalError, "resize terminal: refused")
+	if rendered := ansi.Strip(value.render()); !strings.Contains(rendered, "ERROR") {
+		t.Fatalf("a failure raised after a notice does not show as an error:\n%s", rendered)
+	}
+}
+
 // Copy mode drops the workspace pane so that a plain drag in the host terminal
 // selects terminal output alone. In the split layout every host row also holds
 // the workspace tree, which a multi-line selection would copy along with it.
