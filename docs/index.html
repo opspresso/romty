@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>romty — persistent terminal workspaces</title>
+  <meta name="description"
+    content="romty is a terminal workspace manager that keeps shell sessions running while its TUI is closed. Workspace tree, terminal tabs, and persistent PTY sessions in one process-light interface for macOS and Linux.">
+  <link rel="canonical" href="https://romty.dev/">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="images/romty.svg">
+
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://romty.dev/">
+  <meta property="og:title" content="romty — persistent terminal workspaces">
+  <meta property="og:description"
+    content="Your shells keep running after you close the TUI. A workspace tree, terminal tabs, and persistent PTY sessions for macOS and Linux.">
+  <meta property="og:image" content="https://romty.dev/images/romty.svg">
+  <meta name="twitter:card" content="summary">
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600;700&display=swap"
+    rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+  <script src="js/theme.js"></script>
+</head>
+
+<body>
+  <nav class="nav">
+    <div class="container">
+      <a class="brand" href="./">
+        <img src="images/romty.svg" alt="">romty
+      </a>
+      <div class="nav-links">
+        <a href="#features">Features</a>
+        <a href="#install">Install</a>
+        <a href="#shortcuts" data-optional>Shortcuts</a>
+        <a href="https://github.com/nalbam/romty" target="_blank" rel="noopener">GitHub</a>
+      </div>
+    </div>
+  </nav>
+
+  <header class="hero">
+    <div class="container">
+      <span class="eyebrow">roam + tty</span>
+      <h1>romty</h1>
+      <p class="lead">Your shells keep running. The TUI doesn't have to.</p>
+      <p class="sub">
+        A terminal workspace manager for macOS and Linux. Close the window, reboot your
+        editor, come back tomorrow — a detached daemon owns the PTYs, so the sessions are
+        still there with their output intact.
+      </p>
+      <div class="cta">
+        <span class="copy-line">
+          <span class="prompt">$</span>
+          <code>brew install opspresso/tap/romty</code>
+          <button class="copy-btn" type="button" data-copy="brew install opspresso/tap/romty">copy</button>
+        </span>
+        <a class="btn btn-ghost" href="https://github.com/nalbam/romty" target="_blank" rel="noopener">
+          <svg viewBox="0 0 16 16" aria-hidden="true">
+            <path
+              d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.4 7.4 0 0 1 2-.27c.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z" />
+          </svg>
+          Source on GitHub
+        </a>
+      </div>
+    </div>
+  </header>
+
+  <section class="demo">
+    <div class="container">
+      <div class="window">
+        <div class="window-bar">
+          <span class="dot red"></span><span class="dot amber"></span><span class="dot green"></span>
+          <span class="window-title">romty</span>
+        </div>
+        <div class="screen">
+          <div class="tree">
+            <div class="tree-title">romty</div>
+            <div class="tree-root">▾ nalbam</div>
+            <div class="tree-item"><span>— dockpad</span></div>
+            <div class="tree-item"><span>— dotfiles</span><span class="running">●</span></div>
+            <div class="tree-item"><span>— note</span></div>
+            <div class="tree-item current"><span>— romty</span><span class="running">●</span></div>
+            <div class="tree-item"><span>— resume</span></div>
+            <div class="tree-root" style="margin-top:.5rem">▾ opspresso</div>
+            <div class="tree-item"><span>— agent-studio</span></div>
+            <div class="tree-item"><span>— homebrew-tap</span></div>
+            <div class="tree-item"><span>— toast</span></div>
+          </div>
+          <div class="pane">
+            <div class="tabs"><span class="active">▸ 1</span> &nbsp; +</div>
+            <pre><span class="path">romty</span> <span class="branch">(main)</span> <span class="ok">✓</span> go test ./...
+ok  github.com/nalbam/romty/internal/daemon   11.6s
+ok  github.com/nalbam/romty/internal/ui        5.8s
+
+<span class="path">romty</span> <span class="branch">(main)</span> <span class="ok">✓</span> <span class="caret"></span></pre>
+          </div>
+          <div class="statusbar">
+            <span><b>F1</b>help</span>
+            <span><b>F2</b>add root</span>
+            <span><b>F3</b>config</span>
+            <span><b>F4</b>quit</span>
+            <span><b>F5</b>refresh</span>
+            <span><b>F6</b>scrollback</span>
+            <span><b>F7</b>focus</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="band" id="features">
+    <div class="container">
+      <div class="section-head">
+        <h2>Built for the way a terminal is actually used</h2>
+        <p>
+          Long-running shells, several projects at once, and output you want to scroll back
+          through and copy — without giving up the things your terminal already does well.
+        </p>
+      </div>
+
+      <div class="grid">
+        <div class="card">
+          <span class="icon">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 2v6M12 22v-6M4.9 4.9l4.2 4.2M19.1 19.1l-4.2-4.2M2 12h6M22 12h-6" />
+              <circle cx="12" cy="12" r="3" />
+            </svg>
+          </span>
+          <h3>Sessions outlive the TUI</h3>
+          <p>
+            A detached daemon owns every shell PTY. Closing romty, or the terminal hosting it,
+            leaves the processes running; reopening reattaches and replays what you missed.
+          </p>
+        </div>
+
+        <div class="card">
+          <span class="icon">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M3 5h7l2 2h9v12H3z" />
+              <path d="M7 12h8M7 16h5" />
+            </svg>
+          </span>
+          <h3>Projects as a tree</h3>
+          <p>
+            Point romty at a root directory and it lists the root and its direct children as
+            workspaces. Both can host terminal tabs, each starting in its own directory.
+          </p>
+        </div>
+
+        <div class="card">
+          <span class="icon">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M4 4h16v14H4z" />
+              <path d="M8 20h8M12 9l-3 3 3 3" />
+            </svg>
+          </span>
+          <h3>Scrollback you can select</h3>
+          <p>
+            10,000 lines per terminal, opened full width so a plain click-drag copies terminal
+            output and nothing else — no workspace tree dragged along with it.
+          </p>
+        </div>
+
+        <div class="card">
+          <span class="icon">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M5 6h14v12H5z" />
+              <path d="M8 10h.01M12 10h.01M16 10h.01M8 14h8" />
+            </svg>
+          </span>
+          <h3>Function keys that survive IME</h3>
+          <p>
+            F1 through F9 drive the whole interface and work in any keyboard input mode, so a
+            Korean or Japanese IME never swallows a shortcut mid-session.
+          </p>
+        </div>
+
+        <div class="card">
+          <span class="icon">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M9 3h6a3 3 0 0 1 3 3v12a3 3 0 0 1-3 3H9a3 3 0 0 1-3-3V6a3 3 0 0 1 3-3z" />
+              <path d="M12 7v4" />
+            </svg>
+          </span>
+          <h3>The mouse stays yours</h3>
+          <p>
+            romty leaves mouse tracking off, so your terminal's own selection and copy keep
+            working over it. Applications that want the mouse can have it, per configuration.
+          </p>
+        </div>
+
+        <div class="card">
+          <span class="icon">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="12" cy="12" r="9" />
+              <path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor" stroke="none" />
+            </svg>
+          </span>
+          <h3>Adapts to your terminal</h3>
+          <p>
+            Colors follow the terminal's own light or dark background, and the layout reflows
+            with the window. One binary, no configuration required to start.
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="band" id="install">
+    <div class="container">
+      <div class="section-head">
+        <h2>Install</h2>
+        <p>macOS or Linux. Building from source needs Go 1.25 or later.</p>
+      </div>
+
+      <div class="install-grid">
+        <div>
+          <h3>Homebrew</h3>
+          <pre class="block"><span class="prompt">$</span> brew install opspresso/tap/romty</pre>
+        </div>
+        <div>
+          <h3>Go</h3>
+          <pre class="block"><span class="prompt">$</span> go install github.com/nalbam/romty/cmd/romty@latest</pre>
+        </div>
+        <div>
+          <h3>From source</h3>
+          <pre class="block"><span class="prompt">$</span> git clone https://github.com/nalbam/romty
+<span class="prompt">$</span> cd romty
+<span class="prompt">$</span> go build -o build/romty ./cmd/romty</pre>
+        </div>
+      </div>
+
+      <p class="note">
+        Run <code>romty</code> and the daemon starts on its own. Press <kbd>F2</kbd>, type a
+        project directory, and press <kbd>Enter</kbd>. To shut every session down from outside
+        the TUI, run <code>romty stop</code>.
+      </p>
+    </div>
+  </section>
+
+  <section class="band" id="shortcuts">
+    <div class="container">
+      <div class="section-head">
+        <h2>Every key, in one row</h2>
+        <p>
+          The function keys work from either pane and with a modal open. Each has a letter
+          alias in the workspace pane, and the two that cannot be undone ask first.
+        </p>
+      </div>
+
+      <div class="keys">
+        <div class="key-row"><span class="caps"><kbd>F1</kbd><kbd>?</kbd></span><span>Open help</span></div>
+        <div class="key-row"><span class="caps"><kbd>F2</kbd><kbd>a</kbd></span><span>Add a root directory</span></div>
+        <div class="key-row"><span class="caps"><kbd>F3</kbd><kbd>,</kbd></span><span>Open config</span></div>
+        <div class="key-row"><span class="caps"><kbd>F4</kbd><kbd>q</kbd></span><span>Quit romty</span></div>
+        <div class="key-row"><span class="caps"><kbd>F5</kbd><kbd>r</kbd></span><span>Refresh the tree</span></div>
+        <div class="key-row"><span class="caps"><kbd>F6</kbd></span><span>Enter or leave scrollback</span></div>
+        <div class="key-row"><span class="caps"><kbd>F7</kbd><kbd>Tab</kbd></span><span>Switch between the panes</span>
+        </div>
+        <div class="key-row"><span class="caps"><kbd>F8</kbd><kbd>d</kbd></span><span>Forget the selected root</span>
+        </div>
+        <div class="key-row"><span class="caps"><kbd>F9</kbd></span><span>Stop the daemon and every shell</span></div>
+        <div class="key-row"><span class="caps"><kbd>↑</kbd><kbd>↓</kbd></span><span>Move between workspaces</span>
+        </div>
+        <div class="key-row"><span class="caps"><kbd>←</kbd><kbd>→</kbd></span><span>Move between terminal tabs</span>
+        </div>
+        <div class="key-row"><span class="caps"><kbd>Shift</kbd><kbd>PgUp</kbd></span><span>Scroll back a page at
+            once</span></div>
+      </div>
+
+      <p class="note">
+        Everything else goes to the shell, including <kbd>Ctrl</kbd>+<kbd>←</kbd> and pasted
+        text. On macOS and Linux <kbd>Ctrl</kbd>+<kbd>\</kbd> also leaves the terminal pane.
+      </p>
+    </div>
+  </section>
+
+  <section class="band" id="how">
+    <div class="container">
+      <div class="section-head">
+        <h2>How it works</h2>
+      </div>
+      <div class="arch">
+        <pre>
+<b>romty TUI</b>
+   ├─ workspace tree
+   └─ terminal tabs and VT renderer
+            │
+       Unix socket
+            │
+   <b>romty daemon</b>
+        ├─ state store
+        └─ PTY sessions
+             └─ shell process</pre>
+        <div>
+          <p>
+            The TUI talks to a detached daemon over a Unix socket owned by your user. The
+            daemon holds the PTYs and up to 8&nbsp;MiB of output per session, so the client is
+            free to come and go.
+          </p>
+          <p>
+            Reattaching replays that recording through the client's VT emulator, preceded by
+            the terminal modes the shell had set — bracketed paste among them, so a multi-line
+            paste still arrives as one paste after hours of output.
+          </p>
+          <p>
+            New shells inherit the environment and <code>$SHELL</code> of the romty that asked
+            for them, not the daemon's, which may have started days earlier.
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <footer class="footer">
+    <div class="container">
+      <div class="row">
+        <div>
+          <a class="brand" href="./"><img src="images/romty.svg" alt="">romty</a>
+          <p>
+            A terminal workspace manager that keeps shell sessions running while its TUI is
+            closed or disconnected.
+          </p>
+        </div>
+        <div class="footer-links">
+          <a href="https://github.com/nalbam/romty" target="_blank" rel="noopener">GitHub</a>
+          <a href="https://github.com/nalbam/romty/releases" target="_blank" rel="noopener">Releases</a>
+          <a href="https://opspresso.com" target="_blank" rel="noopener">OpsPresso</a>
+        </div>
+      </div>
+      <div class="footer-bottom">romty &copy; 2025 nalbam</div>
+    </div>
+  </footer>
+
+  <button class="theme-toggle" type="button" onclick="toggleTheme()" aria-label="Switch theme"></button>
+</body>
+
+</html>

@@ -4,6 +4,8 @@
 
 romty is a terminal workspace manager that keeps shell sessions running while its TUI is closed or disconnected. It combines a workspace navigator, terminal tabs, and persistent PTY sessions in one process-light interface.
 
+Website: [romty.dev](https://romty.dev)
+
 ## Features
 
 - Keep terminal sessions alive after leaving the TUI.
