@@ -99,7 +99,7 @@ These function keys work from either pane, with a modal open, and with non-Engli
 | `↑`/`↓`, `j`/`k` | Move between roots and workspaces |
 | `←`/`→`, `h`/`l` | Move between terminal tabs and the `+` tab |
 | `Enter` | Open the selected tab or create the selected `+` tab |
-| `Tab` | Focus the active terminal |
+| `Tab`, `F7` | Focus the active terminal |
 | `i` | Open About |
 | `a`, `F2` | Add a root directory |
 | `d`, `F8` | Ask for confirmation, then forget the selected root; terminals under it keep running |
@@ -132,7 +132,7 @@ Full-screen applications such as `vim`, `less`, and Claude Code switch the termi
 
 The mouse belongs to the host terminal, which is what keeps its click-drag selection and copy working over romty. Applications that want the mouse themselves — Claude Code, `htop`, `vim` with `set mouse=a` — therefore do not receive it by default, and scroll with `PgUp`/`PgDn` or `Ctrl+U`/`Ctrl+D` instead.
 
-Set `mouse_passthrough` in `~/.config/romty/config.json` to hand the mouse to those applications while they run:
+Set `mouse_passthrough` in `config.json` — see [Data and configuration](#data-and-configuration) for where that lives — to hand the mouse to those applications while they run:
 
 ```json
 { "mouse_passthrough": true }
@@ -146,7 +146,8 @@ romty then mirrors whatever mouse mode the application asks for, and returns the
 | `↑`/`↓`, `j`/`k` | Scroll one line |
 | `PgUp`/`PgDn`, `Ctrl+B`/`Ctrl+F` | Scroll one page |
 | `Home`/`End`, `g`/`G` | Jump to the oldest retained line or back to the live screen |
-| `Esc`, `q` | Leave scrollback |
+| `Esc`, `q`, `F6`, `Ctrl+\` | Leave scrollback for the terminal |
+| `F7` | Leave scrollback for the workspace pane |
 
 Scrollback hides the workspace pane and draws the terminal across the full width. That is what makes the text selectable: in the split layout every row of the host terminal holds the workspace tree, a divider, and terminal output on one line, so dragging across several lines copies the tree along with them. With one pane on screen, a plain drag selects terminal output and nothing else.
 
@@ -154,7 +155,7 @@ romty never asks the terminal for mouse events here. The xterm protocol has no w
 
 If your terminal has alternate scroll turned off, the wheel does nothing here and the keys above still work.
 
-While scrollback is open it owns the keyboard, so navigation and terminal input resume only after you leave it. Leaving focuses the terminal, which is what the full-width view was already showing, so `Ctrl+\` cycles terminal → workspace → scrollback → terminal. A terminal whose shell has exited is not focused; the workspace pane keeps the keyboard instead.
+While scrollback is open it owns the keyboard, so navigation and terminal input resume only after you leave it. Leaving focuses the terminal, which is what the full-width view was already showing, so `Ctrl+\` cycles terminal → workspace → scrollback → terminal. `F7` is the exception: it switches panes, so it leaves scrollback for the workspace pane. A terminal whose shell has exited is not focused; the workspace pane keeps the keyboard instead.
 
 ### Modals and prompts
 
@@ -163,7 +164,7 @@ While scrollback is open it owns the keyboard, so navigation and terminal input 
 | `Esc` | Close a modal or cancel root input |
 | `←`/`→`, `[`/`]` | Adjust the workspace pane width in Config |
 | `↑`/`↓`, `j`/`k` | Scroll Help when the terminal is too short to show every shortcut |
-| `Enter` | Confirm the daemon shutdown in the `F9` modal |
+| `Enter` | Confirm the root removal in the `F8` modal, or the daemon shutdown in the `F9` modal |
 
 The configured workspace pane width is stored automatically and constrained to 18 through 40 columns, subject to the available terminal width.
 
@@ -187,13 +188,13 @@ A terminal whose connection drops is reconnected automatically. Repeated drops a
 
 When a shell exits, its tab is removed from the daemon state. If you were in that terminal, romty moves to the tab that took its place in the same workspace, or to the workspace pane when it held the last one. A shell that exits in the background leaves the workspace tree where it is. If the daemon stops or the operating system restarts, roots and workspace metadata remain available, but stale terminal tabs are discarded because their PTY processes can no longer be reattached.
 
-The daemon writes what it is doing, and every failure it cannot report to a client, to `~/.config/romty/daemon.log`. That is the place to look when romty will not start or a session behaves oddly, because the daemon runs detached with nobody watching its output.
+The daemon writes what it is doing, and every failure it cannot report to a client, to `daemon.log` — see [Data and configuration](#data-and-configuration) for where that lives. That is the place to look when romty will not start or a session behaves oddly, because the daemon runs detached with nobody watching its output.
 
 romty refuses to start inside one of its own terminal sessions to avoid nesting the TUI.
 
 ## Data and configuration
 
-romty stores its files under `os.UserConfigDir()/romty`:
+romty stores its files in `romty` under the user config directory — `~/Library/Application Support` on macOS, and `$XDG_CONFIG_HOME` or `~/.config` on Linux:
 
 | File | Purpose |
 |---|---|
