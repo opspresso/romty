@@ -88,13 +88,13 @@ func TestModeTrackerOutlivesTheRecording(t *testing.T) {
 
 	value := newSessionForTest()
 	value.modes.observe([]byte("\x1b[?2004h"))
-	value.appendHistory([]byte("\x1b[?2004h"))
+	value.history.append([]byte("\x1b[?2004h"))
 	// Enough output to push the mode out of the recording entirely.
 	flood := []byte(strings.Repeat("x", maxHistoryBytes*2))
 	value.modes.observe(flood)
-	value.appendHistory(flood)
+	value.history.append(flood)
 
-	if strings.Contains(string(value.history), "2004h") {
+	if strings.Contains(string(value.history.bytes()), "2004h") {
 		t.Fatal("the recording still holds the mode; the test proves nothing")
 	}
 	if got := string(value.modes.restore()); got != "\x1b[?2004h" {

@@ -30,7 +30,7 @@ type session struct {
 
 	mu      sync.Mutex
 	writeMu sync.Mutex
-	history []byte
+	history recording
 	// modes survives the recording being trimmed, so a mode the guest set
 	// long ago is still restored to a reattaching client.
 	modes   *modeTracker
@@ -123,7 +123,7 @@ func (s *session) wait() {
 func (s *session) broadcast(data []byte) {
 	s.mu.Lock()
 	s.modes.observe(data)
-	s.appendHistory(data)
+	s.history.append(data)
 	live := make([]net.Conn, 0, len(s.clients))
 	stalled := make([]net.Conn, 0)
 	for connection, attached := range s.clients {
@@ -152,19 +152,6 @@ func (s *session) broadcast(data []byte) {
 	}
 }
 
-func (s *session) appendHistory(data []byte) {
-	if len(data) >= maxHistoryBytes {
-		s.history = append(s.history[:0], data[len(data)-maxHistoryBytes:]...)
-		return
-	}
-	overflow := len(s.history) + len(data) - maxHistoryBytes
-	if overflow > 0 {
-		copy(s.history, s.history[overflow:])
-		s.history = s.history[:len(s.history)-overflow]
-	}
-	s.history = append(s.history, data...)
-}
-
 func (s *session) attach(connection net.Conn) error {
 	s.mu.Lock()
 	if s.closed {
@@ -176,15 +163,15 @@ func (s *session) attach(connection net.Conn) error {
 	// to maxHistoryBytes and pushing it down a socket that may be slow — then
 	// happens with the lock released, because the PTY read loop needs it to
 	// keep the shell running for everyone else.
-	// Copied, not aliased: appendHistory shifts the buffer in place, so the
-	// slice header alone would be rewritten under the replay's feet.
-	recording := append([]byte(nil), s.history...)
+	// Copied, not aliased: the recording is a ring written in place, so a
+	// slice into it would be rewritten under the replay's feet.
+	recorded := s.history.bytes()
 	modes := s.modes.restore()
 	attached := &attachment{}
 	s.clients[connection] = attached
 	s.mu.Unlock()
 
-	if err := s.replay(connection, modes, recording); err != nil {
+	if err := s.replay(connection, modes, recorded); err != nil {
 		s.detach(connection)
 		return err
 	}

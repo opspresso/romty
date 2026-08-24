@@ -84,7 +84,7 @@ func TestAttachDoesNotStallTheSessionForOtherClients(t *testing.T) {
 	defer unread.Close()
 
 	value := newSessionForTest()
-	value.history = bytes.Repeat([]byte("history\r\n"), 4096)
+	value.history.append(bytes.Repeat([]byte("history\r\n"), 4096))
 
 	attached := make(chan error, 1)
 	go func() { attached <- value.attach(slow) }()
@@ -120,7 +120,7 @@ func TestAttachHandsOffToLiveOutputInOrder(t *testing.T) {
 	defer daemonSide.Close()
 
 	value := newSessionForTest()
-	value.history = bytes.Repeat([]byte("RECORDED"), 8192)
+	value.history.append(bytes.Repeat([]byte("RECORDED"), 8192))
 
 	attached := make(chan error, 1)
 	go func() { attached <- value.attach(client) }()
@@ -154,9 +154,8 @@ func TestAttachHandsOffToLiveOutputInOrder(t *testing.T) {
 	<-attached
 }
 
-// The recording handed to the replay must be a copy: appendHistory shifts the
-// buffer in place once the history is full, so an aliased slice would be
-// rewritten under the replay's feet.
+// The recording handed to the replay must be a copy: the ring is written in
+// place, so an aliased slice would be rewritten under the replay's feet.
 func TestAttachCopiesTheRecordingItReplays(t *testing.T) {
 	previous := maxHistoryBytes
 	maxHistoryBytes = 4096
@@ -166,7 +165,7 @@ func TestAttachCopiesTheRecordingItReplays(t *testing.T) {
 	defer daemonSide.Close()
 
 	value := newSessionForTest()
-	value.history = bytes.Repeat([]byte("O"), maxHistoryBytes)
+	value.history.append(bytes.Repeat([]byte("O"), maxHistoryBytes))
 
 	attached := make(chan error, 1)
 	go func() { attached <- value.attach(client) }()
@@ -285,7 +284,7 @@ func TestAttachRestoresModesTheRecordingNoLongerHolds(t *testing.T) {
 	value.broadcast([]byte("\x1b[?2004h\x1b[?1h"))
 	// Enough output to push those modes out of the recording entirely.
 	value.broadcast([]byte(strings.Repeat("x", maxHistoryBytes*2)))
-	if strings.Contains(string(value.history), "2004h") {
+	if strings.Contains(string(value.history.bytes()), "2004h") {
 		t.Fatal("the recording still holds the mode; the test proves nothing")
 	}
 
