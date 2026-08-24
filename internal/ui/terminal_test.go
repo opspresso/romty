@@ -39,6 +39,43 @@ func TestEmbeddedTerminalRendersANSIOutput(t *testing.T) {
 	}
 }
 
+func TestEmbeddedTerminalForwardsKeypad(t *testing.T) {
+	for _, probe := range []struct {
+		name        string
+		application bool
+		key         tea.Key
+		want        string
+	}{
+		{name: "number", key: tea.Key{Code: tea.KeyKp1, Text: "1", Mod: tea.ModNumLock}, want: "1"},
+		{name: "application number", application: true, key: tea.Key{Code: tea.KeyKp1, Text: "1", Mod: tea.ModNumLock}, want: "\x1bOq"},
+		{name: "divide", key: tea.Key{Code: tea.KeyKpDivide, Text: "/", Mod: tea.ModNumLock}, want: "/"},
+		{name: "application divide", application: true, key: tea.Key{Code: tea.KeyKpDivide, Text: "/", Mod: tea.ModNumLock}, want: "\x1bOo"},
+		{name: "navigation", key: tea.Key{Code: tea.KeyKpLeft}, want: "\x1b[D"},
+		{name: "application navigation", application: true, key: tea.Key{Code: tea.KeyKpLeft}, want: "\x1bOt"},
+		{name: "begin", key: tea.Key{Code: tea.KeyKpBegin}, want: "\x1b[E"},
+		{name: "application begin", application: true, key: tea.Key{Code: tea.KeyKpBegin}, want: "\x1bOu"},
+	} {
+		t.Run(probe.name, func(t *testing.T) {
+			stream := newMemoryStream("")
+			terminal := newEmbeddedTerminal("tab-1", stream, 40, 10)
+			defer terminal.closeTerminal()
+			if probe.application {
+				terminal.writeOutput([]byte("\x1b="))
+			}
+			terminal.sendKey(tea.KeyPressMsg(probe.key))
+
+			deadline := time.Now().Add(time.Second)
+			for time.Now().Before(deadline) {
+				if stream.String() == probe.want {
+					return
+				}
+				time.Sleep(time.Millisecond)
+			}
+			t.Fatalf("guest received %q, want %q", stream.String(), probe.want)
+		})
+	}
+}
+
 // The emulator drops special keys held with Shift, Ctrl or Meta, so romty
 // encodes them itself. This table pins both halves: what romty now sends, and
 // what it still leaves to the emulator.
@@ -59,6 +96,27 @@ func TestEmbeddedTerminalForwardsModifiedKeys(t *testing.T) {
 		{name: "shift+pgup", key: tea.Key{Code: tea.KeyPgUp, Mod: tea.ModShift}, want: "\x1b[5;2~"},
 		{name: "ctrl+delete", key: tea.Key{Code: tea.KeyDelete, Mod: tea.ModCtrl}, want: "\x1b[3;5~"},
 		{name: "alt+ctrl+left", key: tea.Key{Code: tea.KeyLeft, Mod: tea.ModAlt | tea.ModCtrl}, want: "\x1b[1;7D"},
+		{name: "an uppercase rune", key: tea.Key{Code: 'a', ShiftedCode: 'A', Text: "A", Mod: tea.ModShift}, want: "A"},
+		{name: "a caps lock rune", key: tea.Key{Code: 'a', Text: "A", Mod: tea.ModCapsLock}, want: "A"},
+		{name: "alt+uppercase rune", key: tea.Key{Code: 'a', ShiftedCode: 'A', Mod: tea.ModAlt | tea.ModShift}, want: "\x1bA"},
+		{name: "a shifted symbol", key: tea.Key{Code: '1', ShiftedCode: '!', Text: "!", Mod: tea.ModShift}, want: "!"},
+		{name: "layout text", key: tea.Key{Code: 'q', BaseCode: 'q', Text: "a"}, want: "a"},
+		{name: "a grapheme cluster", key: tea.Key{Code: tea.KeyExtended, Text: "👨‍💻"}, want: "👨‍💻"},
+		{name: "keypad text", key: tea.Key{Code: tea.KeyKpDivide, Text: "/", Mod: tea.ModNumLock}, want: "/"},
+		{name: "shift+space", key: tea.Key{Code: tea.KeySpace, Text: " ", Mod: tea.ModShift}, want: " "},
+		{name: "shift+enter", key: tea.Key{Code: tea.KeyEnter, Mod: tea.ModShift}, want: "\x1b[27;2;13~"},
+		{name: "ctrl+enter", key: tea.Key{Code: tea.KeyEnter, Mod: tea.ModCtrl}, want: "\x1b[27;5;13~"},
+		{name: "ctrl+tab", key: tea.Key{Code: tea.KeyTab, Mod: tea.ModCtrl}, want: "\x1b[27;5;9~"},
+		{name: "shift+backspace", key: tea.Key{Code: tea.KeyBackspace, Mod: tea.ModShift}, want: "\x1b[27;2;127~"},
+		{name: "ctrl+shift+c", key: tea.Key{Code: 'c', ShiftedCode: 'C', Mod: tea.ModCtrl | tea.ModShift}, want: "\x1b[27;6;67~"},
+		{name: "begin", key: tea.Key{Code: tea.KeyBegin}, want: "\x1b[E"},
+		{name: "find", key: tea.Key{Code: tea.KeyFind}, want: "\x1b[1~"},
+		{name: "shift+find", key: tea.Key{Code: tea.KeyFind, Mod: tea.ModShift}, want: "\x1b[1;2~"},
+		{name: "select", key: tea.Key{Code: tea.KeySelect}, want: "\x1b[4~"},
+		{name: "f13", key: tea.Key{Code: tea.KeyF13}, want: "\x1b[25~"},
+		{name: "shift+f13", key: tea.Key{Code: tea.KeyF13, Mod: tea.ModShift}, want: "\x1b[25;2~"},
+		{name: "alt+f13", key: tea.Key{Code: tea.KeyF13, Mod: tea.ModAlt}, want: "\x1b\x1b[25~"},
+		{name: "f20", key: tea.Key{Code: tea.KeyF20}, want: "\x1b[34~"},
 
 		// Still the emulator's job, and it gets these right.
 		{name: "pgup", key: tea.Key{Code: tea.KeyPgUp}, want: "\x1b[5~"},
@@ -67,6 +125,10 @@ func TestEmbeddedTerminalForwardsModifiedKeys(t *testing.T) {
 		{name: "shift+tab", key: tea.Key{Code: tea.KeyTab, Mod: tea.ModShift}, want: "\x1b[Z"},
 		{name: "alt+left", key: tea.Key{Code: tea.KeyLeft, Mod: tea.ModAlt}, want: "\x1b\x1b[D"},
 		{name: "ctrl+c", key: tea.Key{Code: 'c', Mod: tea.ModCtrl}, want: "\x03"},
+		{name: "ctrl+c with caps lock", key: tea.Key{Code: 'c', Mod: tea.ModCtrl | tea.ModCapsLock}, want: "\x03"},
+		{name: "alt+ctrl+c", key: tea.Key{Code: 'c', Mod: tea.ModAlt | tea.ModCtrl}, want: "\x1b\x03"},
+		{name: "ctrl+space", key: tea.Key{Code: tea.KeySpace, Mod: tea.ModCtrl}, want: "\x00"},
+		{name: "a repeated arrow", key: tea.Key{Code: tea.KeyUp, IsRepeat: true}, want: "\x1b[A"},
 		{name: "a plain rune", key: tea.Key{Code: 'x', Text: "x"}, want: "x"},
 	} {
 		t.Run(probe.name, func(t *testing.T) {
