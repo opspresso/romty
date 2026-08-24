@@ -1421,14 +1421,15 @@ func (m dashboard) helpEntries() []string {
 		// About lost its function key to help, so help carries what it said.
 		m.styles.modalStrong.Render("romty") + m.styles.modalBody.Render("  Persistent terminal workspace manager"),
 		renderHelpSection(m.styles, "COMMANDS", "F-keys work in both areas"),
+		// In function key order: the row itself is what the reader is scanning.
 		renderHelpShortcut(m.styles, "Help", "F1", "?"),
 		renderHelpShortcut(m.styles, "Add root", "F2", "a"),
-		renderHelpShortcut(m.styles, "Remove root", "F8", "d"),
 		renderHelpShortcut(m.styles, "Config", "F3", ","),
 		renderHelpShortcut(m.styles, "Quit", "F4", "q"),
 		renderHelpShortcut(m.styles, "Refresh", "F5", "r"),
 		renderHelpShortcut(m.styles, "Scrollback", "F6"),
 		renderHelpShortcut(m.styles, "Switch pane", "F7"),
+		renderHelpShortcut(m.styles, "Remove root", "F8", "d"),
 		renderHelpShortcut(m.styles, "Stop daemon", "F9"),
 		renderHelpShortcut(m.styles, "About", "i"),
 		renderHelpSection(m.styles, "NAVIGATION", "workspace area"),
