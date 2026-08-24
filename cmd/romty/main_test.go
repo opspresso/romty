@@ -28,6 +28,7 @@ func TestRunStopsDaemon(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
+	server.SetLogger(testutil.QuietLogger())
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	done := make(chan error, 1)

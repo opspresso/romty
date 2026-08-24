@@ -177,6 +177,8 @@ Reattaching replays the recorded output so the screen comes back as it was. Term
 
 When a shell exits, its tab is removed from the daemon state. If you were in that terminal, romty moves to the tab that took its place in the same workspace, or to the workspace pane when it held the last one. A shell that exits in the background leaves the workspace tree where it is. If the daemon stops or the operating system restarts, roots and workspace metadata remain available, but stale terminal tabs are discarded because their PTY processes can no longer be reattached.
 
+The daemon writes what it is doing, and every failure it cannot report to a client, to `~/.config/romty/daemon.log`. That is the place to look when romty will not start or a session behaves oddly, because the daemon runs detached with nobody watching its output.
+
 romty refuses to start inside one of its own terminal sessions to avoid nesting the TUI.
 
 ## Data and configuration

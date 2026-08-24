@@ -3,9 +3,11 @@ package daemon
 import (
 	"bytes"
 	"context"
+	"log"
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -181,4 +183,79 @@ func TestAttachCopiesTheRecordingItReplays(t *testing.T) {
 	}
 	client.Close()
 	<-attached
+}
+
+// The daemon outlives every client and fails where nobody is watching, so
+// diagnosis depends entirely on what reaches daemon.log. It used to write
+// nothing at all: the file existed and was always empty.
+func TestDaemonRecordsItsLifecycleAndFailures(t *testing.T) {
+	base, err := os.MkdirTemp("/tmp", "romty-log-")
+	if err != nil {
+		t.Fatalf("MkdirTemp() error = %v", err)
+	}
+	t.Cleanup(func() { os.RemoveAll(base) })
+	socket := filepath.Join(base, "daemon.sock")
+	server, err := New(socket, filepath.Join(base, "state.json"), "/bin/sh")
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	var recorded syncBuffer
+	server.SetLogger(log.New(&recorded, "", 0))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- server.Serve(ctx) }()
+
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) && !strings.Contains(recorded.String(), "listening") {
+		time.Sleep(time.Millisecond)
+	}
+	if !strings.Contains(recorded.String(), socket) {
+		t.Fatalf("the daemon did not record that it started: %q", recorded.String())
+	}
+
+	cancel()
+	<-done
+	if !strings.Contains(recorded.String(), "stopped") {
+		t.Fatalf("the daemon did not record that it stopped: %q", recorded.String())
+	}
+}
+
+// A shell exiting is the one place the state file can fall behind with nothing
+// to roll back to, so it has to say so.
+func TestSessionExitIsRecordedWhenStateCannotBeSaved(t *testing.T) {
+	base, err := os.MkdirTemp("/tmp", "romty-log-")
+	if err != nil {
+		t.Fatalf("MkdirTemp() error = %v", err)
+	}
+	t.Cleanup(func() { os.RemoveAll(base) })
+	home := filepath.Join(base, "home")
+	if err := os.MkdirAll(home, 0o700); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	statePath := filepath.Join(home, "state.json")
+	server, err := New(filepath.Join(home, "daemon.sock"), statePath, "/bin/sh")
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	// Read-only directory, so the temporary file the atomic save needs cannot
+	// be created — the shape of a full disk or a permissions change.
+	if err := os.Chmod(home, 0o500); err != nil {
+		t.Fatalf("Chmod() error = %v", err)
+	}
+	t.Cleanup(func() { os.Chmod(home, 0o700) })
+	if probe, err := os.CreateTemp(home, "probe-"); err == nil {
+		probe.Close()
+		t.Skip("the state directory is still writable; running as root?")
+	}
+	var recorded syncBuffer
+	server.SetLogger(log.New(&recorded, "", 0))
+
+	server.sessionExited("tab-7")
+	if !strings.Contains(recorded.String(), "tab-7") {
+		t.Fatalf("the exit was not recorded: %q", recorded.String())
+	}
+	if !strings.Contains(recorded.String(), "persist state") {
+		t.Fatalf("the failed save was not recorded: %q", recorded.String())
+	}
 }

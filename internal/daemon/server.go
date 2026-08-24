@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log"
 	"net"
 	"os"
 	"path/filepath"
@@ -33,6 +34,11 @@ type Server struct {
 	store  *state.Store
 	shell  string
 
+	// logger writes to stderr, which EnsureDaemon points at daemon.log. The
+	// daemon outlives every client and fails where nobody is watching, so an
+	// error that is not written there leaves no trace at all.
+	logger *log.Logger
+
 	mu       sync.Mutex
 	value    model.State
 	sessions map[string]*session
@@ -57,10 +63,16 @@ func New(socket, statePath, shell string) (*Server, error) {
 		socket:   socket,
 		store:    store,
 		shell:    shell,
+		logger:   log.New(os.Stderr, "romty: ", log.LstdFlags),
 		value:    value,
 		sessions: make(map[string]*session),
 		stop:     make(chan struct{}),
 	}, nil
+}
+
+// SetLogger redirects the daemon's diagnostics. Tests use it to stay quiet.
+func (s *Server) SetLogger(logger *log.Logger) {
+	s.logger = logger
 }
 
 func (s *Server) Serve(ctx context.Context) error {
@@ -90,6 +102,8 @@ func (s *Server) Serve(ctx context.Context) error {
 	if err := s.removeStaleTabs(); err != nil {
 		return err
 	}
+	s.logger.Printf("listening on %s", s.socket)
+	defer s.logger.Printf("stopped")
 
 	go func() {
 		select {
@@ -422,12 +436,15 @@ func (s *Server) handleAttach(connection net.Conn, tabID string) {
 	if err := protocol.Write(connection, protocol.Response{}); err != nil {
 		return
 	}
-	_ = value.attach(connection)
+	if err := value.attach(connection); err != nil {
+		s.logger.Printf("attach to tab %s ended: %v", tabID, err)
+	}
 }
 
 func (s *Server) sessionExited(tabID string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.logger.Printf("shell for tab %s exited", tabID)
 	delete(s.sessions, tabID)
 	for index := range s.value.Tabs {
 		if s.value.Tabs[index].ID == tabID {
@@ -435,7 +452,13 @@ func (s *Server) sessionExited(tabID string) {
 			break
 		}
 	}
-	_ = s.store.Save(s.value)
+	if err := s.store.Save(s.value); err != nil {
+		// The tab is gone from memory either way; the state file will
+		// disagree until the next successful save. Every other Save here
+		// rolls back, but there is nothing to roll back to: the shell has
+		// already exited.
+		s.logger.Printf("persist state after tab %s exited: %v", tabID, err)
+	}
 }
 
 func (s *Server) snapshot() (model.Snapshot, error) {
