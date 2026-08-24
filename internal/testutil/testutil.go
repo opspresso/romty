@@ -2,6 +2,8 @@
 package testutil
 
 import (
+	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"testing"
@@ -9,6 +11,12 @@ import (
 
 	"github.com/nalbam/romty/internal/client"
 )
+
+// QuietLogger keeps the daemon's diagnostics out of test output. They belong
+// in daemon.log, where a user can find them, not interleaved with test names.
+func QuietLogger() *log.Logger {
+	return log.New(io.Discard, "", 0)
+}
 
 // socketPathLimit is the portable ceiling for a unix socket path. Linux allows
 // 108 bytes and macOS 104, so the shorter one bounds both.

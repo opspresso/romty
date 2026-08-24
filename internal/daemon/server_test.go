@@ -31,6 +31,7 @@ func TestServeRemovesPersistedTerminalTabs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
+	server.SetLogger(testutil.QuietLogger())
 	persisted, err := store.Load()
 	if err != nil {
 		t.Fatalf("Load() before Serve error = %v", err)
@@ -80,6 +81,7 @@ func TestServerDiscoversWorkspacesAndReattachesSession(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
+	server.SetLogger(testutil.QuietLogger())
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() {
@@ -226,6 +228,7 @@ func TestServerOpensRootTerminalAndReloadsDirectories(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
+	server.SetLogger(testutil.QuietLogger())
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() { done <- server.Serve(ctx) }()
@@ -282,6 +285,7 @@ func TestEnsureWorkspaceRejectsNestedDirectory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
+	server.SetLogger(testutil.QuietLogger())
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() { done <- server.Serve(ctx) }()
@@ -313,6 +317,7 @@ func TestServerStopsAfterAcknowledgingShutdown(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
+	server.SetLogger(testutil.QuietLogger())
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	done := make(chan error, 1)
@@ -435,6 +440,7 @@ func TestAttachDoesNotReplayTerminalQueries(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
+	server.SetLogger(testutil.QuietLogger())
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go server.Serve(ctx)
@@ -501,6 +507,7 @@ func TestSnapshotSurvivesAnUnreadableRoot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
+	server.SetLogger(testutil.QuietLogger())
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() { done <- server.Serve(ctx) }()
@@ -587,6 +594,7 @@ func TestServeCreatesAPrivateSocketAndDirectory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
+	server.SetLogger(testutil.QuietLogger())
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() { done <- server.Serve(ctx) }()
