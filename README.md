@@ -119,17 +119,35 @@ Except for the global function keys and `Ctrl+\`, keyboard and paste input is fo
 
 romty keeps the last 10,000 lines that scrolled off each terminal. Enter scrollback with `F7`, `Shift`+`PgUp`, or a second `Ctrl+\`, and leave it with `Esc`, `q`, `F7`, or `Ctrl+\`. New output does not move the view while you are scrolled back; leaving returns to the live screen.
 
+Full-screen applications such as `vim`, `less`, and Claude Code switch the terminal to its alternate screen, which keeps no history — the application owns every row and scrolls its own content. romty says so instead of opening scrollback, because the history from before the application started is not what you asked for. `Shift`+`PgUp`/`PgDn` reaches such an application as a plain `PgUp`/`PgDn` so its own paging still works.
+
+### Mouse
+
+The mouse belongs to the host terminal, which is what keeps its click-drag selection and copy working over romty. Applications that want the mouse themselves — Claude Code, `htop`, `vim` with `set mouse=a` — therefore do not receive it by default, and scroll with `PgUp`/`PgDn` or `Ctrl+U`/`Ctrl+D` instead.
+
+Set `mouse_passthrough` in `~/.config/romty/config.json` to hand the mouse to those applications while they run:
+
+```json
+{ "mouse_passthrough": true }
+```
+
+romty then mirrors whatever mouse mode the application asks for, and returns the mouse to the terminal as soon as the application exits or scrollback opens. This is the same trade as `set -g mouse on` in tmux: the wheel and clicks reach the application, and the terminal's drag selection needs its bypass modifier — `Option` on macOS, `Shift` elsewhere — for as long as the application is running.
+
 | Key | Action |
 |---|---|
-| Wheel | Scroll three lines |
+| Wheel | Scroll, through the terminal's own alternate scroll |
 | `↑`/`↓`, `j`/`k` | Scroll one line |
 | `PgUp`/`PgDn`, `Ctrl+B`/`Ctrl+F` | Scroll one page |
 | `Home`/`End`, `g`/`G` | Jump to the oldest retained line or back to the live screen |
 | `Esc`, `q` | Leave scrollback |
 
-Scrollback mode is the only state in which romty asks the terminal for mouse events. The xterm protocol has no wheel-only reporting mode, so requesting the wheel also takes drag selection away from the host terminal. Keeping the request scoped to this one mode means the mouse selects and copies text natively everywhere else. Inside scrollback, hold the modifier your terminal uses to bypass mouse reporting — `Option` on macOS, `Shift` elsewhere — to select text as usual.
+Scrollback hides the workspace pane and draws the terminal across the full width. That is what makes the text selectable: in the split layout every row of the host terminal holds the workspace tree, a divider, and terminal output on one line, so dragging across several lines copies the tree along with them. With one pane on screen, a plain drag selects terminal output and nothing else.
 
-While scrollback is open it owns the keyboard, so navigation and terminal input resume only after you leave it.
+romty never asks the terminal for mouse events here. The xterm protocol has no wheel-only reporting mode, so requesting the wheel would take drag selection away — the very thing scrollback exists to give you. The wheel still scrolls because terminals in the alternate screen send it as arrow keys, which scrollback already handles. Selection and copying stay with the terminal, exactly as they behave outside romty.
+
+If your terminal has alternate scroll turned off, the wheel does nothing here and the keys above still work.
+
+While scrollback is open it owns the keyboard, so navigation and terminal input resume only after you leave it. Leaving focuses the terminal, which is what the full-width view was already showing, so `Ctrl+\` cycles terminal → workspace → scrollback → terminal. A terminal whose shell has exited is not focused; the workspace pane keeps the keyboard instead.
 
 ### Modals and prompts
 

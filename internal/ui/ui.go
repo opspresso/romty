@@ -7,6 +7,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/nalbam/romty/internal/model"
@@ -15,8 +16,6 @@ import (
 const (
 	terminalTop        = 2
 	helpKeyColumnWidth = 20
-	// wheelScrollLines is the conventional number of rows one wheel notch moves.
-	wheelScrollLines = 3
 )
 
 type Backend interface {
@@ -86,6 +85,7 @@ type dashboard struct {
 	helpOffset          int
 	configPath          string
 	leftWidth           int
+	mousePassthrough    bool
 	styles              *uiStyles
 }
 
@@ -147,13 +147,14 @@ func newDashboard(backend Backend, initial model.Snapshot) dashboard {
 
 func newDashboardWithConfig(backend Backend, initial model.Snapshot, configPath string, config Config) dashboard {
 	value := dashboard{
-		backend:    backend,
-		state:      initial,
-		width:      80,
-		height:     24,
-		configPath: configPath,
-		leftWidth:  config.LeftWidth,
-		styles:     newUIStyles(true),
+		backend:          backend,
+		state:            initial,
+		width:            80,
+		height:           24,
+		configPath:       configPath,
+		leftWidth:        config.LeftWidth,
+		mousePassthrough: config.MousePassthrough,
+		styles:           newUIStyles(true),
 	}
 	value.ensureWorkspaceCursor()
 	return value
@@ -174,8 +175,8 @@ func (m dashboard) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case tea.KeyPressMsg:
 		return m.handleKey(message)
-	case tea.MouseWheelMsg:
-		return m.handleWheel(message)
+	case tea.MouseClickMsg, tea.MouseReleaseMsg, tea.MouseWheelMsg, tea.MouseMotionMsg:
+		return m.forwardMouse(message.(tea.MouseMsg))
 	case tea.PasteMsg:
 		if m.inputMode {
 			m.input += message.Content
@@ -385,17 +386,41 @@ func (m dashboard) handleScrollbackKey(message tea.KeyPressMsg) (tea.Model, tea.
 	return m, nil
 }
 
-func (m dashboard) handleWheel(message tea.MouseWheelMsg) (tea.Model, tea.Cmd) {
-	if !m.scrollback {
+// forwardMouse relays a host mouse event to the guest application. romty only
+// receives these when passthrough handed the mouse over, so there is nothing to
+// do otherwise.
+func (m dashboard) forwardMouse(message tea.MouseMsg) (tea.Model, tea.Cmd) {
+	if m.mouseMode() == tea.MouseModeNone {
 		return m, nil
 	}
-	switch message.Button {
-	case tea.MouseWheelUp:
-		m.scrollTerminal(wheelScrollLines)
-	case tea.MouseWheelDown:
-		m.scrollTerminal(-wheelScrollLines)
+	mouse, inside := m.translateMouse(message.Mouse())
+	if !inside {
+		return m, nil
+	}
+	switch message.(type) {
+	case tea.MouseClickMsg:
+		m.terminal.sendMouse(uv.MouseClickEvent(mouse))
+	case tea.MouseReleaseMsg:
+		m.terminal.sendMouse(uv.MouseReleaseEvent(mouse))
+	case tea.MouseWheelMsg:
+		m.terminal.sendMouse(uv.MouseWheelEvent(mouse))
+	case tea.MouseMotionMsg:
+		m.terminal.sendMouse(uv.MouseMotionEvent(mouse))
 	}
 	return m, nil
+}
+
+// translateMouse moves a host screen position into the terminal pane's own
+// coordinate space and reports false for events outside the pane.
+func (m dashboard) translateMouse(mouse tea.Mouse) (uv.Mouse, bool) {
+	leftWidth, rightWidth, _, terminalHeight := m.dimensions()
+	translated := uv.Mouse(mouse)
+	translated.X = mouse.X - leftWidth - 3
+	translated.Y = mouse.Y - terminalTop
+	if translated.X < 0 || translated.X >= rightWidth || translated.Y < 0 || translated.Y >= terminalHeight {
+		return uv.Mouse{}, false
+	}
+	return translated, true
 }
 
 func (m dashboard) toggleScrollback() (tea.Model, tea.Cmd) {
@@ -403,22 +428,34 @@ func (m dashboard) toggleScrollback() (tea.Model, tea.Cmd) {
 		m.stopScrollback()
 		return m, nil
 	}
-	if !m.startScrollback() {
-		m.errorMessage = "no terminal output to scroll"
-	}
-	return m, nil
+	return m.pageHistory(0)
 }
 
 func (m dashboard) pageHistory(pages int) (tea.Model, tea.Cmd) {
 	if !m.scrollback && !m.startScrollback() {
+		// An application that owns the screen pages its own output. Send it the
+		// unmodified key: such applications bind plain PgUp/PgDn, and the
+		// emulator has no encoding for Shift with a special key anyway.
+		if pages != 0 && m.focus == terminalPane && m.terminal != nil && m.terminal.altScreen() {
+			m.terminal.sendKey(pagingKey(pages))
+			return m, nil
+		}
+		m.errorMessage = m.scrollbackUnavailable()
 		return m, nil
 	}
 	m.scrollTerminal(pages * m.scrollbackPage())
 	return m, nil
 }
 
+func pagingKey(pages int) tea.KeyPressMsg {
+	if pages < 0 {
+		return tea.KeyPressMsg(tea.Key{Code: tea.KeyPgDown})
+	}
+	return tea.KeyPressMsg(tea.Key{Code: tea.KeyPgUp})
+}
+
 func (m *dashboard) startScrollback() bool {
-	if m.terminal == nil {
+	if m.terminal == nil || m.terminal.scrollbackLen() == 0 {
 		return false
 	}
 	m.scrollback = true
@@ -427,9 +464,28 @@ func (m *dashboard) startScrollback() bool {
 	return true
 }
 
+// scrollbackUnavailable explains why there is nothing for scrollback mode to
+// show, so an application that owns the screen is not mistaken for a bug.
+func (m dashboard) scrollbackUnavailable() string {
+	switch {
+	case m.terminal == nil:
+		return "open a terminal to scroll its output"
+	case m.terminal.altScreen():
+		return "the running application owns the screen; scroll inside it"
+	default:
+		return "no output has scrolled off this terminal yet"
+	}
+}
+
 func (m *dashboard) stopScrollback() {
 	m.scrollback = false
 	m.scrollOffset = 0
+	// Copy mode fills the screen with the terminal, so leaving it lands in the
+	// terminal rather than back in the workspace tree.
+	if m.terminal != nil && m.terminal.active {
+		m.focus = terminalPane
+		m.syncTabCursor(m.selectedTabs())
+	}
 }
 
 // scrollTerminal moves the viewport by delta lines, positive towards the oldest
@@ -471,7 +527,8 @@ func (m dashboard) adjustLeftWidth(delta int) (tea.Model, tea.Cmd) {
 
 func (m dashboard) saveConfig() tea.Cmd {
 	path := m.configPath
-	config := Config{LeftWidth: m.leftWidth}
+	// Carry every field, or adjusting the pane width would erase the rest.
+	config := Config{LeftWidth: m.leftWidth, MousePassthrough: m.mousePassthrough}
 	return func() tea.Msg {
 		return configSavedMsg{leftWidth: config.LeftWidth, err: saveConfig(path, config)}
 	}
@@ -571,7 +628,13 @@ func (m dashboard) handleTerminalOutput(message terminalOutputMsg) (tea.Model, t
 	if len(message.data) > 0 {
 		before := m.terminal.scrollbackLen()
 		m.terminal.writeOutput(message.data)
-		if m.scrollback {
+		switch {
+		case !m.scrollback:
+		case m.terminal.scrollbackLen() == 0:
+			// The application took over the screen; its history is its own.
+			m.stopScrollback()
+			m.errorMessage = m.scrollbackUnavailable()
+		default:
 			// Hold the viewport on the same content as new output pushes
 			// older lines into the scrollback.
 			m.scrollTerminal(m.terminal.scrollbackLen() - before)
@@ -857,12 +920,7 @@ func (m dashboard) View() tea.View {
 	view := tea.NewView(content)
 	view.AltScreen = true
 	view.WindowTitle = "romty"
-	// Mouse reporting takes drag selection away from the host terminal, so it
-	// stays off outside scrollback mode.
-	view.MouseMode = tea.MouseModeNone
-	if m.scrollback {
-		view.MouseMode = tea.MouseModeCellMotion
-	}
+	view.MouseMode = m.mouseMode()
 	if !m.scrollback && m.focus == terminalPane && m.terminal != nil && m.terminal.active {
 		leftWidth, _, _, _ := m.dimensions()
 		position := m.terminal.cursorPosition()
@@ -871,8 +929,33 @@ func (m dashboard) View() tea.View {
 	return view
 }
 
+// mouseMode keeps the mouse with the host terminal, where its native drag
+// selection lives. Copy mode relies on the terminal's alternate scroll to turn
+// the wheel into arrow keys instead of claiming the mouse. The only handover is
+// to a guest application that asked for the mouse, and only when the user
+// opted in, which is the same trade tmux makes for `set -g mouse on`.
+func (m dashboard) mouseMode() tea.MouseMode {
+	if !m.mousePassthrough || m.scrollback || m.terminal == nil || !m.terminal.active {
+		return tea.MouseModeNone
+	}
+	return m.terminal.guestMouseMode()
+}
+
 func (m dashboard) render() string {
 	leftWidth, rightWidth, bodyHeight, _ := m.dimensions()
+	width := max(m.width, 40)
+	lines := m.renderPanes(leftWidth, rightWidth, bodyHeight)
+	if m.scrollback {
+		lines = m.renderRows(m.renderTerminal(width), width, bodyHeight)
+	}
+	if m.modal != noModal {
+		lines = m.overlayModal(lines, width, bodyHeight)
+	}
+	lines = append(lines, m.renderStatus(width, bodyHeight)...)
+	return strings.Join(lines, "\n")
+}
+
+func (m dashboard) renderPanes(leftWidth, rightWidth, bodyHeight int) []string {
 	left := m.renderNavigation(leftWidth, bodyHeight)
 	right := m.renderTerminal(rightWidth)
 	headSeparator, bodySeparator := m.paneSeparators()
@@ -890,16 +973,24 @@ func (m dashboard) render() string {
 		if row == 0 {
 			separator = headSeparator
 		}
-		leftLine = pad(truncate(leftLine, leftWidth), leftWidth)
-		rightLine = truncate(rightLine, rightWidth)
-		lines = append(lines, leftLine+separator+rightLine)
+		lines = append(lines, pad(truncate(leftLine, leftWidth), leftWidth)+separator+truncate(rightLine, rightWidth))
 	}
-	width := max(m.width, 40)
-	if m.modal != noModal {
-		lines = m.overlayModal(lines, width, bodyHeight)
+	return lines
+}
+
+// renderRows lays out a single full-width pane. Copy mode uses it so every row
+// holds terminal output alone and a plain drag in the host terminal selects
+// exactly what is on screen, with no workspace tree spliced into each line.
+func (m dashboard) renderRows(rows []string, width, height int) []string {
+	lines := make([]string, 0, height+2)
+	for row := range height {
+		line := ""
+		if row < len(rows) {
+			line = rows[row]
+		}
+		lines = append(lines, truncate(line, width))
 	}
-	lines = append(lines, m.renderStatus(width, bodyHeight)...)
-	return strings.Join(lines, "\n")
+	return lines
 }
 
 // renderStatus returns the shortcut rail and the status bar. Only the default

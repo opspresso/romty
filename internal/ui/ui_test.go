@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -593,19 +594,21 @@ func TestDashboardScrollsTerminalHistory(t *testing.T) {
 			value.scrollback, value.scrollOffset, command)
 	}
 	view := value.View()
-	if view.MouseMode != tea.MouseModeCellMotion || view.Cursor != nil {
-		t.Fatalf("scrollback view = (mouse %v, cursor %v), want mouse on and no cursor", view.MouseMode, view.Cursor)
+	if view.MouseMode != tea.MouseModeNone || view.Cursor != nil {
+		t.Fatalf("copy mode view = (mouse %v, cursor %v), want the mouse left with the host", view.MouseMode, view.Cursor)
 	}
 
-	updated, _ = value.Update(tea.MouseWheelMsg{Button: tea.MouseWheelUp})
+	// The wheel arrives as arrow keys through the terminal's alternate scroll,
+	// which is what keeps the host's drag selection alive in copy mode.
+	updated, _ = value.Update(key(tea.KeyUp, ""))
 	value = updated.(dashboard)
-	if value.scrollOffset != wheelScrollLines {
-		t.Fatalf("wheel up offset = %d, want %d", value.scrollOffset, wheelScrollLines)
+	if value.scrollOffset != 1 {
+		t.Fatalf("wheel up offset = %d, want 1", value.scrollOffset)
 	}
 	if slices.Equal(plainRows(value.terminal.renderViewport(value.scrollOffset)), live) {
 		t.Fatal("scrolling up did not change the rendered viewport")
 	}
-	updated, _ = value.Update(tea.MouseWheelMsg{Button: tea.MouseWheelDown})
+	updated, _ = value.Update(key(tea.KeyDown, ""))
 	value = updated.(dashboard)
 	if value.scrollOffset != 0 {
 		t.Fatalf("wheel down offset = %d, want back at the live screen", value.scrollOffset)
@@ -709,6 +712,206 @@ func TestDashboardHoldsScrollbackViewportOnNewOutput(t *testing.T) {
 	}
 	if !strings.Contains(ansi.Strip(strings.Join(value.terminal.renderViewport(0), "\n")), "fresh-b") {
 		t.Fatal("live screen does not show the output that arrived during scrollback")
+	}
+}
+
+// Full-screen applications such as vim, less, and Claude Code switch to the
+// alternate screen, which has no history of its own. romty must not offer the
+// main screen's older output as if it belonged to them.
+func TestDashboardRefusesScrollbackOnTheAlternateScreen(t *testing.T) {
+	value := scrolledDashboard(t, 200)
+	updated, _ := value.Update(key(tea.KeyF7, ""))
+	value = updated.(dashboard)
+	if !value.scrollback {
+		t.Fatal("scrollback did not open on the main screen")
+	}
+
+	// The application takes over the screen while scrollback is open.
+	updated, _ = value.Update(terminalOutputMsg{
+		terminal: value.terminal,
+		data:     []byte("\x1b[?1049h\x1b[2J\x1b[Happlication frame\r\n"),
+	})
+	value = updated.(dashboard)
+	if value.scrollback || value.scrollOffset != 0 {
+		t.Fatalf("scrollback stayed open on the alternate screen = (scrollback %v, offset %d)",
+			value.scrollback, value.scrollOffset)
+	}
+	if !strings.Contains(value.errorMessage, "owns the screen") {
+		t.Fatalf("error message = %q, want an explanation of the alternate screen", value.errorMessage)
+	}
+
+	// Re-entering must not resurrect the history from before the application.
+	for _, message := range []tea.KeyPressMsg{
+		key(tea.KeyF7, ""),
+		tea.KeyPressMsg(tea.Key{Code: tea.KeyPgUp, Mod: tea.ModShift}),
+	} {
+		updated, _ = value.Update(message)
+		value = updated.(dashboard)
+		if value.scrollback {
+			t.Fatalf("%q entered scrollback while the alternate screen was active", message.String())
+		}
+	}
+	rows := plainRows(value.terminal.renderViewport(500))
+	if rows[0] != "application frame" {
+		t.Fatalf("viewport row 0 = %q, want the live alternate screen", rows[0])
+	}
+	if strings.Contains(strings.Join(rows, "\n"), "line-") {
+		t.Fatalf("viewport leaked pre-application output:\n%s", strings.Join(rows, "\n"))
+	}
+
+	// Leaving the alternate screen restores the history that was there before.
+	updated, _ = value.Update(terminalOutputMsg{terminal: value.terminal, data: []byte("\x1b[?1049l")})
+	value = updated.(dashboard)
+	updated, _ = value.Update(key(tea.KeyF7, ""))
+	value = updated.(dashboard)
+	if !value.scrollback {
+		t.Fatalf("scrollback did not reopen after the application exited: %q", value.errorMessage)
+	}
+}
+
+// Copy mode drops the workspace pane so that a plain drag in the host terminal
+// selects terminal output alone. In the split layout every host row also holds
+// the workspace tree, which a multi-line selection would copy along with it.
+func TestDashboardRendersCopyModeFullWidth(t *testing.T) {
+	value := scrolledDashboard(t, 200)
+	value.state = model.Snapshot{Roots: []model.RootView{{
+		Root:        model.Root{ID: "root-1", Name: "nalbam", Path: "/projects"},
+		Directories: []model.WorkspaceView{{Workspace: model.Workspace{ID: "w", Name: "SnowClash", Path: "/p/s"}}},
+	}}}
+	if !strings.Contains(ansi.Strip(value.render()), "SnowClash") {
+		t.Fatal("the split layout does not show the workspace tree")
+	}
+
+	updated, _ := value.Update(key(tea.KeyF7, ""))
+	value = updated.(dashboard)
+	_, _, bodyHeight, _ := value.dimensions()
+	body := strings.Split(ansi.Strip(value.render()), "\n")[:bodyHeight]
+	joined := strings.Join(body, "\n")
+	if strings.Contains(joined, "SnowClash") || strings.Contains(joined, "nalbam") || strings.Contains(joined, "│") {
+		t.Fatalf("copy mode still renders the workspace pane and divider:\n%s", joined)
+	}
+	if !strings.Contains(joined, "line-") {
+		t.Fatalf("copy mode does not render terminal output:\n%s", joined)
+	}
+
+	updated, _ = value.Update(key(tea.KeyEscape, ""))
+	value = updated.(dashboard)
+	if !strings.Contains(ansi.Strip(value.render()), "SnowClash") {
+		t.Fatal("leaving copy mode did not restore the workspace pane")
+	}
+}
+
+func TestDashboardKeepsMouseWithTheHostUnlessPassthroughIsOn(t *testing.T) {
+	value := scrolledDashboard(t, 200)
+	// A guest that wants the mouse, the way Claude Code and htop do.
+	value.terminal.writeOutput([]byte("\x1b[?1003h\x1b[?1006h"))
+
+	if value.terminal.guestMouseMode() != tea.MouseModeAllMotion {
+		t.Fatalf("guest mouse mode = %v, want all motion", value.terminal.guestMouseMode())
+	}
+	if value.View().MouseMode != tea.MouseModeNone {
+		t.Fatalf("mouse mode = %v, want the host to keep the mouse by default", value.View().MouseMode)
+	}
+	value.Update(tea.MouseWheelMsg{X: 40, Y: 6, Button: tea.MouseWheelUp})
+	if sent := value.terminal.stream.(*memoryStream).String(); sent != "" {
+		t.Fatalf("mouse reached the guest without passthrough: %q", sent)
+	}
+
+	value.mousePassthrough = true
+	if value.View().MouseMode != tea.MouseModeAllMotion {
+		t.Fatalf("mouse mode = %v, want the guest's own mode mirrored", value.View().MouseMode)
+	}
+	leftWidth, _, _, _ := value.dimensions()
+	value.Update(tea.MouseWheelMsg{X: leftWidth + 3 + 4, Y: terminalTop + 2, Button: tea.MouseWheelUp})
+	time.Sleep(30 * time.Millisecond)
+	sent := value.terminal.stream.(*memoryStream).String()
+	if !strings.HasPrefix(sent, "\x1b[<64;5;3") {
+		t.Fatalf("guest received %q, want an SGR wheel event at column 5, row 3", sent)
+	}
+
+	// Events over the workspace pane are not the guest's business.
+	value.Update(tea.MouseWheelMsg{X: 1, Y: terminalTop + 2, Button: tea.MouseWheelUp})
+	time.Sleep(30 * time.Millisecond)
+	if value.terminal.stream.(*memoryStream).String() != sent {
+		t.Fatalf("an event outside the terminal pane reached the guest: %q",
+			value.terminal.stream.(*memoryStream).String())
+	}
+
+	// Copy mode takes the mouse back so the host can select the scrolled page.
+	updated, _ := value.Update(key(tea.KeyF7, ""))
+	value = updated.(dashboard)
+	if !value.scrollback || value.View().MouseMode != tea.MouseModeNone {
+		t.Fatalf("copy mode = (scrollback %v, mouse %v), want the mouse returned to the host",
+			value.scrollback, value.View().MouseMode)
+	}
+}
+
+// A guest that owns the screen pages its own output, so romty must hand the key
+// over rather than swallowing it for a scrollback it cannot offer.
+func TestDashboardForwardsPagingToTheGuestThatOwnsTheScreen(t *testing.T) {
+	value := scrolledDashboard(t, 200)
+	value.terminal.writeOutput([]byte("\x1b[?1049h"))
+
+	value.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyPgUp, Mod: tea.ModShift}))
+	time.Sleep(30 * time.Millisecond)
+	// Sent unmodified: the emulator has no encoding for Shift with a special
+	// key, and plain PgUp is the key such applications bind.
+	if sent := value.terminal.stream.(*memoryStream).String(); sent != "\x1b[5~" {
+		t.Fatalf("guest received %q for Shift+PgUp, want a plain PgUp", sent)
+	}
+
+	// On the main screen it still belongs to romty's own scrollback.
+	value.terminal.writeOutput([]byte("\x1b[?1049l"))
+	updated, _ := value.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyPgUp, Mod: tea.ModShift}))
+	value = updated.(dashboard)
+	if !value.scrollback || value.scrollOffset == 0 {
+		t.Fatalf("Shift+PgUp on the main screen = (scrollback %v, offset %d), want a page of history",
+			value.scrollback, value.scrollOffset)
+	}
+}
+
+// Ctrl+\ cycles terminal -> workspace -> scrollback -> terminal, so leaving
+// scrollback puts the keyboard back where the full-width view already is.
+func TestDashboardFocusesTerminalWhenLeavingScrollback(t *testing.T) {
+	control := tea.KeyPressMsg(tea.Key{Code: '\\', Mod: tea.ModCtrl})
+	for _, leave := range []tea.KeyPressMsg{control, key(tea.KeyEscape, ""), key('q', "q"), key(tea.KeyF7, "")} {
+		value := scrolledDashboard(t, 200)
+		updated, _ := value.Update(control)
+		value = updated.(dashboard)
+		if value.focus != leftPane {
+			t.Fatalf("Ctrl+\\ focus = %v, want the workspace pane", value.focus)
+		}
+		updated, _ = value.Update(control)
+		value = updated.(dashboard)
+		if !value.scrollback || value.focus != leftPane {
+			t.Fatalf("second Ctrl+\\ = (scrollback %v, focus %v), want scrollback without moving focus",
+				value.scrollback, value.focus)
+		}
+
+		updated, _ = value.Update(leave)
+		value = updated.(dashboard)
+		if value.scrollback || value.focus != terminalPane {
+			t.Fatalf("%q = (scrollback %v, focus %v), want the terminal focused",
+				leave.String(), value.scrollback, value.focus)
+		}
+		if value.View().Cursor == nil {
+			t.Fatalf("%q left the terminal without a cursor", leave.String())
+		}
+	}
+}
+
+func TestDashboardKeepsWorkspaceFocusWhenTheTerminalIsGone(t *testing.T) {
+	value := scrolledDashboard(t, 200)
+	value.focus = leftPane
+	updated, _ := value.Update(key(tea.KeyF7, ""))
+	value = updated.(dashboard)
+	value.terminal.disconnect()
+
+	updated, _ = value.Update(key(tea.KeyEscape, ""))
+	value = updated.(dashboard)
+	if value.scrollback || value.focus == terminalPane {
+		t.Fatalf("leaving scrollback = (scrollback %v, focus %v), want the workspace pane for a dead terminal",
+			value.scrollback, value.focus)
 	}
 }
 
