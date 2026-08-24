@@ -313,14 +313,21 @@ func (m dashboard) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	case terminalOutputMsg:
 		return m.handleTerminalOutput(message)
 	case configSavedMsg:
-		if message.leftWidth != m.leftWidth {
-			return m, m.saveConfig()
-		}
+		// What the save reported comes first. Holding an arrow key in the
+		// config modal outruns the disk, and reading the width before the
+		// error meant a save that failed under a width that had already moved
+		// on was dropped without a word — the one outcome the user has to
+		// hear about.
 		if message.err != nil {
 			m.setError(settingError, message.err.Error())
-			return m, m.resizeTerminal()
+		} else {
+			m.clearError(settingError)
 		}
-		m.clearError(settingError)
+		if message.leftWidth != m.leftWidth {
+			// The width moved while this one was being written, so it is
+			// already out of date. A later save answers whatever this one said.
+			return m, m.saveConfig()
+		}
 		return m, m.resizeTerminal()
 	case resizeFailedMsg:
 		if m.terminal == nil || m.terminal.id != message.tabID {

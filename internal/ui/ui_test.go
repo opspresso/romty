@@ -1868,6 +1868,28 @@ func TestDashboardReportsAFailedResizeAsItsOwnFailure(t *testing.T) {
 	}
 }
 
+// Holding an arrow key in the config modal outruns the disk, so an answer can
+// arrive under a width that has already moved on. Reading the width before the
+// error meant such a save could fail without a word — the one outcome the user
+// has to hear about.
+func TestDashboardReportsAConfigFailureTheWidthMovedPast(t *testing.T) {
+	value := newDashboard(&fakeBackend{}, model.Snapshot{})
+	value.width, value.height = 120, 40
+	value.leftWidth = 24
+
+	updated, command := value.Update(configSavedMsg{
+		leftWidth: 22,
+		err:       errors.New("read-only file system"),
+	})
+	value = updated.(dashboard)
+	if !strings.Contains(value.errorMessage, "read-only file system") {
+		t.Fatalf("error message = %q, want the save failure", value.errorMessage)
+	}
+	if command == nil {
+		t.Fatal("the width that moved on was not saved again")
+	}
+}
+
 // A resize is a round trip, so dragging a window and then switching tabs
 // leaves one in flight for the tab just left. The daemon answers "running
 // terminal session not found" for a terminal nobody is looking at, and the
