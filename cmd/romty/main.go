@@ -79,7 +79,7 @@ func runDaemon(runtime paths.Paths) error {
 			// clients starting at once, not a failure — but exiting in
 			// silence left daemon.log empty, and the caller that gives up
 			// with "see daemon.log" pointing at nothing.
-			fmt.Fprintln(os.Stderr, "romty:", err)
+			fmt.Fprintln(os.Stderr, "romty: another daemon already owns the socket; exiting")
 			return nil
 		}
 		return err

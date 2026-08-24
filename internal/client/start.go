@@ -18,9 +18,11 @@ func EnsureDaemon(runtime paths.Paths, executable string) error {
 	// reply — sent romty off to start a second daemon, which lost the lock to
 	// the first and exited, leaving the user with "daemon did not become
 	// ready" in place of what the ping actually said.
-	if err := backend.Ping(); err == nil {
+	err := backend.Ping()
+	if err == nil {
 		return nil
-	} else if !Unavailable(err) {
+	}
+	if !Unavailable(err) {
 		return err
 	}
 	if err := runtime.Ensure(); err != nil {

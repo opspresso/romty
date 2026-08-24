@@ -29,12 +29,12 @@ type recording struct {
 
 // append records data, dropping whatever no longer fits.
 func (r *recording) append(data []byte) {
-	if len(data) == 0 {
-		return
-	}
 	limit := maxHistoryBytes
 	if limit <= 0 {
 		r.data, r.start, r.size = nil, 0, 0
+		return
+	}
+	if len(data) == 0 {
 		return
 	}
 	// Only the tail of an oversized chunk can survive, and writing the rest

@@ -244,7 +244,7 @@ func (s *session) replay(connection net.Conn, modes, recording []byte) error {
 // off for being long. romty reattached, the daemon replayed the same
 // recording, and it was cut off again — the loop the reattach backoff damps.
 func writeReplay(connection net.Conn, data []byte) error {
-	for {
+	for len(data) > 0 {
 		if err := connection.SetWriteDeadline(time.Now().Add(replayTimeout)); err != nil {
 			return err
 		}
@@ -253,10 +253,8 @@ func writeReplay(connection net.Conn, data []byte) error {
 			return err
 		}
 		data = data[piece:]
-		if len(data) == 0 {
-			return nil
-		}
 	}
+	return nil
 }
 
 func (s *session) detach(connection net.Conn) {
