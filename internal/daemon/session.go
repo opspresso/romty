@@ -31,6 +31,9 @@ type session struct {
 	mu      sync.Mutex
 	writeMu sync.Mutex
 	history []byte
+	// modes survives the recording being trimmed, so a mode the guest set
+	// long ago is still restored to a reattaching client.
+	modes   *modeTracker
 	clients map[net.Conn]*attachment
 	closed  bool
 }
@@ -64,6 +67,7 @@ func startSession(id, directory, shell string, columns, rows uint16, onExit func
 		pty:     terminal,
 		command: command,
 		onExit:  onExit,
+		modes:   newModeTracker(),
 		clients: make(map[net.Conn]*attachment),
 	}
 	go value.read()
@@ -102,6 +106,7 @@ func (s *session) wait() {
 
 func (s *session) broadcast(data []byte) {
 	s.mu.Lock()
+	s.modes.observe(data)
 	s.appendHistory(data)
 	live := make([]net.Conn, 0, len(s.clients))
 	stalled := make([]net.Conn, 0)
@@ -158,11 +163,12 @@ func (s *session) attach(connection net.Conn) error {
 	// Copied, not aliased: appendHistory shifts the buffer in place, so the
 	// slice header alone would be rewritten under the replay's feet.
 	recording := append([]byte(nil), s.history...)
+	modes := s.modes.restore()
 	attached := &attachment{}
 	s.clients[connection] = attached
 	s.mu.Unlock()
 
-	if err := s.replay(connection, recording); err != nil {
+	if err := s.replay(connection, modes, recording); err != nil {
 		s.detach(connection)
 		return err
 	}
@@ -185,11 +191,13 @@ func (s *session) attach(connection net.Conn) error {
 
 // replay sends the recorded screen and then whatever arrived while it was
 // being sent, until the client has caught up and can be marked live.
-func (s *session) replay(connection net.Conn, recording []byte) error {
+func (s *session) replay(connection net.Conn, modes, recording []byte) error {
 	_ = connection.SetWriteDeadline(time.Now().Add(replayTimeout))
 	defer connection.SetWriteDeadline(time.Time{})
 
-	if _, err := connection.Write([]byte(resetScreen)); err != nil {
+	// The modes go first so a mode set before the recording's window is
+	// restored; any change still inside the recording replays on top of them.
+	if _, err := connection.Write(append([]byte(resetScreen), modes...)); err != nil {
 		return fmt.Errorf("initialize attached terminal: %w", err)
 	}
 	if _, err := connection.Write(stripQueries(recording)); err != nil {

@@ -12,6 +12,14 @@ import (
 	"time"
 )
 
+// newSessionForTest builds the parts of a session that do not need a PTY.
+func newSessionForTest() *session {
+	return &session{
+		modes:   newModeTracker(),
+		clients: make(map[net.Conn]*attachment),
+	}
+}
+
 // A peer that connects and never finishes a request must not hold a goroutine
 // and a file descriptor for the daemon's whole life, and must not keep the
 // daemon from serving anyone else.
@@ -71,7 +79,7 @@ func TestAttachDoesNotStallTheSessionForOtherClients(t *testing.T) {
 	defer slow.Close()
 	defer unread.Close()
 
-	value := &session{clients: make(map[net.Conn]*attachment)}
+	value := newSessionForTest()
 	value.history = bytes.Repeat([]byte("history\r\n"), 4096)
 
 	attached := make(chan error, 1)
@@ -107,7 +115,7 @@ func TestAttachHandsOffToLiveOutputInOrder(t *testing.T) {
 	client, daemonSide := net.Pipe()
 	defer daemonSide.Close()
 
-	value := &session{clients: make(map[net.Conn]*attachment)}
+	value := newSessionForTest()
 	value.history = bytes.Repeat([]byte("RECORDED"), 8192)
 
 	attached := make(chan error, 1)
@@ -153,7 +161,7 @@ func TestAttachCopiesTheRecordingItReplays(t *testing.T) {
 	client, daemonSide := net.Pipe()
 	defer daemonSide.Close()
 
-	value := &session{clients: make(map[net.Conn]*attachment)}
+	value := newSessionForTest()
 	value.history = bytes.Repeat([]byte("O"), maxHistoryBytes)
 
 	attached := make(chan error, 1)
@@ -258,4 +266,49 @@ func TestSessionExitIsRecordedWhenStateCannotBeSaved(t *testing.T) {
 	if !strings.Contains(recorded.String(), "persist state") {
 		t.Fatalf("the failed save was not recorded: %q", recorded.String())
 	}
+}
+
+// Bracketed paste is set once, early, and never again. Losing it to the
+// recording's window means the shell can no longer tell pasted text from
+// typed text, so a multi-line paste runs each line — data loss arriving long
+// after the mode went missing.
+func TestAttachRestoresModesTheRecordingNoLongerHolds(t *testing.T) {
+	previous := maxHistoryBytes
+	maxHistoryBytes = 2048
+	t.Cleanup(func() { maxHistoryBytes = previous })
+
+	value := newSessionForTest()
+	value.broadcast([]byte("\x1b[?2004h\x1b[?1h"))
+	// Enough output to push those modes out of the recording entirely.
+	value.broadcast([]byte(strings.Repeat("x", maxHistoryBytes*2)))
+	if strings.Contains(string(value.history), "2004h") {
+		t.Fatal("the recording still holds the mode; the test proves nothing")
+	}
+
+	client, daemonSide := net.Pipe()
+	defer daemonSide.Close()
+	attached := make(chan error, 1)
+	go func() { attached <- value.attach(client) }()
+
+	buffer := make([]byte, 4096)
+	var seen []byte
+	for !bytes.Contains(seen, []byte("xxx")) {
+		daemonSide.SetReadDeadline(time.Now().Add(3 * time.Second))
+		count, err := daemonSide.Read(buffer)
+		seen = append(seen, buffer[:count]...)
+		if err != nil {
+			t.Fatalf("the replay stopped early: %v", err)
+		}
+	}
+	for _, mode := range []string{"\x1b[?1h", "\x1b[?2004h"} {
+		position := bytes.Index(seen, []byte(mode))
+		if position < 0 {
+			t.Fatalf("the replay did not restore %q: %q", mode, seen[:64])
+		}
+		if position > bytes.Index(seen, []byte("xxx")) {
+			t.Fatalf("%q was restored after the recording, so the recording could undo it", mode)
+		}
+	}
+	client.Close()
+	<-attached
 }
