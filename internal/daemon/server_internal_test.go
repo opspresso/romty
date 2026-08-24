@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/opspresso/romty/internal/model"
 	"github.com/opspresso/romty/internal/protocol"
 )
 
@@ -152,6 +153,50 @@ func TestAttachHandsOffToLiveOutputInOrder(t *testing.T) {
 	}
 	client.Close()
 	<-attached
+}
+
+// A shell that the daemon killed on its way out must not be persisted one tab
+// at a time. The process exits as soon as shutdown returns, so each of those
+// saves is a race it can lose halfway through — leaving a temporary file in
+// the user's romty home for every shutdown — to record something the next
+// daemon throws away before it listens.
+func TestShutdownDoesNotPersistTheTabsItIsKilling(t *testing.T) {
+	base, err := os.MkdirTemp("/tmp", "romty-shutdown-")
+	if err != nil {
+		t.Fatalf("MkdirTemp() error = %v", err)
+	}
+	t.Cleanup(func() { os.RemoveAll(base) })
+	statePath := filepath.Join(base, "state.json")
+
+	server, err := New(filepath.Join(base, "daemon.sock"), statePath, "/bin/sh")
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	server.SetLogger(log.New(io.Discard, "", 0))
+	server.value.Tabs = []model.Tab{{ID: "tab-1", WorkspaceID: "workspace-1", Name: "1", Running: true}}
+	if err := server.store.Save(server.value); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	before, err := os.ReadFile(statePath)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+
+	server.shutdown()
+	server.sessionExited("tab-1")
+
+	after, err := os.ReadFile(statePath)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Fatal("a shell killed by shutdown was persisted, racing the process exit that follows")
+	}
+	// The tab is gone from memory either way, which is what the next daemon
+	// would have written anyway.
+	if len(server.value.Tabs) != 0 {
+		t.Fatalf("tabs in memory = %d, want the exited tab dropped", len(server.value.Tabs))
+	}
 }
 
 // A client that keeps reading must not be cut off for taking a while. One

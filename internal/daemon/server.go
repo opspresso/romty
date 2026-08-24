@@ -45,6 +45,9 @@ type Server struct {
 	sessions map[string]*session
 	stop     chan struct{}
 	stopOnce sync.Once
+	// stopping is set once shutdown has begun, so a shell exiting because the
+	// daemon killed it is not persisted one tab at a time.
+	stopping bool
 }
 
 func New(socket, statePath, shell string) (*Server, error) {
@@ -226,6 +229,7 @@ func listenPrivately(path string) (net.Listener, error) {
 
 func (s *Server) shutdown() {
 	s.mu.Lock()
+	s.stopping = true
 	sessions := make([]*session, 0, len(s.sessions))
 	for _, value := range s.sessions {
 		sessions = append(sessions, value)
@@ -546,6 +550,15 @@ func (s *Server) sessionExited(tabID string) {
 			s.value.Tabs = append(s.value.Tabs[:index], s.value.Tabs[index+1:]...)
 			break
 		}
+	}
+	if s.stopping {
+		// These shells exited because the daemon killed them, and it is
+		// leaving. Saving once per tab here writes a file the process may not
+		// live long enough to finish — a temporary left in the user's romty
+		// home for every shutdown — to record something the next daemon
+		// discards before it listens, because every tab in the state file
+		// names a shell that died with the last one.
+		return
 	}
 	if err := s.store.Save(s.value); err != nil {
 		// The tab is gone from memory either way; the state file will
