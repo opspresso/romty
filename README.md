@@ -96,12 +96,12 @@ These function keys work from either pane, with a modal open, and with non-Engli
 | `←`/`→`, `h`/`l` | Move between terminal tabs and the `+` tab |
 | `Enter` | Open the selected tab or create the selected `+` tab |
 | `Tab` | Focus the active terminal |
-| `i` | Open About |
-| `a` | Add a root directory |
+| `i`, `F1` | Open About |
+| `a`, `F2` | Add a root directory |
 | `d` | Forget the selected root; terminals under it keep running |
-| `,` | Open Config |
-| `q` | Quit romty |
-| `r` | Refresh roots, workspaces, and sessions |
+| `,`, `F3` | Open Config |
+| `q`, `F4` | Quit romty |
+| `r`, `F5` | Refresh roots, workspaces, and sessions |
 | `?` | Open Help |
 | `Ctrl+C` | Quit romty |
 
