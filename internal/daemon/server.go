@@ -327,6 +327,8 @@ func (s *Server) dispatch(request protocol.Request) protocol.Response {
 		return protocol.Response{}
 	case protocol.ActionSnapshot:
 		return s.snapshotResponse()
+	case protocol.ActionAgents:
+		return protocol.Response{Agents: s.agents()}
 	case protocol.ActionAddRoot:
 		return s.addRoot(request.Path)
 	case protocol.ActionRemoveRoot:
@@ -576,6 +578,10 @@ func (s *Server) snapshot() model.Snapshot {
 	s.mu.Lock()
 	value := cloneState(s.value)
 	s.mu.Unlock()
+	agents := s.agents()
+	for index := range value.Tabs {
+		value.Tabs[index].Agent = agents[value.Tabs[index].ID]
+	}
 
 	result := model.Snapshot{Roots: make([]model.RootView, 0, len(value.Roots))}
 	for _, root := range value.Roots {
@@ -615,6 +621,16 @@ func (s *Server) snapshot() model.Snapshot {
 		})
 	}
 	return result
+}
+
+func (s *Server) agents() map[string]model.Agent {
+	s.mu.Lock()
+	sessions := make(map[string]*session, len(s.sessions))
+	for tabID, session := range s.sessions {
+		sessions[tabID] = session
+	}
+	s.mu.Unlock()
+	return sessionAgents(sessions)
 }
 
 func canonicalDirectory(path string) (string, error) {

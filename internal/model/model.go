@@ -19,11 +19,19 @@ type Workspace struct {
 	Path   string `json:"path"`
 }
 
+type Agent string
+
+const (
+	AgentClaude Agent = "claude"
+	AgentCodex  Agent = "codex"
+)
+
 type Tab struct {
 	ID          string `json:"id"`
 	WorkspaceID string `json:"workspace_id"`
 	Name        string `json:"name"`
 	Running     bool   `json:"running"`
+	Agent       Agent  `json:"agent,omitempty"`
 }
 
 type Snapshot struct {

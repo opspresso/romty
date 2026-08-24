@@ -14,11 +14,12 @@ import (
 // — `brew upgrade` replaces romty while the old daemon keeps running — so a new
 // client can meet an old daemon. Without a version that showed up as
 // `unknown action "remove_root"`, or as a field silently missing from a reply.
-const Version = 1
+const Version = 2
 
 const (
 	ActionPing            = "ping"
 	ActionSnapshot        = "snapshot"
+	ActionAgents          = "agents"
 	ActionAddRoot         = "add_root"
 	ActionRemoveRoot      = "remove_root"
 	ActionEnsureWorkspace = "ensure_workspace"
@@ -77,10 +78,11 @@ type Response struct {
 	Error string `json:"error,omitempty"`
 	// Version is what the daemon speaks, so a client can say which side is
 	// out of date instead of reporting a puzzling missing field.
-	Version   int              `json:"version,omitempty"`
-	Snapshot  *model.Snapshot  `json:"snapshot,omitempty"`
-	Workspace *model.Workspace `json:"workspace,omitempty"`
-	Tab       *model.Tab       `json:"tab,omitempty"`
+	Version   int                    `json:"version,omitempty"`
+	Snapshot  *model.Snapshot        `json:"snapshot,omitempty"`
+	Agents    map[string]model.Agent `json:"agents,omitempty"`
+	Workspace *model.Workspace       `json:"workspace,omitempty"`
+	Tab       *model.Tab             `json:"tab,omitempty"`
 }
 
 func Write(w io.Writer, value any) error {

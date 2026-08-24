@@ -59,6 +59,14 @@ func (c *Client) Snapshot() (model.Snapshot, error) {
 	return *response.Snapshot, nil
 }
 
+func (c *Client) Agents() (map[string]model.Agent, error) {
+	response, err := c.call(protocol.Request{Action: protocol.ActionAgents})
+	if err != nil {
+		return nil, err
+	}
+	return response.Agents, nil
+}
+
 func (c *Client) AddRoot(path string) (model.Snapshot, error) {
 	normalized, err := normalizePath(path)
 	if err != nil {

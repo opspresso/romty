@@ -30,6 +30,7 @@ const (
 	maximumReattachAttempts = 3
 	initialReattachBackoff  = 250 * time.Millisecond
 	maximumReattachBackoff  = 2 * time.Second
+	agentRefreshInterval    = 2 * time.Second
 	// healthyAttachInterval is how long a terminal has to stay attached before
 	// a later drop counts as a fresh incident rather than another turn of the
 	// loop. What the backoff damps — replay, fall behind, get cut — turns over
@@ -44,6 +45,7 @@ var now = time.Now
 type Backend interface {
 	AddRoot(path string) (model.Snapshot, error)
 	Snapshot() (model.Snapshot, error)
+	Agents() (map[string]model.Agent, error)
 	RemoveRoot(rootID string) (model.Snapshot, error)
 	EnsureWorkspace(rootID, path string) (model.Workspace, error)
 	CreateTab(workspaceID string, columns, rows uint16) (model.Tab, error)
@@ -167,6 +169,11 @@ type snapshotMsg struct {
 	err   error
 }
 
+type agentSnapshotMsg struct {
+	value map[string]model.Agent
+	err   error
+}
+
 type workspaceMsg struct {
 	value     model.Workspace
 	snapshot  model.Snapshot
@@ -255,7 +262,7 @@ func newDashboardWithConfig(backend Backend, initial model.Snapshot, configPath 
 }
 
 func (m dashboard) Init() tea.Cmd {
-	return tea.RequestBackgroundColor
+	return tea.Batch(tea.RequestBackgroundColor, m.refreshAgents())
 }
 
 func (m dashboard) Update(message tea.Msg) (tea.Model, tea.Cmd) {
@@ -304,6 +311,11 @@ func (m dashboard) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			return m.settleAfterExit()
 		}
 		return m, nil
+	case agentSnapshotMsg:
+		if message.err == nil {
+			m.updateAgents(message.value)
+		}
+		return m, m.refreshAgents()
 	case workspaceMsg:
 		return m.handleWorkspace(message)
 	case tabMsg:
@@ -994,6 +1006,29 @@ func (m dashboard) refresh() tea.Cmd {
 	}
 }
 
+func (m dashboard) refreshAgents() tea.Cmd {
+	backend := m.backend
+	return tea.Tick(agentRefreshInterval, func(time.Time) tea.Msg {
+		value, err := backend.Agents()
+		return agentSnapshotMsg{value: value, err: err}
+	})
+}
+
+func (m *dashboard) updateAgents(agents map[string]model.Agent) {
+	for rootIndex := range m.state.Roots {
+		root := &m.state.Roots[rootIndex]
+		for tabIndex := range root.Tabs {
+			root.Tabs[tabIndex].Agent = agents[root.Tabs[tabIndex].ID]
+		}
+		for workspaceIndex := range root.Directories {
+			tabs := root.Directories[workspaceIndex].Tabs
+			for tabIndex := range tabs {
+				tabs[tabIndex].Agent = agents[tabs[tabIndex].ID]
+			}
+		}
+	}
+}
+
 func (m dashboard) selectWorkspace() tea.Cmd {
 	item, ok := m.navigationItem()
 	if !ok {
@@ -1390,14 +1425,22 @@ func (m dashboard) navigationTabs() []model.Tab {
 	return runningTabs(item.tabs)
 }
 
-func openTabMarkers(tabs []model.Tab) string {
-	count := 0
+func openTabMarkers(styles *uiStyles, base lipgloss.Style, tabs []model.Tab) string {
+	var result strings.Builder
 	for _, tab := range tabs {
-		if tab.Running {
-			count++
+		if !tab.Running {
+			continue
 		}
+		style := base
+		switch tab.Agent {
+		case model.AgentClaude:
+			style = style.Foreground(styles.agentClaude.GetForeground())
+		case model.AgentCodex:
+			style = style.Foreground(styles.agentCodex.GetForeground())
+		}
+		result.WriteString(style.Render("●"))
 	}
-	return strings.Repeat("●", count)
+	return result.String()
 }
 
 func (m dashboard) selectedTabs() []model.Tab {
@@ -1895,12 +1938,13 @@ func (m dashboard) renderNavigationItem(item navItem, index, width int) string {
 	if isSelected {
 		style = m.styles.navigationSelected
 	}
-	markers := openTabMarkers(item.tabs)
+	markers := openTabMarkers(m.styles, style, item.tabs)
 	if markers != "" {
 		available := width - lipgloss.Width(markers) - 2
 		if available > 0 {
 			name = truncate(name, available)
-			name += strings.Repeat(" ", max(width-lipgloss.Width(name)-lipgloss.Width(markers), 2)) + markers
+			name += strings.Repeat(" ", max(width-lipgloss.Width(name)-lipgloss.Width(markers), 2))
+			return style.Render(name) + markers
 		}
 	}
 	return style.Render(pad(truncate(name, width), width))
