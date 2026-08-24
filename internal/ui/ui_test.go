@@ -1080,7 +1080,7 @@ func TestDashboardSwitchesPanesWithOneKey(t *testing.T) {
 func TestDashboardKeepsWorkspaceFocusWhenSwitchingToADeadTerminal(t *testing.T) {
 	value := scrolledDashboard(t, 200)
 	value.focus = leftPane
-	value.terminal.close()
+	value.closeTerminal()
 
 	updated, _ := value.Update(key(tea.KeyF7, ""))
 	value = updated.(dashboard)
@@ -1094,7 +1094,7 @@ func TestDashboardKeepsWorkspaceFocusWhenTheTerminalIsGone(t *testing.T) {
 	value.focus = leftPane
 	updated, _ := value.Update(key(tea.KeyF6, ""))
 	value = updated.(dashboard)
-	value.terminal.close()
+	value.closeTerminal()
 
 	updated, _ = value.Update(key(tea.KeyEscape, ""))
 	value = updated.(dashboard)
@@ -1778,7 +1778,14 @@ func TestDashboardKeepsErrorsARefreshDoesNotAnswer(t *testing.T) {
 		{
 			name: "a failed resize",
 			raise: func(m dashboard) dashboard {
-				updated, _ := m.Update(resizeFailedMsg{err: errors.New("terminal session not found")})
+				// A resize failure names its tab, so the terminal it is about
+				// has to be the one on screen.
+				m.terminal = newEmbeddedTerminal("tab-1", newMemoryStream(""), 40, 10)
+				t.Cleanup(m.closeTerminal)
+				updated, _ := m.Update(resizeFailedMsg{
+					tabID: "tab-1",
+					err:   errors.New("terminal session not found"),
+				})
 				return updated.(dashboard)
 			},
 			survives: true,
@@ -1858,6 +1865,42 @@ func TestDashboardReportsAFailedResizeAsItsOwnFailure(t *testing.T) {
 	if value.terminal.emulator.Width() != int(columns) || value.terminal.emulator.Height() != int(rows) {
 		t.Fatalf("emulator = %dx%d, want %dx%d",
 			value.terminal.emulator.Width(), value.terminal.emulator.Height(), columns, rows)
+	}
+}
+
+// A resize is a round trip, so dragging a window and then switching tabs
+// leaves one in flight for the tab just left. The daemon answers "running
+// terminal session not found" for a terminal nobody is looking at, and the
+// status bar used to hang that on whichever terminal had taken its place.
+func TestDashboardIgnoresAResizeFailureForATerminalItLeft(t *testing.T) {
+	backend := &fakeBackend{}
+	backend.fail("Resize", errors.New("running terminal session not found"))
+	value := newDashboard(backend, model.Snapshot{})
+	value.terminal = newEmbeddedTerminal("tab-1", newMemoryStream(""), 40, 10)
+
+	updated, command := value.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	value = updated.(dashboard)
+	if command == nil {
+		t.Fatal("a resize produced no command")
+	}
+	message := command()
+	failure, ok := message.(resizeFailedMsg)
+	if !ok {
+		t.Fatalf("a failed resize produced %T, want resizeFailedMsg", message)
+	}
+	if failure.tabID != "tab-1" {
+		t.Fatalf("resizeFailedMsg tabID = %q, want the tab it was sent for", failure.tabID)
+	}
+
+	// The user has moved on to another tab before the answer lands.
+	value.closeTerminal()
+	value.terminal = newEmbeddedTerminal("tab-2", newMemoryStream(""), 40, 10)
+	t.Cleanup(value.closeTerminal)
+
+	updated, _ = value.Update(failure)
+	value = updated.(dashboard)
+	if value.errorMessage != "" {
+		t.Fatalf("error message = %q, want nothing about a terminal the user left", value.errorMessage)
 	}
 }
 

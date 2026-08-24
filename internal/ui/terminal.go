@@ -17,7 +17,6 @@ type embeddedTerminal struct {
 	id        string
 	stream    io.ReadWriteCloser
 	emulator  *vt.SafeEmulator
-	active    bool
 	closeOnce sync.Once
 	inputDone chan struct{}
 	// applicationKeypad mirrors DECKPAM so keypad navigation and operators
@@ -41,7 +40,6 @@ func newEmbeddedTerminal(id string, stream io.ReadWriteCloser, width, height int
 		id:         id,
 		stream:     stream,
 		emulator:   emulator,
-		active:     true,
 		inputDone:  make(chan struct{}),
 		guestMouse: make(map[ansi.DECMode]bool),
 	}
@@ -418,7 +416,6 @@ func (t *embeddedTerminal) cursorPosition() uv.Position {
 // Two names for one operation are two things to keep straight that are not
 // actually different.
 func (t *embeddedTerminal) close() {
-	t.active = false
 	t.closeOnce.Do(func() {
 		_ = t.stream.Close()
 		if closer, ok := t.emulator.InputPipe().(io.Closer); ok {

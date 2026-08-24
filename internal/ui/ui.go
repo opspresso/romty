@@ -200,8 +200,15 @@ type daemonStoppedMsg struct {
 // snapshot arrived" and whose handler clears the status bar. Borrowing it made
 // a resize failure erase itself and, worse, made every snapshotMsg handler
 // unable to trust message.value.
+//
+// It names its tab, like every other answer romty waits on. A resize is a
+// round trip, so dragging a window and then switching tabs leaves one in
+// flight for the tab just left: the daemon answers "running terminal session
+// not found" for a terminal nobody is looking at any more, and the status bar
+// hung that on whichever terminal had taken its place.
 type resizeFailedMsg struct {
-	err error
+	tabID string
+	err   error
 }
 
 // reopenTerminalMsg arrives after a backoff, so a terminal that keeps dropping
@@ -316,6 +323,11 @@ func (m dashboard) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.clearError(settingError)
 		return m, m.resizeTerminal()
 	case resizeFailedMsg:
+		if m.terminal == nil || m.terminal.id != message.tabID {
+			// The terminal it was sent for is gone, and the one on screen
+			// resizes on its own.
+			return m, nil
+		}
 		// The emulator has already taken the new size, so it and the PTY now
 		// disagree until the next successful resize.
 		m.setError(terminalError, "resize terminal: "+message.err.Error())
@@ -1031,7 +1043,7 @@ func (m dashboard) openSelectedTerminal() tea.Cmd {
 }
 
 func (m dashboard) resizeTerminal() tea.Cmd {
-	if m.terminal == nil || !m.terminal.active {
+	if m.terminal == nil {
 		return nil
 	}
 	columns, rows := m.terminalSize()
@@ -1042,7 +1054,7 @@ func (m dashboard) resizeTerminal() tea.Cmd {
 		// race still tells the daemon what is on screen.
 		columns, rows := terminal.size()
 		if err := m.backend.Resize(terminal.id, columns, rows); err != nil {
-			return resizeFailedMsg{err: err}
+			return resizeFailedMsg{tabID: terminal.id, err: err}
 		}
 		return nil
 	}
@@ -1185,7 +1197,7 @@ func (m *dashboard) setNavigation(index int) {
 // running to move into. A terminal whose shell has exited is not somewhere the
 // keyboard can go, so the workspace pane keeps it.
 func (m *dashboard) focusTerminal() {
-	if m.terminal == nil || !m.terminal.active {
+	if m.terminal == nil {
 		return
 	}
 	m.focus = terminalPane
@@ -1372,7 +1384,7 @@ func (m dashboard) View() tea.View {
 	view.AltScreen = true
 	view.WindowTitle = "romty"
 	view.MouseMode = m.mouseMode()
-	if !m.scrollback && m.focus == terminalPane && m.terminal != nil && m.terminal.active {
+	if !m.scrollback && m.focus == terminalPane && m.terminal != nil {
 		originX, originY := m.dimensions().terminalOrigin()
 		position := m.terminal.cursorPosition()
 		view.Cursor = tea.NewCursor(originX+position.X, originY+position.Y)
@@ -1386,7 +1398,7 @@ func (m dashboard) View() tea.View {
 // to a guest application that asked for the mouse, and only when the user
 // opted in, which is the same trade tmux makes for `set -g mouse on`.
 func (m dashboard) mouseMode() tea.MouseMode {
-	if !m.mousePassthrough || m.scrollback || m.terminal == nil || !m.terminal.active {
+	if !m.mousePassthrough || m.scrollback || m.terminal == nil {
 		return tea.MouseModeNone
 	}
 	return m.terminal.guestMouseMode()
