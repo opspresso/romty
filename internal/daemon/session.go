@@ -11,7 +11,16 @@ import (
 	"github.com/creack/pty"
 )
 
-const maxHistoryBytes = 8 << 20
+// maxHistoryBytes is a variable so tests can reach the trimming path without
+// building an eight megabyte buffer.
+var maxHistoryBytes = 8 << 20
+
+const (
+	// resetScreen puts the client's emulator at a known state before the
+	// recording is replayed onto it.
+	resetScreen   = "\x1b[2J\x1b[H"
+	replayTimeout = 2 * time.Second
+)
 
 type session struct {
 	id      string
@@ -22,8 +31,16 @@ type session struct {
 	mu      sync.Mutex
 	writeMu sync.Mutex
 	history []byte
-	clients map[net.Conn]struct{}
+	clients map[net.Conn]*attachment
 	closed  bool
+}
+
+// attachment tracks one attached client. A client is not live until it has
+// been sent the recorded history; output that arrives before then is queued so
+// it reaches the client after the recording rather than interleaved with it.
+type attachment struct {
+	pending []byte
+	live    bool
 }
 
 func startSession(id, directory, shell string, columns, rows uint16, onExit func()) (*session, error) {
@@ -47,7 +64,7 @@ func startSession(id, directory, shell string, columns, rows uint16, onExit func
 		pty:     terminal,
 		command: command,
 		onExit:  onExit,
-		clients: make(map[net.Conn]struct{}),
+		clients: make(map[net.Conn]*attachment),
 	}
 	go value.read()
 	go value.wait()
@@ -75,7 +92,7 @@ func (s *session) wait() {
 	for connection := range s.clients {
 		clients = append(clients, connection)
 	}
-	s.clients = make(map[net.Conn]struct{})
+	s.clients = make(map[net.Conn]*attachment)
 	s.mu.Unlock()
 	for _, connection := range clients {
 		connection.Close()
@@ -86,18 +103,31 @@ func (s *session) wait() {
 func (s *session) broadcast(data []byte) {
 	s.mu.Lock()
 	s.appendHistory(data)
-	clients := make([]net.Conn, 0, len(s.clients))
-	for connection := range s.clients {
-		clients = append(clients, connection)
+	live := make([]net.Conn, 0, len(s.clients))
+	stalled := make([]net.Conn, 0)
+	for connection, attached := range s.clients {
+		if attached.live {
+			live = append(live, connection)
+			continue
+		}
+		// Still being sent the recording. Queue rather than interleave, and
+		// give up on a client that cannot even keep up with the queue.
+		attached.pending = append(attached.pending, data...)
+		if len(attached.pending) > maxHistoryBytes {
+			stalled = append(stalled, connection)
+		}
 	}
 	s.mu.Unlock()
 
-	for _, connection := range clients {
+	for _, connection := range live {
 		_ = connection.SetWriteDeadline(time.Now().Add(500 * time.Millisecond))
 		if _, err := connection.Write(data); err != nil {
 			s.detach(connection)
 		}
 		_ = connection.SetWriteDeadline(time.Time{})
+	}
+	for _, connection := range stalled {
+		s.detach(connection)
 	}
 }
 
@@ -120,18 +150,22 @@ func (s *session) attach(connection net.Conn) error {
 		s.mu.Unlock()
 		return fmt.Errorf("terminal session has exited")
 	}
-	_ = connection.SetWriteDeadline(time.Now().Add(2 * time.Second))
-	if _, err := connection.Write([]byte("\x1b[2J\x1b[H")); err != nil {
-		s.mu.Unlock()
-		return fmt.Errorf("initialize attached terminal: %w", err)
-	}
-	if _, err := connection.Write(stripQueries(s.history)); err != nil {
-		s.mu.Unlock()
-		return fmt.Errorf("restore terminal history: %w", err)
-	}
-	s.clients[connection] = struct{}{}
-	_ = connection.SetWriteDeadline(time.Time{})
+	// Take the recording and join the client list in one step, so nothing the
+	// shell prints from here on is lost. Everything expensive — filtering up
+	// to maxHistoryBytes and pushing it down a socket that may be slow — then
+	// happens with the lock released, because the PTY read loop needs it to
+	// keep the shell running for everyone else.
+	// Copied, not aliased: appendHistory shifts the buffer in place, so the
+	// slice header alone would be rewritten under the replay's feet.
+	recording := append([]byte(nil), s.history...)
+	attached := &attachment{}
+	s.clients[connection] = attached
 	s.mu.Unlock()
+
+	if err := s.replay(connection, recording); err != nil {
+		s.detach(connection)
+		return err
+	}
 
 	buffer := make([]byte, 32*1024)
 	for {
@@ -145,6 +179,40 @@ func (s *session) attach(connection net.Conn) error {
 		if err != nil {
 			s.detach(connection)
 			return nil
+		}
+	}
+}
+
+// replay sends the recorded screen and then whatever arrived while it was
+// being sent, until the client has caught up and can be marked live.
+func (s *session) replay(connection net.Conn, recording []byte) error {
+	_ = connection.SetWriteDeadline(time.Now().Add(replayTimeout))
+	defer connection.SetWriteDeadline(time.Time{})
+
+	if _, err := connection.Write([]byte(resetScreen)); err != nil {
+		return fmt.Errorf("initialize attached terminal: %w", err)
+	}
+	if _, err := connection.Write(stripQueries(recording)); err != nil {
+		return fmt.Errorf("restore terminal history: %w", err)
+	}
+	for {
+		s.mu.Lock()
+		attached, ok := s.clients[connection]
+		if !ok {
+			s.mu.Unlock()
+			return fmt.Errorf("terminal session has exited")
+		}
+		if len(attached.pending) == 0 {
+			attached.live = true
+			s.mu.Unlock()
+			return nil
+		}
+		queued := attached.pending
+		attached.pending = nil
+		s.mu.Unlock()
+
+		if _, err := connection.Write(queued); err != nil {
+			return fmt.Errorf("restore terminal history: %w", err)
 		}
 	}
 }
