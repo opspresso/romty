@@ -2228,6 +2228,143 @@ func TestDashboardSwitchesTabsWithCtrlShiftArrows(t *testing.T) {
 	}
 }
 
+// Ctrl+Shift+Up/Down is the other axis of the same chord: reaching a terminal
+// in another workspace used to mean leaving the terminal pane, walking the
+// tree and pressing Enter. Only workspaces with a terminal running are stops,
+// because a root lists every child directory whether it has been used or not.
+func TestDashboardSwitchesWorkspacesWithCtrlShiftArrows(t *testing.T) {
+	root := model.Root{ID: "root-1", Name: "projects", Path: "/projects"}
+	// alpha and charlie have terminals; bravo is an empty directory between
+	// them, and delta an empty one after.
+	alpha := model.Workspace{ID: "workspace-1", RootID: root.ID, Name: "alpha", Path: "/projects/alpha"}
+	bravo := model.Workspace{RootID: root.ID, Name: "bravo", Path: "/projects/bravo"}
+	charlie := model.Workspace{ID: "workspace-3", RootID: root.ID, Name: "charlie", Path: "/projects/charlie"}
+	delta := model.Workspace{RootID: root.ID, Name: "delta", Path: "/projects/delta"}
+	alphaTab := model.Tab{ID: "tab-1", WorkspaceID: alpha.ID, Name: "1", Running: true}
+	charlieTab := model.Tab{ID: "tab-3", WorkspaceID: charlie.ID, Name: "1", Running: true}
+	snapshot := model.Snapshot{Roots: []model.RootView{{
+		Root: root,
+		Directories: []model.WorkspaceView{
+			{Workspace: alpha, Tabs: []model.Tab{alphaTab}},
+			{Workspace: bravo},
+			{Workspace: charlie, Tabs: []model.Tab{charlieTab}},
+			{Workspace: delta},
+		},
+	}}}
+
+	backend := &fakeBackend{snapshot: snapshot, workspace: charlie}
+	value := newDashboard(backend, snapshot)
+	value.selectedWorkspaceID = alpha.ID
+	value.selectedPath = alpha.Path
+	value.terminal = newEmbeddedTerminal(alphaTab.ID, newMemoryStream(""), 40, 10)
+	value.focus = terminalPane
+	t.Cleanup(value.closeTerminal)
+
+	// Down skips bravo, which has nothing running, and opens charlie's.
+	value = pressSwitchTab(t, value, tea.KeyDown)
+	if backend.openedTab != charlieTab.ID || value.terminal.id != charlieTab.ID {
+		t.Fatalf("Ctrl+Shift+Down = (opened %q, terminal %q), want charlie's terminal",
+			backend.openedTab, value.terminal.id)
+	}
+	if value.selectedPath != charlie.Path {
+		t.Fatalf("selected path = %q, want %q", value.selectedPath, charlie.Path)
+	}
+	// The cursor follows, so the tree shows where the keyboard now is.
+	if item, ok := value.navigationItem(); !ok || item.workspace.Path != charlie.Path {
+		t.Fatalf("cursor = %+v, want it on charlie", item)
+	}
+
+	// Down again wraps past delta and the root to alpha rather than stopping.
+	backend.workspace = alpha
+	value = pressSwitchTab(t, value, tea.KeyDown)
+	if backend.openedTab != alphaTab.ID || value.terminal.id != alphaTab.ID {
+		t.Fatalf("Ctrl+Shift+Down twice = (opened %q, terminal %q), want it wrapped to alpha",
+			backend.openedTab, value.terminal.id)
+	}
+
+	// Up from alpha wraps the other way, to the last workspace with a terminal.
+	backend.workspace = charlie
+	value = pressSwitchTab(t, value, tea.KeyUp)
+	if value.terminal.id != charlieTab.ID {
+		t.Fatalf("Ctrl+Shift+Up = terminal %q, want it wrapped to charlie", value.terminal.id)
+	}
+}
+
+// The chord is anchored on the workspace that is open, not on the cursor. A
+// cursor anchor makes the key do nothing whenever it points at the workspace
+// before the open one, which from the workspace pane is where it often sits.
+func TestDashboardSwitchesWorkspacesFromTheOpenOneNotTheCursor(t *testing.T) {
+	root := model.Root{ID: "root-1", Name: "projects", Path: "/projects"}
+	alpha := model.Workspace{ID: "workspace-1", RootID: root.ID, Name: "alpha", Path: "/projects/alpha"}
+	bravo := model.Workspace{ID: "workspace-2", RootID: root.ID, Name: "bravo", Path: "/projects/bravo"}
+	alphaTab := model.Tab{ID: "tab-1", WorkspaceID: alpha.ID, Name: "1", Running: true}
+	bravoTab := model.Tab{ID: "tab-2", WorkspaceID: bravo.ID, Name: "1", Running: true}
+	snapshot := model.Snapshot{Roots: []model.RootView{{
+		Root: root,
+		Directories: []model.WorkspaceView{
+			{Workspace: alpha, Tabs: []model.Tab{alphaTab}},
+			{Workspace: bravo, Tabs: []model.Tab{bravoTab}},
+		},
+	}}}
+
+	backend := &fakeBackend{snapshot: snapshot, workspace: alpha}
+	value := newDashboard(backend, snapshot)
+	// bravo's terminal is open while the cursor sits on alpha, the workspace
+	// just above it.
+	value.selectedWorkspaceID = bravo.ID
+	value.selectedPath = bravo.Path
+	value.terminal = newEmbeddedTerminal(bravoTab.ID, newMemoryStream(""), 40, 10)
+	value.focus = leftPane
+	value.setNavigation(1)
+	t.Cleanup(value.closeTerminal)
+
+	value = pressSwitchTab(t, value, tea.KeyDown)
+	if backend.openedTab != alphaTab.ID || value.terminal.id != alphaTab.ID {
+		t.Fatalf("Ctrl+Shift+Down = (opened %q, terminal %q), want alpha's terminal rather than nothing",
+			backend.openedTab, value.terminal.id)
+	}
+}
+
+// Nothing running anywhere, or only the workspace already open: there is
+// nowhere to go, and reopening the one that is open would tear a live terminal
+// down and attach a new one in its place.
+func TestDashboardKeepsTheWorkspaceWhenThereIsNowhereToSwitch(t *testing.T) {
+	root := model.Root{ID: "root-1", Name: "projects", Path: "/projects"}
+	only := model.Workspace{ID: "workspace-1", RootID: root.ID, Name: "alpha", Path: "/projects/alpha"}
+	empty := model.Workspace{RootID: root.ID, Name: "bravo", Path: "/projects/bravo"}
+
+	for _, probe := range []struct {
+		name string
+		tabs []model.Tab
+	}{
+		{name: "no terminal anywhere"},
+		{name: "only the open workspace", tabs: []model.Tab{{ID: "tab-1", WorkspaceID: only.ID, Name: "1", Running: true}}},
+	} {
+		t.Run(probe.name, func(t *testing.T) {
+			snapshot := model.Snapshot{Roots: []model.RootView{{
+				Root: root,
+				Directories: []model.WorkspaceView{
+					{Workspace: only, Tabs: probe.tabs},
+					{Workspace: empty},
+				},
+			}}}
+			backend := &fakeBackend{snapshot: snapshot, workspace: only}
+			value := newDashboard(backend, snapshot)
+			value.selectedWorkspaceID = only.ID
+			value.selectedPath = only.Path
+
+			for _, code := range []rune{tea.KeyDown, tea.KeyUp} {
+				updated, command := value.Update(switchTabKey(code))
+				value = updated.(dashboard)
+				if command != nil || backend.openedTab != "" {
+					t.Fatalf("Ctrl+Shift+%s = (command %v, opened %q), want nothing done",
+						switchTabKey(code).String(), command, backend.openedTab)
+				}
+			}
+		})
+	}
+}
+
 func switchTabKey(code rune) tea.KeyPressMsg {
 	return tea.KeyPressMsg(tea.Key{Code: code, Mod: tea.ModCtrl | tea.ModShift})
 }

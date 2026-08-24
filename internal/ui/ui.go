@@ -386,6 +386,13 @@ var globalKeys = map[string]func(dashboard) (tea.Model, tea.Cmd){
 	// the shell, where word-wise movement lives.
 	"ctrl+shift+left":  func(m dashboard) (tea.Model, tea.Cmd) { return m.switchTab(-1) },
 	"ctrl+shift+right": func(m dashboard) (tea.Model, tea.Cmd) { return m.switchTab(1) },
+	// The other axis of the same chord: Left and Right move along one
+	// workspace's terminals, Up and Down move between the workspaces that
+	// have any. Reaching a terminal in another workspace took leaving the
+	// terminal pane, walking the tree and pressing Enter, which is three
+	// keys and a change of pane for the move a user makes most often.
+	"ctrl+shift+up":   func(m dashboard) (tea.Model, tea.Cmd) { return m.switchWorkspace(-1) },
+	"ctrl+shift+down": func(m dashboard) (tea.Model, tea.Cmd) { return m.switchWorkspace(1) },
 }
 
 func (m dashboard) handleKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
@@ -1129,6 +1136,91 @@ func (m dashboard) switchTab(delta int) (tea.Model, tea.Cmd) {
 	return m, m.openSelectedTerminal()
 }
 
+// switchWorkspace opens a terminal in the workspace delta steps along the ones
+// that have a terminal running.
+//
+// Only those are stops. A root lists every child directory whether it has ever
+// been used or not, so stepping through all of them would make the chord a
+// slower way to hold Down — the tree already has plain Up and Down for walking
+// everything, and the ● markers are what say where the work is.
+func (m dashboard) switchWorkspace(delta int) (tea.Model, tea.Cmd) {
+	if m.modal != noModal {
+		// A modal is a question waiting for an answer, and the switch would
+		// land behind it.
+		return m, nil
+	}
+	items := m.navigationItems()
+	// Anchored on the workspace that is open rather than on the cursor, so the
+	// chord walks one cycle from either pane and every press lands somewhere
+	// new. Anchoring on the cursor would make the key do nothing whenever it
+	// pointed at the workspace before the open one. The cursor stands in only
+	// when nothing is open for the walk to start from.
+	anchor := workspaceIndex(items, m.selectedPath)
+	if anchor < 0 {
+		anchor = m.navIndex
+	}
+	next, ok := nextOccupiedWorkspace(items, anchor, delta)
+	if !ok {
+		return m, nil
+	}
+	m.setNavigation(next)
+	// The first terminal of the workspace being moved to. Which of its tabs to
+	// land on is what Left and Right are for.
+	m.tabIndex = 0
+	return m, m.selectWorkspace()
+}
+
+// nextOccupiedWorkspace is the workspace with a terminal running that lies one
+// step from anchor in the direction of delta, wrapping at both ends. The
+// anchor need not be one itself: a cursor sitting on an empty directory is
+// between two stops, and stepping from there lands on the nearer one.
+//
+// It reports false when there is nowhere to go — no workspace has a terminal,
+// or the only one that does is where the anchor already sits, and reopening
+// that would tear a live terminal down and attach a new one in its place.
+func nextOccupiedWorkspace(items []navItem, anchor, delta int) (int, bool) {
+	occupied := make([]int, 0, len(items))
+	for index, item := range items {
+		if len(runningTabs(item.tabs)) > 0 {
+			occupied = append(occupied, index)
+		}
+	}
+	if len(occupied) == 0 {
+		return 0, false
+	}
+	if delta >= 0 {
+		for _, index := range occupied {
+			if index > anchor {
+				return index, true
+			}
+		}
+		first := occupied[0]
+		return first, first != anchor
+	}
+	for position := len(occupied) - 1; position >= 0; position-- {
+		if occupied[position] < anchor {
+			return occupied[position], true
+		}
+	}
+	last := occupied[len(occupied)-1]
+	return last, last != anchor
+}
+
+// workspaceIndex is where the workspace at path sits in the tree, or -1 when
+// it is not in it: a root that was forgotten takes its workspaces with it, and
+// nothing is open before the first terminal is.
+func workspaceIndex(items []navItem, path string) int {
+	if path == "" {
+		return -1
+	}
+	for index, item := range items {
+		if item.workspace.Path == path {
+			return index
+		}
+	}
+	return -1
+}
+
 // nextTab is the tab delta steps along tabs, wrapping at both ends and never
 // landing on the new-tab slot: a key that switches tabs must not create one. It
 // reports false when there is nothing to switch to, which includes the tab that
@@ -1650,6 +1742,7 @@ func (m dashboard) helpEntries() []string {
 		renderHelpShortcut(m.styles, "Scrollback", "F6"),
 		renderHelpShortcut(m.styles, "Switch pane", "F7"),
 		renderHelpShortcut(m.styles, "Switch tab", "Ctrl+Shift+←/→"),
+		renderHelpShortcut(m.styles, "Switch workspace", "Ctrl+Shift+↑/↓"),
 		renderHelpSection(m.styles, "NAVIGATION", "workspace area"),
 		renderHelpShortcut(m.styles, "Remove root", "F8", "d"),
 		renderHelpShortcut(m.styles, "Stop daemon", "F9", "t"),

@@ -110,6 +110,7 @@ These function keys work from either pane, with a modal open, and with non-Engli
 | `F7` | Switch between the workspace and terminal panes |
 | `Shift`+`PgUp`/`PgDn` | Enter scrollback and move one page at a time |
 | `Ctrl`+`Shift`+`←`/`→` | Open the previous or next terminal tab of the selected workspace |
+| `Ctrl`+`Shift`+`↑`/`↓` | Open a terminal in the previous or next workspace that has one running |
 
 The row stops at `F7`. A full-screen program binds the whole function key row — `htop` puts Kill on `F9` and answers it with `Enter`, which is the same `Enter` that would confirm stopping the daemon — so romty takes `F1` through `F7` from the shell and no more. `F8` and `F9` belong to the workspace pane, below.
 
@@ -136,6 +137,8 @@ The `+` key itself is not a shortcut. Select the `+` tab with `←`/`→` and co
 
 `Ctrl`+`Shift`+`←`/`→` does both steps at once for the tabs that already exist: it moves to the previous or next tab and opens it, skipping the `+` tab, and it works from the terminal pane too.
 
+`Ctrl`+`Shift`+`↑`/`↓` is the other axis of the same chord, moving between workspaces rather than along one workspace's tabs. Only workspaces with a terminal running — the ones marked `●` — are stops, because a root lists every child directory whether it has ever been used or not; the plain `↑`/`↓` still walk all of them. It starts from the workspace whose terminal is open rather than from the cursor, so the same cycle comes out of either pane, and it wraps at both ends. The cursor follows along, so the tree shows where the keyboard went.
+
 ### Terminal pane
 
 | Key | Action |
@@ -143,10 +146,11 @@ The `+` key itself is not a shortcut. Select the `+` tab with `←`/`→` and co
 | `F7`, `Ctrl+\` | Focus the workspace pane and refresh the workspace tree |
 | `Ctrl+\` `Ctrl+\` | Pressing it a second time, from the workspace pane, opens the terminal's scrollback |
 | `Ctrl`+`Shift`+`←`/`→` | Switch terminal tabs without leaving the terminal pane |
+| `Ctrl`+`Shift`+`↑`/`↓` | Switch to a terminal in another workspace without leaving the terminal pane |
 
 `F7` moves in both directions, which `Tab` and `Ctrl+\` each did one way only. It is also the way out when `Ctrl+\` never arrives: an application or the desktop environment can claim that chord as a global hotkey — 1Password does, and a Windows host running romty over WSL sees it taken before the terminal does — and romty cannot receive a key the system intercepted first.
 
-Except for `F1` through `F7`, `Ctrl+\`, `Shift`+`PgUp`/`PgDn` and `Ctrl`+`Shift`+`←`/`→`, keyboard and paste input is forwarded to the PTY — `F8` and `F9` included, so a full-screen program keeps the keys it binds — along with keys held with `Shift`, `Ctrl` or `Meta` such as `Ctrl`+`←` for word-wise movement. Mouse tracking remains disabled so the host terminal can select and copy displayed text normally.
+Except for `F1` through `F7`, `Ctrl+\`, `Shift`+`PgUp`/`PgDn` and `Ctrl`+`Shift`+the arrow keys, keyboard and paste input is forwarded to the PTY — `F8` and `F9` included, so a full-screen program keeps the keys it binds — along with keys held with `Shift`, `Ctrl` or `Meta` such as `Ctrl`+`←` for word-wise movement. Mouse tracking remains disabled so the host terminal can select and copy displayed text normally.
 
 ### Scrollback
 
