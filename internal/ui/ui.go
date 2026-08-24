@@ -1333,7 +1333,9 @@ func (m dashboard) renderStatus(width, bodyHeight int) []string {
 			{key: "Tab", description: "terminal"},
 		}
 		if m.focus == terminalPane {
-			contextShortcuts = []shortcut{{key: "F7", description: "navigation"}, {key: "Ctrl+\\", description: "navigation"}}
+			// Ctrl+\ still works and help still lists it, but the rail names
+			// the key that works on every platform.
+			contextShortcuts = []shortcut{{key: "F7", description: "navigation"}}
 		}
 		rail = renderShortcutRail(m.styles, width, contextShortcuts...)
 		status = renderShortcuts(m.styles, width,

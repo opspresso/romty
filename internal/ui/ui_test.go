@@ -477,7 +477,7 @@ func TestDashboardSupportsIMEIndependentShortcuts(t *testing.T) {
 	value.width = 120
 	if rendered := value.render(); !shortcutOrder(rendered, "F1", "F2", "F3", "F4", "F5", "F6") {
 		t.Fatalf("terminal shortcuts are not in F1-F6 order:\n%s", rendered)
-	} else if !strings.Contains(rendered, value.styles.shortcutKey.Render(" Ctrl+\\ ")) {
+	} else if !strings.Contains(rendered, value.styles.shortcutKey.Render(" F7 ")) {
 		t.Fatalf("terminal status bar does not contain navigation shortcut:\n%s", rendered)
 	}
 	updated, command = value.Update(key(tea.KeyF3, ""))
