@@ -125,7 +125,7 @@ func (s *session) attach(connection net.Conn) error {
 		s.mu.Unlock()
 		return fmt.Errorf("initialize attached terminal: %w", err)
 	}
-	if _, err := connection.Write(s.history); err != nil {
+	if _, err := connection.Write(stripQueries(s.history)); err != nil {
 		s.mu.Unlock()
 		return fmt.Errorf("restore terminal history: %w", err)
 	}
