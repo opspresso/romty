@@ -21,6 +21,7 @@ const (
 type Backend interface {
 	AddRoot(path string) (model.Snapshot, error)
 	Snapshot() (model.Snapshot, error)
+	RemoveRoot(rootID string) (model.Snapshot, error)
 	EnsureWorkspace(rootID, path string) (model.Workspace, error)
 	CreateTab(workspaceID string, columns, rows uint16) (model.Tab, error)
 	OpenTerminal(tabID string) (io.ReadWriteCloser, error)
@@ -55,6 +56,9 @@ type navItem struct {
 	tabs      []model.Tab
 	isRoot    bool
 	lastChild bool
+	// failure is set on a root romty could not read, so the tree can say why
+	// it is empty instead of looking as though the root has no directories.
+	failure string
 }
 
 type shortcut struct {
@@ -303,6 +307,8 @@ func (m dashboard) handleKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, m.refresh()
 	case "?":
 		return m.openModal(helpModal)
+	case "d":
+		return m, m.removeRoot()
 	case "ctrl+\\":
 		// A second Ctrl+\ after leaving the terminal opens its scrollback.
 		return m.toggleScrollback()
@@ -681,6 +687,20 @@ func (m dashboard) settleAfterExit() (tea.Model, tea.Cmd) {
 	return m, m.openSelectedTerminal()
 }
 
+// removeRoot forgets the root the cursor is on. Terminals under it keep
+// running in the daemon; they are simply no longer listed.
+func (m dashboard) removeRoot() tea.Cmd {
+	item, ok := m.navigationItem()
+	if !ok {
+		return nil
+	}
+	rootID := item.root.ID
+	return func() tea.Msg {
+		value, err := m.backend.RemoveRoot(rootID)
+		return snapshotMsg{value: value, err: err}
+	}
+}
+
 func (m dashboard) refresh() tea.Cmd {
 	return func() tea.Msg {
 		value, err := m.backend.Snapshot()
@@ -862,8 +882,9 @@ func (m dashboard) navigationItems() []navItem {
 				Name:   root.Root.Name,
 				Path:   root.Root.Path,
 			},
-			tabs:   root.Tabs,
-			isRoot: true,
+			tabs:    root.Tabs,
+			isRoot:  true,
+			failure: root.Error,
 		})
 		for index, directory := range root.Directories {
 			result = append(result, navItem{
@@ -1159,6 +1180,7 @@ func (m dashboard) helpEntries() []string {
 		renderHelpSection(m.styles, "COMMANDS", "F-keys work in both areas"),
 		renderHelpShortcut(m.styles, "About", "F1", "i"),
 		renderHelpShortcut(m.styles, "Add root", "F2", "a"),
+		renderHelpShortcut(m.styles, "Remove root", "d"),
 		renderHelpShortcut(m.styles, "Config", "F3", ","),
 		renderHelpShortcut(m.styles, "Quit", "F4", "q"),
 		renderHelpShortcut(m.styles, "Refresh", "F5", "r"),
@@ -1293,6 +1315,10 @@ func (m dashboard) renderNavigationItem(item navItem, index, width int) string {
 	if item.isRoot {
 		name = indicator + " ▾ " + item.root.Name
 		style = m.styles.navigationRoot
+		if item.failure != "" {
+			name = indicator + " ✗ " + item.root.Name
+			style = m.styles.errorText
+		}
 	}
 	if isCurrent {
 		style = m.styles.navigationCurrent

@@ -185,6 +185,8 @@ func (s *Server) dispatch(request protocol.Request) protocol.Response {
 		return s.snapshotResponse()
 	case protocol.ActionAddRoot:
 		return s.addRoot(request.Path)
+	case protocol.ActionRemoveRoot:
+		return s.removeRoot(request.RootID)
 	case protocol.ActionEnsureWorkspace:
 		return s.ensureWorkspace(request.RootID, request.Path)
 	case protocol.ActionCreateTab:
@@ -202,6 +204,64 @@ func (s *Server) snapshotResponse() protocol.Response {
 		return protocol.Response{Error: err.Error()}
 	}
 	return protocol.Response{Snapshot: &snapshot}
+}
+
+// removeRoot forgets a root and everything under it. Without it a root that
+// became unreadable could only be dropped by editing the state file by hand.
+// Terminals under the root keep running; they are simply no longer listed.
+func (s *Server) removeRoot(rootID string) protocol.Response {
+	s.mu.Lock()
+	index := -1
+	for position, root := range s.value.Roots {
+		if root.ID == rootID {
+			index = position
+			break
+		}
+	}
+	if index < 0 {
+		s.mu.Unlock()
+		return protocol.Response{Error: "root not found"}
+	}
+
+	previous := cloneState(s.value)
+	s.value.Roots = append(s.value.Roots[:index], s.value.Roots[index+1:]...)
+	workspaces := make([]model.Workspace, 0, len(s.value.Workspaces))
+	orphaned := make(map[string]struct{})
+	for _, workspace := range s.value.Workspaces {
+		if workspace.RootID == rootID {
+			orphaned[workspace.ID] = struct{}{}
+			continue
+		}
+		workspaces = append(workspaces, workspace)
+	}
+	s.value.Workspaces = workspaces
+	tabs := make([]model.Tab, 0, len(s.value.Tabs))
+	closing := make([]*session, 0)
+	for _, tab := range s.value.Tabs {
+		if _, ok := orphaned[tab.WorkspaceID]; !ok {
+			tabs = append(tabs, tab)
+			continue
+		}
+		if value, ok := s.sessions[tab.ID]; ok {
+			closing = append(closing, value)
+			delete(s.sessions, tab.ID)
+		}
+	}
+	s.value.Tabs = tabs
+	if err := s.store.Save(s.value); err != nil {
+		s.value = previous
+		for _, value := range closing {
+			s.sessions[value.id] = value
+		}
+		s.mu.Unlock()
+		return protocol.Response{Error: err.Error()}
+	}
+	s.mu.Unlock()
+
+	for _, value := range closing {
+		value.close()
+	}
+	return s.snapshotResponse()
 }
 
 func (s *Server) addRoot(path string) protocol.Response {
@@ -345,9 +405,19 @@ func (s *Server) snapshot() (model.Snapshot, error) {
 
 	result := model.Snapshot{Roots: make([]model.RootView, 0, len(value.Roots))}
 	for _, root := range value.Roots {
+		rootWorkspace, _ := workspaceAt(value.Workspaces, root.ID, root.Path)
 		entries, err := os.ReadDir(root.Path)
 		if err != nil {
-			return model.Snapshot{}, fmt.Errorf("read root %q: %w", root.Path, err)
+			// Report the root as unreadable rather than failing the snapshot.
+			// One unmounted volume used to make every refresh fail, and with
+			// it every path that needs a snapshot, including startup.
+			result.Roots = append(result.Roots, model.RootView{
+				Root:        root,
+				Tabs:        tabsFor(value.Tabs, rootWorkspace.ID),
+				Error:       err.Error(),
+				Directories: make([]model.WorkspaceView, 0),
+			})
+			continue
 		}
 		directories := make([]model.WorkspaceView, 0)
 		for _, entry := range entries {
@@ -367,7 +437,6 @@ func (s *Server) snapshot() (model.Snapshot, error) {
 		sort.Slice(directories, func(i, j int) bool {
 			return directories[i].Workspace.Name < directories[j].Workspace.Name
 		})
-		rootWorkspace, _ := workspaceAt(value.Workspaces, root.ID, root.Path)
 		result.Roots = append(result.Roots, model.RootView{
 			Root:        root,
 			Tabs:        tabsFor(value.Tabs, rootWorkspace.ID),
