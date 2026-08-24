@@ -78,6 +78,7 @@ const (
 	aboutModal
 	helpModal
 	configModal
+	browseModal
 	removeRootModal
 	shutdownModal
 )
@@ -134,6 +135,11 @@ type dashboard struct {
 	scrollOffset     int
 	helpOffset       int
 	configPath       string
+	// homePath is where the root picker opens, resolved once at startup.
+	homePath string
+	// browse is the root picker's state, kept on the dashboard so the modal
+	// renders from it and the keys move it.
+	browse browser
 	// config is the document as loaded, kept so saving edits it instead of
 	// reconstructing it from fields.
 	config           Config
@@ -217,6 +223,7 @@ func newDashboardWithConfig(backend Backend, initial model.Snapshot, configPath 
 		width:            80,
 		height:           24,
 		configPath:       configPath,
+		homePath:         userHomeDirectory(),
 		config:           config,
 		leftWidth:        config.LeftWidth,
 		mousePassthrough: config.MousePassthrough,
@@ -321,7 +328,7 @@ var globalKeys = map[string]func(dashboard) (tea.Model, tea.Cmd){
 	// terminal pane, where the shortcuts are hardest to remember, with no way
 	// to look them up at all.
 	"f1": func(m dashboard) (tea.Model, tea.Cmd) { return m.openModal(helpModal) },
-	"f2": func(m dashboard) (tea.Model, tea.Cmd) { return m.startRootInput() },
+	"f2": func(m dashboard) (tea.Model, tea.Cmd) { return m.startBrowse() },
 	"f3": func(m dashboard) (tea.Model, tea.Cmd) { return m.openModal(configModal) },
 	"f4": func(m dashboard) (tea.Model, tea.Cmd) { return m.quit() },
 	"f5": func(m dashboard) (tea.Model, tea.Cmd) { return m, m.refresh() },
@@ -378,7 +385,7 @@ func (m dashboard) handleKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "i":
 		return m.openModal(aboutModal)
 	case "a":
-		return m.startRootInput()
+		return m.startBrowse()
 	case ",":
 		return m.openModal(configModal)
 	case "q":
@@ -456,6 +463,8 @@ func (m dashboard) handleModalKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 		return m, nil
 	}
 	switch m.modal {
+	case browseModal:
+		return m.handleBrowseKey(message)
 	case removeRootModal:
 		if message.String() == "enter" {
 			m.modal = noModal
@@ -698,10 +707,7 @@ func (m dashboard) handleInput(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		path := strings.TrimSpace(m.input)
 		m.inputMode = false
 		m.input = ""
-		return m, func() tea.Msg {
-			value, err := m.backend.AddRoot(path)
-			return snapshotMsg{value: value, err: err}
-		}
+		return m, m.addRoot(path)
 	case "backspace":
 		runes := []rune(m.input)
 		if len(runes) > 0 {
@@ -713,6 +719,15 @@ func (m dashboard) handleInput(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 	return m, nil
+}
+
+// addRoot is shared by the typed prompt and the picker: both name a directory
+// and both leave the daemon to canonicalise and judge it.
+func (m dashboard) addRoot(path string) tea.Cmd {
+	return func() tea.Msg {
+		value, err := m.backend.AddRoot(path)
+		return snapshotMsg{value: value, err: err}
+	}
 }
 
 func (m dashboard) handleWorkspace(message workspaceMsg) (tea.Model, tea.Cmd) {
@@ -1318,6 +1333,15 @@ func (m dashboard) renderStatus(width, bodyHeight int) []string {
 			m.styles.promptLabel.Render(" STOPPING ")+" "+m.styles.shortcutDescription.Render("waiting for the daemon to stop"),
 			width,
 		)
+	case m.modal == browseModal:
+		status = renderShortcuts(m.styles, width,
+			shortcut{key: "↑/↓", description: "select"},
+			shortcut{key: "→", description: "open"},
+			shortcut{key: "←", description: "up"},
+			shortcut{key: "Enter", description: "add root"},
+			shortcut{key: "/", description: "type a path"},
+			shortcut{key: "Esc", description: "cancel"},
+		)
 	case m.modal == removeRootModal:
 		status = renderShortcuts(m.styles, width,
 			shortcut{key: "Enter", description: "remove root"},
@@ -1396,6 +1420,10 @@ func (m dashboard) renderModal(width, height int) []string {
 		modalWidth = min(max(width-4, 40), 64)
 		return m.renderHelpModal(modalWidth, height)
 	}
+	if m.modal == browseModal {
+		// Paths are long, so the picker gets the wider box help uses.
+		return m.renderBrowseModal(min(max(width-4, 40), 64), height)
+	}
 	if m.modal == removeRootModal {
 		return modalBox(m.styles, modalWidth, "Remove root",
 			"",
@@ -1470,6 +1498,7 @@ func (m dashboard) helpEntries() []string {
 		renderHelpSection(m.styles, "OTHER", "contextual"),
 		renderHelpShortcut(m.styles, "Quit", "Ctrl+C"),
 		renderHelpShortcut(m.styles, "Resize workspace pane", "←/→", "[/]"),
+		renderHelpShortcut(m.styles, "Type a root path", "/"),
 		renderHelpShortcut(m.styles, "Close / cancel", "Esc"),
 	}
 }

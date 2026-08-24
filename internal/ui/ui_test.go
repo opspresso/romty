@@ -343,6 +343,8 @@ func TestDashboardAddsRootFromPrompt(t *testing.T) {
 
 	updated, _ := value.Update(key(tea.KeyF2, ""))
 	value = updated.(dashboard)
+	updated, _ = value.Update(key('/', "/"))
+	value = updated.(dashboard)
 	updated, _ = value.Update(key(tea.KeyExtended, "/projects"))
 	value = updated.(dashboard)
 	updated, command := value.Update(key(tea.KeyEnter, ""))
@@ -362,6 +364,8 @@ func TestDashboardAcceptsPastedRootPath(t *testing.T) {
 	value := newDashboard(backend, model.Snapshot{})
 
 	updated, _ := value.Update(key(tea.KeyF2, ""))
+	value = updated.(dashboard)
+	updated, _ = value.Update(key('/', "/"))
 	value = updated.(dashboard)
 	updated, _ = value.Update(tea.PasteMsg{Content: "/projects/with spaces"})
 	value = updated.(dashboard)
@@ -389,8 +393,8 @@ func TestDashboardSupportsHiddenWorkspaceShortcuts(t *testing.T) {
 	value = newDashboard(backend, model.Snapshot{})
 	updated, command = value.Update(key('a', "a"))
 	value = updated.(dashboard)
-	if !value.inputMode || command != nil {
-		t.Fatalf("a result = (input mode %v, command %v), want root input", value.inputMode, command)
+	if value.modal != browseModal || command != nil {
+		t.Fatalf("a result = (modal %v, command %v), want the root picker", value.modal, command)
 	}
 
 	value = newDashboard(backend, model.Snapshot{})
@@ -441,8 +445,8 @@ func TestDashboardSupportsIMEIndependentShortcuts(t *testing.T) {
 	value = newDashboard(backend, model.Snapshot{})
 	updated, command = value.Update(key(tea.KeyF2, ""))
 	value = updated.(dashboard)
-	if !value.inputMode || command != nil {
-		t.Fatalf("F2 result = (input mode %v, command %v), want root input", value.inputMode, command)
+	if value.modal != browseModal || command != nil {
+		t.Fatalf("F2 result = (modal %v, command %v), want the root picker", value.modal, command)
 	}
 
 	value = newDashboard(backend, model.Snapshot{})
@@ -1227,6 +1231,7 @@ func TestDashboardReportsBackendFailures(t *testing.T) {
 			act: func(m dashboard) (tea.Model, tea.Cmd) {
 				updated, _ := m.Update(key(tea.KeyF2, ""))
 				updated, _ = updated.(dashboard).Update(key('/', "/"))
+				updated, _ = updated.(dashboard).Update(key(tea.KeyExtended, "/projects"))
 				return updated.(dashboard).Update(key(tea.KeyEnter, ""))
 			},
 		},
@@ -1876,8 +1881,13 @@ func TestDashboardKeepsGlobalKeysAtOnePrecedence(t *testing.T) {
 
 	updated, _ := value.Update(key(tea.KeyF2, ""))
 	value = updated.(dashboard)
+	if value.modal != browseModal {
+		t.Fatalf("F2 with a modal open = modal %v, want the root picker", value.modal)
+	}
+	updated, _ = value.Update(key('/', "/"))
+	value = updated.(dashboard)
 	if !value.inputMode || value.modal != noModal {
-		t.Fatalf("F2 with a modal open = (input %v, modal %v), want root input", value.inputMode, value.modal)
+		t.Fatalf("/ in the picker = (input %v, modal %v), want root input", value.inputMode, value.modal)
 	}
 
 	// Root input owns every key except its own cancel, so F4 cannot discard it.
