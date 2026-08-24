@@ -394,8 +394,10 @@ func TestDashboardSupportsHiddenWorkspaceShortcuts(t *testing.T) {
 	value = newDashboard(backend, model.Snapshot{})
 	updated, command = value.Update(key('a', "a"))
 	value = updated.(dashboard)
-	if value.modal != browseModal || command != nil {
-		t.Fatalf("a result = (modal %v, command %v), want the root picker", value.modal, command)
+	// The picker reads the directory off the update loop, so opening it leaves
+	// a read pending rather than blocking on a slow mount.
+	if value.modal != browseModal || command == nil {
+		t.Fatalf("a result = (modal %v, command %v), want the root picker reading", value.modal, command)
 	}
 
 	value = newDashboard(backend, model.Snapshot{})
@@ -423,6 +425,37 @@ func TestDashboardSupportsHiddenWorkspaceShortcuts(t *testing.T) {
 	}
 }
 
+// The cursor stops at the ends of the tree. The wheel reaches romty as arrow
+// keys — three per notch, through the terminal's alternate scroll — so a tree
+// that wrapped sent one notch at the bottom back to the top.
+func TestDashboardNavigationStopsAtBothEnds(t *testing.T) {
+	snapshot := model.Snapshot{Roots: []model.RootView{{
+		Root: model.Root{ID: "root-1", Name: "projects", Path: "/projects"},
+		Directories: []model.WorkspaceView{
+			{Workspace: model.Workspace{RootID: "root-1", Name: "api", Path: "/projects/api"}},
+			{Workspace: model.Workspace{RootID: "root-1", Name: "web", Path: "/projects/web"}},
+		},
+	}}}
+	value := newDashboard(&fakeBackend{}, snapshot)
+
+	for range 3 {
+		updated, _ := value.Update(key(tea.KeyUp, ""))
+		value = updated.(dashboard)
+	}
+	if value.navIndex != 0 {
+		t.Fatalf("cursor after ↑ past the top = %d, want 0", value.navIndex)
+	}
+
+	last := len(value.navigationItems()) - 1
+	for range 5 {
+		updated, _ := value.Update(key(tea.KeyDown, ""))
+		value = updated.(dashboard)
+	}
+	if value.navIndex != last {
+		t.Fatalf("cursor after ↓ past the end = %d, want %d", value.navIndex, last)
+	}
+}
+
 func TestDashboardIgnoresRemovedPlusShortcut(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, model.Snapshot{})
 
@@ -446,8 +479,8 @@ func TestDashboardSupportsIMEIndependentShortcuts(t *testing.T) {
 	value = newDashboard(backend, model.Snapshot{})
 	updated, command = value.Update(key(tea.KeyF2, ""))
 	value = updated.(dashboard)
-	if value.modal != browseModal || command != nil {
-		t.Fatalf("F2 result = (modal %v, command %v), want the root picker", value.modal, command)
+	if value.modal != browseModal || command == nil {
+		t.Fatalf("F2 result = (modal %v, command %v), want the root picker reading", value.modal, command)
 	}
 
 	value = newDashboard(backend, model.Snapshot{})
@@ -2273,7 +2306,10 @@ func TestDashboardOpensHelpFromTheTerminalPane(t *testing.T) {
 func TestDashboardShowsAllShortcutsInHelpModal(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, model.Snapshot{})
 	value.width = 100
-	value.height = 40
+	// Tall enough for the whole list: this is about what help says, and the
+	// window it fits into is what TestDashboardScrollsHelpModalOnShortTerminals
+	// covers.
+	value.height = 48
 	lines := strings.Split(value.render(), "\n")
 	status := lines[len(lines)-1]
 	if strings.Contains(status, value.styles.shortcutKey.Render(" + ")) || strings.Contains(status, value.styles.shortcutKey.Render(" , ")) {
@@ -2289,7 +2325,7 @@ func TestDashboardShowsAllShortcutsInHelpModal(t *testing.T) {
 	modalLines := value.renderModal(value.width, bodyHeight)
 	plainLines := strings.Split(ansi.Strip(strings.Join(modalLines, "\n")), "\n")
 	plain := strings.Join(plainLines, "\n")
-	for _, section := range []string{"COMMANDS", "NAVIGATION", "TERMINAL", "OTHER"} {
+	for _, section := range []string{"COMMANDS", "NAVIGATION", "ADD ROOT", "TERMINAL", "OTHER"} {
 		if !strings.Contains(plain, section) {
 			t.Fatalf("help modal does not contain %q section:\n%s", section, plain)
 		}
@@ -2323,6 +2359,12 @@ func TestDashboardShowsAllShortcutsInHelpModal(t *testing.T) {
 		{keys: []string{"Ctrl+C"}, description: "Quit"},
 		{keys: []string{"←/→", "[/]"}, description: "Resize workspace pane"},
 		{keys: []string{"Esc"}, description: "Close / cancel"},
+		// The picker is a mode of its own, and help is the only reference the
+		// terminal pane can reach, so its keys are named here rather than left
+		// to the status bar the picker happens to show.
+		{keys: []string{"→/←", "l/h"}, description: "Open / parent"},
+		{keys: []string{"Enter"}, description: "Add the selected one"},
+		{keys: []string{"/"}, description: "Type a path instead"},
 	}
 	for _, shortcut := range shortcuts {
 		if !helpContainsShortcut(plainLines, shortcut.description, shortcut.keys...) {
@@ -2359,6 +2401,10 @@ func TestDashboardShowsAllShortcutsInHelpModal(t *testing.T) {
 	}
 	if len(order) != 7 || !slices.IsSorted(order) {
 		t.Fatalf("COMMANDS function keys read %v, want F1 through F7 in order:\n%s", order, plain)
+	}
+	// Help stands in for About in the terminal pane, so it names the build too.
+	if !strings.Contains(plain, version.String()) {
+		t.Fatalf("help modal does not show version %q:\n%s", version.String(), plain)
 	}
 	if len(modalLines) > value.height-2 {
 		t.Fatalf("help modal height = %d, want at most %d", len(modalLines), value.height-2)

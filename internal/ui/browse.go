@@ -15,14 +15,30 @@ import (
 
 // browser is the root picker's state: the directory it has open, the
 // directories inside it, and where the cursor sits among them.
+//
+// The cursor counts from the open directory itself, which is row zero: adding
+// the directory you walked into is the reason to walk into it, and a row that
+// is always there beats a key that only works when the listing is empty.
 type browser struct {
 	path    string
 	entries []string
 	cursor  int
+	// loading is set while the directory is being read, which happens off the
+	// update loop: a stale network mount can take tens of seconds to answer,
+	// and romty must not stop drawing terminals until it does.
+	loading bool
+	// preferred is the directory the cursor should land on once the read
+	// finishes, so stepping out of a directory lands back on it.
+	preferred string
 	// failure explains a directory romty could not read, in the picker itself.
 	// The status bar cannot carry it: while the picker is open that row is
 	// showing the picker's own shortcuts.
 	failure string
+}
+
+// browserMsg carries a finished directory read back to the update loop.
+type browserMsg struct {
+	value browser
 }
 
 // userHomeDirectory is where the picker opens. A home romty cannot resolve
@@ -38,22 +54,58 @@ func userHomeDirectory() string {
 // startBrowse opens the picker at the home directory. It starts there every
 // time rather than where it was left, so F2 lands somewhere predictable.
 func (m dashboard) startBrowse() (tea.Model, tea.Cmd) {
-	m.browse = openBrowser(m.homePath)
-	return m.openModal(browseModal)
+	model, _ := m.openModal(browseModal)
+	value := model.(dashboard)
+	return value.openDirectory(m.homePath, "")
 }
 
-func openBrowser(path string) browser {
+// openDirectory shows the directory at once and reads it in the background.
+// preferred names the entry the cursor should land on when the read lands.
+func (m dashboard) openDirectory(path, preferred string) (tea.Model, tea.Cmd) {
+	absolute := cleanPath(path)
+	m.browse = browser{path: absolute, loading: true, preferred: preferred}
+	return m, func() tea.Msg {
+		return browserMsg{value: readDirectory(absolute)}
+	}
+}
+
+// handleBrowserRead accepts a read only for the directory still on screen. A
+// user who moves on before a slow directory answers would otherwise be thrown
+// back into it.
+func (m dashboard) handleBrowserRead(message browserMsg) (tea.Model, tea.Cmd) {
+	if m.modal != browseModal || message.value.path != m.browse.path {
+		return m, nil
+	}
+	value := message.value
+	if m.browse.preferred != "" {
+		value.selectEntry(m.browse.preferred)
+	}
+	m.browse = value
+	return m, nil
+}
+
+func cleanPath(path string) string {
 	absolute, err := filepath.Abs(path)
 	if err != nil {
-		return browser{path: path, failure: err.Error()}
+		return path
 	}
-	value := browser{path: filepath.Clean(absolute)}
-	entries, err := readSubdirectories(value.path)
+	return filepath.Clean(absolute)
+}
+
+func readDirectory(path string) browser {
+	value := browser{path: path}
+	entries, err := readSubdirectories(path)
 	if err != nil {
 		value.failure = failureReason(err)
 		return value
 	}
 	value.entries = entries
+	if len(entries) > 0 {
+		// The open directory is row zero, but a walk is usually headed
+		// further in, so the cursor starts on the first directory it could
+		// walk into.
+		value.cursor = 1
+	}
 	return value
 }
 
@@ -104,37 +156,50 @@ func failureReason(err error) string {
 	return err.Error()
 }
 
+// rows counts the open directory and everything inside it.
+func (b browser) rows() int {
+	return len(b.entries) + 1
+}
+
 func (b *browser) moveCursor(delta int) {
-	if len(b.entries) == 0 {
-		return
-	}
-	b.cursor = min(max(b.cursor+delta, 0), len(b.entries)-1)
+	b.cursor = min(max(b.cursor+delta, 0), b.rows()-1)
 }
 
 // selectEntry puts the cursor on a named directory, so stepping out of one
-// lands back on it rather than at the top of its parent.
+// lands back on it rather than on the parent's own row.
 func (b *browser) selectEntry(name string) {
 	for index, entry := range b.entries {
 		if entry == name {
-			b.cursor = index
+			b.cursor = index + 1
 			return
 		}
 	}
 }
 
+// selected returns the highlighted path and whether it is a directory inside
+// the open one, which is the only kind the picker can walk into.
 func (b browser) selected() (string, bool) {
-	if b.cursor < 0 || b.cursor >= len(b.entries) {
-		return "", false
+	if b.cursor <= 0 || b.cursor > len(b.entries) {
+		return b.path, false
 	}
-	return filepath.Join(b.path, b.entries[b.cursor]), true
+	return filepath.Join(b.path, b.entries[b.cursor-1]), true
 }
 
 func (m dashboard) handleBrowseKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	page := max(m.browseCapacity()-1, 1)
 	switch message.String() {
 	case "up", "k":
 		m.browse.moveCursor(-1)
 	case "down", "j":
 		m.browse.moveCursor(1)
+	case "pgup", "ctrl+b":
+		m.browse.moveCursor(-page)
+	case "pgdown", "ctrl+f":
+		m.browse.moveCursor(page)
+	case "home", "g":
+		m.browse.moveCursor(-m.browse.rows())
+	case "end", "G":
+		m.browse.moveCursor(m.browse.rows())
 	case "right", "l":
 		return m.openBrowseSelection()
 	case "left", "h":
@@ -150,12 +215,11 @@ func (m dashboard) handleBrowseKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd)
 }
 
 func (m dashboard) openBrowseSelection() (tea.Model, tea.Cmd) {
-	path, ok := m.browse.selected()
-	if !ok {
+	path, inside := m.browse.selected()
+	if !inside {
 		return m, nil
 	}
-	m.browse = openBrowser(path)
-	return m, nil
+	return m.openDirectory(path, "")
 }
 
 func (m dashboard) browseParent() (tea.Model, tea.Cmd) {
@@ -163,25 +227,25 @@ func (m dashboard) browseParent() (tea.Model, tea.Cmd) {
 	if parent == m.browse.path {
 		return m, nil
 	}
-	child := filepath.Base(m.browse.path)
-	m.browse = openBrowser(parent)
-	m.browse.selectEntry(child)
-	return m, nil
+	return m.openDirectory(parent, filepath.Base(m.browse.path))
 }
 
-// addBrowseSelection adds the highlighted directory. One with no
-// subdirectories to highlight adds itself, so a walk that ends in an empty
-// directory is not a dead end.
+// addBrowseSelection adds the highlighted directory, which is the open one
+// when the cursor is on its row.
 func (m dashboard) addBrowseSelection() (tea.Model, tea.Cmd) {
-	path, ok := m.browse.selected()
-	if !ok {
-		if m.browse.failure != "" {
-			return m, nil
-		}
-		path = m.browse.path
+	path, inside := m.browse.selected()
+	if !inside && m.browse.failure != "" {
+		return m, nil
 	}
 	m.modal = noModal
 	return m, m.addRoot(path)
+}
+
+// browseCapacity is how many rows the picker shows at once, which is what a
+// page key moves by.
+func (m dashboard) browseCapacity() int {
+	// The path line and the blank under it take two of the box's rows.
+	return max(modalCapacity(m.dimensions().bodyHeight)-2, 1)
 }
 
 // renderBrowseModal windows the directory list around the cursor so the box
@@ -189,34 +253,44 @@ func (m dashboard) addBrowseSelection() (tea.Model, tea.Cmd) {
 func (m dashboard) renderBrowseModal(width, height int) []string {
 	contentWidth := max(width-6, 0)
 	lines := []string{m.styles.empty.Render(shortenPath(m.browse.path, contentWidth)), ""}
-	// The path line and the blank under it take two of the box's rows.
 	capacity := max(modalCapacity(height)-len(lines), 1)
 	switch {
 	case m.browse.failure != "":
 		lines = append(lines, m.styles.errorText.Render(m.browse.failure))
-	case len(m.browse.entries) == 0:
-		lines = append(lines, m.styles.empty.Render("No subdirectories — Enter adds this one"))
+	case m.browse.loading:
+		lines = append(lines, m.styles.empty.Render("Reading…"))
 	default:
+		rows := m.browse.rows()
 		start := 0
-		if len(m.browse.entries) > capacity {
-			start = min(max(m.browse.cursor-capacity/2, 0), len(m.browse.entries)-capacity)
+		if rows > capacity {
+			start = min(max(m.browse.cursor-capacity/2, 0), rows-capacity)
 		}
-		for index := start; index < len(m.browse.entries) && index-start < capacity; index++ {
-			lines = append(lines, m.renderBrowseEntry(index, contentWidth))
+		for index := start; index < rows && index-start < capacity; index++ {
+			lines = append(lines, m.renderBrowseRow(index, contentWidth))
+		}
+		if len(m.browse.entries) == 0 {
+			lines = append(lines, "", m.styles.empty.Render("No subdirectories"))
 		}
 	}
 	return modalBox(m.styles, width, "Add root", lines...)
 }
 
-func (m dashboard) renderBrowseEntry(index, width int) string {
-	name := m.browse.entries[index]
+// renderBrowseRow draws row zero as the open directory and the rest as what is
+// inside it. Only the latter carry the marker that says they can be opened.
+func (m dashboard) renderBrowseRow(index, width int) string {
+	name := ".  this directory"
+	marker := "  "
+	if index > 0 {
+		name = m.browse.entries[index-1]
+		marker = " ▸"
+	}
 	style := m.styles.modalBody
 	indicator := "  "
 	if index == m.browse.cursor {
 		style = m.styles.navigationSelected
 		indicator = "▌ "
 	}
-	label := pad(truncate(indicator+name, max(width-2, 1)), max(width-2, 0)) + " ▸"
+	label := pad(truncate(indicator+name, max(width-2, 1)), max(width-2, 0)) + marker
 	return style.Render(truncate(label, width))
 }
 

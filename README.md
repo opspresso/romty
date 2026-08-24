@@ -81,14 +81,19 @@ The status bar shows `F1` through `F7` in both panes and adds navigation keys fo
 
 | Key | Action |
 |---|---|
-| `↑`/`↓`, `k`/`j` | Move between directories |
+| `↑`/`↓`, `k`/`j` | Move between rows |
+| `PgUp`/`PgDn`, `Home`/`End` | Move a page, or to either end |
 | `→`, `l` | Open the highlighted directory |
 | `←`, `h` | Go to the parent directory; the cursor lands on the directory just left |
-| `Enter` | Add the highlighted directory as a root |
+| `Enter` | Add the highlighted row as a root |
 | `/` | Type a path instead |
 | `Esc` | Close the picker |
 
-Files and dot-directories are left out, and a linked directory is listed as the directory it points at. A directory with no subdirectories to highlight adds itself, so walking into an empty one is not a dead end. The picker always opens on the home directory rather than where it was left, so `F2` lands somewhere predictable; `/` reaches everything else, including a path that is faster to paste than to walk to.
+The first row is the open directory itself, listed as `.`, so the directory you walked into can be added without walking back out — and `Enter` means one thing regardless of what the directory holds.
+
+Files and dot-directories are left out, and a linked directory is listed as the directory it points at. The picker always opens on the home directory rather than where it was left, so `F2` lands somewhere predictable; `/` reaches everything else, including a path that is faster to paste than to walk to.
+
+The directory is read in the background, so a listing that is slow to answer — a stale network mount, say — leaves romty drawing and its terminals running.
 
 ### Global keys
 
@@ -121,7 +126,7 @@ The row stops at `F7`. A full-screen program binds the whole function key row �
 | `F8`, `d` | Ask for confirmation, then forget the selected root; terminals under it keep running |
 | `F9`, `t` | Ask for confirmation, then stop the daemon and all running terminal sessions |
 | `i` | Open About, which names the version this build is |
-| `↑`/`↓`, `j`/`k` | Move between roots and workspaces |
+| `↑`/`↓`, `j`/`k` | Move between roots and workspaces; stops at both ends |
 | `←`/`→`, `h`/`l` | Move between terminal tabs and the `+` tab |
 | `Enter` | Open the selected tab or create the selected `+` tab |
 | `Ctrl+C` | Quit romty |
