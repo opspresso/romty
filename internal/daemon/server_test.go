@@ -579,6 +579,52 @@ func TestSnapshotSurvivesAnUnreadableRoot(t *testing.T) {
 	}
 }
 
+func TestRemoveRootKeepsTerminalRunning(t *testing.T) {
+	base := testutil.ShortTempDir(t)
+	root := filepath.Join(base, "projects")
+	if err := os.Mkdir(root, 0o755); err != nil {
+		t.Fatalf("Mkdir() error = %v", err)
+	}
+
+	socket := filepath.Join(base, "daemon.sock")
+	server, err := daemon.New(socket, filepath.Join(base, "state.json"), "/bin/sh")
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	server.SetLogger(testutil.QuietLogger())
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- server.Serve(ctx) }()
+	defer func() { cancel(); <-done }()
+
+	backend := client.New(socket)
+	testutil.WaitForDaemon(t, backend)
+	snapshot, err := backend.AddRoot(root)
+	if err != nil {
+		t.Fatalf("AddRoot() error = %v", err)
+	}
+	rootID := snapshot.Roots[0].Root.ID
+	workspace, err := backend.EnsureWorkspace(rootID, root)
+	if err != nil {
+		t.Fatalf("EnsureWorkspace() error = %v", err)
+	}
+	tab, err := backend.CreateTab(workspace.ID, 80, 24)
+	if err != nil {
+		t.Fatalf("CreateTab() error = %v", err)
+	}
+	connection, reader, err := backend.OpenAttach(tab.ID)
+	if err != nil {
+		t.Fatalf("OpenAttach() error = %v", err)
+	}
+	defer connection.Close()
+
+	if _, err := backend.RemoveRoot(rootID); err != nil {
+		t.Fatalf("RemoveRoot() error = %v", err)
+	}
+	writeCommand(t, connection, "printf terminal-survived")
+	readUntil(t, connection, reader, "terminal-survived")
+}
+
 // The socket is the only thing between another local process and every shell
 // romty owns, so it must never be reachable by anyone else — not even during
 // the instant between bind and chmod.

@@ -379,31 +379,18 @@ func (s *Server) removeRoot(rootID string) protocol.Response {
 	}
 	s.value.Workspaces = workspaces
 	tabs := make([]model.Tab, 0, len(s.value.Tabs))
-	closing := make([]*session, 0)
 	for _, tab := range s.value.Tabs {
 		if _, ok := orphaned[tab.WorkspaceID]; !ok {
 			tabs = append(tabs, tab)
-			continue
-		}
-		if value, ok := s.sessions[tab.ID]; ok {
-			closing = append(closing, value)
-			delete(s.sessions, tab.ID)
 		}
 	}
 	s.value.Tabs = tabs
 	if err := s.store.Save(s.value); err != nil {
 		s.value = previous
-		for _, value := range closing {
-			s.sessions[value.id] = value
-		}
 		s.mu.Unlock()
 		return protocol.Response{Error: err.Error()}
 	}
 	s.mu.Unlock()
-
-	for _, value := range closing {
-		value.close()
-	}
 	return s.snapshotResponse()
 }
 
