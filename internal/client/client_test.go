@@ -547,8 +547,34 @@ func TestClientDegradesFeaturesMissingFromAnOlderDaemon(t *testing.T) {
 		t.Fatalf("Agents() = (%v, %v), want an empty supported fallback", agents, err)
 	}
 	if _, err := backend.RemoveWorkspace("root-1", "/workspace"); err == nil ||
-		!strings.Contains(err.Error(), "does not support") {
-		t.Fatalf("RemoveWorkspace() error = %v, want an unsupported capability", err)
+		!strings.Contains(err.Error(), "does not support") ||
+		!strings.Contains(err.Error(), protocol.Remedy) {
+		t.Fatalf("RemoveWorkspace() error = %v, want an unsupported capability and its remedy", err)
+	}
+}
+
+// A mismatch is only useful to a user who is told what to do about it, and
+// romty stop is what every one of them resolves to.
+func TestNegotiationFailureNamesItsRemedy(t *testing.T) {
+	socket := filepath.Join(shortTempDir(t), "daemon.sock")
+	listener, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatalf("Listen() error = %v", err)
+	}
+	if err := os.Chmod(socket, 0o600); err != nil {
+		t.Fatalf("Chmod() socket error = %v", err)
+	}
+
+	go func() {
+		_ = answerNegotiation(listener, protocol.Version+3, protocol.Version+1)
+		listener.Close()
+	}()
+	_, err = New(socket).Snapshot()
+	if err == nil {
+		t.Fatal("Snapshot() succeeded against a daemon with no shared protocol")
+	}
+	if !strings.Contains(err.Error(), protocol.Remedy) {
+		t.Fatalf("Snapshot() error = %v, want it to name %q", err, protocol.Remedy)
 	}
 }
 

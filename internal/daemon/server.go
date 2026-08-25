@@ -328,8 +328,8 @@ func checkClientVersion(request protocol.Request) error {
 		request.Version >= protocol.MinimumVersion && request.Version <= protocol.Version {
 		return nil
 	}
-	return fmt.Errorf("daemon supports protocol %d..%d but the client selected %d",
-		protocol.MinimumVersion, protocol.Version, request.Version)
+	return fmt.Errorf("daemon supports protocol %d..%d but the client selected %d; %s",
+		protocol.MinimumVersion, protocol.Version, request.Version, protocol.Remedy)
 }
 
 func checkClientCapability(request protocol.Request) error {
@@ -343,7 +343,7 @@ func checkClientCapability(request protocol.Request) error {
 	if required == "" || protocol.HasCapability(requestCapabilities(request), required) {
 		return nil
 	}
-	return fmt.Errorf("action %q requires capability %q", request.Action, required)
+	return fmt.Errorf("action %q requires capability %q; %s", request.Action, required, protocol.Remedy)
 }
 
 func requestCapabilities(request protocol.Request) []string {

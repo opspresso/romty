@@ -49,6 +49,12 @@ const (
 	ActionShutdown        = "shutdown"
 )
 
+// Remedy is what the user has to do about a mismatch, and every message that
+// reports one ends with it. Both sides raise those messages — the daemon when
+// it refuses a request, the client when it refuses a reply — and naming the
+// remedy in one place keeps their wording from drifting apart.
+const Remedy = "run `romty stop` and start romty again"
+
 // VersionExempt identifies the handshake and remedy that must work even when
 // the peers have no ordinary protocol revision in common.
 func VersionExempt(action string) bool {

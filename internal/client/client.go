@@ -146,7 +146,7 @@ func (c *Client) RemoveWorkspace(rootID, path string) (model.Snapshot, error) {
 		return model.Snapshot{}, err
 	}
 	if !supported {
-		return model.Snapshot{}, fmt.Errorf("running daemon does not support removing workspaces")
+		return model.Snapshot{}, fmt.Errorf("running daemon does not support removing workspaces; %s", protocol.Remedy)
 	}
 	response, err := c.call(protocol.Request{
 		Action: protocol.ActionRemoveWorkspace,
@@ -423,8 +423,8 @@ func (c *Client) negotiateProtocol() (*negotiatedProtocol, error) {
 		protocol.MinimumVersion, protocol.Version, daemonMin, daemonMax,
 	)
 	if !ok {
-		return nil, fmt.Errorf("romty supports protocol %d..%d but the running daemon supports %d..%d",
-			protocol.MinimumVersion, protocol.Version, daemonMin, daemonMax)
+		return nil, fmt.Errorf("romty supports protocol %d..%d but the running daemon supports %d..%d; %s",
+			protocol.MinimumVersion, protocol.Version, daemonMin, daemonMax, protocol.Remedy)
 	}
 	advertised := response.Capabilities
 	if response.MinVersion == 0 && len(advertised) == 0 {
@@ -505,8 +505,8 @@ func validateDaemonSocket(path string) error {
 // so neither is tied to the request's selected version.
 func checkResponse(action string, response protocol.Response, expectedVersion int) error {
 	if response.Version != expectedVersion && !protocol.VersionExempt(action) {
-		return fmt.Errorf("romty selected protocol %d but the running daemon answered with %d",
-			expectedVersion, response.Version)
+		return fmt.Errorf("romty selected protocol %d but the running daemon answered with %d; %s",
+			expectedVersion, response.Version, protocol.Remedy)
 	}
 	if response.Error != "" {
 		return fmt.Errorf("daemon: %s", response.Error)

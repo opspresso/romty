@@ -990,7 +990,7 @@ func TestServerRefusesAClientOutsideItsProtocolRange(t *testing.T) {
 	if response.Error == "" {
 		t.Fatal("snapshot from a mismatched client was accepted")
 	}
-	for _, want := range []string{"protocol", "selected 6"} {
+	for _, want := range []string{"protocol", "selected 6", protocol.Remedy} {
 		if !strings.Contains(response.Error, want) {
 			t.Fatalf("error = %q, want it to mention %q", response.Error, want)
 		}
