@@ -1,11 +1,13 @@
 package daemon
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/opspresso/romty/internal/model"
 	"golang.org/x/sys/unix"
@@ -15,8 +17,16 @@ var foregroundProcessGroup = func(terminal *os.File) (int, error) {
 	return unix.IoctlGetInt(int(terminal.Fd()), unix.TIOCGPGRP)
 }
 
-var listProcesses = func() ([]byte, error) {
-	return exec.Command("ps", "-axo", "pgid=,command=").Output()
+var processListTimeout = 2 * time.Second
+
+var runProcessList = func(ctx context.Context) ([]byte, error) {
+	return exec.CommandContext(ctx, "ps", "-axo", "pgid=,command=").Output()
+}
+
+func listProcesses() ([]byte, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), processListTimeout)
+	defer cancel()
+	return runProcessList(ctx)
 }
 
 func sessionAgents(sessions map[string]*session) map[string]model.Agent {
