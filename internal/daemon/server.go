@@ -286,8 +286,12 @@ func (s *Server) handle(connection net.Conn) {
 		return
 	}
 
+	// Stamped with the version the client selected, not the daemon's own: a
+	// client checks the version before it reads the error, so a reply carrying
+	// the daemon's version would be refused for the mismatch it is reporting
+	// and the sentence naming the remedy would never reach the user.
 	if err := checkClientVersion(request); err != nil {
-		_ = reply(connection, protocol.Response{Error: err.Error()})
+		_ = replyFor(connection, request, protocol.Response{Error: err.Error()})
 		return
 	}
 	if err := checkClientCapability(request); err != nil {

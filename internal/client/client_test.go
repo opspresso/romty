@@ -527,6 +527,78 @@ func TestClientUsesAnOlderDaemonSelectedProtocol(t *testing.T) {
 	}
 }
 
+// A socket that answers but names no protocol of its own is not a daemon this
+// client can negotiate with. What it said is the only clue there is, and
+// swallowing it leaves EnsureDaemon treating the socket as healthy.
+func TestPingReportsAPeerThatNamesNoProtocol(t *testing.T) {
+	socket := filepath.Join(shortTempDir(t), "daemon.sock")
+	listener, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatalf("Listen() error = %v", err)
+	}
+	if err := os.Chmod(socket, 0o600); err != nil {
+		t.Fatalf("Chmod() socket error = %v", err)
+	}
+
+	go func() {
+		connection, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		var request protocol.Request
+		if err := protocol.Read(bufio.NewReader(connection), &request); err == nil {
+			_ = protocol.Write(connection, protocol.Response{Error: "decode protocol message: unexpected end"})
+		}
+		connection.Close()
+		listener.Close()
+	}()
+
+	err = New(socket).Ping()
+	if err == nil || !strings.Contains(err.Error(), "decode protocol message") {
+		t.Fatalf("Ping() error = %v, want the peer's own refusal", err)
+	}
+	if Unavailable(err) {
+		t.Fatal("Ping() reported an answering socket as an absent daemon")
+	}
+}
+
+// The daemon stamps a refusal with the version the client selected, so the
+// client's version check does not refuse the very reply that is reporting the
+// mismatch and hide the sentence naming the remedy.
+func TestClientShowsADaemonRefusalForTheSelectedProtocol(t *testing.T) {
+	socket := filepath.Join(shortTempDir(t), "daemon.sock")
+	listener, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatalf("Listen() error = %v", err)
+	}
+	if err := os.Chmod(socket, 0o600); err != nil {
+		t.Fatalf("Chmod() socket error = %v", err)
+	}
+
+	refusal := "daemon supports protocol 1..4 but the client selected 5; " + protocol.Remedy
+	go func() {
+		if err := answerNegotiation(listener, protocol.Version, protocol.MinimumVersion); err != nil {
+			return
+		}
+		connection, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		defer connection.Close()
+		listener.Close()
+		var request protocol.Request
+		if err := protocol.Read(bufio.NewReader(connection), &request); err != nil {
+			return
+		}
+		_ = protocol.Write(connection, protocol.Response{Version: request.Version, Error: refusal})
+	}()
+
+	_, err = New(socket).Snapshot()
+	if err == nil || !strings.Contains(err.Error(), refusal) {
+		t.Fatalf("Snapshot() error = %v, want the daemon's refusal %q", err, refusal)
+	}
+}
+
 func TestClientDegradesFeaturesMissingFromAnOlderDaemon(t *testing.T) {
 	socket := filepath.Join(shortTempDir(t), "daemon.sock")
 	listener, err := net.Listen("unix", socket)

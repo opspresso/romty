@@ -455,7 +455,12 @@ func (c *Client) probeProtocol() (protocol.Response, error) {
 	if err != nil {
 		return protocol.Response{}, err
 	}
-	if response.Error != "" && !strings.Contains(response.Error, "protocol") {
+	// A peer that refuses the ping without naming a version of its own is not
+	// one this client can negotiate with — a program holding the socket, or a
+	// reply too damaged to read — and what it said is the only clue there is.
+	// A refusal that does carry a version is an ordinary mismatch, which
+	// negotiation reports in the sentence that also names the remedy.
+	if response.Error != "" && advertisedMaximum(response) == 0 {
 		return protocol.Response{}, fmt.Errorf("daemon: %s", response.Error)
 	}
 	return response, nil

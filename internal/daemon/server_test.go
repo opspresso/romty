@@ -998,6 +998,11 @@ func TestServerRefusesAClientOutsideItsProtocolRange(t *testing.T) {
 	if response.Snapshot != nil {
 		t.Fatal("a refused request still returned a snapshot")
 	}
+	// Stamped with what the client selected, so the client's own version check
+	// does not refuse the reply that is reporting the mismatch.
+	if response.Version != protocol.Version+1 {
+		t.Fatalf("refusal version = %d, want the request version %d", response.Version, protocol.Version+1)
+	}
 }
 
 // The capability gate is the only thing this protocol adds that can newly
