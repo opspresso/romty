@@ -207,11 +207,6 @@ pre {
   text-decoration: none;
 }
 
-.btn-primary {
-  background: var(--accent);
-  color: var(--canvas);
-}
-
 .btn-ghost {
   border-color: var(--border);
   color: var(--text);
@@ -408,10 +403,6 @@ pre {
   color: #15803d;
 }
 
-.pane .art {
-  color: var(--text);
-}
-
 .caret {
   display: inline-block;
   width: 0.6em;
@@ -569,10 +560,6 @@ pre.block {
 pre.block .prompt {
   color: var(--accent);
   user-select: none;
-}
-
-pre.block .comment {
-  color: var(--muted);
 }
 
 /* ----------------------------------------------------------- shortcuts */
