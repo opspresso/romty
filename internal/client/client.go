@@ -341,6 +341,13 @@ func readReplay(connection net.Conn, reader io.Reader, replay []byte) error {
 		}
 		count, err := reader.Read(replay)
 		replay = replay[count:]
+		// A reader may hand over the last of the replay together with the
+		// error that ends the stream. The history is complete either way, and
+		// refusing it here would turn a restored terminal into an attach
+		// failure and the reattach backoff that follows one.
+		if len(replay) == 0 {
+			break
+		}
 		if err != nil {
 			return err
 		}

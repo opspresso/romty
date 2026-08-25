@@ -599,6 +599,34 @@ func TestClientShowsADaemonRefusalForTheSelectedProtocol(t *testing.T) {
 	}
 }
 
+// endsWithItsError delivers everything it has and reports the end of the
+// stream in the same call, which io.Reader permits and a socket that is closed
+// as its last bytes are read can produce.
+type endsWithItsError struct{ data []byte }
+
+func (r *endsWithItsError) Read(data []byte) (int, error) {
+	count := copy(data, r.data)
+	r.data = r.data[count:]
+	if len(r.data) > 0 {
+		return count, nil
+	}
+	return count, io.EOF
+}
+
+func TestReadReplayKeepsAReplayThatEndsWithItsError(t *testing.T) {
+	connection, peer := net.Pipe()
+	defer connection.Close()
+	defer peer.Close()
+
+	replay := make([]byte, len("restored history"))
+	if err := readReplay(connection, &endsWithItsError{data: []byte("restored history")}, replay); err != nil {
+		t.Fatalf("readReplay() error = %v, want the completed replay kept", err)
+	}
+	if string(replay) != "restored history" {
+		t.Fatalf("replay = %q, want %q", replay, "restored history")
+	}
+}
+
 func TestClientDegradesFeaturesMissingFromAnOlderDaemon(t *testing.T) {
 	socket := filepath.Join(shortTempDir(t), "daemon.sock")
 	listener, err := net.Listen("unix", socket)
