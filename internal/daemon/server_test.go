@@ -1000,6 +1000,65 @@ func TestServerRefusesAClientOutsideItsProtocolRange(t *testing.T) {
 	}
 }
 
+// The capability gate is the only thing this protocol adds that can newly
+// refuse a request an older client used to make, so both of its answers are
+// checked against the shape a released client actually sends: a stamped
+// version, no range and no capability list.
+func TestServerInfersCapabilitiesForAReleasedClient(t *testing.T) {
+	socket, cancel, done := serveForTest(t)
+	defer func() { cancel(); <-done }()
+
+	removal := speakRaw(t, socket, map[string]any{
+		"action":  "remove_workspace",
+		"version": 4,
+		"root_id": "root-1",
+		"path":    "workspace",
+	})
+	if strings.Contains(removal.Error, "requires capability") {
+		t.Fatalf("remove_workspace from a protocol 4 client = %q, want its capability inferred", removal.Error)
+	}
+	if removal.Version != 4 {
+		t.Fatalf("response version = %d, want the request version 4", removal.Version)
+	}
+
+	agents := speakRaw(t, socket, map[string]any{"action": "agents", "version": 2})
+	if agents.Error != "" {
+		t.Fatalf("agents from a protocol 2 client = %q, want it carried out", agents.Error)
+	}
+}
+
+// A client that negotiated a revision from before a feature says so in its
+// capability list, and the daemon refuses rather than answering with a field
+// that revision has no meaning for.
+func TestServerRefusesAnActionTheSelectedProtocolPredates(t *testing.T) {
+	socket, cancel, done := serveForTest(t)
+	defer func() { cancel(); <-done }()
+
+	for _, testCase := range []struct {
+		action     string
+		version    int
+		capability string
+	}{
+		{action: "agents", version: 1, capability: protocol.CapabilityAgents},
+		{action: "remove_workspace", version: 3, capability: protocol.CapabilityRemoveWorkspace},
+	} {
+		response := speakRaw(t, socket, map[string]any{
+			"action":       testCase.action,
+			"version":      testCase.version,
+			"min_version":  protocol.MinimumVersion,
+			"capabilities": protocol.CapabilitiesForVersion(testCase.version),
+		})
+		if !strings.Contains(response.Error, testCase.capability) ||
+			!strings.Contains(response.Error, protocol.Remedy) {
+			t.Fatalf("%s at protocol %d error = %q, want it to name %q and the remedy",
+				testCase.action, testCase.version, response.Error, testCase.capability)
+		}
+		if response.Version != testCase.version {
+			t.Fatalf("refusal version = %d, want the request version %d", response.Version, testCase.version)
+		}
+	}
+}
+
 func TestServerPingAdvertisesItsProtocolRangeAndCapabilities(t *testing.T) {
 	socket, cancel, done := serveForTest(t)
 	defer func() { cancel(); <-done }()
