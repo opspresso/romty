@@ -45,10 +45,11 @@ type fakeBackend struct {
 }
 
 type memoryStream struct {
-	reader  *bytes.Reader
-	mu      sync.Mutex
-	written bytes.Buffer
-	closed  bool
+	reader   *bytes.Reader
+	mu       sync.Mutex
+	written  bytes.Buffer
+	writeErr error
+	closed   bool
 }
 
 func newMemoryStream(output string) *memoryStream {
@@ -62,6 +63,9 @@ func (s *memoryStream) Read(data []byte) (int, error) {
 func (s *memoryStream) Write(data []byte) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.writeErr != nil {
+		return 0, s.writeErr
+	}
 	return s.written.Write(data)
 }
 
@@ -243,8 +247,17 @@ func TestDashboardSelectsWorkspaceAndCreatesTerminal(t *testing.T) {
 		t.Fatalf("CreateTab() calls = %d, want 1", backend.createCount)
 	}
 
-	updated, _ = value.Update(readCommand())
-	value = updated.(dashboard)
+	followup := readCommand()
+	commands, ok := followup.(tea.BatchMsg)
+	if !ok {
+		t.Fatalf("terminal followup = %T, want read and resize commands", followup)
+	}
+	for _, command := range commands {
+		if message := command(); message != nil {
+			updated, _ = value.Update(message)
+			value = updated.(dashboard)
+		}
+	}
 	rendered := value.render()
 	if !strings.Contains(rendered, "projects") || !strings.Contains(rendered, "embedded terminal") {
 		t.Fatalf("rendered dashboard does not contain both panes:\n%s", rendered)
@@ -353,6 +366,119 @@ func TestDashboardOpensExistingWorkspaceTabWithoutCreatingOne(t *testing.T) {
 	}
 	if backend.createCount != 0 {
 		t.Fatalf("CreateTab() calls = %d, want 0", backend.createCount)
+	}
+}
+
+func TestDashboardRejectsSnapshotsThatFinishOutOfOrder(t *testing.T) {
+	tree := func(revision uint64, name string) model.Snapshot {
+		return model.Snapshot{Revision: revision, Roots: []model.RootView{{
+			Root: model.Root{ID: "root-1", Name: name, Path: "/projects"},
+		}}}
+	}
+
+	value := newDashboard(&fakeBackend{}, tree(1, "initial"))
+	updated, _ := value.Update(snapshotMsg{value: tree(2, "newest"), order: 2})
+	value = updated.(dashboard)
+	updated, _ = value.Update(snapshotMsg{value: tree(1, "older revision"), order: 3})
+	value = updated.(dashboard)
+	updated, _ = value.Update(snapshotMsg{value: tree(2, "older request"), order: 1})
+	value = updated.(dashboard)
+
+	if got := value.state.Roots[0].Root.Name; got != "newest" {
+		t.Fatalf("root after out-of-order snapshots = %q, want newest", got)
+	}
+}
+
+func TestDashboardIgnoresAnOlderWorkspaceSelection(t *testing.T) {
+	workspace := func(id string) model.Workspace {
+		return model.Workspace{ID: id, RootID: "root-1", Name: id, Path: "/projects/" + id}
+	}
+	tree := func(revision uint64, names ...string) model.Snapshot {
+		directories := make([]model.WorkspaceView, 0, len(names))
+		for _, name := range names {
+			value := workspace(name)
+			directories = append(directories, model.WorkspaceView{
+				Workspace: value,
+				Tabs:      []model.Tab{{ID: name + "-tab", WorkspaceID: value.ID, Running: true}},
+			})
+		}
+		return model.Snapshot{Revision: revision, Roots: []model.RootView{{
+			Root:        model.Root{ID: "root-1", Name: "projects", Path: "/projects"},
+			Directories: directories,
+		}}}
+	}
+
+	value := newDashboard(&fakeBackend{}, tree(1, "alpha", "beta"))
+	value.selectionRequest = 2
+	updated, _ := value.Update(workspaceMsg{
+		value: workspace("beta"), snapshot: tree(3, "alpha", "beta"),
+		order: 2, selection: 2, tabID: "beta-tab",
+	})
+	value = updated.(dashboard)
+	updated, command := value.Update(workspaceMsg{
+		value: workspace("alpha"), snapshot: tree(2, "alpha", "beta"),
+		order: 1, selection: 1, tabID: "alpha-tab",
+	})
+	value = updated.(dashboard)
+
+	if command != nil || value.selectedWorkspaceID != "beta" || value.selectedPath != "/projects/beta" {
+		t.Fatalf("stale selection result = (command %v, workspace %q, path %q)", command, value.selectedWorkspaceID, value.selectedPath)
+	}
+}
+
+func TestCreateTabErrorKeepsItsSelection(t *testing.T) {
+	value := newDashboard(&fakeBackend{}, model.Snapshot{})
+	value.selectionRequest = 1
+	command := value.createTab()
+	value.selectionRequest = 2
+
+	raw := command()
+	message, ok := raw.(tabMsg)
+	if !ok {
+		t.Fatalf("createTab() message = %T, want tabMsg", raw)
+	}
+	if message.selection != 1 {
+		t.Fatalf("createTab() selection = %d, want 1", message.selection)
+	}
+}
+
+func TestDashboardCreatesOnlyOneTabWhileASelectionIsPending(t *testing.T) {
+	workspace := model.Workspace{ID: "workspace-1", RootID: "root-1", Name: "alpha", Path: "/projects/alpha"}
+	snapshot := model.Snapshot{Roots: []model.RootView{{
+		Root: model.Root{ID: "root-1", Name: "projects", Path: "/projects"},
+		Directories: []model.WorkspaceView{{
+			Workspace: workspace,
+		}},
+	}}}
+	backend := &fakeBackend{
+		snapshot:   snapshot,
+		workspace:  workspace,
+		createdTab: model.Tab{ID: "tab-1", WorkspaceID: workspace.ID, Name: "1", Running: true},
+	}
+	value := newDashboard(backend, snapshot)
+	value.setNavigation(1)
+
+	first := value.selectWorkspace()
+	second := value.selectWorkspace()
+	firstMessage := first()
+	secondMessage := second()
+	updated, create := value.Update(secondMessage)
+	value = updated.(dashboard)
+	updated, stale := value.Update(firstMessage)
+	value = updated.(dashboard)
+	if stale != nil {
+		t.Fatal("older selection created a second tab command")
+	}
+	if retry := value.selectWorkspace(); retry != nil {
+		t.Fatal("selection accepted another Enter while tab creation was pending")
+	}
+	if create == nil {
+		t.Fatal("newest selection did not create a tab command")
+	}
+	updated, _ = value.Update(create())
+	value = updated.(dashboard)
+	if backend.createCount != 1 || value.tabPending {
+		t.Fatalf("tab creation = (calls %d, pending %t), want (1, false)", backend.createCount, value.tabPending)
 	}
 }
 
@@ -669,14 +795,21 @@ func waitForGuest(t *testing.T, stream *memoryStream, want string) {
 	t.Fatalf("guest received %q, want it to contain %q", stream.String(), want)
 }
 
-// waitForGuestSilence gives the emulator a chance to speak and fails if it
-// does, which is the opposite assertion and cannot be polled for.
-func waitForGuestSilence(t *testing.T, stream *memoryStream, was string) {
+// waitForGuestSilence puts a marker behind the event under test. Seeing that
+// marker proves the copy goroutine processed everything before it.
+func waitForGuestSilence(t *testing.T, terminal *embeddedTerminal, was string) string {
 	t.Helper()
-	time.Sleep(100 * time.Millisecond)
-	if now := stream.String(); now != was {
-		t.Fatalf("guest received %q, want nothing beyond %q", now, was)
+	stream := terminal.stream.(*memoryStream)
+	marker := fmt.Sprintf("__romty_test_barrier_%d__", len(was))
+	if _, err := io.WriteString(terminal.emulator.InputPipe(), marker); err != nil {
+		t.Fatalf("write barrier: %v", err)
 	}
+	want := was + marker
+	waitForGuest(t, stream, want)
+	if now := stream.String(); now != want {
+		t.Fatalf("guest received %q before barrier, want %q", now, want)
+	}
+	return want
 }
 
 func plainRows(lines []string) []string {
@@ -1043,7 +1176,7 @@ func TestDashboardKeepsMouseWithTheHostUnlessPassthroughIsOn(t *testing.T) {
 		t.Fatalf("mouse mode = %v, want the host to keep the mouse by default", value.View().MouseMode)
 	}
 	value.Update(tea.MouseWheelMsg{X: 40, Y: 6, Button: tea.MouseWheelUp})
-	waitForGuestSilence(t, value.terminal.stream.(*memoryStream), "")
+	waitForGuestSilence(t, value.terminal, "")
 
 	value.mousePassthrough = true
 	if value.View().MouseMode != tea.MouseModeAllMotion {
@@ -1056,7 +1189,7 @@ func TestDashboardKeepsMouseWithTheHostUnlessPassthroughIsOn(t *testing.T) {
 
 	// Events over the workspace pane are not the guest's business.
 	value.Update(tea.MouseWheelMsg{X: 1, Y: terminalTop + 2, Button: tea.MouseWheelUp})
-	waitForGuestSilence(t, value.terminal.stream.(*memoryStream), sent)
+	waitForGuestSilence(t, value.terminal, sent)
 
 	// Copy mode takes the mouse back so the host can select the scrolled page.
 	updated, _ := value.Update(key(tea.KeyF6, ""))
@@ -1449,6 +1582,35 @@ func TestDashboardReturnsToTheTreeWhenOpeningFails(t *testing.T) {
 	}
 	if !strings.Contains(value.errorMessage, "session not found") {
 		t.Fatalf("error message = %q, want the attach failure", value.errorMessage)
+	}
+}
+
+func TestDashboardReconnectsWhenTerminalInputFails(t *testing.T) {
+	backend := &fakeBackend{}
+	value := newDashboard(backend, model.Snapshot{})
+	stream := newMemoryStream("")
+	stream.writeErr = errors.New("connection reset")
+	value.terminal = newEmbeddedTerminal("tab-1", stream, 40, 10)
+	value.focus = terminalPane
+
+	value.terminal.sendKey(key('x', "x"))
+	select {
+	case <-value.terminal.inputDone:
+	case <-time.After(time.Second):
+		t.Fatal("terminal input copy did not report the write failure")
+	}
+	message := value.terminal.read()()
+	updated, command := value.Update(message)
+	value = updated.(dashboard)
+
+	if value.terminal != nil || !value.terminalExited {
+		t.Fatalf("failed input = (terminal %v, exited %v), want reconnect", value.terminal != nil, value.terminalExited)
+	}
+	if !strings.Contains(value.errorMessage, "write terminal input: connection reset") {
+		t.Fatalf("error message = %q, want the input failure", value.errorMessage)
+	}
+	if command == nil {
+		t.Fatal("failed input did not refresh the daemon snapshot")
 	}
 }
 
@@ -2623,6 +2785,57 @@ func TestDashboardHighlightsNavigationAndShowsOpenTabs(t *testing.T) {
 	}
 }
 
+func TestDashboardReplacesControlCharactersInLabels(t *testing.T) {
+	hostile := "name\x1b]8;;https://example.com\x07\n"
+	safe := "name�]8;;https://example.com��"
+	safePrefix := "name�]8;;https://"
+	workspace := model.Workspace{ID: "workspace-1", RootID: "root-1", Name: hostile, Path: "/projects/workspace"}
+	value := newDashboard(&fakeBackend{}, model.Snapshot{Roots: []model.RootView{{
+		Root: model.Root{ID: "root-1", Name: hostile, Path: "/projects"},
+		Directories: []model.WorkspaceView{{
+			Workspace: workspace,
+			Tabs:      []model.Tab{{ID: "tab-1", Name: hostile, Running: true}},
+		}},
+	}}})
+	value.width = 120
+	value.height = 40
+	value.selectedWorkspaceID = workspace.ID
+	value.selectedPath = workspace.Path
+
+	rendered := value.render()
+	if strings.Contains(rendered, "\x1b]8;;https://example.com") {
+		t.Fatalf("dashboard rendered a terminal control sequence:\n%s", rendered)
+	}
+	if plain := ansi.Strip(rendered); strings.Count(plain, safePrefix) < 2 {
+		t.Fatalf("dashboard labels do not contain the safe replacement prefix %q:\n%s", safePrefix, plain)
+	}
+	tabBar := strings.Join(renderTabBar(value.styles, []model.Tab{{Name: hostile}}, 0, 120), "\n")
+	if strings.Contains(tabBar, "\x1b]8;;https://example.com") || !strings.Contains(ansi.Strip(tabBar), safe) {
+		t.Fatalf("tab label was not rendered safely: %q", tabBar)
+	}
+
+	value.inputMode = true
+	value.input = hostile
+	if rendered := value.renderStatus(120, 36)[1]; strings.Contains(rendered, "\x1b]8;;https://example.com") ||
+		!strings.Contains(ansi.Strip(rendered), safe) {
+		t.Fatalf("root input was not rendered safely: %q", rendered)
+	}
+
+	value.inputMode = false
+	value.setError(treeError, hostile)
+	if rendered := value.renderStatus(120, 36)[1]; strings.Contains(rendered, "\x1b]8;;https://example.com") ||
+		!strings.Contains(ansi.Strip(rendered), safe) {
+		t.Fatalf("error was not rendered safely: %q", rendered)
+	}
+
+	value.modal = removeRootModal
+	value.removeTarget = model.Root{Name: hostile}
+	if rendered := strings.Join(value.renderModal(120, 36), "\n"); strings.Contains(rendered, "\x1b]8;;https://example.com") ||
+		!strings.Contains(ansi.Strip(rendered), safe) {
+		t.Fatalf("confirmation was not rendered safely: %q", rendered)
+	}
+}
+
 func TestOpenTabMarkersUseAgentColors(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, model.Snapshot{})
 	tabs := []model.Tab{
@@ -3125,7 +3338,7 @@ func TestDashboardForgetsRetriesAfterAHealthyAttach(t *testing.T) {
 
 	// Reopen, then let the terminal run past the healthy interval before it
 	// drops. That drop starts over: an immediate reconnect, not a delayed one.
-	updated, open = value.Update(reopenTerminalMsg{})
+	updated, open = value.Update(reopenTerminalMsg{tabID: "tab-1"})
 	value = updated.(dashboard)
 	updated, _ = value.Update(open())
 	value = updated.(dashboard)
@@ -3141,7 +3354,7 @@ func TestDashboardForgetsRetriesAfterAHealthyAttach(t *testing.T) {
 	if command == nil {
 		t.Fatal("no reconnect after a healthy attach dropped")
 	}
-	if message := command(); message == (reopenTerminalMsg{}) {
+	if _, delayed := command().(reopenTerminalMsg); delayed {
 		t.Fatal("a drop after a healthy attach was delayed, want an immediate reconnect")
 	}
 }
@@ -3167,8 +3380,39 @@ func TestDashboardStillBacksOffWhenDropsAreImmediate(t *testing.T) {
 		t.Fatalf("an immediate drop = (retries %d, command %v), want one counted retry",
 			value.reattachAttempts, command)
 	}
-	if message := command(); message != (reopenTerminalMsg{}) {
+	if message := command(); message != (reopenTerminalMsg{tabID: "tab-1"}) {
 		t.Fatalf("an immediate drop returned %T, want a delayed reopen", message)
+	}
+}
+
+func TestDashboardIgnoresAReattachForTheTabItLeft(t *testing.T) {
+	tabs := []model.Tab{
+		{ID: "tab-1", WorkspaceID: "workspace-1", Name: "1", Running: true},
+		{ID: "tab-2", WorkspaceID: "workspace-1", Name: "2", Running: true},
+	}
+	value, _, refresh := exitedDashboard(t, tabs, 0)
+
+	updated, open := value.Update(refresh())
+	value = updated.(dashboard)
+	updated, _ = value.Update(open())
+	value = updated.(dashboard)
+	updated, refresh = value.Update(terminalOutputMsg{terminal: value.terminal, err: io.EOF})
+	value = updated.(dashboard)
+	updated, delayed := value.Update(refresh())
+	value = updated.(dashboard)
+	if delayed == nil {
+		t.Fatal("the repeated drop produced no delayed reattach")
+	}
+
+	updated, _ = value.Update(switchTabKey(tea.KeyRight))
+	value = updated.(dashboard)
+	if value.selectedTabID() != "tab-2" {
+		t.Fatalf("selected tab = %q, want tab-2", value.selectedTabID())
+	}
+	updated, stale := value.Update(delayed())
+	value = updated.(dashboard)
+	if stale != nil {
+		t.Fatal("a delayed reattach for tab-1 reopened tab-2")
 	}
 }
 
@@ -3221,6 +3465,51 @@ func TestDashboardIgnoresATerminalOpenedForTheTabItLeft(t *testing.T) {
 	}
 	if !stale.isClosed() {
 		t.Fatal("the terminal romty walked away from is still attached to the daemon")
+	}
+}
+
+func TestDashboardSizesTerminalWhenAttachCompletes(t *testing.T) {
+	workspace := model.Workspace{ID: "workspace-1", RootID: "root-1", Name: "alpha", Path: "/projects/alpha"}
+	tab := model.Tab{ID: "tab-1", WorkspaceID: workspace.ID, Name: "1", Running: true}
+	snapshot := model.Snapshot{Roots: []model.RootView{{
+		Root:        model.Root{ID: "root-1", Name: "projects", Path: "/projects"},
+		Directories: []model.WorkspaceView{{Workspace: workspace, Tabs: []model.Tab{tab}}},
+	}}}
+	backend := &fakeBackend{snapshot: snapshot, workspace: workspace}
+	value := newDashboard(backend, snapshot)
+	value.width = 80
+	value.height = 24
+	value.selectedWorkspaceID = workspace.ID
+	value.selectedPath = workspace.Path
+	value.setNavigation(1)
+
+	open := value.openSelectedTerminal()
+	if open == nil {
+		t.Fatal("running tab did not produce an attach command")
+	}
+	updated, resize := value.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	value = updated.(dashboard)
+	if resize != nil {
+		t.Fatal("window resize without an attached terminal contacted the daemon")
+	}
+
+	updated, followup := value.Update(open())
+	value = updated.(dashboard)
+	defer value.closeTerminal()
+	if value.terminal == nil || followup == nil {
+		t.Fatalf("attach result = (terminal %v, followup %v), want an open terminal", value.terminal, followup)
+	}
+	if commands, ok := followup().(tea.BatchMsg); ok {
+		for _, command := range commands {
+			if command != nil {
+				command()
+			}
+		}
+	}
+	wantColumns, wantRows := value.terminalSize()
+	if backend.createdColumns != wantColumns || backend.createdRows != wantRows {
+		t.Fatalf("attached PTY size = %dx%d, want current window size %dx%d",
+			backend.createdColumns, backend.createdRows, wantColumns, wantRows)
 	}
 }
 

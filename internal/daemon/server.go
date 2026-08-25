@@ -30,6 +30,9 @@ var ErrAlreadyRunning = errors.New("romty daemon is already running")
 // client ever meets it. It is a variable so tests need not wait.
 var requestTimeout = 10 * time.Second
 
+var resolveDirectory = canonicalDirectory
+var readDirectory = os.ReadDir
+
 type Server struct {
 	socket string
 	store  *state.Store
@@ -42,12 +45,17 @@ type Server struct {
 
 	mu       sync.Mutex
 	value    model.State
+	revision uint64
 	sessions map[string]*session
 	stop     chan struct{}
 	stopOnce sync.Once
 	// stopping is set once shutdown has begun, so a shell exiting because the
 	// daemon killed it is not persisted one tab at a time.
 	stopping bool
+
+	requestMu sync.Mutex
+	accepting bool
+	mutations sync.WaitGroup
 }
 
 func New(socket, statePath, shell string) (*Server, error) {
@@ -63,13 +71,14 @@ func New(socket, statePath, shell string) (*Server, error) {
 		shell = "/bin/sh"
 	}
 	return &Server{
-		socket:   socket,
-		store:    store,
-		shell:    shell,
-		logger:   log.New(os.Stderr, "romty: ", log.LstdFlags),
-		value:    value,
-		sessions: make(map[string]*session),
-		stop:     make(chan struct{}),
+		socket:    socket,
+		store:     store,
+		shell:     shell,
+		logger:    log.New(os.Stderr, "romty: ", log.LstdFlags),
+		value:     value,
+		sessions:  make(map[string]*session),
+		stop:      make(chan struct{}),
+		accepting: true,
 	}, nil
 }
 
@@ -131,13 +140,17 @@ func (s *Server) Serve(ctx context.Context) error {
 		case <-ctx.Done():
 		case <-s.stop:
 		}
+		s.beginShutdown()
 		listener.Close()
 	}()
 
 	for {
 		connection, err := listener.Accept()
 		if err != nil {
-			if ctx.Err() != nil || s.stopped() {
+			expected := ctx.Err() != nil || s.stopped()
+			s.beginShutdown()
+			s.mutations.Wait()
+			if expected {
 				return nil
 			}
 			return fmt.Errorf("accept daemon connection: %w", err)
@@ -158,6 +171,7 @@ func (s *Server) removeStaleTabs() error {
 		s.value.Tabs = tabs
 		return fmt.Errorf("remove stale terminal tabs: %w", err)
 	}
+	s.revision++
 	return nil
 }
 
@@ -171,9 +185,25 @@ const lockSuffix = ".lock"
 // that was killed outright leaves nothing to clean up — which a PID file, the
 // other way to answer this, would.
 func lockDaemon(path string) (*os.File, error) {
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
+	fd, err := syscall.Open(path,
+		syscall.O_CREAT|syscall.O_RDWR|syscall.O_CLOEXEC|syscall.O_NOFOLLOW, 0o600)
 	if err != nil {
 		return nil, fmt.Errorf("open daemon lock: %w", err)
+	}
+	file := os.NewFile(uintptr(fd), path)
+	info, err := file.Stat()
+	if err != nil {
+		file.Close()
+		return nil, fmt.Errorf("inspect daemon lock: %w", err)
+	}
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !ok || !info.Mode().IsRegular() || stat.Uid != uint32(os.Geteuid()) || stat.Nlink != 1 {
+		file.Close()
+		return nil, fmt.Errorf("daemon lock must be a regular file owned only by the current user")
+	}
+	if err := file.Chmod(0o600); err != nil {
+		file.Close()
+		return nil, fmt.Errorf("set daemon lock permissions: %w", err)
 	}
 	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
 		file.Close()
@@ -267,14 +297,20 @@ func (s *Server) handle(connection net.Conn) {
 		return
 	}
 	if request.Action == protocol.ActionAttach {
+		finish, ok := s.beginRequest(request.Action)
+		if !ok {
+			_ = reply(connection, protocol.Response{Error: "daemon is shutting down"})
+			return
+		}
+		finish()
 		s.handleAttach(connection, request.TabID)
 		return
 	}
 	if request.Action == protocol.ActionShutdown {
 		// Stop even when the acknowledgement cannot be delivered, so a client
 		// that already timed out never leaves the daemon running unnoticed.
+		s.beginShutdown()
 		_ = reply(connection, protocol.Response{})
-		s.stopOnce.Do(func() { close(s.stop) })
 		return
 	}
 	_ = reply(connection, s.dispatch(request))
@@ -322,6 +358,12 @@ func (s *Server) stopped() bool {
 }
 
 func (s *Server) dispatch(request protocol.Request) protocol.Response {
+	finish, ok := s.beginRequest(request.Action)
+	if !ok {
+		return protocol.Response{Error: "daemon is shutting down"}
+	}
+	defer finish()
+
 	switch request.Action {
 	case protocol.ActionPing:
 		return protocol.Response{}
@@ -344,6 +386,43 @@ func (s *Server) dispatch(request protocol.Request) protocol.Response {
 	}
 }
 
+func (s *Server) beginRequest(action string) (func(), bool) {
+	s.requestMu.Lock()
+	defer s.requestMu.Unlock()
+	if !s.accepting {
+		return nil, false
+	}
+	switch action {
+	case protocol.ActionCreateTab, protocol.ActionResize:
+		s.mutations.Add(1)
+		return s.mutations.Done, true
+	default:
+		return func() {}, true
+	}
+}
+
+func (s *Server) beginMutation() (func(), bool) {
+	s.requestMu.Lock()
+	defer s.requestMu.Unlock()
+	if !s.accepting {
+		return nil, false
+	}
+	s.mutations.Add(1)
+	return s.mutations.Done, true
+}
+
+func (s *Server) beginShutdown() {
+	s.requestMu.Lock()
+	if s.accepting {
+		s.accepting = false
+		s.mu.Lock()
+		s.stopping = true
+		s.mu.Unlock()
+	}
+	s.requestMu.Unlock()
+	s.stopOnce.Do(func() { close(s.stop) })
+}
+
 func (s *Server) snapshotResponse() protocol.Response {
 	snapshot := s.snapshot()
 	return protocol.Response{Snapshot: &snapshot}
@@ -353,6 +432,11 @@ func (s *Server) snapshotResponse() protocol.Response {
 // became unreadable could only be dropped by editing the state file by hand.
 // Terminals under the root keep running; they are simply no longer listed.
 func (s *Server) removeRoot(rootID string) protocol.Response {
+	finish, ok := s.beginMutation()
+	if !ok {
+		return protocol.Response{Error: "daemon is shutting down"}
+	}
+
 	s.mu.Lock()
 	index := -1
 	for position, root := range s.value.Roots {
@@ -363,6 +447,7 @@ func (s *Server) removeRoot(rootID string) protocol.Response {
 	}
 	if index < 0 {
 		s.mu.Unlock()
+		finish()
 		return protocol.Response{Error: "root not found"}
 	}
 
@@ -379,44 +464,39 @@ func (s *Server) removeRoot(rootID string) protocol.Response {
 	}
 	s.value.Workspaces = workspaces
 	tabs := make([]model.Tab, 0, len(s.value.Tabs))
-	closing := make([]*session, 0)
 	for _, tab := range s.value.Tabs {
 		if _, ok := orphaned[tab.WorkspaceID]; !ok {
 			tabs = append(tabs, tab)
-			continue
-		}
-		if value, ok := s.sessions[tab.ID]; ok {
-			closing = append(closing, value)
-			delete(s.sessions, tab.ID)
 		}
 	}
 	s.value.Tabs = tabs
 	if err := s.store.Save(s.value); err != nil {
 		s.value = previous
-		for _, value := range closing {
-			s.sessions[value.id] = value
-		}
 		s.mu.Unlock()
+		finish()
 		return protocol.Response{Error: err.Error()}
 	}
+	s.revision++
 	s.mu.Unlock()
-
-	for _, value := range closing {
-		value.close()
-	}
+	finish()
 	return s.snapshotResponse()
 }
 
 func (s *Server) addRoot(path string) protocol.Response {
-	canonical, err := canonicalDirectory(path)
+	canonical, err := resolveDirectory(path)
 	if err != nil {
 		return protocol.Response{Error: err.Error()}
+	}
+	finish, ok := s.beginMutation()
+	if !ok {
+		return protocol.Response{Error: "daemon is shutting down"}
 	}
 
 	s.mu.Lock()
 	for _, root := range s.value.Roots {
 		if root.Path == canonical {
 			s.mu.Unlock()
+			finish()
 			return s.snapshotResponse()
 		}
 	}
@@ -425,17 +505,39 @@ func (s *Server) addRoot(path string) protocol.Response {
 	if err := s.store.Save(s.value); err != nil {
 		s.value.Roots = s.value.Roots[:len(s.value.Roots)-1]
 		s.mu.Unlock()
+		finish()
 		return protocol.Response{Error: err.Error()}
 	}
+	s.revision++
 	s.mu.Unlock()
+	finish()
 	return s.snapshotResponse()
 }
 
 func (s *Server) ensureWorkspace(rootID, path string) protocol.Response {
-	canonical, err := canonicalDirectory(path)
+	s.mu.Lock()
+	if _, ok := findRoot(s.value.Roots, rootID); !ok {
+		s.mu.Unlock()
+		return protocol.Response{Error: "root not found"}
+	}
+	for _, workspace := range s.value.Workspaces {
+		if workspace.RootID == rootID && workspace.Path == path && workspaceHasTabs(s.value.Tabs, workspace.ID) {
+			copy := workspace
+			s.mu.Unlock()
+			return protocol.Response{Workspace: &copy}
+		}
+	}
+	s.mu.Unlock()
+
+	canonical, err := resolveDirectory(path)
 	if err != nil {
 		return protocol.Response{Error: err.Error()}
 	}
+	finish, ok := s.beginMutation()
+	if !ok {
+		return protocol.Response{Error: "daemon is shutting down"}
+	}
+	defer finish()
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -464,6 +566,7 @@ func (s *Server) ensureWorkspace(rootID, path string) protocol.Response {
 		s.value.Workspaces = s.value.Workspaces[:len(s.value.Workspaces)-1]
 		return protocol.Response{Error: err.Error()}
 	}
+	s.revision++
 	return protocol.Response{Workspace: &workspace}
 }
 
@@ -509,6 +612,7 @@ func (s *Server) createTab(request protocol.Request) protocol.Response {
 		value.close()
 		return protocol.Response{Error: err.Error()}
 	}
+	s.revision++
 	s.mu.Unlock()
 	return protocol.Response{Tab: &tab}
 }
@@ -547,11 +651,16 @@ func (s *Server) sessionExited(tabID string) {
 	defer s.mu.Unlock()
 	s.logger.Printf("shell for tab %s exited", tabID)
 	delete(s.sessions, tabID)
+	removed := false
 	for index := range s.value.Tabs {
 		if s.value.Tabs[index].ID == tabID {
 			s.value.Tabs = append(s.value.Tabs[:index], s.value.Tabs[index+1:]...)
+			removed = true
 			break
 		}
+	}
+	if removed {
+		s.revision++
 	}
 	if s.stopping {
 		// These shells exited because the daemon killed them, and it is
@@ -577,22 +686,24 @@ func (s *Server) sessionExited(tabID string) {
 func (s *Server) snapshot() model.Snapshot {
 	s.mu.Lock()
 	value := cloneState(s.value)
+	revision := s.revision
 	s.mu.Unlock()
 	agents := s.agents()
 	for index := range value.Tabs {
 		value.Tabs[index].Agent = agents[value.Tabs[index].ID]
 	}
 
-	result := model.Snapshot{Roots: make([]model.RootView, 0, len(value.Roots))}
+	result := model.Snapshot{Revision: revision, Roots: make([]model.RootView, 0, len(value.Roots))}
 	for _, root := range value.Roots {
 		rootWorkspace, _ := workspaceAt(value.Workspaces, root.ID, root.Path)
-		entries, err := os.ReadDir(root.Path)
+		entries, err := readDirectory(root.Path)
 		if err != nil {
+			directories := appendMissingRunningWorkspaces(nil, value, root)
 			result.Roots = append(result.Roots, model.RootView{
 				Root:        root,
 				Tabs:        tabsFor(value.Tabs, rootWorkspace.ID),
 				Error:       err.Error(),
-				Directories: make([]model.WorkspaceView, 0),
+				Directories: directories,
 			})
 			continue
 		}
@@ -611,6 +722,7 @@ func (s *Server) snapshot() model.Snapshot {
 				Tabs:      tabsFor(value.Tabs, workspace.ID),
 			})
 		}
+		directories = appendMissingRunningWorkspaces(directories, value, root)
 		sort.Slice(directories, func(i, j int) bool {
 			return directories[i].Workspace.Name < directories[j].Workspace.Name
 		})
@@ -621,6 +733,28 @@ func (s *Server) snapshot() model.Snapshot {
 		})
 	}
 	return result
+}
+
+func appendMissingRunningWorkspaces(directories []model.WorkspaceView, value model.State, root model.Root) []model.WorkspaceView {
+	seen := make(map[string]struct{}, len(directories))
+	for _, directory := range directories {
+		seen[directory.Workspace.Path] = struct{}{}
+	}
+	for _, workspace := range value.Workspaces {
+		if workspace.RootID != root.ID || workspace.Path == root.Path {
+			continue
+		}
+		if _, ok := seen[workspace.Path]; ok {
+			continue
+		}
+		tabs := tabsFor(value.Tabs, workspace.ID)
+		if len(tabs) == 0 {
+			continue
+		}
+		directories = append(directories, model.WorkspaceView{Workspace: workspace, Tabs: tabs})
+		seen[workspace.Path] = struct{}{}
+	}
+	return directories
 }
 
 func (s *Server) agents() map[string]model.Agent {
@@ -698,6 +832,15 @@ func tabsFor(values []model.Tab, workspaceID string) []model.Tab {
 		}
 	}
 	return result
+}
+
+func workspaceHasTabs(values []model.Tab, workspaceID string) bool {
+	for _, value := range values {
+		if value.WorkspaceID == workspaceID {
+			return true
+		}
+	}
+	return false
 }
 
 func nextTabName(values []model.Tab, workspaceID string) string {

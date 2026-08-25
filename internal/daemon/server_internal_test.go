@@ -25,6 +25,130 @@ func newSessionForTest() *session {
 	}
 }
 
+func TestShutdownDoesNotWaitForDirectoryPreflight(t *testing.T) {
+	for _, action := range []string{protocol.ActionAddRoot, protocol.ActionEnsureWorkspace} {
+		t.Run(action, func(t *testing.T) {
+			server, err := New(filepath.Join(t.TempDir(), "daemon.sock"), filepath.Join(t.TempDir(), "state.json"), "/bin/sh")
+			if err != nil {
+				t.Fatalf("New() error = %v", err)
+			}
+			request := protocol.Request{Action: action, Path: "/root"}
+			if action == protocol.ActionEnsureWorkspace {
+				server.value.Roots = []model.Root{{ID: "root-1", Name: "root", Path: "/root"}}
+				request.RootID = "root-1"
+				request.Path = "/root/child"
+			}
+
+			entered := make(chan struct{})
+			release := make(chan struct{})
+			released := false
+			previous := resolveDirectory
+			resolveDirectory = func(path string) (string, error) {
+				close(entered)
+				<-release
+				return path, nil
+			}
+			t.Cleanup(func() {
+				resolveDirectory = previous
+				if !released {
+					close(release)
+				}
+			})
+
+			response := make(chan protocol.Response, 1)
+			go func() { response <- server.dispatch(request) }()
+			<-entered
+			server.beginShutdown()
+			drained := make(chan struct{})
+			go func() {
+				server.mutations.Wait()
+				close(drained)
+			}()
+			select {
+			case <-drained:
+			case <-time.After(time.Second):
+				t.Fatal("shutdown waited for directory preflight")
+			}
+
+			close(release)
+			released = true
+			result := <-response
+			if result.Error != "daemon is shutting down" {
+				t.Fatalf("response error = %q, want shutdown rejection", result.Error)
+			}
+			if len(server.value.Roots) != 0 && action == protocol.ActionAddRoot {
+				t.Fatalf("roots = %#v, want no late mutation", server.value.Roots)
+			}
+			if len(server.value.Workspaces) != 0 {
+				t.Fatalf("workspaces = %#v, want no late mutation", server.value.Workspaces)
+			}
+		})
+	}
+}
+
+func TestShutdownDoesNotWaitForResponseSnapshot(t *testing.T) {
+	for _, action := range []string{protocol.ActionAddRoot, protocol.ActionRemoveRoot} {
+		t.Run(action, func(t *testing.T) {
+			base := t.TempDir()
+			server, err := New(filepath.Join(base, "daemon.sock"), filepath.Join(base, "state.json"), "/bin/sh")
+			if err != nil {
+				t.Fatalf("New() error = %v", err)
+			}
+			request := protocol.Request{Action: action}
+			if action == protocol.ActionAddRoot {
+				request.Path = t.TempDir()
+			} else {
+				server.value.Roots = []model.Root{
+					{ID: "remove", Name: "remove", Path: t.TempDir()},
+					{ID: "keep", Name: "keep", Path: t.TempDir()},
+				}
+				request.RootID = "remove"
+			}
+
+			entered := make(chan struct{})
+			release := make(chan struct{})
+			released := false
+			previous := readDirectory
+			readDirectory = func(string) ([]os.DirEntry, error) {
+				close(entered)
+				<-release
+				return nil, nil
+			}
+			t.Cleanup(func() {
+				readDirectory = previous
+				if !released {
+					close(release)
+				}
+			})
+
+			response := make(chan protocol.Response, 1)
+			go func() { response <- server.dispatch(request) }()
+			<-entered
+			server.beginShutdown()
+			drained := make(chan struct{})
+			go func() {
+				server.mutations.Wait()
+				close(drained)
+			}()
+			select {
+			case <-drained:
+			case <-time.After(time.Second):
+				t.Fatal("shutdown waited for response snapshot")
+			}
+
+			close(release)
+			released = true
+			result := <-response
+			if result.Error != "" {
+				t.Fatalf("response error = %q", result.Error)
+			}
+			if result.Snapshot == nil {
+				t.Fatal("response has no snapshot")
+			}
+		})
+	}
+}
+
 // A peer that connects and never finishes a request must not hold a goroutine
 // and a file descriptor for the daemon's whole life, and must not keep the
 // daemon from serving anyone else.
@@ -632,6 +756,46 @@ func TestServeReportsAlreadyRunningWhenAnotherDaemonHoldsTheLock(t *testing.T) {
 	}
 }
 
+func TestLockDaemonDoesNotFollowASymlink(t *testing.T) {
+	base := t.TempDir()
+	target := filepath.Join(base, "target")
+	if err := os.WriteFile(target, []byte("unchanged"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	if err := os.Symlink(target, filepath.Join(base, "daemon.sock.lock")); err != nil {
+		t.Fatalf("Symlink() error = %v", err)
+	}
+
+	if lock, err := lockDaemon(filepath.Join(base, "daemon.sock.lock")); err == nil {
+		lock.Close()
+		t.Fatal("lockDaemon() followed a symbolic link")
+	}
+	contents, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	if string(contents) != "unchanged" {
+		t.Fatalf("symlink target = %q, want unchanged", contents)
+	}
+}
+
+func TestLockDaemonRejectsAHardLink(t *testing.T) {
+	base := t.TempDir()
+	target := filepath.Join(base, "target")
+	if err := os.WriteFile(target, nil, 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	lockPath := filepath.Join(base, "daemon.sock.lock")
+	if err := os.Link(target, lockPath); err != nil {
+		t.Fatalf("Link() error = %v", err)
+	}
+
+	if lock, err := lockDaemon(lockPath); err == nil {
+		lock.Close()
+		t.Fatal("lockDaemon() accepted a multiply linked file")
+	}
+}
+
 // The tabs a state file carries name shells that died with the last daemon, so
 // they are cleared before the socket exists. A daemon that cannot clear them
 // has nothing consistent to serve, and must not have touched the socket path a
@@ -679,5 +843,72 @@ func TestServeClearsStaleTabsBeforeTouchingTheSocket(t *testing.T) {
 	}
 	if _, err := os.Lstat(socket); err != nil {
 		t.Fatalf("the socket path was disturbed by a daemon that never served: %v", err)
+	}
+}
+
+func TestShutdownDrainsAdmittedMutations(t *testing.T) {
+	server := &Server{stop: make(chan struct{}), accepting: true}
+	finish, ok := server.beginRequest(protocol.ActionCreateTab)
+	if !ok {
+		t.Fatal("server rejected a mutation before shutdown")
+	}
+	server.beginShutdown()
+	if _, ok := server.beginRequest(protocol.ActionAddRoot); ok {
+		t.Fatal("server admitted a new mutation during shutdown")
+	}
+
+	drained := make(chan struct{})
+	go func() {
+		server.mutations.Wait()
+		close(drained)
+	}()
+	select {
+	case <-drained:
+		t.Fatal("shutdown passed an admitted mutation that was still running")
+	case <-time.After(100 * time.Millisecond):
+	}
+	finish()
+	select {
+	case <-drained:
+	case <-time.After(3 * time.Second):
+		t.Fatal("shutdown did not continue after the admitted mutation finished")
+	}
+}
+
+func TestSnapshotRevisionAdvancesWithPersistedState(t *testing.T) {
+	base := t.TempDir()
+	rootPath := filepath.Join(base, "projects")
+	workspacePath := filepath.Join(rootPath, "alpha")
+	if err := os.MkdirAll(workspacePath, 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	server, err := New(filepath.Join(base, "daemon.sock"), filepath.Join(base, "state.json"), "/bin/sh")
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	initial := server.snapshot().Revision
+	added := server.addRoot(rootPath)
+	if added.Error != "" || added.Snapshot == nil {
+		t.Fatalf("addRoot() = %#v", added)
+	}
+	if added.Snapshot.Revision <= initial {
+		t.Fatalf("revision after add = %d, want > %d", added.Snapshot.Revision, initial)
+	}
+	rootID := added.Snapshot.Roots[0].Root.ID
+	ensured := server.ensureWorkspace(rootID, workspacePath)
+	if ensured.Error != "" {
+		t.Fatalf("ensureWorkspace() error = %s", ensured.Error)
+	}
+	afterWorkspace := server.snapshot().Revision
+	if afterWorkspace <= added.Snapshot.Revision {
+		t.Fatalf("revision after workspace = %d, want > %d", afterWorkspace, added.Snapshot.Revision)
+	}
+	removed := server.removeRoot(rootID)
+	if removed.Error != "" || removed.Snapshot == nil {
+		t.Fatalf("removeRoot() = %#v", removed)
+	}
+	if removed.Snapshot.Revision <= afterWorkspace {
+		t.Fatalf("revision after remove = %d, want > %d", removed.Snapshot.Revision, afterWorkspace)
 	}
 }

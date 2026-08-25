@@ -1,9 +1,12 @@
 package daemon
 
 import (
+	"context"
+	"errors"
 	"os"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/opspresso/romty/internal/model"
 )
@@ -43,14 +46,14 @@ func TestSessionAgentsMatchTabsByForegroundProcessGroup(t *testing.T) {
 	codexPTY := new(os.File)
 	groups := map[*os.File]int{claudePTY: 101, codexPTY: 202}
 	previousGroup := foregroundProcessGroup
-	previousList := listProcesses
+	previousList := runProcessList
 	foregroundProcessGroup = func(terminal *os.File) (int, error) { return groups[terminal], nil }
-	listProcesses = func() ([]byte, error) {
+	runProcessList = func(context.Context) ([]byte, error) {
 		return []byte("101 claude\n202 codex\n"), nil
 	}
 	t.Cleanup(func() {
 		foregroundProcessGroup = previousGroup
-		listProcesses = previousList
+		runProcessList = previousList
 	})
 
 	sessions := map[string]*session{
@@ -63,5 +66,33 @@ func TestSessionAgentsMatchTabsByForegroundProcessGroup(t *testing.T) {
 	}
 	if got := sessionAgents(sessions); !reflect.DeepEqual(got, want) {
 		t.Fatalf("sessionAgents() = %#v, want %#v", got, want)
+	}
+}
+
+func TestListProcessesTimesOut(t *testing.T) {
+	previousTimeout := processListTimeout
+	previousList := runProcessList
+	processListTimeout = 20 * time.Millisecond
+	runProcessList = func(ctx context.Context) ([]byte, error) {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
+	t.Cleanup(func() {
+		processListTimeout = previousTimeout
+		runProcessList = previousList
+	})
+
+	result := make(chan error, 1)
+	go func() {
+		_, err := listProcesses()
+		result <- err
+	}()
+	select {
+	case err := <-result:
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("listProcesses() error = %v, want deadline exceeded", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("listProcesses() ignored its timeout")
 	}
 }

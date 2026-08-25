@@ -64,5 +64,23 @@ func (p Paths) Ensure() error {
 	if err := os.MkdirAll(p.Directory, 0o700); err != nil {
 		return fmt.Errorf("create romty directory: %w", err)
 	}
+	fd, err := syscall.Open(p.Directory,
+		syscall.O_RDONLY|syscall.O_DIRECTORY|syscall.O_NOFOLLOW|syscall.O_CLOEXEC, 0)
+	if err != nil {
+		return fmt.Errorf("open romty directory securely: %w", err)
+	}
+	directory := os.NewFile(uintptr(fd), p.Directory)
+	defer directory.Close()
+	info, err := directory.Stat()
+	if err != nil {
+		return fmt.Errorf("inspect romty directory: %w", err)
+	}
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !ok || stat.Uid != uint32(os.Geteuid()) {
+		return fmt.Errorf("romty directory must be owned by the current user")
+	}
+	if err := directory.Chmod(0o700); err != nil {
+		return fmt.Errorf("set romty directory permissions: %w", err)
+	}
 	return nil
 }

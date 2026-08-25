@@ -30,10 +30,12 @@ var replayTimeout = 2 * time.Second
 const replayChunkBytes = 64 << 10
 
 type session struct {
-	id      string
-	pty     *os.File
-	command *exec.Cmd
-	onExit  func()
+	id       string
+	pty      *os.File
+	command  *exec.Cmd
+	onExit   func()
+	readDone chan struct{}
+	exitDone chan struct{}
 
 	mu      sync.Mutex
 	writeMu sync.Mutex
@@ -76,12 +78,14 @@ func startSession(id, directory, shell string, environment []string, columns, ro
 	}
 
 	value := &session{
-		id:      id,
-		pty:     terminal,
-		command: command,
-		onExit:  onExit,
-		modes:   newModeTracker(),
-		clients: make(map[net.Conn]*attachment),
+		id:       id,
+		pty:      terminal,
+		command:  command,
+		onExit:   onExit,
+		readDone: make(chan struct{}),
+		exitDone: make(chan struct{}),
+		modes:    newModeTracker(),
+		clients:  make(map[net.Conn]*attachment),
 	}
 	go value.read()
 	go value.wait()
@@ -100,8 +104,9 @@ func startSession(id, directory, shell string, environment []string, columns, ro
 func (s *session) read() {
 	defer func() {
 		s.mu.Lock()
-		defer s.mu.Unlock()
 		_ = s.pty.Close()
+		s.mu.Unlock()
+		close(s.readDone)
 	}()
 	buffer := make([]byte, 32*1024)
 	for {
@@ -116,7 +121,11 @@ func (s *session) read() {
 }
 
 func (s *session) wait() {
+	if s.exitDone != nil {
+		defer close(s.exitDone)
+	}
 	_ = s.command.Wait()
+	<-s.readDone
 	s.mu.Lock()
 	s.closed = true
 	clients := make([]net.Conn, 0, len(s.clients))
@@ -125,10 +134,10 @@ func (s *session) wait() {
 	}
 	s.clients = make(map[net.Conn]*attachment)
 	s.mu.Unlock()
+	s.onExit()
 	for _, connection := range clients {
 		connection.Close()
 	}
-	s.onExit()
 }
 
 func (s *session) broadcast(data []byte) {
@@ -294,14 +303,21 @@ func (s *session) resize(columns, rows uint16) error {
 
 func (s *session) close() {
 	s.mu.Lock()
-	if s.closed {
-		s.mu.Unlock()
-		return
+	alreadyClosed := s.closed
+	if !alreadyClosed {
+		s.closed = true
+		_ = s.pty.Close()
 	}
-	s.closed = true
-	_ = s.pty.Close()
+	exitDone := s.exitDone
+	process := s.command.Process
 	s.mu.Unlock()
-	if s.command.Process != nil {
-		_ = s.command.Process.Kill()
+	if !alreadyClosed && process != nil {
+		_ = process.Kill()
+	}
+	// The daemon's socket and lock are its shutdown acknowledgement. Do not
+	// release them while this shell is still being reaped or its clients are
+	// still being closed, or `romty stop` can report success too early.
+	if exitDone != nil {
+		<-exitDone
 	}
 }

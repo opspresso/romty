@@ -21,6 +21,7 @@ import (
 // is a terminal a user leaves open. handshakeTimeout is a variable so tests
 // need not wait it out, the way the daemon's request timeout is one.
 const dialTimeout = 2 * time.Second
+const shutdownTimeout = 10 * time.Second
 
 var handshakeTimeout = 3 * time.Second
 
@@ -156,7 +157,47 @@ func (c *Client) Resize(tabID string, columns, rows uint16) error {
 
 func (c *Client) Shutdown() error {
 	_, err := c.call(protocol.Request{Action: protocol.ActionShutdown})
-	return err
+	if err != nil {
+		return err
+	}
+	deadline := time.Now().Add(shutdownTimeout)
+	for time.Now().Before(deadline) {
+		stopped, err := daemonStopped(c.socket)
+		if err != nil {
+			return err
+		}
+		if stopped {
+			return nil
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	return fmt.Errorf("daemon did not finish stopping")
+}
+
+func daemonStopped(socket string) (bool, error) {
+	if _, err := os.Lstat(socket); err == nil {
+		return false, nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return false, fmt.Errorf("inspect daemon socket after shutdown: %w", err)
+	}
+	lock, err := os.OpenFile(socket+".lock", os.O_RDWR, 0)
+	if errors.Is(err, os.ErrNotExist) {
+		return true, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("open daemon lock after shutdown: %w", err)
+	}
+	defer lock.Close()
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		if errors.Is(err, syscall.EWOULDBLOCK) {
+			return false, nil
+		}
+		return false, fmt.Errorf("check daemon lock after shutdown: %w", err)
+	}
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_UN); err != nil {
+		return false, fmt.Errorf("release daemon lock after shutdown check: %w", err)
+	}
+	return true, nil
 }
 
 // Unavailable reports whether err means the daemon socket could not be reached,
@@ -166,6 +207,9 @@ func Unavailable(err error) bool {
 }
 
 func (c *Client) OpenAttach(tabID string) (net.Conn, *bufio.Reader, error) {
+	if err := validateDaemonSocket(c.socket); err != nil {
+		return nil, nil, err
+	}
 	connection, err := net.DialTimeout("unix", c.socket, dialTimeout)
 	if err != nil {
 		return nil, nil, fmt.Errorf("connect to daemon: %w", err)
@@ -224,6 +268,9 @@ func sendRequest(w io.Writer, request protocol.Request) error {
 }
 
 func (c *Client) call(request protocol.Request) (protocol.Response, error) {
+	if err := validateDaemonSocket(c.socket); err != nil {
+		return protocol.Response{}, err
+	}
 	connection, err := net.DialTimeout("unix", c.socket, dialTimeout)
 	if err != nil {
 		return protocol.Response{}, fmt.Errorf("connect to daemon: %w", err)
@@ -244,6 +291,27 @@ func (c *Client) call(request protocol.Request) (protocol.Response, error) {
 		return protocol.Response{}, err
 	}
 	return response, nil
+}
+
+func validateDaemonSocket(path string) error {
+	info, err := os.Lstat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("inspect daemon socket: %w", err)
+	}
+	if info.Mode()&os.ModeSocket == 0 {
+		return fmt.Errorf("daemon socket path is not a unix socket")
+	}
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !ok || stat.Uid != uint32(os.Geteuid()) {
+		return fmt.Errorf("daemon socket must be owned by the current user")
+	}
+	if info.Mode().Perm()&0o077 != 0 {
+		return fmt.Errorf("daemon socket must not be accessible by group or other users")
+	}
+	return nil
 }
 
 // checkResponse judges a reply before anything reads its fields. The version

@@ -37,6 +37,21 @@ func TestModeTrackerFollowsWhatTheGuestSet(t *testing.T) {
 			restore: "\x1b[?2004h",
 		},
 		{
+			name:    "application keypad",
+			output:  []string{"\x1b="},
+			restore: "\x1b=",
+		},
+		{
+			name:    "application keypad turned back to normal",
+			output:  []string{"\x1b=", "work\r\n", "\x1b>"},
+			restore: "\x1b>",
+		},
+		{
+			name:    "application keypad split across chunks",
+			output:  []string{"\x1b", "="},
+			restore: "\x1b=",
+		},
+		{
 			name:    "a sequence split across two chunks",
 			output:  []string{"before\x1b[?20", "04h after"},
 			restore: "\x1b[?2004h",
@@ -87,8 +102,8 @@ func TestModeTrackerOutlivesTheRecording(t *testing.T) {
 	t.Cleanup(func() { maxHistoryBytes = previous })
 
 	value := newSessionForTest()
-	value.modes.observe([]byte("\x1b[?2004h"))
-	value.history.append([]byte("\x1b[?2004h"))
+	value.modes.observe([]byte("\x1b[?2004h\x1b="))
+	value.history.append([]byte("\x1b[?2004h\x1b="))
 	// Enough output to push the mode out of the recording entirely.
 	flood := []byte(strings.Repeat("x", maxHistoryBytes*2))
 	value.modes.observe(flood)
@@ -97,8 +112,8 @@ func TestModeTrackerOutlivesTheRecording(t *testing.T) {
 	if strings.Contains(string(value.history.bytes()), "2004h") {
 		t.Fatal("the recording still holds the mode; the test proves nothing")
 	}
-	if got := string(value.modes.restore()); got != "\x1b[?2004h" {
-		t.Fatalf("restore() = %q, want bracketed paste restored from outside the recording", got)
+	if got := string(value.modes.restore()); got != "\x1b[?2004h\x1b=" {
+		t.Fatalf("restore() = %q, want sticky modes restored from outside the recording", got)
 	}
 }
 

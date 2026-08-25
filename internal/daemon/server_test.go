@@ -274,6 +274,70 @@ func TestServerOpensRootTerminalAndReloadsDirectories(t *testing.T) {
 	}
 }
 
+func TestSnapshotKeepsRunningWorkspaceWhenItsDirectoryDisappears(t *testing.T) {
+	base := testutil.ShortTempDir(t)
+	root := filepath.Join(base, "projects")
+	workspacePath := filepath.Join(root, "alpha")
+	if err := os.MkdirAll(workspacePath, 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+
+	socket := filepath.Join(base, "daemon.sock")
+	server, err := daemon.New(socket, filepath.Join(base, "state.json"), "/bin/sh")
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	server.SetLogger(testutil.QuietLogger())
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- server.Serve(ctx) }()
+	defer func() {
+		cancel()
+		<-done
+	}()
+
+	backend := client.New(socket)
+	testutil.WaitForDaemon(t, backend)
+	snapshot, err := backend.AddRoot(root)
+	if err != nil {
+		t.Fatalf("AddRoot() error = %v", err)
+	}
+	rootID := snapshot.Roots[0].Root.ID
+	workspace, err := backend.EnsureWorkspace(rootID, workspacePath)
+	if err != nil {
+		t.Fatalf("EnsureWorkspace() error = %v", err)
+	}
+	tab, err := backend.CreateTab(workspace.ID, 80, 24)
+	if err != nil {
+		t.Fatalf("CreateTab() error = %v", err)
+	}
+
+	if err := os.RemoveAll(root); err != nil {
+		t.Fatalf("RemoveAll() error = %v", err)
+	}
+	snapshot, err = backend.Snapshot()
+	if err != nil {
+		t.Fatalf("Snapshot() error = %v", err)
+	}
+	if len(snapshot.Roots) != 1 || snapshot.Roots[0].Error == "" || len(snapshot.Roots[0].Directories) != 1 {
+		t.Fatalf("snapshot after directory removal = %#v", snapshot.Roots)
+	}
+	missing := snapshot.Roots[0].Directories[0]
+	if missing.Workspace.ID != workspace.ID || len(missing.Tabs) != 1 || missing.Tabs[0].ID != tab.ID {
+		t.Fatalf("missing workspace = %#v, want running tab %q", missing, tab.ID)
+	}
+	if _, err := backend.EnsureWorkspace(rootID, workspace.Path); err != nil {
+		t.Fatalf("EnsureWorkspace() for running missing workspace error = %v", err)
+	}
+	connection, reader, err := backend.OpenAttach(tab.ID)
+	if err != nil {
+		t.Fatalf("OpenAttach() after directory removal error = %v", err)
+	}
+	defer connection.Close()
+	writeCommand(t, connection, "printf workspace-survived")
+	readUntil(t, connection, reader, "workspace-survived")
+}
+
 func TestEnsureWorkspaceRejectsNestedDirectory(t *testing.T) {
 	base := testutil.ShortTempDir(t)
 	root := filepath.Join(base, "projects")
@@ -443,8 +507,14 @@ func TestAttachDoesNotReplayTerminalQueries(t *testing.T) {
 	}
 	server.SetLogger(testutil.QuietLogger())
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	go server.Serve(ctx)
+	done := make(chan error, 1)
+	go func() { done <- server.Serve(ctx) }()
+	defer func() {
+		cancel()
+		if err := <-done; err != nil {
+			t.Errorf("Serve() error = %v", err)
+		}
+	}()
 	backend := client.New(socket)
 	testutil.WaitForDaemon(t, backend)
 
@@ -577,6 +647,52 @@ func TestSnapshotSurvivesAnUnreadableRoot(t *testing.T) {
 	if _, err := backend.RemoveRoot(doomedID); err == nil {
 		t.Fatal("removing an unknown root reported success")
 	}
+}
+
+func TestRemoveRootKeepsTerminalRunning(t *testing.T) {
+	base := testutil.ShortTempDir(t)
+	root := filepath.Join(base, "projects")
+	if err := os.Mkdir(root, 0o755); err != nil {
+		t.Fatalf("Mkdir() error = %v", err)
+	}
+
+	socket := filepath.Join(base, "daemon.sock")
+	server, err := daemon.New(socket, filepath.Join(base, "state.json"), "/bin/sh")
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	server.SetLogger(testutil.QuietLogger())
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- server.Serve(ctx) }()
+	defer func() { cancel(); <-done }()
+
+	backend := client.New(socket)
+	testutil.WaitForDaemon(t, backend)
+	snapshot, err := backend.AddRoot(root)
+	if err != nil {
+		t.Fatalf("AddRoot() error = %v", err)
+	}
+	rootID := snapshot.Roots[0].Root.ID
+	workspace, err := backend.EnsureWorkspace(rootID, root)
+	if err != nil {
+		t.Fatalf("EnsureWorkspace() error = %v", err)
+	}
+	tab, err := backend.CreateTab(workspace.ID, 80, 24)
+	if err != nil {
+		t.Fatalf("CreateTab() error = %v", err)
+	}
+	connection, reader, err := backend.OpenAttach(tab.ID)
+	if err != nil {
+		t.Fatalf("OpenAttach() error = %v", err)
+	}
+	defer connection.Close()
+
+	if _, err := backend.RemoveRoot(rootID); err != nil {
+		t.Fatalf("RemoveRoot() error = %v", err)
+	}
+	writeCommand(t, connection, "printf terminal-survived")
+	readUntil(t, connection, reader, "terminal-survived")
 }
 
 // The socket is the only thing between another local process and every shell

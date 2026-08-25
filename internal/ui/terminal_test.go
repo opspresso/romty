@@ -148,3 +148,57 @@ func TestEmbeddedTerminalForwardsModifiedKeys(t *testing.T) {
 		})
 	}
 }
+
+func TestEmbeddedTerminalClampsScrollRegion(t *testing.T) {
+	stream := newMemoryStream("")
+	terminal := newEmbeddedTerminal("tab-1", stream, 20, 5)
+	defer terminal.close()
+
+	// A guest that has not seen the pane shrink yet asks for a scroll region
+	// taller than the screen, then scrolls inside it.
+	terminal.writeOutput([]byte("\x1b[1;40r"))
+	terminal.writeOutput([]byte("a\x1bM"))
+
+	lines := terminal.render()
+	if len(lines) != 5 {
+		t.Fatalf("rendered %d lines, want 5", len(lines))
+	}
+	if !strings.Contains(lines[1], "a") {
+		t.Fatalf("rendered terminal = %q, want the reverse index to scroll %q onto the second row", lines, "a")
+	}
+}
+
+func TestEmbeddedTerminalClampsHorizontalMargins(t *testing.T) {
+	stream := newMemoryStream("")
+	terminal := newEmbeddedTerminal("tab-1", stream, 20, 5)
+	defer terminal.close()
+
+	// Left and right margin mode, then margins wider than the screen, then an
+	// insert that walks the whole region.
+	terminal.writeOutput([]byte("\x1b[?69h\x1b[1;80s"))
+	terminal.writeOutput([]byte("ab\x1b[H\x1b[2@"))
+
+	lines := terminal.render()
+	if !strings.Contains(lines[0], "  ab") {
+		t.Fatalf("rendered terminal = %q, want the insert to push %q right", lines, "ab")
+	}
+}
+
+func TestEmbeddedTerminalKeepsScrollRegionInRange(t *testing.T) {
+	stream := newMemoryStream("")
+	terminal := newEmbeddedTerminal("tab-1", stream, 20, 5)
+	defer terminal.close()
+
+	// A region the screen can hold is left exactly as the guest asked: the
+	// last row sits outside it and must not move.
+	terminal.writeOutput([]byte("\x1b[5;1Hz\x1b[1;3r"))
+	terminal.writeOutput([]byte("a\x1bM"))
+
+	lines := terminal.render()
+	if !strings.Contains(lines[1], "a") {
+		t.Fatalf("rendered terminal = %q, want %q scrolled onto the second row", lines, "a")
+	}
+	if !strings.Contains(lines[4], "z") {
+		t.Fatalf("rendered terminal = %q, want %q left below the scroll region", lines, "z")
+	}
+}

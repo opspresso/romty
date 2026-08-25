@@ -28,6 +28,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          persist-credentials: false
 
       - name: Set up Go
         uses: actions/setup-go@v7
@@ -53,3 +55,37 @@ jobs:
 
       - name: Build
         run: go build ./...
+
+  release-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: Build release snapshot
+        uses: goreleaser/goreleaser-action@v7
+        with:
+          distribution: goreleaser
+          version: v2.17.1
+          args: release --snapshot --clean
+
+      - name: Validate Homebrew formula
+        run: |
+          ./scripts/render-homebrew-formula.sh v0.0.0 dist/checksums.txt /tmp/romty.rb
+          ruby -c /tmp/romty.rb
+          for artifact in dist/romty_0.0.0_{darwin,linux}_{amd64,arm64}.tar.gz; do
+            if ! tar -tzf "$artifact" | grep -qx romty; then
+              echo "$artifact does not contain a top-level romty binary"
+              exit 1
+            fi
+          done

@@ -252,11 +252,11 @@ func (m dashboard) browseCapacity() int {
 // always fits the body, the way the help modal windows its shortcuts.
 func (m dashboard) renderBrowseModal(width, height int) []string {
 	contentWidth := max(width-6, 0)
-	lines := []string{m.styles.empty.Render(shortenPath(m.browse.path, contentWidth)), ""}
+	lines := []string{m.styles.empty.Render(shortenPath(displayText(m.browse.path), contentWidth)), ""}
 	capacity := max(modalCapacity(height)-len(lines), 1)
 	switch {
 	case m.browse.failure != "":
-		lines = append(lines, m.styles.errorText.Render(m.browse.failure))
+		lines = append(lines, m.styles.errorText.Render(displayText(m.browse.failure)))
 	case m.browse.loading:
 		lines = append(lines, m.styles.empty.Render("Reading…"))
 	default:
@@ -281,7 +281,7 @@ func (m dashboard) renderBrowseRow(index, width int) string {
 	name := ".  this directory"
 	marker := "  "
 	if index > 0 {
-		name = m.browse.entries[index-1]
+		name = displayText(m.browse.entries[index-1])
 		marker = " ▸"
 	}
 	style := m.styles.modalBody

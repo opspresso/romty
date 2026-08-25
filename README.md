@@ -246,6 +246,8 @@ Set `ROMTY_HOME` to use a different directory, which is useful for development o
 ROMTY_HOME=/tmp/romty-dev romty
 ```
 
+The directory must be owned by the current user and cannot be a symbolic link. romty narrows it to mode `0700` and refuses a daemon socket or log that could expose the client environment or terminal stream to another local user.
+
 Keep it shallow. `daemon.sock` lives inside it, and a unix socket path has a hard ceiling in the kernel — 104 bytes on macOS, 108 on Linux. romty refuses a directory that would put the socket past it and says so, rather than leaving `bind: invalid argument` to explain itself.
 
 ## Architecture
