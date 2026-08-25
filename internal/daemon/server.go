@@ -375,6 +375,8 @@ func (s *Server) dispatch(request protocol.Request) protocol.Response {
 		return s.addRoot(request.Path)
 	case protocol.ActionRemoveRoot:
 		return s.removeRoot(request.RootID)
+	case protocol.ActionRemoveWorkspace:
+		return s.removeWorkspace(request.RootID, request.Path)
 	case protocol.ActionEnsureWorkspace:
 		return s.ensureWorkspace(request.RootID, request.Path)
 	case protocol.ActionCreateTab:
@@ -430,7 +432,8 @@ func (s *Server) snapshotResponse() protocol.Response {
 
 // removeRoot forgets a root and everything under it. Without it a root that
 // became unreadable could only be dropped by editing the state file by hand.
-// Terminals under the root keep running; they are simply no longer listed.
+// Its directory stays on disk, but its terminal sessions are terminated so
+// they do not survive as processes the workspace tree can no longer reach.
 func (s *Server) removeRoot(rootID string) protocol.Response {
 	finish, ok := s.beginMutation()
 	if !ok {
@@ -463,11 +466,16 @@ func (s *Server) removeRoot(rootID string) protocol.Response {
 		workspaces = append(workspaces, workspace)
 	}
 	s.value.Workspaces = workspaces
+	sessions := make([]*session, 0, len(orphaned))
 	tabs := make([]model.Tab, 0, len(s.value.Tabs))
 	for _, tab := range s.value.Tabs {
-		if _, ok := orphaned[tab.WorkspaceID]; !ok {
-			tabs = append(tabs, tab)
+		if _, removed := orphaned[tab.WorkspaceID]; removed {
+			if value, ok := s.sessions[tab.ID]; ok {
+				sessions = append(sessions, value)
+			}
+			continue
 		}
+		tabs = append(tabs, tab)
 	}
 	s.value.Tabs = tabs
 	if err := s.store.Save(s.value); err != nil {
@@ -478,8 +486,93 @@ func (s *Server) removeRoot(rootID string) protocol.Response {
 	}
 	s.revision++
 	s.mu.Unlock()
+	for _, value := range sessions {
+		value.close()
+	}
 	finish()
 	return s.snapshotResponse()
+}
+
+func (s *Server) removeWorkspace(rootID, path string) protocol.Response {
+	finish, ok := s.beginMutation()
+	if !ok {
+		return protocol.Response{Error: "daemon is shutting down"}
+	}
+	defer finish()
+
+	s.mu.Lock()
+	root, ok := findRoot(s.value.Roots, rootID)
+	s.mu.Unlock()
+	if !ok {
+		return protocol.Response{Error: "root not found"}
+	}
+	workspacePath, err := removableWorkspacePath(root, path)
+	if err != nil {
+		return protocol.Response{Error: err.Error()}
+	}
+	if err := os.RemoveAll(workspacePath); err != nil {
+		return protocol.Response{Error: fmt.Sprintf("delete workspace: %v", err)}
+	}
+
+	s.mu.Lock()
+	previous := cloneState(s.value)
+	removedWorkspaceIDs := make(map[string]struct{})
+	workspaces := make([]model.Workspace, 0, len(s.value.Workspaces))
+	for _, workspace := range s.value.Workspaces {
+		if workspace.RootID == rootID && workspace.Path == workspacePath {
+			removedWorkspaceIDs[workspace.ID] = struct{}{}
+			continue
+		}
+		workspaces = append(workspaces, workspace)
+	}
+	s.value.Workspaces = workspaces
+	sessions := make([]*session, 0, len(removedWorkspaceIDs))
+	tabs := make([]model.Tab, 0, len(s.value.Tabs))
+	for _, tab := range s.value.Tabs {
+		if _, removed := removedWorkspaceIDs[tab.WorkspaceID]; removed {
+			if value, ok := s.sessions[tab.ID]; ok {
+				sessions = append(sessions, value)
+			}
+			continue
+		}
+		tabs = append(tabs, tab)
+	}
+	s.value.Tabs = tabs
+	if len(removedWorkspaceIDs) > 0 {
+		if err := s.store.Save(s.value); err != nil {
+			s.value = previous
+			s.mu.Unlock()
+			return protocol.Response{Error: fmt.Sprintf("workspace directory deleted but persist state: %v", err)}
+		}
+	}
+	s.revision++
+	s.mu.Unlock()
+	for _, value := range sessions {
+		value.close()
+	}
+	return s.snapshotResponse()
+}
+
+func removableWorkspacePath(root model.Root, path string) (string, error) {
+	workspacePath := filepath.Clean(path)
+	if path == "" || workspacePath != path || workspacePath == root.Path || filepath.Dir(workspacePath) != root.Path {
+		return "", fmt.Errorf("workspace must be a direct child of its root")
+	}
+	canonicalRoot, err := canonicalDirectory(root.Path)
+	if err != nil {
+		return "", fmt.Errorf("inspect workspace root: %w", err)
+	}
+	if canonicalRoot != root.Path {
+		return "", fmt.Errorf("workspace root changed since it was registered")
+	}
+	info, err := os.Lstat(workspacePath)
+	if err != nil {
+		return "", fmt.Errorf("inspect workspace: %w", err)
+	}
+	if !info.IsDir() {
+		return "", fmt.Errorf("workspace path is not a directory")
+	}
+	return workspacePath, nil
 }
 
 func (s *Server) addRoot(path string) protocol.Response {

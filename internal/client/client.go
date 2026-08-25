@@ -16,12 +16,16 @@ import (
 	"github.com/opspresso/romty/internal/protocol"
 )
 
-// dialTimeout bounds reaching the socket, and handshakeTimeout the request and
-// the reply that answers it. Neither bounds the attach that may follow, which
-// is a terminal a user leaves open. handshakeTimeout is a variable so tests
-// need not wait it out, the way the daemon's request timeout is one.
-const dialTimeout = 2 * time.Second
-const shutdownTimeout = 10 * time.Second
+// dialTimeout bounds reaching the socket, and handshakeTimeout an ordinary
+// request and its reply. Neither bounds the attach that may follow, which is a
+// terminal a user leaves open. Removing a large workspace gets its own bound.
+// handshakeTimeout is a variable so tests need not wait it out, the way the
+// daemon's request timeout is one.
+const (
+	dialTimeout             = 2 * time.Second
+	shutdownTimeout         = 10 * time.Second
+	workspaceRemovalTimeout = 10 * time.Minute
+)
 
 var handshakeTimeout = 3 * time.Second
 
@@ -100,6 +104,21 @@ func normalizePath(path string) (string, error) {
 
 func (c *Client) RemoveRoot(rootID string) (model.Snapshot, error) {
 	response, err := c.call(protocol.Request{Action: protocol.ActionRemoveRoot, RootID: rootID})
+	if err != nil {
+		return model.Snapshot{}, err
+	}
+	if response.Snapshot == nil {
+		return model.Snapshot{}, fmt.Errorf("daemon returned no snapshot")
+	}
+	return *response.Snapshot, nil
+}
+
+func (c *Client) RemoveWorkspace(rootID, path string) (model.Snapshot, error) {
+	response, err := c.call(protocol.Request{
+		Action: protocol.ActionRemoveWorkspace,
+		RootID: rootID,
+		Path:   path,
+	})
 	if err != nil {
 		return model.Snapshot{}, err
 	}
@@ -276,7 +295,11 @@ func (c *Client) call(request protocol.Request) (protocol.Response, error) {
 		return protocol.Response{}, fmt.Errorf("connect to daemon: %w", err)
 	}
 	defer connection.Close()
-	if err := connection.SetDeadline(time.Now().Add(handshakeTimeout)); err != nil {
+	timeout := handshakeTimeout
+	if request.Action == protocol.ActionRemoveWorkspace {
+		timeout = workspaceRemovalTimeout
+	}
+	if err := connection.SetDeadline(time.Now().Add(timeout)); err != nil {
 		return protocol.Response{}, fmt.Errorf("set daemon deadline: %w", err)
 	}
 	if err := sendRequest(connection, request); err != nil {

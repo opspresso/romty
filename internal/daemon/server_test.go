@@ -649,7 +649,7 @@ func TestSnapshotSurvivesAnUnreadableRoot(t *testing.T) {
 	}
 }
 
-func TestRemoveRootKeepsTerminalRunning(t *testing.T) {
+func TestRemoveRootTerminatesItsTerminalSessions(t *testing.T) {
 	base := testutil.ShortTempDir(t)
 	root := filepath.Join(base, "projects")
 	if err := os.Mkdir(root, 0o755); err != nil {
@@ -687,12 +687,138 @@ func TestRemoveRootKeepsTerminalRunning(t *testing.T) {
 		t.Fatalf("OpenAttach() error = %v", err)
 	}
 	defer connection.Close()
+	secondTab, err := backend.CreateTab(workspace.ID, 80, 24)
+	if err != nil {
+		t.Fatalf("CreateTab() second error = %v", err)
+	}
+	secondConnection, secondReader, err := backend.OpenAttach(secondTab.ID)
+	if err != nil {
+		t.Fatalf("OpenAttach() second error = %v", err)
+	}
+	defer secondConnection.Close()
 
 	if _, err := backend.RemoveRoot(rootID); err != nil {
 		t.Fatalf("RemoveRoot() error = %v", err)
 	}
-	writeCommand(t, connection, "printf terminal-survived")
-	readUntil(t, connection, reader, "terminal-survived")
+	expectTerminalClosed(t, connection, reader)
+	expectTerminalClosed(t, secondConnection, secondReader)
+}
+
+func TestRemoveWorkspaceDeletesOnlyTheDirectChildAndTerminatesItsSessions(t *testing.T) {
+	base := testutil.ShortTempDir(t)
+	root := filepath.Join(base, "projects")
+	workspacePath := filepath.Join(root, "alpha")
+	siblingPath := filepath.Join(root, "beta")
+	nestedPath := filepath.Join(workspacePath, "nested")
+	if err := os.MkdirAll(nestedPath, 0o755); err != nil {
+		t.Fatalf("MkdirAll() workspace error = %v", err)
+	}
+	if err := os.Mkdir(siblingPath, 0o755); err != nil {
+		t.Fatalf("Mkdir() sibling error = %v", err)
+	}
+
+	socket := filepath.Join(base, "daemon.sock")
+	statePath := filepath.Join(base, "state.json")
+	server, err := daemon.New(socket, statePath, "/bin/sh")
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	server.SetLogger(testutil.QuietLogger())
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- server.Serve(ctx) }()
+	defer func() { cancel(); <-done }()
+
+	backend := client.New(socket)
+	testutil.WaitForDaemon(t, backend)
+	snapshot, err := backend.AddRoot(root)
+	if err != nil {
+		t.Fatalf("AddRoot() error = %v", err)
+	}
+	rootID := snapshot.Roots[0].Root.ID
+	workspace, err := backend.EnsureWorkspace(rootID, workspacePath)
+	if err != nil {
+		t.Fatalf("EnsureWorkspace() error = %v", err)
+	}
+	tab, err := backend.CreateTab(workspace.ID, 80, 24)
+	if err != nil {
+		t.Fatalf("CreateTab() error = %v", err)
+	}
+	connection, reader, err := backend.OpenAttach(tab.ID)
+	if err != nil {
+		t.Fatalf("OpenAttach() error = %v", err)
+	}
+	defer connection.Close()
+	siblingWorkspace, err := backend.EnsureWorkspace(rootID, siblingPath)
+	if err != nil {
+		t.Fatalf("EnsureWorkspace() sibling error = %v", err)
+	}
+	siblingTab, err := backend.CreateTab(siblingWorkspace.ID, 80, 24)
+	if err != nil {
+		t.Fatalf("CreateTab() sibling error = %v", err)
+	}
+	siblingConnection, siblingReader, err := backend.OpenAttach(siblingTab.ID)
+	if err != nil {
+		t.Fatalf("OpenAttach() sibling error = %v", err)
+	}
+	defer siblingConnection.Close()
+
+	canonicalRoot := snapshot.Roots[0].Root.Path
+	canonicalNested := filepath.Join(workspace.Path, "nested")
+	for _, protected := range []string{canonicalRoot, canonicalNested, filepath.Join(base, "outside")} {
+		if _, err := backend.RemoveWorkspace(rootID, protected); err == nil {
+			t.Fatalf("RemoveWorkspace(%q) succeeded outside the direct-child boundary", protected)
+		}
+	}
+	if _, err := os.Stat(root); err != nil {
+		t.Fatalf("protected root changed: %v", err)
+	}
+	if _, err := os.Stat(nestedPath); err != nil {
+		t.Fatalf("protected nested directory changed: %v", err)
+	}
+
+	snapshot, err = backend.RemoveWorkspace(rootID, workspace.Path)
+	if err != nil {
+		t.Fatalf("RemoveWorkspace() error = %v", err)
+	}
+	if _, err := os.Stat(workspacePath); !os.IsNotExist(err) {
+		t.Fatalf("workspace still exists: %v", err)
+	}
+	if _, err := os.Stat(siblingPath); err != nil {
+		t.Fatalf("sibling changed: %v", err)
+	}
+	if len(snapshot.Roots) != 1 || len(snapshot.Roots[0].Directories) != 1 ||
+		snapshot.Roots[0].Directories[0].Workspace.Name != "beta" {
+		t.Fatalf("snapshot after removal = %#v, want only beta", snapshot)
+	}
+	persisted, err := state.New(statePath).Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if len(persisted.Workspaces) != 1 || persisted.Workspaces[0].ID != siblingWorkspace.ID ||
+		len(persisted.Tabs) != 1 || persisted.Tabs[0].ID != siblingTab.ID {
+		t.Fatalf("persisted state after removal = %#v, want only the sibling session", persisted)
+	}
+
+	expectTerminalClosed(t, connection, reader)
+	writeCommand(t, siblingConnection, "printf sibling-survived")
+	readUntil(t, siblingConnection, siblingReader, "sibling-survived")
+}
+
+func expectTerminalClosed(t *testing.T, connection net.Conn, reader *bufio.Reader) {
+	t.Helper()
+	if err := connection.SetReadDeadline(time.Now().Add(3 * time.Second)); err != nil {
+		t.Fatalf("SetReadDeadline() error = %v", err)
+	}
+	buffer := make([]byte, 4096)
+	for {
+		if _, err := reader.Read(buffer); err != nil {
+			if timeout, ok := err.(net.Error); ok && timeout.Timeout() {
+				t.Fatal("terminal connection remained open after removal")
+			}
+			return
+		}
+	}
 }
 
 // The socket is the only thing between another local process and every shell

@@ -95,15 +95,20 @@
           <div class="tree">
             <div class="tree-title">romty</div>
             <div class="tree-root">▾ nalbam</div>
-            <div class="tree-item"><span>— dockpad</span></div>
-            <div class="tree-item"><span>— dotfiles</span><span class="running">●</span></div>
-            <div class="tree-item"><span>— note</span></div>
-            <div class="tree-item current"><span>— romty</span><span class="running">●</span></div>
+            <div class="tree-item"><span>— dotfiles</span><span class="running" title="bash running"
+                aria-label="bash running">●</span></div>
+            <div class="tree-item"><span>— nalbam</span></div>
             <div class="tree-item"><span>— resume</span></div>
             <div class="tree-root" style="margin-top:.5rem">▾ opspresso</div>
-            <div class="tree-item"><span>— agent-studio</span></div>
+            <div class="tree-item"><span>— agent-studio</span><span class="running claude"
+                title="Claude Code running" aria-label="Claude Code running">●</span></div>
             <div class="tree-item"><span>— homebrew-tap</span></div>
-            <div class="tree-item"><span>— toast</span></div>
+            <div class="tree-item current"><span>— romty</span><span class="running-agents"><span
+                  class="running claude" title="Claude Code running" aria-label="Claude Code running">●</span><span
+                  class="running codex" title="Codex running" aria-label="Codex running">●</span><span class="running"
+                  title="bash running" aria-label="bash running">●</span></span></div>
+            <div class="tree-item"><span>— toast-app</span></div>
+            <div class="tree-item"><span>— vibemon-app</span></div>
           </div>
           <div class="pane">
             <div class="tabs"><span class="active">▸ 1</span> &nbsp; +</div>
@@ -278,8 +283,8 @@ ok  github.com/opspresso/romty/internal/ui        5.8s
         <div class="key-row"><span class="caps"><kbd>F6</kbd><kbd>s</kbd></span><span>Enter or leave scrollback</span>
         </div>
         <div class="key-row"><span class="caps"><kbd>F7</kbd></span><span>Switch between the panes</span></div>
-        <div class="key-row"><span class="caps"><kbd>F8</kbd><kbd>d</kbd></span><span>Forget the selected root
-            (workspace pane)</span></div>
+        <div class="key-row"><span class="caps"><kbd>F8</kbd><kbd>d</kbd></span><span>Delete the selected workspace
+            or forget the selected root, terminating its shells (workspace pane)</span></div>
         <div class="key-row"><span class="caps"><kbd>F9</kbd><kbd>t</kbd></span><span>Stop the daemon and every
             shell (workspace pane)</span></div>
         <div class="key-row"><span class="caps"><kbd>↑</kbd><kbd>↓</kbd></span><span>Move between workspaces</span>
