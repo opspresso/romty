@@ -48,6 +48,21 @@ func TestStripQueriesRemovesQueriesAndKeepsOutput(t *testing.T) {
 			want:    "beforeafter",
 		},
 		{
+			name:    "clipboard read query",
+			history: "before\x1b]52;c;?\x07after",
+			want:    "beforeafter",
+		},
+		{
+			name:    "primary selection read query",
+			history: "before\x1b]52;p;?\x1b\\after",
+			want:    "beforeafter",
+		},
+		{
+			name:    "a clipboard read of several buffers",
+			history: "before\x1b]52;cp;?\x07after",
+			want:    "beforeafter",
+		},
+		{
 			name:    "mode state request",
 			history: "before\x1b[?2026$pafter",
 			want:    "beforeafter",
@@ -141,6 +156,11 @@ func TestStripQueriesRemovesQueriesAndKeepsOutput(t *testing.T) {
 			name:    "an OSC setting a color is not a query",
 			history: "\x1b]4;1;rgb:ff/00/00\x07prompt",
 			want:    "\x1b]4;1;rgb:ff/00/00\x07prompt",
+		},
+		{
+			name:    "an OSC setting the clipboard is not a query",
+			history: "\x1b]52;c;aGVsbG8=\x07prompt",
+			want:    "\x1b]52;c;aGVsbG8=\x07prompt",
 		},
 		{
 			name:    "a truncated query at the end is left alone",
