@@ -18,13 +18,14 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/opspresso/romty/internal/agenthooks"
 	"github.com/opspresso/romty/internal/model"
 	"github.com/opspresso/romty/internal/version"
 )
 
 type fakeBackend struct {
 	snapshot               model.Snapshot
-	agents                 map[string]model.Agent
+	agentStatuses          map[string]model.AgentStatus
 	workspace              model.Workspace
 	createdTab             model.Tab
 	createdColumns         uint16
@@ -158,11 +159,11 @@ func (f *fakeBackend) Snapshot() (model.Snapshot, error) {
 	return f.snapshot, nil
 }
 
-func (f *fakeBackend) Agents() (map[string]model.Agent, error) {
-	if err := f.failure("Agents"); err != nil {
+func (f *fakeBackend) AgentStatuses() (map[string]model.AgentStatus, error) {
+	if err := f.failure("AgentStatuses"); err != nil {
 		return nil, err
 	}
-	return f.agents, nil
+	return f.agentStatuses, nil
 }
 
 func (f *fakeBackend) EnsureWorkspace(rootID, path string) (model.Workspace, error) {
@@ -907,6 +908,110 @@ func TestDashboardConfirmsDaemonShutdown(t *testing.T) {
 	value = updated.(dashboard)
 	if backend.shutdownCount != 1 || !value.result.Quit || quitCommand == nil || value.terminal != nil {
 		t.Fatalf("shutdown result = (count %d, quit %v, command %v, terminal %v)", backend.shutdownCount, value.result.Quit, quitCommand, value.terminal)
+	}
+}
+
+func TestDashboardConfirmsAgentHookInstallation(t *testing.T) {
+	statuses := []agenthooks.Status{
+		{Provider: agenthooks.ProviderClaude, State: agenthooks.StateMissing, Path: "/home/me/.claude/settings.json"},
+		{Provider: agenthooks.ProviderCodex, State: agenthooks.StateOutdated, Path: "/home/me/.codex/hooks.json"},
+	}
+	value := newDashboard(&fakeBackend{}, model.Snapshot{})
+	value.offerAgentHooks(statuses)
+	if value.modal != hookInstallModal {
+		t.Fatalf("hook check modal = %v, want confirmation", value.modal)
+	}
+	plain := ansi.Strip(strings.Join(value.renderModal(100, 30), "\n"))
+	for _, want := range []string{"Claude Code: install", "Codex: update", "Existing settings and other hooks are preserved."} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("hook confirmation does not contain %q:\n%s", want, plain)
+		}
+	}
+
+	previousInstall := installHookProviders
+	var installed []agenthooks.Provider
+	installHookProviders = func(providers []agenthooks.Provider) ([]agenthooks.Result, error) {
+		installed = append(installed, providers...)
+		return []agenthooks.Result{
+			{Provider: agenthooks.ProviderClaude, Action: agenthooks.ActionInstalled},
+			{Provider: agenthooks.ProviderCodex, Action: agenthooks.ActionUpdated},
+		}, nil
+	}
+	t.Cleanup(func() { installHookProviders = previousInstall })
+
+	updated, command := value.Update(key(tea.KeyEnter, ""))
+	value = updated.(dashboard)
+	if command == nil || !value.hookInstallPending || len(installed) != 0 {
+		t.Fatalf("Enter = (command %v, pending %v, installed %v), want deferred install", command, value.hookInstallPending, installed)
+	}
+	if status := ansi.Strip(value.renderStatus(100, 30)[1]); !strings.Contains(status, "INSTALLING") {
+		t.Fatalf("pending status = %q", status)
+	}
+
+	updated, extra := value.Update(command())
+	value = updated.(dashboard)
+	if extra != nil || value.modal != noModal || value.hookInstallPending {
+		t.Fatalf("install result = (extra %v, modal %v, pending %v)", extra, value.modal, value.hookInstallPending)
+	}
+	if !slices.Equal(installed, []agenthooks.Provider{agenthooks.ProviderClaude, agenthooks.ProviderCodex}) {
+		t.Fatalf("installed providers = %v", installed)
+	}
+	if !value.noticeMessage || !strings.Contains(value.errorMessage, "Claude Code and Codex hooks installed") {
+		t.Fatalf("install notice = (%v, %q)", value.noticeMessage, value.errorMessage)
+	}
+}
+
+func TestDashboardCanSkipAgentHookInstallation(t *testing.T) {
+	value := newDashboard(&fakeBackend{}, model.Snapshot{})
+	value.offerAgentHooks([]agenthooks.Status{{
+		Provider: agenthooks.ProviderClaude,
+		State:    agenthooks.StateMissing,
+	}})
+
+	updated, command := value.Update(key(tea.KeyEscape, ""))
+	value = updated.(dashboard)
+	if command != nil || value.modal != noModal || value.hookStatuses != nil {
+		t.Fatalf("Esc = (command %v, modal %v, statuses %v), want no changes", command, value.modal, value.hookStatuses)
+	}
+}
+
+func TestDashboardCanQuitDuringAgentHookInstallation(t *testing.T) {
+	for _, pending := range []bool{false, true} {
+		value := newDashboard(&fakeBackend{}, model.Snapshot{})
+		value.offerAgentHooks([]agenthooks.Status{{
+			Provider: agenthooks.ProviderClaude,
+			State:    agenthooks.StateMissing,
+		}})
+		value.hookInstallPending = pending
+
+		updated, command := value.Update(key(tea.KeyF4, ""))
+		value = updated.(dashboard)
+		if !value.result.Quit || command == nil {
+			t.Fatalf("F4 with pending %v = (quit %v, command %v), want quit", pending, value.result.Quit, command)
+		}
+	}
+}
+
+func TestDashboardDoesNotPromptForCurrentAgentHooks(t *testing.T) {
+	value := newDashboard(&fakeBackend{}, model.Snapshot{})
+	value.offerAgentHooks([]agenthooks.Status{
+		{Provider: agenthooks.ProviderClaude, State: agenthooks.StateCurrent},
+		{Provider: agenthooks.ProviderCodex, State: agenthooks.StateUnavailable},
+	})
+	if value.modal != noModal || value.errorMessage != "" {
+		t.Fatalf("current hooks = (modal %v, error %q), want no prompt", value.modal, value.errorMessage)
+	}
+}
+
+func TestDashboardReportsInvalidAgentHookSettings(t *testing.T) {
+	value := newDashboard(&fakeBackend{}, model.Snapshot{})
+	value.offerAgentHooks([]agenthooks.Status{{
+		Provider: agenthooks.ProviderClaude,
+		State:    agenthooks.StateInvalid,
+		Err:      errors.New("hooks must be an object"),
+	}})
+	if value.modal != noModal || !strings.Contains(value.errorMessage, "hooks must be an object") || value.noticeMessage {
+		t.Fatalf("invalid hooks = (modal %v, error %q, notice %v)", value.modal, value.errorMessage, value.noticeMessage)
 	}
 }
 
@@ -3139,15 +3244,15 @@ func TestDashboardReplacesControlCharactersInLabels(t *testing.T) {
 func TestOpenTabMarkersUseAgentColors(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, model.Snapshot{})
 	tabs := []model.Tab{
-		{Running: true, Agent: model.AgentClaude},
-		{Running: true, Agent: model.AgentCodex},
+		{Running: true, Agent: model.AgentClaude, AgentPhase: model.AgentPhaseIdle},
+		{Running: true, Agent: model.AgentCodex, AgentPhase: model.AgentPhaseWaitingInput},
 		{Running: true},
 	}
 
 	base := value.styles.navigationSelected
 	markers := openTabMarkers(value.styles, base, tabs)
-	claude := base.Foreground(value.styles.agentClaude.GetForeground()).Render("●")
-	codex := base.Foreground(value.styles.agentCodex.GetForeground()).Render("●")
+	claude := base.Foreground(value.styles.agentClaude.GetForeground()).Render("○")
+	codex := base.Foreground(value.styles.agentCodex.GetForeground()).Render("◉")
 	plain := base.Render("●")
 	if markers != claude+codex+plain {
 		t.Fatalf("open tab markers = %q, want Claude, Codex, and default markers", markers)
@@ -3298,10 +3403,15 @@ func TestAgentSnapshotUpdatesStateAndSchedulesAnotherRefresh(t *testing.T) {
 	}}}
 	value := newDashboard(&fakeBackend{}, snapshot)
 
-	updated, command := value.Update(agentSnapshotMsg{value: map[string]model.Agent{"tab-1": model.AgentClaude}})
+	updated, command := value.Update(agentSnapshotMsg{value: map[string]model.AgentStatus{
+		"tab-1": {Agent: model.AgentClaude, Phase: model.AgentPhaseWaitingApproval},
+	}})
 	value = updated.(dashboard)
 	if got := value.state.Roots[0].Tabs[0].Agent; got != model.AgentClaude {
 		t.Fatalf("agent = %q, want %q", got, model.AgentClaude)
+	}
+	if got := value.state.Roots[0].Tabs[0].AgentPhase; got != model.AgentPhaseWaitingApproval {
+		t.Fatalf("agent phase = %q, want %q", got, model.AgentPhaseWaitingApproval)
 	}
 	if command == nil {
 		t.Fatal("agent snapshot did not schedule another refresh")

@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/opspresso/romty/internal/agenthooks"
 	"github.com/opspresso/romty/internal/model"
 	"github.com/opspresso/romty/internal/version"
 )
@@ -48,7 +50,7 @@ var now = time.Now
 type Backend interface {
 	AddRoot(path string) (model.Snapshot, error)
 	Snapshot() (model.Snapshot, error)
-	Agents() (map[string]model.Agent, error)
+	AgentStatuses() (map[string]model.AgentStatus, error)
 	RemoveRoot(rootID string) (model.Snapshot, error)
 	RemoveWorkspace(rootID, path string) (model.Snapshot, error)
 	EnsureWorkspace(rootID, path string) (model.Workspace, error)
@@ -97,6 +99,7 @@ const (
 	browseModal
 	removeSelectionModal
 	shutdownModal
+	hookInstallModal
 )
 
 type navItem struct {
@@ -147,6 +150,8 @@ type dashboard struct {
 	terminal            *embeddedTerminal
 	modal               modal
 	shutdownPending     bool
+	hookStatuses        []agenthooks.Status
+	hookInstallPending  bool
 	// removeTarget is the item the confirmation modal is asking about, held so
 	// the answer applies to the item the question named.
 	removeTarget   navItem
@@ -188,7 +193,7 @@ type snapshotMsg struct {
 }
 
 type agentSnapshotMsg struct {
-	value map[string]model.Agent
+	value map[string]model.AgentStatus
 	err   error
 }
 
@@ -232,6 +237,11 @@ type daemonStoppedMsg struct {
 	err error
 }
 
+type hooksInstalledMsg struct {
+	results []agenthooks.Result
+	err     error
+}
+
 // resizeFailedMsg keeps a failed resize out of snapshotMsg, which means "a new
 // snapshot arrived" and whose handler clears the status bar. Borrowing it made
 // a resize failure erase itself and, worse, made every snapshotMsg handler
@@ -253,12 +263,16 @@ type reopenTerminalMsg struct {
 	tabID string
 }
 
-func Run(backend Backend, initial model.Snapshot, configPath string) (Result, error) {
+var installHookProviders = agenthooks.Install
+
+func Run(backend Backend, initial model.Snapshot, configPath string, hookStatuses []agenthooks.Status) (Result, error) {
 	config, err := loadConfig(configPath)
 	if err != nil {
 		return Result{}, fmt.Errorf("load UI config: %w", err)
 	}
-	program := tea.NewProgram(newDashboardWithConfig(backend, initial, configPath, config))
+	value := newDashboardWithConfig(backend, initial, configPath, config)
+	value.offerAgentHooks(hookStatuses)
+	program := tea.NewProgram(value)
 	final, err := program.Run()
 	// romty held the host's alternate scroll off while it ran. Leaving it that
 	// way would follow the user out of romty and into every full-screen program
@@ -460,6 +474,16 @@ func (m dashboard) update(message tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		return m.quit()
+	case hooksInstalledMsg:
+		m.hookInstallPending = false
+		m.hookStatuses = nil
+		m.modal = noModal
+		if message.err != nil {
+			m.setError(settingError, "install agent hooks: "+message.err.Error())
+			return m, nil
+		}
+		m.setNotice(settingError, installedHooksNotice(message.results))
+		return m, nil
 	}
 	return m, nil
 }
@@ -515,6 +539,18 @@ func (m dashboard) handleKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m.quit()
 		}
 		return m, nil
+	}
+	if m.hookInstallPending {
+		if message.String() == "f4" {
+			return m.quit()
+		}
+		return m, nil
+	}
+	if m.modal == hookInstallModal {
+		if message.String() == "f4" {
+			return m.quit()
+		}
+		return m.handleModalKey(message)
 	}
 	if action, ok := globalKeys[message.String()]; ok {
 		return action(m)
@@ -618,6 +654,44 @@ func (m dashboard) openModal(value modal) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m *dashboard) offerAgentHooks(statuses []agenthooks.Status) {
+	m.hookStatuses = statuses
+	if len(agenthooks.Pending(statuses)) > 0 {
+		m.modal = hookInstallModal
+		return
+	}
+	if err := hookStatusErrors(statuses); err != nil {
+		m.setError(settingError, "check agent hooks: "+err.Error())
+	}
+}
+
+func (m dashboard) installAgentHooks() tea.Cmd {
+	providers := agenthooks.Pending(m.hookStatuses)
+	statuses := append([]agenthooks.Status(nil), m.hookStatuses...)
+	return func() tea.Msg {
+		results, err := installHookProviders(providers)
+		return hooksInstalledMsg{results: results, err: errors.Join(err, hookStatusErrors(statuses))}
+	}
+}
+
+func hookStatusErrors(statuses []agenthooks.Status) error {
+	var failures []error
+	for _, status := range statuses {
+		if status.State == agenthooks.StateInvalid {
+			failures = append(failures, fmt.Errorf("%s: %w", status.Provider.DisplayName(), status.Err))
+		}
+	}
+	return errors.Join(failures...)
+}
+
+func installedHooksNotice(results []agenthooks.Result) string {
+	names := make([]string, 0, len(results))
+	for _, result := range results {
+		names = append(names, result.Provider.DisplayName())
+	}
+	return strings.Join(names, " and ") + " hooks installed; restart running agent sessions"
+}
+
 func (m dashboard) startRootInput() (tea.Model, tea.Cmd) {
 	m.modal = noModal
 	m.inputMode = true
@@ -628,6 +702,9 @@ func (m dashboard) startRootInput() (tea.Model, tea.Cmd) {
 
 func (m dashboard) handleModalKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if message.String() == "esc" {
+		if m.modal == hookInstallModal {
+			m.hookStatuses = nil
+		}
 		m.modal = noModal
 		return m, nil
 	}
@@ -643,6 +720,11 @@ func (m dashboard) handleModalKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 		if message.String() == "enter" {
 			m.shutdownPending = true
 			return m, m.shutdownDaemon()
+		}
+	case hookInstallModal:
+		if message.String() == "enter" {
+			m.hookInstallPending = true
+			return m, m.installAgentHooks()
 		}
 	case helpModal:
 		page := max(modalCapacity(m.dimensions().bodyHeight)-1, 1)
@@ -1139,21 +1221,25 @@ func (m dashboard) refreshAll() (tea.Model, tea.Cmd) {
 func (m dashboard) refreshAgents() tea.Cmd {
 	backend := m.backend
 	return tea.Tick(agentRefreshInterval, func(time.Time) tea.Msg {
-		value, err := backend.Agents()
+		value, err := backend.AgentStatuses()
 		return agentSnapshotMsg{value: value, err: err}
 	})
 }
 
-func (m *dashboard) updateAgents(agents map[string]model.Agent) {
+func (m *dashboard) updateAgents(statuses map[string]model.AgentStatus) {
 	for rootIndex := range m.state.Roots {
 		root := &m.state.Roots[rootIndex]
 		for tabIndex := range root.Tabs {
-			root.Tabs[tabIndex].Agent = agents[root.Tabs[tabIndex].ID]
+			status := statuses[root.Tabs[tabIndex].ID]
+			root.Tabs[tabIndex].Agent = status.Agent
+			root.Tabs[tabIndex].AgentPhase = status.Phase
 		}
 		for workspaceIndex := range root.Directories {
 			tabs := root.Directories[workspaceIndex].Tabs
 			for tabIndex := range tabs {
-				tabs[tabIndex].Agent = agents[tabs[tabIndex].ID]
+				status := statuses[tabs[tabIndex].ID]
+				tabs[tabIndex].Agent = status.Agent
+				tabs[tabIndex].AgentPhase = status.Phase
 			}
 		}
 	}
@@ -1650,7 +1736,14 @@ func openTabMarkers(styles *uiStyles, base lipgloss.Style, tabs []model.Tab) str
 		case model.AgentCodex:
 			style = style.Foreground(styles.agentCodex.GetForeground())
 		}
-		result.WriteString(style.Render("●"))
+		marker := "●"
+		switch tab.AgentPhase {
+		case model.AgentPhaseIdle:
+			marker = "○"
+		case model.AgentPhaseWaitingInput, model.AgentPhaseWaitingApproval, model.AgentPhaseError:
+			marker = "◉"
+		}
+		result.WriteString(style.Render(marker))
 	}
 	return result.String()
 }
@@ -1875,6 +1968,16 @@ func (m dashboard) renderStatus(width, bodyHeight int) []string {
 			shortcut{key: "Enter", description: "stop daemon"},
 			shortcut{key: "Esc", description: "cancel"},
 		)
+	case m.modal == hookInstallModal && m.hookInstallPending:
+		status = truncate(
+			m.styles.promptLabel.Render(" INSTALLING ")+" "+m.styles.shortcutDescription.Render("updating agent status hooks"),
+			width,
+		)
+	case m.modal == hookInstallModal:
+		status = renderShortcuts(m.styles, width,
+			shortcut{key: "Enter", description: "install hooks"},
+			shortcut{key: "Esc", description: "skip"},
+		)
 	case m.scrollback:
 		status = truncate(
 			m.styles.promptLabel.Render(" SCROLLBACK ")+" "+
@@ -1976,6 +2079,29 @@ func (m dashboard) renderModal(width, height int) []string {
 			m.styles.errorText.Render("Running shells will be terminated."),
 			"",
 		)
+	}
+	if m.modal == hookInstallModal {
+		lines := []string{
+			"",
+			m.styles.modalStrong.Render("Install or update agent status hooks?"),
+			"",
+		}
+		for _, status := range m.hookStatuses {
+			var action string
+			switch status.State {
+			case agenthooks.StateMissing:
+				action = "install"
+			case agenthooks.StateOutdated:
+				action = "update"
+			case agenthooks.StateInvalid:
+				action = "invalid settings"
+			default:
+				continue
+			}
+			lines = append(lines, m.styles.modalBody.Render(status.Provider.DisplayName()+": "+action))
+		}
+		lines = append(lines, "", m.styles.modalBody.Render("Existing settings and other hooks are preserved."), "")
+		return modalBox(m.styles, modalWidth, "Agent hooks", lines...)
 	}
 	if m.modal == configModal {
 		return modalBox(m.styles, modalWidth, "Config",

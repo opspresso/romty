@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/opspresso/romty/internal/agenthooks"
 	"github.com/opspresso/romty/internal/client"
 	"github.com/opspresso/romty/internal/daemon"
 	"github.com/opspresso/romty/internal/paths"
@@ -23,10 +24,23 @@ func main() {
 }
 
 func run() error {
-	return runCommand(os.Args[1:], os.Stdout)
+	return runCommandWithInput(os.Args[1:], os.Stdout, os.Stdin)
 }
 
 func runCommand(arguments []string, output io.Writer) error {
+	return runCommandWithInput(arguments, output, os.Stdin)
+}
+
+func runCommandWithInput(arguments []string, output io.Writer, input io.Reader) error {
+	if len(arguments) == 2 && arguments[0] == "hook" {
+		switch arguments[1] {
+		case "claude", "codex":
+			runHookCommand(arguments[1], input)
+			return nil
+		default:
+			return fmt.Errorf("unknown hook provider %q", arguments[1])
+		}
+	}
 	if len(arguments) > 1 {
 		return fmt.Errorf("usage: romty <command>; run `romty help` for details")
 	}
@@ -40,13 +54,16 @@ func runCommand(arguments []string, output io.Writer) error {
 		return printHelp(output, theme)
 	case "version", "-v", "--version":
 		return printVersion(output, theme)
-	case "", "daemon", "stop", "status", "doctor", "list":
+	case "", "daemon", "stop", "status", "doctor", "hooks", "list":
 	default:
 		return fmt.Errorf("unknown command %q; run `romty help` for usage", command)
 	}
 
 	if os.Getenv("ROMTY") == "1" && (command == "" || command == "daemon" || command == "stop") {
 		return fmt.Errorf("cannot run romty inside a romty terminal")
+	}
+	if command == "hooks" {
+		return installAgentHooks(output, theme)
 	}
 	runtime, err := paths.Resolve()
 	if err != nil {
@@ -84,7 +101,7 @@ func runCommand(arguments []string, output io.Writer) error {
 	if err != nil {
 		return err
 	}
-	_, err = ui.Run(backend, snapshot, runtime.Config)
+	_, err = ui.Run(backend, snapshot, runtime.Config, agenthooks.Detect())
 	return err
 }
 

@@ -99,6 +99,42 @@ func (c *Client) Agents() (map[string]model.Agent, error) {
 	return response.Agents, nil
 }
 
+func (c *Client) AgentStatuses() (map[string]model.AgentStatus, error) {
+	supported, err := c.supports(protocol.CapabilityAgentStatus)
+	if err != nil {
+		return nil, err
+	}
+	if !supported {
+		agents, err := c.Agents()
+		if err != nil {
+			return nil, err
+		}
+		statuses := make(map[string]model.AgentStatus, len(agents))
+		for tabID, agent := range agents {
+			statuses[tabID] = model.AgentStatus{Agent: agent, Phase: model.AgentPhaseUnknown}
+		}
+		return statuses, nil
+	}
+	response, err := c.call(protocol.Request{Action: protocol.ActionAgentStatuses})
+	if err != nil {
+		return nil, err
+	}
+	return response.AgentStatuses, nil
+}
+
+func (c *Client) ReportAgentEvent(tabID string, event protocol.AgentEvent) error {
+	supported, err := c.supports(protocol.CapabilityAgentStatus)
+	if err != nil || !supported {
+		return err
+	}
+	_, err = c.call(protocol.Request{
+		Action:     protocol.ActionAgentEvent,
+		TabID:      tabID,
+		AgentEvent: &event,
+	})
+	return err
+}
+
 func (c *Client) AddRoot(path string) (model.Snapshot, error) {
 	normalized, err := normalizePath(path)
 	if err != nil {

@@ -9,8 +9,10 @@ import (
 	"os/exec"
 	"strings"
 	"syscall"
+	"unicode"
 
 	"github.com/charmbracelet/x/term"
+	"github.com/opspresso/romty/internal/agenthooks"
 	"github.com/opspresso/romty/internal/client"
 	"github.com/opspresso/romty/internal/model"
 	"github.com/opspresso/romty/internal/paths"
@@ -28,6 +30,7 @@ Commands:
   version  Show the romty version
   help     Show this help
   doctor   Check the local romty environment
+  hooks    Install or update agent status hooks
   list     List roots, workspaces, and sessions
   stop     Stop the daemon and all running sessions
 `
@@ -96,12 +99,61 @@ func printHelp(output io.Writer, theme commandTheme) error {
   %s  Show the romty version
   %s     Show this help
   %s   Check the local romty environment
+  %s    Install or update agent status hooks
   %s     List roots, workspaces, and sessions
   %s     Stop the daemon and all running sessions
 `, theme.label("romty"), theme.label("Usage:"), theme.label("Commands:"),
-		theme.good("status"), theme.good("version"), theme.good("help"), theme.good("doctor"),
+		theme.good("status"), theme.good("version"), theme.good("help"), theme.good("doctor"), theme.good("hooks"),
 		theme.good("list"), theme.failure("stop"))
 	return err
+}
+
+func installAgentHooks(output io.Writer, theme commandTheme) error {
+	statuses := agenthooks.Detect()
+	results, installErr := agenthooks.Install(agenthooks.Pending(statuses))
+	byProvider := make(map[agenthooks.Provider]agenthooks.Result, len(results))
+	for _, result := range results {
+		byProvider[result.Provider] = result
+	}
+	var failures []error
+	for _, status := range statuses {
+		label := string(status.Provider)
+		value := ""
+		switch status.State {
+		case agenthooks.StateUnavailable:
+			value = theme.warning("not found")
+		case agenthooks.StateInvalid:
+			value = theme.failure("invalid")
+			failures = append(failures, fmt.Errorf("%s hooks: %w", status.Provider.DisplayName(), status.Err))
+		case agenthooks.StateCurrent:
+			value = theme.good("current") + "  " + commandText(status.Path)
+		case agenthooks.StateMissing, agenthooks.StateOutdated:
+			if result, ok := byProvider[status.Provider]; ok {
+				value = theme.good(string(result.Action)) + "  " + commandText(result.Path)
+			} else {
+				value = theme.failure("failed") + "  " + commandText(status.Path)
+			}
+		}
+		if err := printField(output, theme, label, value); err != nil {
+			return err
+		}
+	}
+	if installErr != nil {
+		failures = append(failures, installErr)
+	}
+	if err := errors.Join(failures...); err != nil {
+		return fmt.Errorf("configure agent hooks: %w", err)
+	}
+	return nil
+}
+
+func commandText(value string) string {
+	return strings.Map(func(character rune) rune {
+		if unicode.IsControl(character) {
+			return '�'
+		}
+		return character
+	}, value)
 }
 
 func printVersion(output io.Writer, theme commandTheme) error {
@@ -236,6 +288,8 @@ func printTabs(output io.Writer, theme commandTheme, indent string, tabs []model
 		agent := string(tab.Agent)
 		if agent == "" {
 			agent = "shell"
+		} else if tab.AgentPhase != "" && tab.AgentPhase != model.AgentPhaseUnknown {
+			agent += "/" + string(tab.AgentPhase)
 		}
 		value := fmt.Sprintf("%q  %s", tab.Name, theme.agent(tab.Agent, agent))
 		if err := printField(output, theme, indent+"tab", value); err != nil {
