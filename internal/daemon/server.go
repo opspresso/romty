@@ -488,6 +488,20 @@ func (s *Server) addRoot(path string) protocol.Response {
 }
 
 func (s *Server) ensureWorkspace(rootID, path string) protocol.Response {
+	s.mu.Lock()
+	if _, ok := findRoot(s.value.Roots, rootID); !ok {
+		s.mu.Unlock()
+		return protocol.Response{Error: "root not found"}
+	}
+	for _, workspace := range s.value.Workspaces {
+		if workspace.RootID == rootID && workspace.Path == path && workspaceHasTabs(s.value.Tabs, workspace.ID) {
+			copy := workspace
+			s.mu.Unlock()
+			return protocol.Response{Workspace: &copy}
+		}
+	}
+	s.mu.Unlock()
+
 	canonical, err := canonicalDirectory(path)
 	if err != nil {
 		return protocol.Response{Error: err.Error()}
@@ -652,11 +666,12 @@ func (s *Server) snapshot() model.Snapshot {
 		rootWorkspace, _ := workspaceAt(value.Workspaces, root.ID, root.Path)
 		entries, err := os.ReadDir(root.Path)
 		if err != nil {
+			directories := appendMissingRunningWorkspaces(nil, value, root)
 			result.Roots = append(result.Roots, model.RootView{
 				Root:        root,
 				Tabs:        tabsFor(value.Tabs, rootWorkspace.ID),
 				Error:       err.Error(),
-				Directories: make([]model.WorkspaceView, 0),
+				Directories: directories,
 			})
 			continue
 		}
@@ -675,6 +690,7 @@ func (s *Server) snapshot() model.Snapshot {
 				Tabs:      tabsFor(value.Tabs, workspace.ID),
 			})
 		}
+		directories = appendMissingRunningWorkspaces(directories, value, root)
 		sort.Slice(directories, func(i, j int) bool {
 			return directories[i].Workspace.Name < directories[j].Workspace.Name
 		})
@@ -685,6 +701,28 @@ func (s *Server) snapshot() model.Snapshot {
 		})
 	}
 	return result
+}
+
+func appendMissingRunningWorkspaces(directories []model.WorkspaceView, value model.State, root model.Root) []model.WorkspaceView {
+	seen := make(map[string]struct{}, len(directories))
+	for _, directory := range directories {
+		seen[directory.Workspace.Path] = struct{}{}
+	}
+	for _, workspace := range value.Workspaces {
+		if workspace.RootID != root.ID || workspace.Path == root.Path {
+			continue
+		}
+		if _, ok := seen[workspace.Path]; ok {
+			continue
+		}
+		tabs := tabsFor(value.Tabs, workspace.ID)
+		if len(tabs) == 0 {
+			continue
+		}
+		directories = append(directories, model.WorkspaceView{Workspace: workspace, Tabs: tabs})
+		seen[workspace.Path] = struct{}{}
+	}
+	return directories
 }
 
 func (s *Server) agents() map[string]model.Agent {
@@ -762,6 +800,15 @@ func tabsFor(values []model.Tab, workspaceID string) []model.Tab {
 		}
 	}
 	return result
+}
+
+func workspaceHasTabs(values []model.Tab, workspaceID string) bool {
+	for _, value := range values {
+		if value.WorkspaceID == workspaceID {
+			return true
+		}
+	}
+	return false
 }
 
 func nextTabName(values []model.Tab, workspaceID string) string {
