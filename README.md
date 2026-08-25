@@ -92,7 +92,7 @@ The status bar shows the primary actions and the keys for the active pane. Press
 | Both panes | `F5` | Refresh |
 | Both panes | `F6` | Enter or leave scrollback |
 | Both panes | `F7` | Switch pane |
-| Workspace | `F8` | Remove the selected root after confirmation |
+| Workspace | `F8` | Delete the selected workspace or forget the selected root after confirmation |
 | Workspace | `F9` | Stop the daemon and running shells after confirmation |
 
 #### Navigation
@@ -107,7 +107,7 @@ The status bar shows the primary actions and the keys for the active pane. Press
 | Both panes | `Ctrl`+`Shift`+`←`/`→` | Switch terminal tab |
 | Both panes | `Ctrl`+`Shift`+`↑`/`↓` | Switch to a workspace with a running terminal |
 
-Workspace aliases are `?` Help, `a` Add root, `,` Config, `q` or `Ctrl+C` Quit, `r` Refresh, `s` Scrollback, `d` Remove root, `t` Stop daemon, and `i` About. `j`/`k`, `h`/`l`, `Ctrl+B`/`Ctrl+F`, and `g`/`G` mirror the corresponding arrow, page, and end keys where applicable.
+Workspace aliases are `?` Help, `a` Add root, `,` Config, `q` or `Ctrl+C` Quit, `r` Refresh, `s` Scrollback, `d` Remove selection, `t` Stop daemon, and `i` About. `j`/`k`, `h`/`l`, `Ctrl+B`/`Ctrl+F`, and `g`/`G` mirror the corresponding arrow, page, and end keys where applicable.
 
 #### Contextual modes
 
@@ -122,7 +122,7 @@ Workspace aliases are `?` Help, `a` Add root, `,` Config, `q` or `Ctrl+C` Quit, 
 | Help | `↑`/`↓`, `PgUp`/`PgDn`, `Home`/`End` | Scroll the reference |
 | Config | `←`/`→`, `[`/`]` | Resize the workspace pane |
 | Modal or prompt | `Esc` | Cancel |
-| Confirmation | `Enter` | Confirm root removal or daemon shutdown |
+| Confirmation | `Enter` | Confirm selection removal or daemon shutdown |
 
 ### Adding a root
 
@@ -155,6 +155,8 @@ With passthrough enabled, the application's mouse mode is mirrored until it exit
 ### Modals and config
 
 `Esc` cancels a modal or path prompt; `Enter` confirms destructive actions. The configured workspace pane width is saved automatically and constrained to 18 through 40 columns, subject to the available terminal width.
+
+`F8` or `d` acts on the highlighted row. A workspace is deleted recursively with all of its contents. A root is only forgotten by romty; its directory stays on disk. Both actions terminate every terminal session under the selected item.
 
 ## Workspace refresh
 
