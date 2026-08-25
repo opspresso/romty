@@ -34,6 +34,7 @@ const (
 	initialReattachBackoff  = 250 * time.Millisecond
 	maximumReattachBackoff  = 2 * time.Second
 	agentRefreshInterval    = 2 * time.Second
+	agentAnimationInterval  = 120 * time.Millisecond
 	gitRefreshInterval      = 10 * time.Second
 	gitFetchInterval        = 5 * time.Minute
 	// healthyAttachInterval is how long a terminal has to stay attached before
@@ -46,6 +47,8 @@ const (
 // now is a variable so tests need not wait out healthyAttachInterval, the way
 // the daemon's request timeout is one so they need not wait out a handshake.
 var now = time.Now
+
+var agentAnimationFrames = [...]string{"◐", "◓", "◑", "◒"}
 
 type Backend interface {
 	AddRoot(path string) (model.Snapshot, error)
@@ -138,20 +141,22 @@ type dashboard struct {
 	// cursorPath is what the cursor is actually on. navIndex is only where
 	// that lands in the tree as it stands, and the tree is rebuilt on every
 	// refresh.
-	cursorPath          string
-	tabIndex            int
-	selectedWorkspaceID string
-	selectedPath        string
-	inputMode           bool
-	input               string
-	errorMessage        string
-	errorFrom           errorSource
-	noticeMessage       bool
-	terminal            *embeddedTerminal
-	modal               modal
-	shutdownPending     bool
-	hookStatuses        []agenthooks.Status
-	hookInstallPending  bool
+	cursorPath            string
+	tabIndex              int
+	selectedWorkspaceID   string
+	selectedPath          string
+	inputMode             bool
+	input                 string
+	errorMessage          string
+	errorFrom             errorSource
+	noticeMessage         bool
+	terminal              *embeddedTerminal
+	modal                 modal
+	shutdownPending       bool
+	hookStatuses          []agenthooks.Status
+	hookInstallPending    bool
+	agentAnimationFrame   int
+	agentAnimationPending bool
 	// removeTarget is the item the confirmation modal is asking about, held so
 	// the answer applies to the item the question named.
 	removeTarget   navItem
@@ -196,6 +201,8 @@ type agentSnapshotMsg struct {
 	value map[string]model.AgentStatus
 	err   error
 }
+
+type agentAnimationMsg struct{}
 
 type gitStatusMsg struct {
 	value      map[string]gitState
@@ -308,6 +315,7 @@ func newDashboardWithConfig(backend Backend, initial model.Snapshot, configPath 
 		gitFetchedAt:     now(),
 	}
 	value.ensureWorkspaceCursor()
+	value.agentAnimationPending = value.hasAnimatedAgent()
 	return value
 }
 
@@ -315,7 +323,11 @@ func (m dashboard) Init() tea.Cmd {
 	// The host starts with alternate scroll on, which is what turns a wheel
 	// notch into arrow keys romty cannot tell from typed ones. Only scrollback
 	// wants them, so the mode is off until it opens.
-	return tea.Batch(tea.RequestBackgroundColor, m.refreshAgents(), m.initialGitStatus(), altScrollCommand(false))
+	commands := []tea.Cmd{tea.RequestBackgroundColor, m.refreshAgents(), m.initialGitStatus(), altScrollCommand(false)}
+	if m.agentAnimationPending {
+		commands = append(commands, animateAgentMarker())
+	}
+	return tea.Batch(commands...)
 }
 
 // Update wraps the state machine so every path that opens or leaves scrollback
@@ -327,7 +339,16 @@ func (m dashboard) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	if !ok {
 		return updated, command
 	}
+	value, command = value.syncAgentAnimation(command)
 	return value.syncAltScroll(command)
+}
+
+func (m dashboard) syncAgentAnimation(command tea.Cmd) (dashboard, tea.Cmd) {
+	if m.hasAnimatedAgent() && !m.agentAnimationPending {
+		m.agentAnimationPending = true
+		command = tea.Batch(command, animateAgentMarker())
+	}
+	return m, command
 }
 
 // syncAltScroll asks the host for alternate scroll while scrollback is open and
@@ -415,6 +436,12 @@ func (m dashboard) update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.updateAgents(message.value)
 		}
 		return m, m.refreshAgents()
+	case agentAnimationMsg:
+		m.agentAnimationPending = false
+		if m.hasAnimatedAgent() {
+			m.agentAnimationFrame = (m.agentAnimationFrame + 1) % len(agentAnimationFrames)
+		}
+		return m, nil
 	case gitStatusMsg:
 		m.gitStates = message.value
 		if message.fetchedAt.After(m.gitFetchedAt) {
@@ -1226,6 +1253,12 @@ func (m dashboard) refreshAgents() tea.Cmd {
 	})
 }
 
+func animateAgentMarker() tea.Cmd {
+	return tea.Tick(agentAnimationInterval, func(time.Time) tea.Msg {
+		return agentAnimationMsg{}
+	})
+}
+
 func (m *dashboard) updateAgents(statuses map[string]model.AgentStatus) {
 	for rootIndex := range m.state.Roots {
 		root := &m.state.Roots[rootIndex]
@@ -1242,6 +1275,34 @@ func (m *dashboard) updateAgents(statuses map[string]model.AgentStatus) {
 				tabs[tabIndex].AgentPhase = status.Phase
 			}
 		}
+	}
+}
+
+func (m dashboard) hasAnimatedAgent() bool {
+	for _, root := range m.state.Roots {
+		for _, tab := range root.Tabs {
+			if tab.Running && animatedAgentPhase(tab.AgentPhase) {
+				return true
+			}
+		}
+		for _, workspace := range root.Directories {
+			for _, tab := range workspace.Tabs {
+				if tab.Running && animatedAgentPhase(tab.AgentPhase) {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+func animatedAgentPhase(phase model.AgentPhase) bool {
+	switch phase {
+	case model.AgentPhaseThinking, model.AgentPhaseWorking, model.AgentPhasePlanning,
+		model.AgentPhaseCompacting, model.AgentPhaseBackground:
+		return true
+	default:
+		return false
 	}
 }
 
@@ -1472,7 +1533,7 @@ func (m dashboard) switchTab(delta int) (tea.Model, tea.Cmd) {
 // Only those are stops. A root lists every child directory whether it has ever
 // been used or not, so stepping through all of them would make the chord a
 // slower way to hold Down — the tree already has plain Up and Down for walking
-// everything, and the ● markers are what say where the work is.
+// everything, and the tab markers are what say where the work is.
 func (m dashboard) switchWorkspace(delta int) (tea.Model, tea.Cmd) {
 	if m.modal != noModal {
 		// A modal is a question waiting for an answer, and the switch would
@@ -1723,7 +1784,7 @@ func (m dashboard) navigationTabs() []model.Tab {
 	return runningTabs(item.tabs)
 }
 
-func openTabMarkers(styles *uiStyles, base lipgloss.Style, tabs []model.Tab) string {
+func openTabMarkers(styles *uiStyles, base lipgloss.Style, tabs []model.Tab, animationFrame int) string {
 	var result strings.Builder
 	for _, tab := range tabs {
 		if !tab.Running {
@@ -1738,10 +1799,17 @@ func openTabMarkers(styles *uiStyles, base lipgloss.Style, tabs []model.Tab) str
 		}
 		marker := "●"
 		switch tab.AgentPhase {
+		case model.AgentPhaseThinking, model.AgentPhaseWorking, model.AgentPhasePlanning,
+			model.AgentPhaseCompacting, model.AgentPhaseBackground:
+			marker = agentAnimationFrames[animationFrame%len(agentAnimationFrames)]
 		case model.AgentPhaseIdle:
 			marker = "○"
-		case model.AgentPhaseWaitingInput, model.AgentPhaseWaitingApproval, model.AgentPhaseError:
-			marker = "◉"
+		case model.AgentPhaseWaitingInput:
+			marker = "▲"
+		case model.AgentPhaseWaitingApproval:
+			marker = "■"
+		case model.AgentPhaseError:
+			marker = "★"
 		}
 		result.WriteString(style.Render(marker))
 	}
@@ -2309,7 +2377,7 @@ func (m dashboard) renderNavigationItem(item navItem, index, width int) []string
 	if isSelected {
 		style = m.styles.navigationSelected
 	}
-	markers := openTabMarkers(m.styles, style, item.tabs)
+	markers := openTabMarkers(m.styles, style, item.tabs, m.agentAnimationFrame)
 	var nameLine string
 	if markers != "" {
 		available := width - lipgloss.Width(markers) - 2

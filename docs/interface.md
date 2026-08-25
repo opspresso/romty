@@ -8,9 +8,12 @@ Claude Code markers are orange and Codex markers are blue. Foreground process de
 
 | Marker | Meaning |
 |---|---|
-| `●` | Active or unknown phase |
+| `●` | Agent detected with an unknown phase |
+| `◐` `◓` `◑` `◒` | Thinking, working, planning, compacting, or running background work |
 | `○` | Idle and ready for another prompt |
-| `◉` | Waiting for input or approval, or stopped with an error |
+| `▲` | Waiting for user input |
+| `■` | Waiting for permission approval |
+| `★` | Stopped with an error |
 
 Git metadata is rendered as `(branch*) ↑N ↓N`. `*` means the worktree has tracked or untracked changes, `!` replaces it for conflicts, and the arrows count commits ahead of or behind the upstream. A detached HEAD appears as `(@abcdef0)`.
 
