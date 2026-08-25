@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"encoding/json"
 	"fmt"
 
 	"github.com/opspresso/romty/internal/jsonfile"
@@ -16,6 +17,42 @@ type Config struct {
 	// MousePassthrough hands the mouse to applications that ask for it, at the
 	// cost of the host terminal's drag selection while they run.
 	MousePassthrough bool `json:"mouse_passthrough,omitempty"`
+	unknownFields    map[string]json.RawMessage
+}
+
+func (c *Config) UnmarshalJSON(data []byte) error {
+	type configValue Config
+	var value configValue
+	if err := json.Unmarshal(data, &value); err != nil {
+		return err
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	delete(fields, "left_width")
+	delete(fields, "mouse_passthrough")
+	*c = Config(value)
+	c.unknownFields = fields
+	return nil
+}
+
+func (c Config) MarshalJSON() ([]byte, error) {
+	type configValue Config
+	data, err := json.Marshal(configValue(c))
+	if err != nil {
+		return nil, err
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return nil, err
+	}
+	for key, value := range c.unknownFields {
+		if _, known := fields[key]; !known {
+			fields[key] = value
+		}
+	}
+	return json.Marshal(fields)
 }
 
 func loadConfig(path string) (Config, error) {

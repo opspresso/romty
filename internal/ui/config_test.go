@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -21,7 +22,7 @@ func TestConfigRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("loadConfig() error = %v", err)
 	}
-	if got != want {
+	if got.LeftWidth != want.LeftWidth || got.MousePassthrough != want.MousePassthrough {
 		t.Fatalf("loadConfig() = %#v, want %#v", got, want)
 	}
 	info, err := os.Stat(path)
@@ -48,7 +49,7 @@ func TestConfigMissingFileUsesResponsiveWidth(t *testing.T) {
 // pane width — and an older romty would erase what a newer one had written.
 func TestAdjustingOneSettingKeepsTheRest(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
-	if err := os.WriteFile(path, []byte(`{"left_width":24,"mouse_passthrough":true}`+"\n"), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte(`{"left_width":24,"mouse_passthrough":true,"future":{"enabled":true}}`+"\n"), 0o600); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 	loaded, err := loadConfig(path)
@@ -77,5 +78,26 @@ func TestAdjustingOneSettingKeepsTheRest(t *testing.T) {
 	}
 	if !written.MousePassthrough {
 		t.Fatal("adjusting the pane width erased mouse_passthrough")
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile() after save error = %v", err)
+	}
+	var document map[string]json.RawMessage
+	if err := json.Unmarshal(data, &document); err != nil {
+		t.Fatalf("Unmarshal() after save error = %v", err)
+	}
+	future, ok := document["future"]
+	if !ok {
+		t.Fatal("adjusting the pane width erased an unknown setting")
+	}
+	var setting struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := json.Unmarshal(future, &setting); err != nil {
+		t.Fatalf("Unmarshal() future setting error = %v", err)
+	}
+	if !setting.Enabled {
+		t.Fatal("adjusting the pane width changed an unknown setting")
 	}
 }
