@@ -1191,13 +1191,13 @@ func (m *dashboard) selectWorkspace() tea.Cmd {
 }
 
 func (m *dashboard) createTab() tea.Cmd {
+	selection := m.selectionRequest
 	if m.selectedWorkspaceID == "" {
 		return func() tea.Msg {
-			return tabMsg{selection: m.selectionRequest, err: fmt.Errorf("select a workspace first")}
+			return tabMsg{selection: selection, err: fmt.Errorf("select a workspace first")}
 		}
 	}
 	columns, rows := m.terminalSize()
-	selection := m.selectionRequest
 	order := m.nextSnapshotOrder()
 	backend := m.backend
 	workspaceID := m.selectedWorkspaceID

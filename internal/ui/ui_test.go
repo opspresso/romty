@@ -426,6 +426,22 @@ func TestDashboardIgnoresAnOlderWorkspaceSelection(t *testing.T) {
 	}
 }
 
+func TestCreateTabErrorKeepsItsSelection(t *testing.T) {
+	value := newDashboard(&fakeBackend{}, model.Snapshot{})
+	value.selectionRequest = 1
+	command := value.createTab()
+	value.selectionRequest = 2
+
+	raw := command()
+	message, ok := raw.(tabMsg)
+	if !ok {
+		t.Fatalf("createTab() message = %T, want tabMsg", raw)
+	}
+	if message.selection != 1 {
+		t.Fatalf("createTab() selection = %d, want 1", message.selection)
+	}
+}
+
 func TestDashboardCreatesOnlyOneTabWhileASelectionIsPending(t *testing.T) {
 	workspace := model.Workspace{ID: "workspace-1", RootID: "root-1", Name: "alpha", Path: "/projects/alpha"}
 	snapshot := model.Snapshot{Roots: []model.RootView{{
