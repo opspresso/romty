@@ -3273,7 +3273,7 @@ func TestAgentAnimationRunsOnlyWhileWorkIsActive(t *testing.T) {
 		}},
 	}}}
 	value := newDashboard(&fakeBackend{}, snapshot)
-	if !value.agentAnimationPending {
+	if !value.agentAnimationActive || !value.agentAnimationPending {
 		t.Fatal("working agent did not schedule the initial animation tick")
 	}
 
@@ -3288,7 +3288,7 @@ func TestAgentAnimationRunsOnlyWhileWorkIsActive(t *testing.T) {
 	})
 	updated, command = value.Update(agentAnimationMsg{})
 	value = updated.(dashboard)
-	if value.agentAnimationFrame != 1 || value.agentAnimationPending || command != nil {
+	if value.agentAnimationFrame != 1 || value.agentAnimationActive || value.agentAnimationPending || command != nil {
 		t.Fatalf("idle animation = (frame %d, pending %v, command %v), want stopped frame", value.agentAnimationFrame, value.agentAnimationPending, command)
 	}
 
@@ -3296,7 +3296,7 @@ func TestAgentAnimationRunsOnlyWhileWorkIsActive(t *testing.T) {
 		"tab-1": {Agent: model.AgentClaude, Phase: model.AgentPhaseThinking},
 	}})
 	value = updated.(dashboard)
-	if !value.agentAnimationPending || command == nil {
+	if !value.agentAnimationActive || !value.agentAnimationPending || command == nil {
 		t.Fatal("new working phase did not restart the animation")
 	}
 }

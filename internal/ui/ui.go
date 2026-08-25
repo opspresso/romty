@@ -156,6 +156,7 @@ type dashboard struct {
 	hookStatuses          []agenthooks.Status
 	hookInstallPending    bool
 	agentAnimationFrame   int
+	agentAnimationActive  bool
 	agentAnimationPending bool
 	// removeTarget is the item the confirmation modal is asking about, held so
 	// the answer applies to the item the question named.
@@ -315,7 +316,8 @@ func newDashboardWithConfig(backend Backend, initial model.Snapshot, configPath 
 		gitFetchedAt:     now(),
 	}
 	value.ensureWorkspaceCursor()
-	value.agentAnimationPending = value.hasAnimatedAgent()
+	value.agentAnimationActive = value.hasAnimatedAgent()
+	value.agentAnimationPending = value.agentAnimationActive
 	return value
 }
 
@@ -344,7 +346,7 @@ func (m dashboard) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m dashboard) syncAgentAnimation(command tea.Cmd) (dashboard, tea.Cmd) {
-	if m.hasAnimatedAgent() && !m.agentAnimationPending {
+	if m.agentAnimationActive && !m.agentAnimationPending {
 		m.agentAnimationPending = true
 		command = tea.Batch(command, animateAgentMarker())
 	}
@@ -438,7 +440,7 @@ func (m dashboard) update(message tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.refreshAgents()
 	case agentAnimationMsg:
 		m.agentAnimationPending = false
-		if m.hasAnimatedAgent() {
+		if m.agentAnimationActive {
 			m.agentAnimationFrame = (m.agentAnimationFrame + 1) % len(agentAnimationFrames)
 		}
 		return m, nil
@@ -1276,6 +1278,7 @@ func (m *dashboard) updateAgents(statuses map[string]model.AgentStatus) {
 			}
 		}
 	}
+	m.agentAnimationActive = m.hasAnimatedAgent()
 }
 
 func (m dashboard) hasAnimatedAgent() bool {
@@ -1404,6 +1407,7 @@ func (m *dashboard) applySnapshot(order uint64, snapshot model.Snapshot) bool {
 	}
 	m.state = snapshot
 	m.snapshotApplied = order
+	m.agentAnimationActive = m.hasAnimatedAgent()
 	return true
 }
 
