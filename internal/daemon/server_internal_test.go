@@ -632,6 +632,46 @@ func TestServeReportsAlreadyRunningWhenAnotherDaemonHoldsTheLock(t *testing.T) {
 	}
 }
 
+func TestLockDaemonDoesNotFollowASymlink(t *testing.T) {
+	base := t.TempDir()
+	target := filepath.Join(base, "target")
+	if err := os.WriteFile(target, []byte("unchanged"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	if err := os.Symlink(target, filepath.Join(base, "daemon.sock.lock")); err != nil {
+		t.Fatalf("Symlink() error = %v", err)
+	}
+
+	if lock, err := lockDaemon(filepath.Join(base, "daemon.sock.lock")); err == nil {
+		lock.Close()
+		t.Fatal("lockDaemon() followed a symbolic link")
+	}
+	contents, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	if string(contents) != "unchanged" {
+		t.Fatalf("symlink target = %q, want unchanged", contents)
+	}
+}
+
+func TestLockDaemonRejectsAHardLink(t *testing.T) {
+	base := t.TempDir()
+	target := filepath.Join(base, "target")
+	if err := os.WriteFile(target, nil, 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	lockPath := filepath.Join(base, "daemon.sock.lock")
+	if err := os.Link(target, lockPath); err != nil {
+		t.Fatalf("Link() error = %v", err)
+	}
+
+	if lock, err := lockDaemon(lockPath); err == nil {
+		lock.Close()
+		t.Fatal("lockDaemon() accepted a multiply linked file")
+	}
+}
+
 // The tabs a state file carries name shells that died with the last daemon, so
 // they are cleared before the socket exists. A daemon that cannot clear them
 // has nothing consistent to serve, and must not have touched the socket path a
