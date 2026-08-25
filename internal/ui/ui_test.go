@@ -45,10 +45,11 @@ type fakeBackend struct {
 }
 
 type memoryStream struct {
-	reader  *bytes.Reader
-	mu      sync.Mutex
-	written bytes.Buffer
-	closed  bool
+	reader   *bytes.Reader
+	mu       sync.Mutex
+	written  bytes.Buffer
+	writeErr error
+	closed   bool
 }
 
 func newMemoryStream(output string) *memoryStream {
@@ -62,6 +63,9 @@ func (s *memoryStream) Read(data []byte) (int, error) {
 func (s *memoryStream) Write(data []byte) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.writeErr != nil {
+		return 0, s.writeErr
+	}
 	return s.written.Write(data)
 }
 
@@ -1553,6 +1557,35 @@ func TestDashboardReturnsToTheTreeWhenOpeningFails(t *testing.T) {
 	}
 	if !strings.Contains(value.errorMessage, "session not found") {
 		t.Fatalf("error message = %q, want the attach failure", value.errorMessage)
+	}
+}
+
+func TestDashboardReconnectsWhenTerminalInputFails(t *testing.T) {
+	backend := &fakeBackend{}
+	value := newDashboard(backend, model.Snapshot{})
+	stream := newMemoryStream("")
+	stream.writeErr = errors.New("connection reset")
+	value.terminal = newEmbeddedTerminal("tab-1", stream, 40, 10)
+	value.focus = terminalPane
+
+	value.terminal.sendKey(key('x', "x"))
+	select {
+	case <-value.terminal.inputDone:
+	case <-time.After(time.Second):
+		t.Fatal("terminal input copy did not report the write failure")
+	}
+	message := value.terminal.read()()
+	updated, command := value.Update(message)
+	value = updated.(dashboard)
+
+	if value.terminal != nil || !value.terminalExited {
+		t.Fatalf("failed input = (terminal %v, exited %v), want reconnect", value.terminal != nil, value.terminalExited)
+	}
+	if !strings.Contains(value.errorMessage, "write terminal input: connection reset") {
+		t.Fatalf("error message = %q, want the input failure", value.errorMessage)
+	}
+	if command == nil {
+		t.Fatal("failed input did not refresh the daemon snapshot")
 	}
 }
 

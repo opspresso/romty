@@ -19,6 +19,8 @@ type embeddedTerminal struct {
 	emulator  *vt.SafeEmulator
 	closeOnce sync.Once
 	inputDone chan struct{}
+	inputMu   sync.Mutex
+	inputErr  error
 	// applicationKeypad mirrors DECKPAM so keypad navigation and operators
 	// keep the mode the guest requested.
 	applicationKeypad bool
@@ -28,9 +30,10 @@ type embeddedTerminal struct {
 }
 
 type terminalOutputMsg struct {
-	terminal *embeddedTerminal
-	data     []byte
-	err      error
+	terminal     *embeddedTerminal
+	data         []byte
+	err          error
+	inputFailure bool
 }
 
 func newEmbeddedTerminal(id string, stream io.ReadWriteCloser, width, height int) *embeddedTerminal {
@@ -50,7 +53,15 @@ func newEmbeddedTerminal(id string, stream io.ReadWriteCloser, width, height int
 	clampMargins(emulator)
 	go func() {
 		defer close(terminal.inputDone)
-		_, _ = io.Copy(stream, emulator)
+		if _, err := io.Copy(stream, emulator); err != nil {
+			terminal.inputMu.Lock()
+			terminal.inputErr = fmt.Errorf("write terminal input: %w", err)
+			terminal.inputMu.Unlock()
+			if closer, ok := emulator.InputPipe().(io.Closer); ok {
+				_ = closer.Close()
+			}
+			_ = stream.Close()
+		}
 	}()
 	return terminal
 }
@@ -97,7 +108,13 @@ func (t *embeddedTerminal) read() tea.Cmd {
 	return func() tea.Msg {
 		buffer := make([]byte, 32*1024)
 		count, err := t.stream.Read(buffer)
-		return terminalOutputMsg{terminal: t, data: buffer[:count], err: err}
+		t.inputMu.Lock()
+		inputFailure := t.inputErr != nil
+		if t.inputErr != nil {
+			err = t.inputErr
+		}
+		t.inputMu.Unlock()
+		return terminalOutputMsg{terminal: t, data: buffer[:count], err: err, inputFailure: inputFailure}
 	}
 }
 

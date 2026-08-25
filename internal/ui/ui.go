@@ -1005,6 +1005,9 @@ func (m dashboard) handleTerminalOutput(message terminalOutputMsg) (tea.Model, t
 		}
 	}
 	if message.err != nil {
+		if message.inputFailure {
+			m.setError(terminalError, message.err.Error())
+		}
 		// Drop the dead terminal now, but let the fresh snapshot decide where
 		// the cursor lands: only the daemon knows whether the tab is gone.
 		m.closeTerminal()
