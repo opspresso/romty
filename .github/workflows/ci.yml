@@ -82,4 +82,10 @@ jobs:
       - name: Validate Homebrew formula
         run: |
           ./scripts/render-homebrew-formula.sh v0.0.0 dist/checksums.txt /tmp/romty.rb
-          test -s /tmp/romty.rb
+          ruby -c /tmp/romty.rb
+          for artifact in dist/romty_0.0.0_{darwin,linux}_{amd64,arm64}.tar.gz; do
+            if ! tar -tzf "$artifact" | grep -qx romty; then
+              echo "$artifact does not contain a top-level romty binary"
+              exit 1
+            fi
+          done

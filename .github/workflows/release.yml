@@ -52,7 +52,9 @@ jobs:
       - name: Render Homebrew formula
         env:
           RELEASE_TAG: ${{ github.ref_name }}
-        run: ./scripts/render-homebrew-formula.sh "$RELEASE_TAG" dist/checksums.txt /tmp/romty.rb
+        run: |
+          ./scripts/render-homebrew-formula.sh "$RELEASE_TAG" dist/checksums.txt /tmp/romty.rb
+          ruby -c /tmp/romty.rb
 
       - name: Publish Homebrew formula
         env:
