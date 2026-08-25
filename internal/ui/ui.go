@@ -1929,16 +1929,9 @@ func (m dashboard) renderModal(width, height int) []string {
 
 func (m dashboard) helpEntries() []string {
 	return []string{
-		// About lost its function key to help, so help carries what it said —
-		// the version included, because help is the only one of the two the
-		// terminal pane can reach.
 		m.styles.modalStrong.Render("romty") + m.styles.empty.Render("  "+version.String()) +
 			m.styles.modalBody.Render("  "+tagline),
-		// The split is the point: this is the only reference the terminal pane
-		// can reach, so it has to say which of these keys reach it too. The
-		// letters and F8/F9 do not — the shell gets those.
-		renderHelpSection(m.styles, "COMMANDS", "work in both areas"),
-		// In function key order: the row itself is what the reader is scanning.
+		renderHelpSection(m.styles, "CORE", "global, then workspace-only"),
 		renderHelpShortcut(m.styles, "Help", "F1"),
 		renderHelpShortcut(m.styles, "Add root", "F2"),
 		renderHelpShortcut(m.styles, "Config", "F3"),
@@ -1946,39 +1939,28 @@ func (m dashboard) helpEntries() []string {
 		renderHelpShortcut(m.styles, "Refresh", "F5"),
 		renderHelpShortcut(m.styles, "Scrollback", "F6"),
 		renderHelpShortcut(m.styles, "Switch pane", "F7"),
+		renderHelpShortcut(m.styles, "Remove root", "F8"),
+		renderHelpShortcut(m.styles, "Stop daemon", "F9"),
+		renderHelpSection(m.styles, "NAVIGATE", "workspaces and terminals"),
+		renderHelpShortcut(m.styles, "Select workspace", "↑/↓"),
+		renderHelpShortcut(m.styles, "Select tab / +", "←/→"),
+		renderHelpShortcut(m.styles, "Open selection", "Enter"),
+		renderHelpShortcut(m.styles, "Focus terminal", "Tab"),
+		renderHelpShortcut(m.styles, "Focus workspace", "Ctrl+\\"),
 		renderHelpShortcut(m.styles, "Switch tab", "Ctrl+Shift+←/→"),
 		renderHelpShortcut(m.styles, "Switch workspace", "Ctrl+Shift+↑/↓"),
-		renderHelpSection(m.styles, "NAVIGATION", "workspace area"),
-		renderHelpShortcut(m.styles, "Remove root", "F8", "d"),
-		renderHelpShortcut(m.styles, "Stop daemon", "F9", "t"),
-		renderHelpShortcut(m.styles, "Help / About", "?", "i"),
-		renderHelpShortcut(m.styles, "Add root / config", "a", ","),
-		renderHelpShortcut(m.styles, "Quit / refresh", "q", "r"),
-		renderHelpShortcut(m.styles, "Scrollback", "s"),
-		renderHelpShortcut(m.styles, "Select workspace", "↑/↓", "j/k"),
-		renderHelpShortcut(m.styles, "Select tab / +", "←/→", "h/l"),
-		renderHelpShortcut(m.styles, "Open / confirm", "Enter"),
-		renderHelpShortcut(m.styles, "Focus terminal", "F7", "Tab"),
-		renderHelpSection(m.styles, "ADD ROOT", "the F2 picker"),
-		renderHelpShortcut(m.styles, "Select a directory", "↑/↓", "j/k"),
-		renderHelpShortcut(m.styles, "Open / parent", "→/←", "l/h"),
-		renderHelpShortcut(m.styles, "Add the selected one", "Enter"),
-		renderHelpShortcut(m.styles, "Page up / down", "PgUp/PgDn"),
-		renderHelpShortcut(m.styles, "First / last", "Home/End"),
-		renderHelpShortcut(m.styles, "Type a path instead", "/"),
-		renderHelpSection(m.styles, "TERMINAL", "terminal area"),
-		renderHelpShortcut(m.styles, "Focus workspace", "F7", "Ctrl+\\"),
-		renderHelpSection(m.styles, "SCROLLBACK", "mouse works here only"),
-		renderHelpShortcut(m.styles, "Enter / leave", "F6", "Ctrl+\\"),
-		renderHelpShortcut(m.styles, "Scroll a line", "↑/↓", "j/k"),
+		renderHelpSection(m.styles, "SCROLLBACK", "terminal history"),
+		renderHelpShortcut(m.styles, "Enter one page back", "Shift+PgUp/PgDn"),
+		renderHelpShortcut(m.styles, "Scroll a line", "↑/↓"),
 		renderHelpShortcut(m.styles, "Scroll a page", "PgUp/PgDn"),
-		renderHelpShortcut(m.styles, "Scroll with the mouse", "Wheel"),
-		renderHelpShortcut(m.styles, "Enter at a page back", "Shift+PgUp"),
-		renderHelpShortcut(m.styles, "Oldest / newest", "Home/End"),
-		renderHelpSection(m.styles, "OTHER", "contextual"),
-		renderHelpShortcut(m.styles, "Quit", "Ctrl+C"),
-		renderHelpShortcut(m.styles, "Resize workspace pane", "←/→", "[/]"),
-		renderHelpShortcut(m.styles, "Close / cancel", "Esc"),
+		renderHelpShortcut(m.styles, "Oldest / live", "Home/End"),
+		renderHelpShortcut(m.styles, "Leave scrollback", "Esc"),
+		renderHelpSection(m.styles, "PICKER", "add a root"),
+		renderHelpShortcut(m.styles, "Move selection", "↑/↓"),
+		renderHelpShortcut(m.styles, "Open / parent", "→/←"),
+		renderHelpShortcut(m.styles, "Add directory", "Enter"),
+		renderHelpShortcut(m.styles, "Type a path", "/"),
+		renderHelpShortcut(m.styles, "Close picker", "Esc"),
 	}
 }
 

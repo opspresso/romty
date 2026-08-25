@@ -75,132 +75,86 @@ The left pane shows the workspace tree, which scrolls with the selection when th
 
 A `↓N` marker means a Git workspace is `N` commits behind its configured upstream and can pull remote-tracking commits. romty checks local remote-tracking refs every 10 seconds without fetching or making a network request, so run `git fetch` when you want the marker to reflect the current remote.
 
-The status bar shows `F1` through `F7` in both panes and adds navigation keys for the active pane. Press `F1` in either pane to see every shortcut, including aliases hidden from the status bar.
+The status bar shows the primary actions and the keys for the active pane. Press `F1` for the compact in-app reference.
+
+### Keyboard shortcuts
+
+`F1` through `F7` work in both panes and with a modal open. The root path prompt is the exception: it owns every key until it is submitted or cancelled.
+
+#### Core
+
+| Scope | Key | Action |
+|---|---|---|
+| Both panes | `F1` | Help |
+| Both panes | `F2` | Add a root |
+| Both panes | `F3` | Config |
+| Both panes | `F4` | Quit romty |
+| Both panes | `F5` | Refresh |
+| Both panes | `F6` | Enter or leave scrollback |
+| Both panes | `F7` | Switch pane |
+| Workspace | `F8` | Remove the selected root after confirmation |
+| Workspace | `F9` | Stop the daemon and running shells after confirmation |
+
+#### Navigation
+
+| Scope | Key | Action |
+|---|---|---|
+| Workspace | `↑`/`↓` | Select a root or workspace |
+| Workspace | `←`/`→` | Select a terminal tab or `+` |
+| Workspace | `Enter` | Open the selection |
+| Workspace | `Tab` | Focus the terminal |
+| Terminal | `Ctrl+\` | Focus the workspace and refresh it |
+| Both panes | `Ctrl`+`Shift`+`←`/`→` | Switch terminal tab |
+| Both panes | `Ctrl`+`Shift`+`↑`/`↓` | Switch to a workspace with a running terminal |
+
+Workspace aliases are `?` Help, `a` Add root, `,` Config, `q` or `Ctrl+C` Quit, `r` Refresh, `s` Scrollback, `d` Remove root, `t` Stop daemon, and `i` About. `j`/`k`, `h`/`l`, `Ctrl+B`/`Ctrl+F`, and `g`/`G` mirror the corresponding arrow, page, and end keys where applicable.
+
+#### Contextual modes
+
+| Mode | Key | Action |
+|---|---|---|
+| Picker | `↑`/`↓`, `PgUp`/`PgDn`, `Home`/`End` | Move through directories |
+| Picker | `→`/`←` | Open a directory or go to its parent |
+| Picker | `Enter` / `/` / `Esc` | Add the selection / type a path / close |
+| Terminal / scrollback | `Shift`+`PgUp`/`PgDn` | Enter scrollback or move one page |
+| Scrollback | `↑`/`↓`, `PgUp`/`PgDn`, `Home`/`End`, Wheel | Move through history |
+| Scrollback | `F6`, `F7`, `Ctrl+\`, `Esc`, `q`, `s` | Leave scrollback |
+| Help | `↑`/`↓`, `PgUp`/`PgDn`, `Home`/`End` | Scroll the reference |
+| Config | `←`/`→`, `[`/`]` | Resize the workspace pane |
+| Modal or prompt | `Esc` | Cancel |
+| Confirmation | `Enter` | Confirm root removal or daemon shutdown |
 
 ### Adding a root
 
-`F2`, or `a` in the workspace pane, opens a picker on the home directory listing the directories inside it.
+`F2` opens a picker on the home directory. The first row is the open directory itself, shown as `.`, so `Enter` always adds the highlighted row. Files and dot-directories are omitted; `/` opens the path prompt for a directory that is faster to type or paste.
 
-| Key | Action |
-|---|---|
-| `↑`/`↓`, `k`/`j` | Move between rows |
-| `PgUp`/`PgDn`, `Home`/`End` | Move a page, or to either end |
-| `→`, `l` | Open the highlighted directory |
-| `←`, `h` | Go to the parent directory; the cursor lands on the directory just left |
-| `Enter` | Add the highlighted row as a root |
-| `/` | Type a path instead |
-| `Esc` | Close the picker |
+Directory reads run in the background, so a slow network mount does not block the TUI or its terminals.
 
-The first row is the open directory itself, listed as `.`, so the directory you walked into can be added without walking back out — and `Enter` means one thing regardless of what the directory holds.
+### Switching panes and sessions
 
-Files and dot-directories are left out, and a linked directory is listed as the directory it points at. The picker always opens on the home directory rather than where it was left, so `F2` lands somewhere predictable; `/` reaches everything else, including a path that is faster to paste than to walk to.
+The `+` key is not a shortcut. Select the `+` tab with `←`/`→` and press `Enter`. `Ctrl`+`Shift`+the arrow keys switch existing tabs or workspaces immediately and wrap at both ends.
 
-The directory is read in the background, so a listing that is slow to answer — a stale network mount, say — leaves romty drawing and its terminals running.
+`F7` switches panes in either direction. `Tab` enters the terminal and `Ctrl+\` returns to the workspace; pressing `Ctrl+\` again opens scrollback. The function-key fallback matters when the desktop intercepts `Ctrl+\` before romty receives it.
 
-### Global keys
+In the terminal pane, only the global shortcuts above are captured. Other keyboard and paste input, including `F8`, `F9`, and ordinary `Ctrl` combinations, is forwarded to the PTY.
 
-These function keys work from either pane, with a modal open, and with non-English keyboard input modes. The root input prompt is the one exception: while it is open every key belongs to the prompt, so a typed path is never discarded by a function key.
+### Scrollback and mouse
 
-| Key | Action |
-|---|---|
-| `F1` | Open Help |
-| `F2` | Open the root directory picker |
-| `F3` | Open Config |
-| `F4` | Quit romty |
-| `F5` | Refresh roots, workspaces, and sessions |
-| `F6` | Enter or leave scrollback for the open terminal |
-| `F7` | Switch between the workspace and terminal panes |
-| `Shift`+`PgUp`/`PgDn` | Enter scrollback and move one page at a time |
-| `Ctrl`+`Shift`+`←`/`→` | Open the previous or next terminal tab of the selected workspace |
-| `Ctrl`+`Shift`+`↑`/`↓` | Open a terminal in the previous or next workspace that has one running |
+romty keeps the last 10,000 lines that scrolled off each terminal. Scrollback fills the width so native terminal selection copies terminal output without the workspace tree. New output does not move the historical view; leaving returns to the live screen.
 
-The row stops at `F7`. A full-screen program binds the whole function key row — `htop` puts Kill on `F9` and answers it with `Enter`, which is the same `Enter` that would confirm stopping the daemon — so romty takes `F1` through `F7` from the shell and no more. `F8` and `F9` belong to the workspace pane, below.
+Full-screen applications such as `vim`, `less`, and Claude Code use an alternate screen with no history. In that mode `Shift`+`PgUp`/`PgDn` is forwarded as plain `PgUp`/`PgDn` so the application can page itself.
 
-### Workspace pane
-
-| Key | Action |
-|---|---|
-| `F1`, `?` | Open Help |
-| `F2`, `a` | Open the root directory picker |
-| `F3`, `,` | Open Config |
-| `F4`, `q` | Quit romty |
-| `F5`, `r` | Refresh roots, workspaces, and sessions |
-| `F6`, `s` | Enter or leave scrollback for the open terminal |
-| `F7`, `Tab` | Focus the active terminal |
-| `F8`, `d` | Ask for confirmation, then forget the selected root; terminals under it keep running |
-| `F9`, `t` | Ask for confirmation, then stop the daemon and all running terminal sessions |
-| `i` | Open About, which names the version this build is |
-| `↑`/`↓`, `j`/`k` | Move between roots and workspaces; stops at both ends |
-| `←`/`→`, `h`/`l` | Move between terminal tabs and the `+` tab |
-| `Enter` | Open the selected tab or create the selected `+` tab |
-| `Ctrl+C` | Quit romty |
-
-The `+` key itself is not a shortcut. Select the `+` tab with `←`/`→` and confirm it with `Enter`.
-
-`Ctrl`+`Shift`+`←`/`→` does both steps at once for the tabs that already exist: it moves to the previous or next tab and opens it, skipping the `+` tab, and it works from the terminal pane too.
-
-`Ctrl`+`Shift`+`↑`/`↓` is the other axis of the same chord, moving between workspaces rather than along one workspace's tabs. Only workspaces with a terminal running — the ones marked `●` — are stops, because a root lists every child directory whether it has ever been used or not; the plain `↑`/`↓` still walk all of them. It starts from the workspace whose terminal is open rather than from the cursor, so the same cycle comes out of either pane, and it wraps at both ends. The cursor follows along, so the tree shows where the keyboard went.
-
-### Terminal pane
-
-| Key | Action |
-|---|---|
-| `F7`, `Ctrl+\` | Focus the workspace pane and refresh the workspace tree |
-| `Ctrl+\` `Ctrl+\` | Pressing it a second time, from the workspace pane, opens the terminal's scrollback |
-| `Ctrl`+`Shift`+`←`/`→` | Switch terminal tabs without leaving the terminal pane |
-| `Ctrl`+`Shift`+`↑`/`↓` | Switch to a terminal in another workspace without leaving the terminal pane |
-
-`F7` moves in both directions, which `Tab` and `Ctrl+\` each did one way only. It is also the way out when `Ctrl+\` never arrives: an application or the desktop environment can claim that chord as a global hotkey — 1Password does, and a Windows host running romty over WSL sees it taken before the terminal does — and romty cannot receive a key the system intercepted first.
-
-Except for `F1` through `F7`, `Ctrl+\`, `Shift`+`PgUp`/`PgDn` and `Ctrl`+`Shift`+the arrow keys, keyboard and paste input is forwarded to the PTY — `F8` and `F9` included, so a full-screen program keeps the keys it binds — along with keys held with `Shift`, `Ctrl` or `Meta` such as `Ctrl`+`←` for word-wise movement. Mouse tracking remains disabled so the host terminal can select and copy displayed text normally.
-
-### Scrollback
-
-romty keeps the last 10,000 lines that scrolled off each terminal. Enter scrollback with `F6`, `s`, `Shift`+`PgUp`, or a second `Ctrl+\`, and leave it with `F6`, `s`, `Ctrl+\`, `Esc`, or `q`. New output does not move the view while you are scrolled back; leaving returns to the live screen.
-
-Full-screen applications such as `vim`, `less`, and Claude Code switch the terminal to its alternate screen, which keeps no history — the application owns every row and scrolls its own content. romty says so instead of opening scrollback, because the history from before the application started is not what you asked for. `Shift`+`PgUp`/`PgDn` reaches such an application as a plain `PgUp`/`PgDn` so its own paging still works.
-
-### Mouse
-
-The mouse belongs to the host terminal, which is what keeps its click-drag selection and copy working over romty. Applications that want the mouse themselves — Claude Code, `htop`, `vim` with `set mouse=a` — therefore do not receive it by default, and scroll with `PgUp`/`PgDn` or `Ctrl+U`/`Ctrl+D` instead.
-
-Set `mouse_passthrough` in `config.json` — see [Data and configuration](#data-and-configuration) for where that lives — to hand the mouse to those applications while they run:
+The mouse stays with the host terminal for native selection. Set `mouse_passthrough` in `config.json` to let applications receive it instead:
 
 ```json
 { "mouse_passthrough": true }
 ```
 
-romty then mirrors whatever mouse mode the application asks for, and returns the mouse to the terminal as soon as the application exits or scrollback opens. This is the same trade as `set -g mouse on` in tmux: the wheel and clicks reach the application, and the terminal's drag selection needs its bypass modifier — `Option` on macOS, `Shift` elsewhere — for as long as the application is running.
+With passthrough enabled, the application's mouse mode is mirrored until it exits or scrollback opens. Native selection then uses the terminal's bypass modifier: `Option` on macOS or `Shift` elsewhere. If the terminal does not support alternate scroll, the wheel does nothing in scrollback and the keyboard controls still work.
 
-Outside scrollback the wheel does nothing. Terminals showing a full-screen program send a wheel notch as three arrow key presses, which romty cannot tell from typed ones: they walked the workspace tree three rows at a time and reached the shell as history keys nobody pressed. romty asks the terminal to stop sending them — DEC private mode 1007, alternate scroll — for as long as it is not in scrollback, and turns the mode back on when it exits. A terminal that does not implement 1007 keeps sending the arrow keys, and scrolling over romty moves the cursor as it did before.
+### Modals and config
 
-| Key | Action |
-|---|---|
-| Wheel | Scroll, through the terminal's own alternate scroll |
-| `↑`/`↓`, `j`/`k` | Scroll one line |
-| `PgUp`/`PgDn`, `Ctrl+B`/`Ctrl+F` | Scroll one page |
-| `Home`/`End`, `g`/`G` | Jump to the oldest retained line or back to the live screen |
-| `F6`, `s`, `Ctrl+\`, `Esc`, `q` | Leave scrollback for the terminal |
-| `F7` | Leave scrollback for the workspace pane |
-
-Scrollback hides the workspace pane and draws the terminal across the full width. That is what makes the text selectable: in the split layout every row of the host terminal holds the workspace tree, a divider, and terminal output on one line, so dragging across several lines copies the tree along with them. With one pane on screen, a plain drag selects terminal output and nothing else.
-
-romty never asks the terminal for mouse events here. The xterm protocol has no wheel-only reporting mode, so requesting the wheel would take drag selection away — the very thing scrollback exists to give you. The wheel still scrolls because scrollback turns alternate scroll back on, and the arrow keys it sends are the ones the keys above already handle. Selection and copying stay with the terminal, exactly as they behave outside romty.
-
-If your terminal does not implement alternate scroll, the wheel does nothing here and the keys above still work.
-
-While scrollback is open it owns the keyboard, so navigation and terminal input resume only after you leave it. Leaving focuses the terminal, which is what the full-width view was already showing, so `Ctrl+\` cycles terminal → workspace → scrollback → terminal. `F7` is the exception: it switches panes, so it leaves scrollback for the workspace pane. A terminal whose shell has exited is not focused; the workspace pane keeps the keyboard instead.
-
-### Modals and prompts
-
-| Key | Action |
-|---|---|
-| `Esc` | Close a modal or cancel root input |
-| `←`/`→`, `[`/`]` | Adjust the workspace pane width in Config |
-| `↑`/`↓`, `j`/`k` | Scroll Help when the terminal is too short to show every shortcut |
-| `Enter` | Confirm the root removal in the `F8` modal, or the daemon shutdown in the `F9` modal |
-
-The configured workspace pane width is stored automatically and constrained to 18 through 40 columns, subject to the available terminal width.
+`Esc` cancels a modal or path prompt; `Enter` confirms destructive actions. The configured workspace pane width is saved automatically and constrained to 18 through 40 columns, subject to the available terminal width.
 
 ## Workspace refresh
 
