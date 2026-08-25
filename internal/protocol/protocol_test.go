@@ -142,6 +142,8 @@ func TestCapabilitiesFollowTheirIntroducedVersion(t *testing.T) {
 		{version: 4, capability: protocol.CapabilityRemoveWorkspace, want: true},
 		{version: 4, capability: protocol.CapabilityReplayBoundary, want: false},
 		{version: 5, capability: protocol.CapabilityReplayBoundary, want: true},
+		{version: 4, capability: protocol.CapabilityAgentStatus, want: false},
+		{version: 5, capability: protocol.CapabilityAgentStatus, want: true},
 	} {
 		capabilities := protocol.CapabilitiesForVersion(probe.version)
 		if got := protocol.HasCapability(capabilities, probe.capability); got != probe.want {

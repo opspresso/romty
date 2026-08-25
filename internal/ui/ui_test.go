@@ -24,7 +24,7 @@ import (
 
 type fakeBackend struct {
 	snapshot               model.Snapshot
-	agents                 map[string]model.Agent
+	agentStatuses          map[string]model.AgentStatus
 	workspace              model.Workspace
 	createdTab             model.Tab
 	createdColumns         uint16
@@ -158,11 +158,11 @@ func (f *fakeBackend) Snapshot() (model.Snapshot, error) {
 	return f.snapshot, nil
 }
 
-func (f *fakeBackend) Agents() (map[string]model.Agent, error) {
-	if err := f.failure("Agents"); err != nil {
+func (f *fakeBackend) AgentStatuses() (map[string]model.AgentStatus, error) {
+	if err := f.failure("AgentStatuses"); err != nil {
 		return nil, err
 	}
-	return f.agents, nil
+	return f.agentStatuses, nil
 }
 
 func (f *fakeBackend) EnsureWorkspace(rootID, path string) (model.Workspace, error) {
@@ -3139,15 +3139,15 @@ func TestDashboardReplacesControlCharactersInLabels(t *testing.T) {
 func TestOpenTabMarkersUseAgentColors(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, model.Snapshot{})
 	tabs := []model.Tab{
-		{Running: true, Agent: model.AgentClaude},
-		{Running: true, Agent: model.AgentCodex},
+		{Running: true, Agent: model.AgentClaude, AgentPhase: model.AgentPhaseIdle},
+		{Running: true, Agent: model.AgentCodex, AgentPhase: model.AgentPhaseWaitingInput},
 		{Running: true},
 	}
 
 	base := value.styles.navigationSelected
 	markers := openTabMarkers(value.styles, base, tabs)
-	claude := base.Foreground(value.styles.agentClaude.GetForeground()).Render("●")
-	codex := base.Foreground(value.styles.agentCodex.GetForeground()).Render("●")
+	claude := base.Foreground(value.styles.agentClaude.GetForeground()).Render("○")
+	codex := base.Foreground(value.styles.agentCodex.GetForeground()).Render("◉")
 	plain := base.Render("●")
 	if markers != claude+codex+plain {
 		t.Fatalf("open tab markers = %q, want Claude, Codex, and default markers", markers)
@@ -3298,10 +3298,15 @@ func TestAgentSnapshotUpdatesStateAndSchedulesAnotherRefresh(t *testing.T) {
 	}}}
 	value := newDashboard(&fakeBackend{}, snapshot)
 
-	updated, command := value.Update(agentSnapshotMsg{value: map[string]model.Agent{"tab-1": model.AgentClaude}})
+	updated, command := value.Update(agentSnapshotMsg{value: map[string]model.AgentStatus{
+		"tab-1": {Agent: model.AgentClaude, Phase: model.AgentPhaseWaitingApproval},
+	}})
 	value = updated.(dashboard)
 	if got := value.state.Roots[0].Tabs[0].Agent; got != model.AgentClaude {
 		t.Fatalf("agent = %q, want %q", got, model.AgentClaude)
+	}
+	if got := value.state.Roots[0].Tabs[0].AgentPhase; got != model.AgentPhaseWaitingApproval {
+		t.Fatalf("agent phase = %q, want %q", got, model.AgentPhaseWaitingApproval)
 	}
 	if command == nil {
 		t.Fatal("agent snapshot did not schedule another refresh")

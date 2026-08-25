@@ -236,6 +236,8 @@ func printTabs(output io.Writer, theme commandTheme, indent string, tabs []model
 		agent := string(tab.Agent)
 		if agent == "" {
 			agent = "shell"
+		} else if tab.AgentPhase != "" && tab.AgentPhase != model.AgentPhaseUnknown {
+			agent += "/" + string(tab.AgentPhase)
 		}
 		value := fmt.Sprintf("%q  %s", tab.Name, theme.agent(tab.Agent, agent))
 		if err := printField(output, theme, indent+"tab", value); err != nil {

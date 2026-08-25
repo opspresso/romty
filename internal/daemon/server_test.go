@@ -1046,6 +1046,7 @@ func TestServerRefusesAnActionTheSelectedProtocolPredates(t *testing.T) {
 	}{
 		{action: "agents", version: 1, capability: protocol.CapabilityAgents},
 		{action: "remove_workspace", version: 3, capability: protocol.CapabilityRemoveWorkspace},
+		{action: "agent_statuses", version: 4, capability: protocol.CapabilityAgentStatus},
 	} {
 		response := speakRaw(t, socket, map[string]any{
 			"action":       testCase.action,

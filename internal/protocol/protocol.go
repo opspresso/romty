@@ -23,6 +23,7 @@ const (
 	CapabilitySnapshotRevision = "snapshot_revision"
 	CapabilityRemoveWorkspace  = "remove_workspace"
 	CapabilityReplayBoundary   = "replay_boundary"
+	CapabilityAgentStatus      = "agent_status"
 )
 
 var capabilities = []struct {
@@ -33,12 +34,15 @@ var capabilities = []struct {
 	{name: CapabilitySnapshotRevision, since: 3},
 	{name: CapabilityRemoveWorkspace, since: 4},
 	{name: CapabilityReplayBoundary, since: 5},
+	{name: CapabilityAgentStatus, since: 5},
 }
 
 const (
 	ActionPing            = "ping"
 	ActionSnapshot        = "snapshot"
 	ActionAgents          = "agents"
+	ActionAgentStatuses   = "agent_statuses"
+	ActionAgentEvent      = "agent_event"
 	ActionAddRoot         = "add_root"
 	ActionRemoveRoot      = "remove_root"
 	ActionRemoveWorkspace = "remove_workspace"
@@ -83,21 +87,36 @@ type Request struct {
 	// own environment is not the one the user is working in.
 	Environment []string `json:"environment,omitempty"`
 	// Shell is what the client wants to run, for the same reason.
-	Shell string `json:"shell,omitempty"`
+	Shell      string      `json:"shell,omitempty"`
+	AgentEvent *AgentEvent `json:"agent_event,omitempty"`
+}
+
+// AgentEvent contains only the hook metadata needed to derive a UI state. It
+// intentionally has no prompt, transcript, tool input, tool output, or model
+// response fields.
+type AgentEvent struct {
+	Agent            model.Agent `json:"agent"`
+	SessionID        string      `json:"session_id,omitempty"`
+	HookEvent        string      `json:"hook_event"`
+	ToolName         string      `json:"tool_name,omitempty"`
+	NotificationType string      `json:"notification_type,omitempty"`
+	PermissionMode   string      `json:"permission_mode,omitempty"`
+	Background       bool        `json:"background,omitempty"`
 }
 
 type Response struct {
 	Error string `json:"error,omitempty"`
 	// Version echoes the request revision so clients that predate range
 	// negotiation still see the exact version they expect.
-	Version      int                    `json:"version,omitempty"`
-	MinVersion   int                    `json:"min_version,omitempty"`
-	MaxVersion   int                    `json:"max_version,omitempty"`
-	Capabilities []string               `json:"capabilities,omitempty"`
-	Snapshot     *model.Snapshot        `json:"snapshot,omitempty"`
-	Agents       map[string]model.Agent `json:"agents,omitempty"`
-	Workspace    *model.Workspace       `json:"workspace,omitempty"`
-	Tab          *model.Tab             `json:"tab,omitempty"`
+	Version       int                          `json:"version,omitempty"`
+	MinVersion    int                          `json:"min_version,omitempty"`
+	MaxVersion    int                          `json:"max_version,omitempty"`
+	Capabilities  []string                     `json:"capabilities,omitempty"`
+	Snapshot      *model.Snapshot              `json:"snapshot,omitempty"`
+	Agents        map[string]model.Agent       `json:"agents,omitempty"`
+	AgentStatuses map[string]model.AgentStatus `json:"agent_statuses,omitempty"`
+	Workspace     *model.Workspace             `json:"workspace,omitempty"`
+	Tab           *model.Tab                   `json:"tab,omitempty"`
 	// ReplayBytes is the exact initial terminal history that follows an attach
 	// response. Anything after it is live output.
 	ReplayBytes int `json:"replay_bytes,omitempty"`

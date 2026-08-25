@@ -48,7 +48,7 @@ var now = time.Now
 type Backend interface {
 	AddRoot(path string) (model.Snapshot, error)
 	Snapshot() (model.Snapshot, error)
-	Agents() (map[string]model.Agent, error)
+	AgentStatuses() (map[string]model.AgentStatus, error)
 	RemoveRoot(rootID string) (model.Snapshot, error)
 	RemoveWorkspace(rootID, path string) (model.Snapshot, error)
 	EnsureWorkspace(rootID, path string) (model.Workspace, error)
@@ -188,7 +188,7 @@ type snapshotMsg struct {
 }
 
 type agentSnapshotMsg struct {
-	value map[string]model.Agent
+	value map[string]model.AgentStatus
 	err   error
 }
 
@@ -1139,21 +1139,25 @@ func (m dashboard) refreshAll() (tea.Model, tea.Cmd) {
 func (m dashboard) refreshAgents() tea.Cmd {
 	backend := m.backend
 	return tea.Tick(agentRefreshInterval, func(time.Time) tea.Msg {
-		value, err := backend.Agents()
+		value, err := backend.AgentStatuses()
 		return agentSnapshotMsg{value: value, err: err}
 	})
 }
 
-func (m *dashboard) updateAgents(agents map[string]model.Agent) {
+func (m *dashboard) updateAgents(statuses map[string]model.AgentStatus) {
 	for rootIndex := range m.state.Roots {
 		root := &m.state.Roots[rootIndex]
 		for tabIndex := range root.Tabs {
-			root.Tabs[tabIndex].Agent = agents[root.Tabs[tabIndex].ID]
+			status := statuses[root.Tabs[tabIndex].ID]
+			root.Tabs[tabIndex].Agent = status.Agent
+			root.Tabs[tabIndex].AgentPhase = status.Phase
 		}
 		for workspaceIndex := range root.Directories {
 			tabs := root.Directories[workspaceIndex].Tabs
 			for tabIndex := range tabs {
-				tabs[tabIndex].Agent = agents[tabs[tabIndex].ID]
+				status := statuses[tabs[tabIndex].ID]
+				tabs[tabIndex].Agent = status.Agent
+				tabs[tabIndex].AgentPhase = status.Phase
 			}
 		}
 	}
@@ -1650,7 +1654,14 @@ func openTabMarkers(styles *uiStyles, base lipgloss.Style, tabs []model.Tab) str
 		case model.AgentCodex:
 			style = style.Foreground(styles.agentCodex.GetForeground())
 		}
-		result.WriteString(style.Render("●"))
+		marker := "●"
+		switch tab.AgentPhase {
+		case model.AgentPhaseIdle:
+			marker = "○"
+		case model.AgentPhaseWaitingInput, model.AgentPhaseWaitingApproval, model.AgentPhaseError:
+			marker = "◉"
+		}
+		result.WriteString(style.Render(marker))
 	}
 	return result.String()
 }

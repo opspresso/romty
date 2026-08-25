@@ -26,12 +26,33 @@ const (
 	AgentCodex  Agent = "codex"
 )
 
+type AgentPhase string
+
+const (
+	AgentPhaseUnknown         AgentPhase = "unknown"
+	AgentPhaseThinking        AgentPhase = "thinking"
+	AgentPhaseWorking         AgentPhase = "working"
+	AgentPhasePlanning        AgentPhase = "planning"
+	AgentPhaseCompacting      AgentPhase = "compacting"
+	AgentPhaseIdle            AgentPhase = "idle"
+	AgentPhaseWaitingInput    AgentPhase = "waiting_input"
+	AgentPhaseWaitingApproval AgentPhase = "waiting_approval"
+	AgentPhaseBackground      AgentPhase = "background"
+	AgentPhaseError           AgentPhase = "error"
+)
+
+type AgentStatus struct {
+	Agent Agent      `json:"agent"`
+	Phase AgentPhase `json:"phase"`
+}
+
 type Tab struct {
-	ID          string `json:"id"`
-	WorkspaceID string `json:"workspace_id"`
-	Name        string `json:"name"`
-	Running     bool   `json:"running"`
-	Agent       Agent  `json:"agent,omitempty"`
+	ID          string     `json:"id"`
+	WorkspaceID string     `json:"workspace_id"`
+	Name        string     `json:"name"`
+	Running     bool       `json:"running"`
+	Agent       Agent      `json:"agent,omitempty"`
+	AgentPhase  AgentPhase `json:"agent_phase,omitempty"`
 }
 
 type Snapshot struct {

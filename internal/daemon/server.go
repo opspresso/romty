@@ -43,12 +43,13 @@ type Server struct {
 	// error that is not written there leaves no trace at all.
 	logger *log.Logger
 
-	mu       sync.Mutex
-	value    model.State
-	revision uint64
-	sessions map[string]*session
-	stop     chan struct{}
-	stopOnce sync.Once
+	mu            sync.Mutex
+	value         model.State
+	revision      uint64
+	sessions      map[string]*session
+	agentStatuses map[string]agentRuntime
+	stop          chan struct{}
+	stopOnce      sync.Once
 	// stopping is set once shutdown has begun, so a shell exiting because the
 	// daemon killed it is not persisted one tab at a time.
 	stopping bool
@@ -71,14 +72,15 @@ func New(socket, statePath, shell string) (*Server, error) {
 		shell = "/bin/sh"
 	}
 	return &Server{
-		socket:    socket,
-		store:     store,
-		shell:     shell,
-		logger:    log.New(os.Stderr, "romty: ", log.LstdFlags),
-		value:     value,
-		sessions:  make(map[string]*session),
-		stop:      make(chan struct{}),
-		accepting: true,
+		socket:        socket,
+		store:         store,
+		shell:         shell,
+		logger:        log.New(os.Stderr, "romty: ", log.LstdFlags),
+		value:         value,
+		sessions:      make(map[string]*session),
+		agentStatuses: make(map[string]agentRuntime),
+		stop:          make(chan struct{}),
+		accepting:     true,
 	}, nil
 }
 
@@ -341,6 +343,8 @@ func checkClientCapability(request protocol.Request) error {
 	switch request.Action {
 	case protocol.ActionAgents:
 		required = protocol.CapabilityAgents
+	case protocol.ActionAgentStatuses, protocol.ActionAgentEvent:
+		required = protocol.CapabilityAgentStatus
 	case protocol.ActionRemoveWorkspace:
 		required = protocol.CapabilityRemoveWorkspace
 	}
@@ -412,6 +416,10 @@ func (s *Server) dispatch(request protocol.Request) protocol.Response {
 		return s.snapshotResponse()
 	case protocol.ActionAgents:
 		return protocol.Response{Agents: s.agents()}
+	case protocol.ActionAgentStatuses:
+		return protocol.Response{AgentStatuses: s.agentStatusesSnapshot()}
+	case protocol.ActionAgentEvent:
+		return s.recordAgentEvent(request.TabID, request.AgentEvent)
 	case protocol.ActionAddRoot:
 		return s.addRoot(request.Path)
 	case protocol.ActionRemoveRoot:
@@ -793,6 +801,7 @@ func (s *Server) sessionExited(tabID string) {
 	defer s.mu.Unlock()
 	s.logger.Printf("shell for tab %s exited", tabID)
 	delete(s.sessions, tabID)
+	delete(s.agentStatuses, tabID)
 	removed := false
 	for index := range s.value.Tabs {
 		if s.value.Tabs[index].ID == tabID {
@@ -830,9 +839,11 @@ func (s *Server) snapshot() model.Snapshot {
 	value := cloneState(s.value)
 	revision := s.revision
 	s.mu.Unlock()
-	agents := s.agents()
+	statuses := s.agentStatusesSnapshot()
 	for index := range value.Tabs {
-		value.Tabs[index].Agent = agents[value.Tabs[index].ID]
+		status := statuses[value.Tabs[index].ID]
+		value.Tabs[index].Agent = status.Agent
+		value.Tabs[index].AgentPhase = status.Phase
 	}
 
 	result := model.Snapshot{Revision: revision, Roots: make([]model.RootView, 0, len(value.Roots))}
@@ -900,13 +911,36 @@ func appendMissingRunningWorkspaces(directories []model.WorkspaceView, value mod
 }
 
 func (s *Server) agents() map[string]model.Agent {
+	statuses := s.agentStatusesSnapshot()
+	result := make(map[string]model.Agent, len(statuses))
+	for tabID, status := range statuses {
+		result[tabID] = status.Agent
+	}
+	return result
+}
+
+func (s *Server) agentStatusesSnapshot() map[string]model.AgentStatus {
 	s.mu.Lock()
 	sessions := make(map[string]*session, len(s.sessions))
 	for tabID, session := range s.sessions {
 		sessions[tabID] = session
 	}
 	s.mu.Unlock()
-	return sessionAgents(sessions)
+	agents := sessionAgents(sessions)
+	result := make(map[string]model.AgentStatus, len(agents))
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for tabID, agent := range agents {
+		if _, ok := s.sessions[tabID]; !ok {
+			continue
+		}
+		status := model.AgentStatus{Agent: agent, Phase: model.AgentPhaseUnknown}
+		if runtime, ok := s.agentStatuses[tabID]; ok && runtime.Agent == agent {
+			status.Phase = runtime.Phase
+		}
+		result[tabID] = status
+	}
+	return result
 }
 
 func canonicalDirectory(path string) (string, error) {

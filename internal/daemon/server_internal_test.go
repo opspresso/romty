@@ -732,7 +732,7 @@ func TestStartSessionUsesTheEnvironmentItIsGiven(t *testing.T) {
 		t.Skip("the marker is already in the daemon's environment")
 	}
 	value, err := startSession("tab-1", t.TempDir(), "/bin/sh",
-		append(os.Environ(), "ROMTY_ONLY_IN_THE_REQUEST=yes"), 80, 24, func() {})
+		append(os.Environ(), "ROMTY_ONLY_IN_THE_REQUEST=yes", "ROMTY_TAB_ID=stale"), 80, 24, func() {})
 	if err != nil {
 		t.Fatalf("startSession() error = %v", err)
 	}
@@ -751,16 +751,16 @@ func TestStartSessionUsesTheEnvironmentItIsGiven(t *testing.T) {
 			remote.SetReadDeadline(time.Now().Add(3 * time.Second))
 			count, err := remote.Read(buffer)
 			output = append(output, buffer[:count]...)
-			if err != nil || bytes.Contains(output, []byte("marker=yes")) {
+			if err != nil || bytes.Contains(output, []byte("marker=yes tab=tab-1")) {
 				seen <- string(output)
 				return
 			}
 		}
 	}()
-	if err := value.write([]byte("printf 'marker=%s\\n' \"$ROMTY_ONLY_IN_THE_REQUEST\"\n")); err != nil {
+	if err := value.write([]byte("printf 'marker=%s tab=%s\\n' \"$ROMTY_ONLY_IN_THE_REQUEST\" \"$ROMTY_TAB_ID\"\n")); err != nil {
 		t.Fatalf("write() error = %v", err)
 	}
-	if output := <-seen; !bytes.Contains([]byte(output), []byte("marker=yes")) {
+	if output := <-seen; !bytes.Contains([]byte(output), []byte("marker=yes tab=tab-1")) {
 		t.Fatalf("the shell did not receive the request's environment: %q", output)
 	}
 }

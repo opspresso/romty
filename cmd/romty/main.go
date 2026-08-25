@@ -23,10 +23,23 @@ func main() {
 }
 
 func run() error {
-	return runCommand(os.Args[1:], os.Stdout)
+	return runCommandWithInput(os.Args[1:], os.Stdout, os.Stdin)
 }
 
 func runCommand(arguments []string, output io.Writer) error {
+	return runCommandWithInput(arguments, output, os.Stdin)
+}
+
+func runCommandWithInput(arguments []string, output io.Writer, input io.Reader) error {
+	if len(arguments) == 2 && arguments[0] == "hook" {
+		switch arguments[1] {
+		case "claude", "codex":
+			runHookCommand(arguments[1], input)
+			return nil
+		default:
+			return fmt.Errorf("unknown hook provider %q", arguments[1])
+		}
+	}
 	if len(arguments) > 1 {
 		return fmt.Errorf("usage: romty <command>; run `romty help` for details")
 	}
