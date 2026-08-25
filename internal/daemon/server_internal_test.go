@@ -25,6 +25,67 @@ func newSessionForTest() *session {
 	}
 }
 
+func TestShutdownDoesNotWaitForDirectoryPreflight(t *testing.T) {
+	for _, action := range []string{protocol.ActionAddRoot, protocol.ActionEnsureWorkspace} {
+		t.Run(action, func(t *testing.T) {
+			server, err := New(filepath.Join(t.TempDir(), "daemon.sock"), filepath.Join(t.TempDir(), "state.json"), "/bin/sh")
+			if err != nil {
+				t.Fatalf("New() error = %v", err)
+			}
+			request := protocol.Request{Action: action, Path: "/root"}
+			if action == protocol.ActionEnsureWorkspace {
+				server.value.Roots = []model.Root{{ID: "root-1", Name: "root", Path: "/root"}}
+				request.RootID = "root-1"
+				request.Path = "/root/child"
+			}
+
+			entered := make(chan struct{})
+			release := make(chan struct{})
+			released := false
+			previous := resolveDirectory
+			resolveDirectory = func(path string) (string, error) {
+				close(entered)
+				<-release
+				return path, nil
+			}
+			t.Cleanup(func() {
+				resolveDirectory = previous
+				if !released {
+					close(release)
+				}
+			})
+
+			response := make(chan protocol.Response, 1)
+			go func() { response <- server.dispatch(request) }()
+			<-entered
+			server.beginShutdown()
+			drained := make(chan struct{})
+			go func() {
+				server.mutations.Wait()
+				close(drained)
+			}()
+			select {
+			case <-drained:
+			case <-time.After(time.Second):
+				t.Fatal("shutdown waited for directory preflight")
+			}
+
+			close(release)
+			released = true
+			result := <-response
+			if result.Error != "daemon is shutting down" {
+				t.Fatalf("response error = %q, want shutdown rejection", result.Error)
+			}
+			if len(server.value.Roots) != 0 && action == protocol.ActionAddRoot {
+				t.Fatalf("roots = %#v, want no late mutation", server.value.Roots)
+			}
+			if len(server.value.Workspaces) != 0 {
+				t.Fatalf("workspaces = %#v, want no late mutation", server.value.Workspaces)
+			}
+		})
+	}
+}
+
 // A peer that connects and never finishes a request must not hold a goroutine
 // and a file descriptor for the daemon's whole life, and must not keep the
 // daemon from serving anyone else.

@@ -30,6 +30,8 @@ var ErrAlreadyRunning = errors.New("romty daemon is already running")
 // client ever meets it. It is a variable so tests need not wait.
 var requestTimeout = 10 * time.Second
 
+var resolveDirectory = canonicalDirectory
+
 type Server struct {
 	socket string
 	store  *state.Store
@@ -390,13 +392,22 @@ func (s *Server) beginRequest(action string) (func(), bool) {
 		return nil, false
 	}
 	switch action {
-	case protocol.ActionAddRoot, protocol.ActionRemoveRoot, protocol.ActionEnsureWorkspace,
-		protocol.ActionCreateTab, protocol.ActionResize:
+	case protocol.ActionRemoveRoot, protocol.ActionCreateTab, protocol.ActionResize:
 		s.mutations.Add(1)
 		return s.mutations.Done, true
 	default:
 		return func() {}, true
 	}
+}
+
+func (s *Server) beginMutation() (func(), bool) {
+	s.requestMu.Lock()
+	defer s.requestMu.Unlock()
+	if !s.accepting {
+		return nil, false
+	}
+	s.mutations.Add(1)
+	return s.mutations.Done, true
 }
 
 func (s *Server) beginShutdown() {
@@ -463,10 +474,15 @@ func (s *Server) removeRoot(rootID string) protocol.Response {
 }
 
 func (s *Server) addRoot(path string) protocol.Response {
-	canonical, err := canonicalDirectory(path)
+	canonical, err := resolveDirectory(path)
 	if err != nil {
 		return protocol.Response{Error: err.Error()}
 	}
+	finish, ok := s.beginMutation()
+	if !ok {
+		return protocol.Response{Error: "daemon is shutting down"}
+	}
+	defer finish()
 
 	s.mu.Lock()
 	for _, root := range s.value.Roots {
@@ -502,10 +518,15 @@ func (s *Server) ensureWorkspace(rootID, path string) protocol.Response {
 	}
 	s.mu.Unlock()
 
-	canonical, err := canonicalDirectory(path)
+	canonical, err := resolveDirectory(path)
 	if err != nil {
 		return protocol.Response{Error: err.Error()}
 	}
+	finish, ok := s.beginMutation()
+	if !ok {
+		return protocol.Response{Error: "daemon is shutting down"}
+	}
+	defer finish()
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
