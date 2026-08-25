@@ -69,6 +69,23 @@ To stop the daemon and every running terminal session from outside the TUI:
 romty stop
 ```
 
+## CLI commands
+
+| Command | Action |
+|---|---|
+| `romty` | Start or reconnect to the TUI |
+| `romty status` | Show daemon, protocol, root, workspace, session, and agent counts |
+| `romty version` | Show the client version |
+| `romty help` | Show command-line help |
+| `romty doctor` | Check runtime permissions, JSON files, the shell, and daemon compatibility |
+| `romty list` | List roots, workspaces, and running terminal sessions |
+| `romty stop` | Stop the daemon and every running terminal session |
+
+`status`, `doctor`, and `list` are read-only and never start the daemon or create the runtime directory. A missing runtime directory, state file, or config file is valid before the first run. `doctor` exits with an error when it finds an invalid runtime, malformed JSON, an unavailable shell, an unsafe socket, or an incompatible daemon protocol.
+
+`--version` and `-v` are aliases for `version`; `--help` and `-h` are aliases for `help`.
+Command output uses color when connected to a terminal, stays plain when redirected or piped, and honors `NO_COLOR`.
+
 ## Interface
 
 The left pane shows the workspace tree, which scrolls with the selection when the tree is taller than the pane. A `●` after an item represents one running terminal tab. A dot turns Claude orange while Claude Code is in the foreground and Codex blue while Codex is in the foreground; other terminals keep the normal row color. The right pane contains the tab rail and the embedded terminal. Accent colors distinguish the current selection, active tab, and focused pane; the arrow beside the vertical divider points to the active pane.
