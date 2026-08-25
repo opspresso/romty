@@ -2,7 +2,9 @@ package daemon
 
 import (
 	"errors"
+	"net"
 	"os"
+	"os/exec"
 	"testing"
 	"time"
 )
@@ -23,9 +25,9 @@ func TestSessionReleasesThePTYWhenTheShellExits(t *testing.T) {
 		t.Fatal("shell did not exit")
 	}
 
-	// The server drops the session as soon as the shell exits, so this is the
-	// last moment anything could close the master: whatever holds it here holds
-	// it for the daemon's life.
+	// The server drops the session once the shell has exited and the PTY is
+	// drained, so this is the last moment anything could close the master:
+	// whatever holds it here holds it for the daemon's life.
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
 		if errors.Is(descriptorState(value.pty), os.ErrClosed) {
@@ -34,6 +36,53 @@ func TestSessionReleasesThePTYWhenTheShellExits(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatal("PTY master is still open after the shell exited")
+}
+
+func TestSessionDrainsPTYBeforeReportingExit(t *testing.T) {
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("Pipe() error = %v", err)
+	}
+	defer reader.Close()
+	defer writer.Close()
+
+	command := exec.Command("/bin/sh", "-c", "exit 0")
+	if err := command.Start(); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	exited := make(chan struct{})
+	value := &session{
+		pty:      reader,
+		command:  command,
+		readDone: make(chan struct{}),
+		onExit: func() {
+			close(exited)
+		},
+		modes:   newModeTracker(),
+		clients: make(map[net.Conn]*attachment),
+	}
+	go value.read()
+	go value.wait()
+
+	select {
+	case <-exited:
+		t.Fatal("session reported exit before the PTY was drained")
+	case <-time.After(250 * time.Millisecond):
+	}
+	if _, err := writer.Write([]byte("final output")); err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("Close() writer error = %v", err)
+	}
+	select {
+	case <-exited:
+	case <-time.After(3 * time.Second):
+		t.Fatal("session did not report exit after the PTY was drained")
+	}
+	if got := string(value.history.bytes()); got != "final output" {
+		t.Fatalf("history = %q, want final output", got)
+	}
 }
 
 // descriptorState reports os.ErrClosed for a file that has been closed and nil

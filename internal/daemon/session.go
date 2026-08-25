@@ -30,10 +30,11 @@ var replayTimeout = 2 * time.Second
 const replayChunkBytes = 64 << 10
 
 type session struct {
-	id      string
-	pty     *os.File
-	command *exec.Cmd
-	onExit  func()
+	id       string
+	pty      *os.File
+	command  *exec.Cmd
+	onExit   func()
+	readDone chan struct{}
 
 	mu      sync.Mutex
 	writeMu sync.Mutex
@@ -76,12 +77,13 @@ func startSession(id, directory, shell string, environment []string, columns, ro
 	}
 
 	value := &session{
-		id:      id,
-		pty:     terminal,
-		command: command,
-		onExit:  onExit,
-		modes:   newModeTracker(),
-		clients: make(map[net.Conn]*attachment),
+		id:       id,
+		pty:      terminal,
+		command:  command,
+		onExit:   onExit,
+		readDone: make(chan struct{}),
+		modes:    newModeTracker(),
+		clients:  make(map[net.Conn]*attachment),
 	}
 	go value.read()
 	go value.wait()
@@ -100,8 +102,9 @@ func startSession(id, directory, shell string, environment []string, columns, ro
 func (s *session) read() {
 	defer func() {
 		s.mu.Lock()
-		defer s.mu.Unlock()
 		_ = s.pty.Close()
+		s.mu.Unlock()
+		close(s.readDone)
 	}()
 	buffer := make([]byte, 32*1024)
 	for {
@@ -117,6 +120,7 @@ func (s *session) read() {
 
 func (s *session) wait() {
 	_ = s.command.Wait()
+	<-s.readDone
 	s.mu.Lock()
 	s.closed = true
 	clients := make([]net.Conn, 0, len(s.clients))
