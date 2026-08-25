@@ -17,24 +17,60 @@ const (
 	gitStatusWorkers  = 4
 )
 
-func gitBehind(path string, fetch bool) int {
+type gitState struct {
+	Branch     string
+	Revision   string
+	Detached   bool
+	Dirty      bool
+	Conflicted bool
+	Ahead      int
+	Behind     int
+}
+
+func readGitState(path string, fetch bool) (gitState, bool) {
 	if _, err := os.Stat(filepath.Join(path, ".git")); err != nil {
-		return 0
+		return gitState{}, false
 	}
 	if fetch {
 		fetchGit(path)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), gitCommandTimeout)
 	defer cancel()
-	output, err := exec.CommandContext(ctx, "git", "-C", path, "rev-list", "--count", "HEAD..@{upstream}").Output()
+	command := exec.CommandContext(ctx, "git", "-C", path, "status", "--porcelain=v2", "--branch", "--untracked-files=normal")
+	command.Env = append(os.Environ(), "GIT_OPTIONAL_LOCKS=0")
+	output, err := command.Output()
 	if err != nil {
-		return 0
+		return gitState{}, false
 	}
-	behind, err := strconv.Atoi(strings.TrimSpace(string(output)))
-	if err != nil || behind < 1 {
-		return 0
+	return parseGitState(string(output)), true
+}
+
+func parseGitState(output string) gitState {
+	var state gitState
+	for _, line := range strings.Split(output, "\n") {
+		switch {
+		case strings.HasPrefix(line, "# branch.oid "):
+			state.Revision = strings.TrimPrefix(line, "# branch.oid ")
+		case strings.HasPrefix(line, "# branch.head "):
+			state.Branch = strings.TrimPrefix(line, "# branch.head ")
+			if state.Branch == "(detached)" {
+				state.Branch = ""
+				state.Detached = true
+			}
+		case strings.HasPrefix(line, "# branch.ab "):
+			fields := strings.Fields(strings.TrimPrefix(line, "# branch.ab "))
+			if len(fields) == 2 {
+				state.Ahead, _ = strconv.Atoi(strings.TrimPrefix(fields[0], "+"))
+				state.Behind, _ = strconv.Atoi(strings.TrimPrefix(fields[1], "-"))
+			}
+		case strings.HasPrefix(line, "u "):
+			state.Dirty = true
+			state.Conflicted = true
+		case line != "" && !strings.HasPrefix(line, "# "):
+			state.Dirty = true
+		}
 	}
-	return behind
+	return state
 }
 
 func fetchGit(path string) {
@@ -45,7 +81,7 @@ func fetchGit(path string) {
 	_ = command.Run()
 }
 
-func gitBehindWorkspaces(paths []string, fetch bool) map[string]int {
+func gitStates(paths []string, fetch bool) map[string]gitState {
 	unique := make(map[string]struct{}, len(paths))
 	for _, path := range paths {
 		if path != "" {
@@ -58,7 +94,7 @@ func gitBehindWorkspaces(paths []string, fetch bool) map[string]int {
 	}
 	close(jobs)
 
-	result := make(map[string]int)
+	result := make(map[string]gitState)
 	var mu sync.Mutex
 	var workers sync.WaitGroup
 	for range min(len(unique), gitStatusWorkers) {
@@ -66,10 +102,10 @@ func gitBehindWorkspaces(paths []string, fetch bool) map[string]int {
 		go func() {
 			defer workers.Done()
 			for path := range jobs {
-				behind := gitBehind(path, fetch)
-				if behind > 0 {
+				state, ok := readGitState(path, fetch)
+				if ok {
 					mu.Lock()
-					result[path] = behind
+					result[path] = state
 					mu.Unlock()
 				}
 			}

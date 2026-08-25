@@ -4,10 +4,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
-func TestGitBehindUsesFetchedUpstream(t *testing.T) {
+func TestGitStateUsesFetchedUpstream(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git is not installed")
 	}
@@ -20,8 +21,9 @@ func TestGitBehindUsesFetchedUpstream(t *testing.T) {
 	writeGitFile(t, source, "one")
 	runGit(t, "-C", source, "add", "status.txt")
 	runGit(t, "-C", source, "-c", "user.name=romty", "-c", "user.email=romty@example.com", "commit", "-m", "one")
-	if got := gitBehind(source, false); got != 0 {
-		t.Fatalf("repository without upstream behind = %d, want 0", got)
+	state, ok := readGitState(source, false)
+	if !ok || state.Branch != "main" || state.Dirty || state.Ahead != 0 || state.Behind != 0 {
+		t.Fatalf("repository without upstream state = %#v, %v", state, ok)
 	}
 	runGit(t, "-C", source, "remote", "add", "origin", remote)
 	runGit(t, "-C", source, "push", "-u", "origin", "main")
@@ -32,25 +34,51 @@ func TestGitBehindUsesFetchedUpstream(t *testing.T) {
 	runGit(t, "-C", source, "-c", "user.name=romty", "-c", "user.email=romty@example.com", "commit", "-m", "two")
 	runGit(t, "-C", source, "push", "origin", "main")
 
-	if got := gitBehind(workspace, false); got != 0 {
-		t.Fatalf("behind before fetch = %d, want the stale local upstream left unchanged", got)
+	state, ok = readGitState(workspace, false)
+	if !ok || state.Behind != 0 {
+		t.Fatalf("state before fetch = %#v, %v, want stale upstream left unchanged", state, ok)
 	}
-	if got := gitBehind(workspace, true); got != 1 {
-		t.Fatalf("behind with fetch = %d, want 1", got)
+	state, ok = readGitState(workspace, true)
+	if !ok || state.Branch != "main" || state.Dirty || state.Ahead != 0 || state.Behind != 1 {
+		t.Fatalf("state with fetch = %#v, %v, want clean main behind by one", state, ok)
 	}
-	statuses := gitBehindWorkspaces([]string{workspace, workspace, ""}, false)
-	if len(statuses) != 1 || statuses[workspace] != 1 {
-		t.Fatalf("workspace statuses = %#v, want the fetched repository once", statuses)
+	states := gitStates([]string{workspace, workspace, ""}, false)
+	if len(states) != 1 || states[workspace].Behind != 1 {
+		t.Fatalf("workspace statuses = %#v, want the fetched repository once", states)
 	}
-	runGit(t, "-C", workspace, "pull", "--ff-only")
-	if got := gitBehind(workspace, false); got != 0 {
-		t.Fatalf("behind after pull = %d, want 0", got)
+
+	writeGitFile(t, workspace, "local")
+	if err := os.WriteFile(filepath.Join(workspace, "untracked.txt"), []byte("new"), 0o600); err != nil {
+		t.Fatalf("write untracked Git fixture: %v", err)
+	}
+	state, ok = readGitState(workspace, false)
+	if !ok || !state.Dirty {
+		t.Fatalf("modified and untracked workspace state = %#v, %v, want dirty", state, ok)
+	}
+	runGit(t, "-C", workspace, "add", "status.txt", "untracked.txt")
+	runGit(t, "-C", workspace, "-c", "user.name=romty", "-c", "user.email=romty@example.com", "commit", "-m", "local")
+	state, ok = readGitState(workspace, false)
+	if !ok || state.Dirty || state.Ahead != 1 || state.Behind != 1 {
+		t.Fatalf("diverged workspace state = %#v, %v, want clean and one ahead/behind", state, ok)
 	}
 }
 
-func TestGitBehindIgnoresDirectoriesWithoutGitMetadata(t *testing.T) {
-	if got := gitBehind(t.TempDir(), true); got != 0 {
-		t.Fatalf("non-repository behind = %d, want 0", got)
+func TestParseGitStateRecognizesDetachedConflict(t *testing.T) {
+	state := parseGitState(strings.Join([]string{
+		"# branch.oid 0123456789abcdef",
+		"# branch.head (detached)",
+		"# branch.ab +2 -3",
+		"u UU N... 100644 100644 100644 100644 a b c conflict.txt",
+	}, "\n"))
+	if !state.Detached || state.Revision != "0123456789abcdef" || !state.Dirty || !state.Conflicted ||
+		state.Ahead != 2 || state.Behind != 3 {
+		t.Fatalf("detached conflict state = %#v", state)
+	}
+}
+
+func TestGitStateIgnoresDirectoriesWithoutGitMetadata(t *testing.T) {
+	if state, ok := readGitState(t.TempDir(), true); ok {
+		t.Fatalf("non-repository state = %#v, want no state", state)
 	}
 }
 

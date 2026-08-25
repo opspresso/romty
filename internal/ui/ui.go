@@ -103,9 +103,10 @@ type navItem struct {
 	root      model.Root
 	workspace model.Workspace
 	tabs      []model.Tab
-	gitBehind int
+	git       gitState
+	hasGit    bool
 	isRoot    bool
-	lastChild bool
+	separator bool
 	// failure is set on a root romty could not read, so the tree can say why
 	// it is empty instead of looking as though the root has no directories.
 	failure string
@@ -175,7 +176,7 @@ type dashboard struct {
 	config           Config
 	leftWidth        int
 	mousePassthrough bool
-	gitBehind        map[string]int
+	gitStates        map[string]gitState
 	gitFetchedAt     time.Time
 	styles           *uiStyles
 }
@@ -192,7 +193,7 @@ type agentSnapshotMsg struct {
 }
 
 type gitStatusMsg struct {
-	value      map[string]int
+	value      map[string]gitState
 	fetchedAt  time.Time
 	reschedule bool
 }
@@ -290,6 +291,7 @@ func newDashboardWithConfig(backend Backend, initial model.Snapshot, configPath 
 		leftWidth:        config.LeftWidth,
 		mousePassthrough: config.MousePassthrough,
 		styles:           newUIStyles(true),
+		gitFetchedAt:     now(),
 	}
 	value.ensureWorkspaceCursor()
 	return value
@@ -299,7 +301,7 @@ func (m dashboard) Init() tea.Cmd {
 	// The host starts with alternate scroll on, which is what turns a wheel
 	// notch into arrow keys romty cannot tell from typed ones. Only scrollback
 	// wants them, so the mode is off until it opens.
-	return tea.Batch(tea.RequestBackgroundColor, m.refreshAgents(), m.readGitStatus(true, true), altScrollCommand(false))
+	return tea.Batch(tea.RequestBackgroundColor, m.refreshAgents(), m.initialGitStatus(), altScrollCommand(false))
 }
 
 // Update wraps the state machine so every path that opens or leaves scrollback
@@ -400,7 +402,7 @@ func (m dashboard) update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, m.refreshAgents()
 	case gitStatusMsg:
-		m.gitBehind = message.value
+		m.gitStates = message.value
 		if message.fetchedAt.After(m.gitFetchedAt) {
 			m.gitFetchedAt = message.fetchedAt
 		}
@@ -1131,7 +1133,7 @@ func (m *dashboard) refresh() tea.Cmd {
 
 func (m dashboard) refreshAll() (tea.Model, tea.Cmd) {
 	tree := m.refresh()
-	return m, tea.Batch(tree, m.readGitStatus(true, false))
+	return m, tea.Batch(tree, m.readGitStatus(false, false), m.readGitStatus(true, false))
 }
 
 func (m dashboard) refreshAgents() tea.Cmd {
@@ -1165,8 +1167,12 @@ func (m dashboard) readGitStatus(forceFetch, reschedule bool) tea.Cmd {
 		fetchedAt = now()
 	}
 	return func() tea.Msg {
-		return gitStatusMsg{value: gitBehindWorkspaces(paths, fetch), fetchedAt: fetchedAt, reschedule: reschedule}
+		return gitStatusMsg{value: gitStates(paths, fetch), fetchedAt: fetchedAt, reschedule: reschedule}
 	}
+}
+
+func (m dashboard) initialGitStatus() tea.Cmd {
+	return tea.Batch(m.readGitStatus(false, true), m.readGitStatus(true, false))
 }
 
 func (m dashboard) refreshGitStatus() tea.Cmd {
@@ -1179,7 +1185,6 @@ func (m dashboard) refreshGitStatus() tea.Cmd {
 func (m dashboard) workspacePaths() []string {
 	paths := make([]string, 0)
 	for _, root := range m.state.Roots {
-		paths = append(paths, root.Root.Path)
 		for _, directory := range root.Directories {
 			paths = append(paths, directory.Workspace.Path)
 		}
@@ -1589,7 +1594,7 @@ func (m *dashboard) syncSelection() {
 
 func (m dashboard) navigationItems() []navItem {
 	result := make([]navItem, 0)
-	for _, root := range m.state.Roots {
+	for rootIndex, root := range m.state.Roots {
 		result = append(result, navItem{
 			root: root.Root,
 			workspace: model.Workspace{
@@ -1598,17 +1603,18 @@ func (m dashboard) navigationItems() []navItem {
 				Path:   root.Root.Path,
 			},
 			tabs:      root.Tabs,
-			gitBehind: m.gitBehind[root.Root.Path],
 			isRoot:    true,
+			separator: rootIndex > 0,
 			failure:   root.Error,
 		})
-		for index, directory := range root.Directories {
+		for _, directory := range root.Directories {
+			directoryGit, directoryHasGit := m.gitStates[directory.Workspace.Path]
 			result = append(result, navItem{
 				root:      root.Root,
 				workspace: directory.Workspace,
 				tabs:      directory.Tabs,
-				gitBehind: m.gitBehind[directory.Workspace.Path],
-				lastChild: index == len(root.Directories)-1,
+				git:       directoryGit,
+				hasGit:    directoryHasGit,
 			})
 		}
 	}
@@ -2097,13 +2103,12 @@ func (m dashboard) renderNavigation(width, height int) []string {
 	header := title + m.styles.tabRail.Render(strings.Repeat("─", max(width-lipgloss.Width(title), 0)))
 	lines := []string{header, ""}
 	items := m.navigationItems()
-	capacity := max(height-len(lines), 1)
-	start := 0
-	if len(items) > capacity {
-		start = min(max(m.navIndex-capacity/2, 0), len(items)-capacity)
-	}
-	for index := start; index < len(items) && index-start < capacity; index++ {
-		lines = append(lines, m.renderNavigationItem(items[index], index, width))
+	available := max(height-len(lines), 0)
+	start, end := navigationWindow(items, m.navIndex, available)
+	for index := start; index < end; index++ {
+		itemLines := m.renderNavigationItem(items[index], index, width)
+		remaining := max(height-len(lines), 0)
+		lines = append(lines, itemLines[:min(len(itemLines), remaining)]...)
 	}
 	if len(items) == 0 {
 		lines = append(lines,
@@ -2114,7 +2119,44 @@ func (m dashboard) renderNavigation(width, height int) []string {
 	return lines
 }
 
-func (m dashboard) renderNavigationItem(item navItem, index, width int) string {
+func navigationWindow(items []navItem, cursor, available int) (int, int) {
+	if len(items) == 0 || available <= 0 {
+		return 0, 0
+	}
+	cursor = min(max(cursor, 0), len(items)-1)
+	start := cursor
+	used := navigationRows(items[cursor])
+	for start > 0 && used+navigationRows(items[start-1]) <= available/2 {
+		start--
+		used += navigationRows(items[start])
+	}
+	end := start
+	used = 0
+	for end < len(items) && used+navigationRows(items[end]) <= available {
+		used += navigationRows(items[end])
+		end++
+	}
+	for end == len(items) && start > 0 && used+navigationRows(items[start-1]) <= available {
+		start--
+		used += navigationRows(items[start])
+	}
+	if end == start {
+		end++
+	}
+	return start, end
+}
+
+func navigationRows(item navItem) int {
+	if item.isRoot {
+		if item.separator {
+			return 2
+		}
+		return 1
+	}
+	return 2
+}
+
+func (m dashboard) renderNavigationItem(item navItem, index, width int) []string {
 	isCurrent := item.workspace.Path == m.selectedPath
 	isSelected := m.focus == leftPane && index == m.navIndex
 	indicator := " "
@@ -2124,17 +2166,14 @@ func (m dashboard) renderNavigationItem(item navItem, index, width int) string {
 	if isSelected {
 		indicator = "▌"
 	}
-	branch := "├─"
-	if item.lastChild {
-		branch = "└─"
-	}
+	branch := "-"
 	name := indicator + " " + branch + " " + displayText(item.workspace.Name)
 	style := m.styles.navigationItem
 	if item.isRoot {
-		name = indicator + " ▾ " + displayText(item.root.Name)
+		name = indicator + "▾ " + displayText(item.root.Name)
 		style = m.styles.navigationRoot
 		if item.failure != "" {
-			name = indicator + " ✗ " + displayText(item.root.Name)
+			name = indicator + "✗ " + displayText(item.root.Name)
 			style = m.styles.errorText
 		}
 	}
@@ -2145,24 +2184,68 @@ func (m dashboard) renderNavigationItem(item navItem, index, width int) string {
 		style = m.styles.navigationSelected
 	}
 	markers := openTabMarkers(m.styles, style, item.tabs)
-	if item.gitBehind > 0 {
-		gitStyle := style.Foreground(m.styles.gitBehind.GetForeground())
-		gitMarker := gitStyle.Render(fmt.Sprintf("↓%d", item.gitBehind))
-		if markers != "" {
-			markers = gitMarker + style.Render(" ") + markers
-		} else {
-			markers = gitMarker
-		}
-	}
+	var nameLine string
 	if markers != "" {
 		available := width - lipgloss.Width(markers) - 2
 		if available > 0 {
 			name = truncate(name, available)
 			name += strings.Repeat(" ", max(width-lipgloss.Width(name)-lipgloss.Width(markers), 2))
-			return style.Render(name) + markers
+			nameLine = style.Render(name) + markers
 		}
 	}
-	return style.Render(pad(truncate(name, width), width))
+	if nameLine == "" {
+		nameLine = style.Render(pad(truncate(name, width), width))
+	}
+	if item.isRoot {
+		if item.separator {
+			return []string{"", nameLine}
+		}
+		return []string{nameLine}
+	}
+	return []string{nameLine, m.renderNavigationGit(item, indicator, style, width)}
+}
+
+func (m dashboard) renderNavigationGit(item navItem, indicator string, style lipgloss.Style, width int) string {
+	prefix := indicator + "   "
+	if !item.hasGit {
+		return style.Render(pad(prefix, width))
+	}
+
+	branch := displayText(item.git.Branch)
+	if item.git.Detached {
+		revision := item.git.Revision
+		if len(revision) > 7 {
+			revision = revision[:7]
+		}
+		branch = "@" + revision
+	}
+	marker := ""
+	if item.git.Conflicted {
+		marker = "!"
+	} else if item.git.Dirty {
+		marker = "*"
+	}
+	sync := ""
+	if item.git.Ahead > 0 {
+		sync += fmt.Sprintf(" ↑%d", item.git.Ahead)
+	}
+	if item.git.Behind > 0 {
+		sync += fmt.Sprintf(" ↓%d", item.git.Behind)
+	}
+
+	available := max(width-lipgloss.Width(prefix)-lipgloss.Width(marker)-lipgloss.Width(sync)-2, 0)
+	branch = truncate(branch, available)
+	branchStyle := style.Foreground(m.styles.gitBranch.GetForeground())
+	statusStyle := style.Foreground(m.styles.gitStatus.GetForeground())
+	conflictStyle := style.Foreground(m.styles.gitConflict.GetForeground())
+	line := style.Render(prefix) + branchStyle.Render("("+branch)
+	if marker == "!" {
+		line += conflictStyle.Render(marker)
+	} else if marker != "" {
+		line += statusStyle.Render(marker)
+	}
+	line += branchStyle.Render(")") + statusStyle.Render(sync)
+	return line + style.Render(strings.Repeat(" ", max(width-lipgloss.Width(line), 0)))
 }
 
 func (m dashboard) renderTerminal(width int) []string {

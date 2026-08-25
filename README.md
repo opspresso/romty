@@ -55,8 +55,10 @@ The daemon starts automatically on the first run. Press `F2` to open a picker on
 
 ```text
 ▾ projects
-├─ api
-└─ web
+  - api
+    (main)
+  - web
+    (main*) ↓2
 ```
 
 Use `↑`/`↓` to choose a root or workspace. Use `←`/`→` to choose an existing terminal tab or the `+` tab, then press `Enter` to confirm. Selecting a workspace without an open tab creates one automatically.
@@ -88,9 +90,9 @@ Command output uses color when connected to a terminal, stays plain when redirec
 
 ## Interface
 
-The left pane shows the workspace tree, which scrolls with the selection when the tree is taller than the pane. A `●` after an item represents one running terminal tab. A dot turns Claude orange while Claude Code is in the foreground and Codex blue while Codex is in the foreground; other terminals keep the normal row color. The right pane contains the tab rail and the embedded terminal. Accent colors distinguish the current selection, active tab, and focused pane; the arrow beside the vertical divider points to the active pane.
+The left pane shows the workspace tree, which scrolls with the selection when the tree is taller than the pane. Each root uses one row. Each workspace uses two rows: the first holds its name and terminal markers, and the second holds Git metadata or stays blank for a non-Git directory. A `●` after an item represents one running terminal tab. A dot turns Claude orange while Claude Code is in the foreground and Codex blue while Codex is in the foreground; other terminals keep the normal row color. The right pane contains the tab rail and the embedded terminal. Accent colors distinguish the current selection, active tab, and focused pane; the arrow beside the vertical divider points to the active pane.
 
-A `↓N` marker means a Git workspace is `N` commits behind its configured upstream and can pull remote-tracking commits. romty checks local remote-tracking refs every 10 seconds, fetches them in the background at startup and every 5 minutes, and fetches immediately when you press `F5`. Fetches never prompt for credentials and time out without blocking the interface.
+Git metadata is rendered as `(branch*) ↑N ↓N`. `*` means the worktree has tracked or untracked changes, `!` replaces it when files are conflicted, and the arrows count commits ahead of or behind the configured upstream. A detached HEAD is shown as `(@abcdef0)`. romty shows local state first, checks it every 10 seconds, and fetches remote-tracking refs separately in the background at startup and every 5 minutes. Pressing `F5` refreshes local state immediately and starts another background fetch. Fetches never prompt for credentials and time out without blocking the interface.
 
 The status bar shows the primary actions and the keys for the active pane. Press `F1` for the compact in-app reference.
 

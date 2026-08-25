@@ -309,7 +309,7 @@ func TestDashboardSelectsRootAndCreatesTerminal(t *testing.T) {
 	value.height = 40
 	value.setNavigation(0)
 
-	if rendered := ansi.Strip(value.render()); !strings.Contains(rendered, "▌ ▾ projects") || !strings.Contains(rendered, "  └─ cloned") {
+	if rendered := ansi.Strip(value.render()); !strings.Contains(rendered, "▌▾ projects") || !strings.Contains(rendered, "  - cloned") {
 		t.Fatalf("root and indented workspace are not distinguishable:\n%s", rendered)
 	}
 	updated, selectCommand := value.Update(key(tea.KeyEnter, ""))
@@ -333,7 +333,7 @@ func TestDashboardSelectsRootAndCreatesTerminal(t *testing.T) {
 	if value.terminal == nil || value.terminal.id != tab.ID || readCommand == nil {
 		t.Fatalf("root terminal = %v, read command = %v", value.terminal, readCommand)
 	}
-	if rendered := ansi.Strip(value.render()); !strings.Contains(rendered, "▎ ▾ projects") || !strings.Contains(rendered, "●") {
+	if rendered := ansi.Strip(value.render()); !strings.Contains(rendered, "▎▾ projects") || !strings.Contains(rendered, "●") {
 		t.Fatalf("root tab marker is missing:\n%s", rendered)
 	}
 }
@@ -366,7 +366,7 @@ func TestDashboardReloadsWorkspacesWhenReturningFromTerminal(t *testing.T) {
 	}
 	updated, _ = value.Update(refreshCommand())
 	value = updated.(dashboard)
-	if backend.snapshotCount != 1 || !strings.Contains(ansi.Strip(value.render()), "  └─ cloned") {
+	if backend.snapshotCount != 1 || !strings.Contains(ansi.Strip(value.render()), "  - cloned") {
 		t.Fatalf("reloaded workspace list = (snapshots %d):\n%s", backend.snapshotCount, value.render())
 	}
 }
@@ -787,7 +787,7 @@ func TestDashboardSupportsIMEIndependentShortcuts(t *testing.T) {
 	var forcedGitFetch bool
 	for _, message := range commandMessages(command) {
 		if status, ok := message.(gitStatusMsg); ok {
-			forcedGitFetch = !status.fetchedAt.IsZero()
+			forcedGitFetch = forcedGitFetch || !status.fetchedAt.IsZero()
 			if _, followup := value.Update(message); followup != nil {
 				t.Fatal("F5 Git fetch started another refresh loop")
 			}
@@ -2494,7 +2494,7 @@ func TestDashboardKeepsTheCursorOnTheSameWorkspace(t *testing.T) {
 	if !ok || item.workspace.Name != "gamma" {
 		t.Fatalf("after the refresh the cursor is on %q, want gamma", item.workspace.Name)
 	}
-	if !strings.Contains(ansi.Strip(value.render()), "▌ └─ gamma") {
+	if !strings.Contains(ansi.Strip(value.render()), "▌ - gamma") {
 		t.Fatalf("the highlight is not on gamma:\n%s", ansi.Strip(value.render()))
 	}
 
@@ -3048,7 +3048,7 @@ func TestDashboardHighlightsNavigationAndShowsOpenTabs(t *testing.T) {
 	if strings.Contains(plain, "> ") {
 		t.Fatalf("navigation still contains arrow cursor:\n%s", rendered)
 	}
-	if !strings.Contains(plain, "▾ nalbam") || !strings.Contains(plain, "▌ ├─ SnowClash") {
+	if !strings.Contains(plain, "▾ nalbam") || !strings.Contains(plain, "▌ - SnowClash") {
 		t.Fatalf("navigation tree or selection color is missing:\n%s", rendered)
 	}
 	view := value.dimensions()
@@ -3073,7 +3073,7 @@ func TestDashboardHighlightsNavigationAndShowsOpenTabs(t *testing.T) {
 	if !strings.Contains(rendered, status) {
 		t.Fatalf("status shortcuts and descriptions are not separated:\n%s", rendered)
 	}
-	if !strings.Contains(plain, "  └─ TankClash") {
+	if !strings.Contains(plain, "  - TankClash") {
 		t.Fatalf("workspace without tabs is missing:\n%s", rendered)
 	}
 
@@ -3154,7 +3154,7 @@ func TestOpenTabMarkersUseAgentColors(t *testing.T) {
 	}
 }
 
-func TestNavigationShowsGitBehindBesideOpenTabs(t *testing.T) {
+func TestNavigationShowsGitStateOnSecondLine(t *testing.T) {
 	workspace := model.Workspace{ID: "workspace-1", RootID: "root-1", Name: "SnowClash", Path: "/projects/SnowClash"}
 	snapshot := model.Snapshot{Roots: []model.RootView{{
 		Root: model.Root{ID: "root-1", Name: "projects", Path: "/projects"},
@@ -3164,30 +3164,80 @@ func TestNavigationShowsGitBehindBesideOpenTabs(t *testing.T) {
 		}},
 	}}}
 	value := newDashboard(&fakeBackend{}, snapshot)
-	value.gitBehind = map[string]int{workspace.Path: 3}
+	value.gitStates = map[string]gitState{workspace.Path: {
+		Branch: "main",
+		Dirty:  true,
+		Ahead:  1,
+		Behind: 3,
+	}}
 	value.width = 120
 	value.height = 40
 
 	navigation := ansi.Strip(strings.Join(value.renderNavigation(28, 36), "\n"))
-	for _, line := range strings.Split(navigation, "\n") {
-		if strings.Contains(line, workspace.Name) && !strings.HasSuffix(strings.TrimRight(line, " "), "↓3 ●") {
-			t.Fatalf("workspace row = %q, want Git and terminal markers", line)
+	lines := strings.Split(navigation, "\n")
+	for index, line := range lines {
+		if strings.Contains(line, workspace.Name) {
+			if !strings.HasSuffix(strings.TrimRight(line, " "), "●") {
+				t.Fatalf("workspace row = %q, want terminal marker", line)
+			}
+			if index+1 >= len(lines) || strings.TrimSpace(lines[index+1]) != "(main*) ↑1 ↓3" {
+				t.Fatalf("Git row after %q = %q, want branch and status", line, lines[index+1])
+			}
+			return
 		}
 	}
-	marker := value.styles.navigationItem.Foreground(value.styles.gitBehind.GetForeground()).Render("↓3")
-	if rendered := strings.Join(value.renderNavigation(28, 36), "\n"); !strings.Contains(rendered, marker) {
-		t.Fatalf("navigation does not contain styled Git marker:\n%s", rendered)
+	t.Fatalf("navigation does not contain workspace %q:\n%s", workspace.Name, navigation)
+}
+
+func TestNavigationUsesOneRootLineAndTwoWorkspaceLines(t *testing.T) {
+	value := newDashboard(&fakeBackend{}, model.Snapshot{Roots: []model.RootView{{
+		Root: model.Root{ID: "root-1", Name: "projects", Path: "/projects"},
+		Directories: []model.WorkspaceView{
+			{Workspace: model.Workspace{ID: "workspace-1", RootID: "root-1", Name: "first", Path: "/projects/first"}},
+			{Workspace: model.Workspace{ID: "workspace-2", RootID: "root-1", Name: "last", Path: "/projects/last"}},
+		},
+	}}})
+	value.focus = terminalPane
+	value.selectedPath = "/projects/first"
+	value.gitStates = map[string]gitState{"/projects/first": {Branch: "main"}}
+	lines := value.renderNavigation(28, 20)
+	if len(lines) != 7 {
+		t.Fatalf("navigation lines = %d, want header, one root line, and two lines per workspace\n%s", len(lines), strings.Join(lines, "\n"))
+	}
+	plain := make([]string, len(lines))
+	for index, line := range lines {
+		plain[index] = strings.TrimRight(ansi.Strip(line), " ")
+	}
+	if plain[2] != " ▾ projects" || plain[3] != "▎ - first" || plain[4] != "▎   (main)" {
+		t.Fatalf("root and workspace rows = %#v", plain[2:5])
+	}
+	if plain[6] != "" {
+		t.Fatalf("last workspace continuation = %q, want blank", plain[6])
+	}
+}
+
+func TestNavigationSeparatesRootsWithOneBlankLine(t *testing.T) {
+	value := newDashboard(&fakeBackend{}, model.Snapshot{Roots: []model.RootView{
+		{Root: model.Root{ID: "root-1", Name: "projects", Path: "/projects"}},
+		{Root: model.Root{ID: "root-2", Name: "archive", Path: "/archive"}},
+	}})
+	lines := value.renderNavigation(28, 20)
+	if len(lines) != 5 {
+		t.Fatalf("navigation lines = %d, want header, two roots, and one separator\n%s", len(lines), strings.Join(lines, "\n"))
+	}
+	if strings.TrimSpace(ansi.Strip(lines[3])) != "" || strings.TrimSpace(ansi.Strip(lines[4])) != "▾ archive" {
+		t.Fatalf("second root rows = %#v, want a blank line before archive", lines[3:5])
 	}
 }
 
 func TestGitStatusUpdatesStateAndSchedulesAnotherRefresh(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, model.Snapshot{})
-	value.gitBehind = map[string]int{"/old": 2}
+	value.gitStates = map[string]gitState{"/old": {Behind: 2}}
 
-	updated, command := value.Update(gitStatusMsg{value: map[string]int{"/new": 1}, reschedule: true})
+	updated, command := value.Update(gitStatusMsg{value: map[string]gitState{"/new": {Behind: 1}}, reschedule: true})
 	value = updated.(dashboard)
-	if !reflect.DeepEqual(value.gitBehind, map[string]int{"/new": 1}) {
-		t.Fatalf("Git status = %#v, want only the current result", value.gitBehind)
+	if !reflect.DeepEqual(value.gitStates, map[string]gitState{"/new": {Behind: 1}}) {
+		t.Fatalf("Git status = %#v, want only the current result", value.gitStates)
 	}
 	if command == nil {
 		t.Fatal("Git status did not schedule another refresh")
@@ -3201,22 +3251,43 @@ func TestGitStatusFetchesAtStartupAndAfterInterval(t *testing.T) {
 	t.Cleanup(func() { now = previousNow })
 
 	value := newDashboard(&fakeBackend{}, model.Snapshot{})
-	initial := value.readGitStatus(false, true)().(gitStatusMsg)
-	if initial.fetchedAt != current {
-		t.Fatalf("initial Git fetch time = %v, want %v", initial.fetchedAt, current)
-	}
-
-	value.gitFetchedAt = current
-	current = current.Add(gitFetchInterval - time.Second)
 	beforeInterval := value.readGitStatus(false, true)().(gitStatusMsg)
 	if !beforeInterval.fetchedAt.IsZero() {
-		t.Fatalf("Git fetch before interval = %v, want no fetch", beforeInterval.fetchedAt)
+		t.Fatalf("Git fetch before interval = %v, want local status only", beforeInterval.fetchedAt)
 	}
 
-	current = current.Add(time.Second)
+	current = current.Add(gitFetchInterval)
 	afterInterval := value.readGitStatus(false, true)().(gitStatusMsg)
 	if afterInterval.fetchedAt != current {
 		t.Fatalf("Git fetch after interval = %v, want %v", afterInterval.fetchedAt, current)
+	}
+}
+
+func TestInitialGitStatusSeparatesLocalReadFromFetch(t *testing.T) {
+	value := newDashboard(&fakeBackend{}, model.Snapshot{Roots: []model.RootView{{
+		Root: model.Root{ID: "root-1", Path: "/projects"},
+		Directories: []model.WorkspaceView{{
+			Workspace: model.Workspace{ID: "workspace-1", RootID: "root-1", Path: "/projects/first"},
+		}},
+	}}})
+	if paths := value.workspacePaths(); !reflect.DeepEqual(paths, []string{"/projects/first"}) {
+		t.Fatalf("Git paths = %#v, want workspaces without the root", paths)
+	}
+	var local, remote int
+	for _, message := range commandMessages(value.initialGitStatus()) {
+		status, ok := message.(gitStatusMsg)
+		if !ok {
+			continue
+		}
+		if status.fetchedAt.IsZero() && status.reschedule {
+			local++
+		}
+		if !status.fetchedAt.IsZero() && !status.reschedule {
+			remote++
+		}
+	}
+	if local != 1 || remote != 1 {
+		t.Fatalf("initial Git reads = (local %d, remote %d), want one of each", local, remote)
 	}
 }
 
@@ -3288,6 +3359,12 @@ func TestDashboardKeepsWideWorkspaceNamesWithinViewport(t *testing.T) {
 	value.width = 40
 	value.height = 12
 	value.setNavigation(1)
+	value.gitStates = map[string]gitState{"/projects/long": {
+		Branch: "feat/a-very-long-workspace-branch-name",
+		Dirty:  true,
+		Ahead:  123,
+		Behind: 456,
+	}}
 
 	for index, line := range strings.Split(value.render(), "\n") {
 		if lineWidth := lipgloss.Width(line); lineWidth > value.width {
