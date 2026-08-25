@@ -201,8 +201,9 @@
           </span>
           <h3>Function keys that survive IME</h3>
           <p>
-            F1 through F9 drive the whole interface and work in any keyboard input mode, so a
-            Korean or Japanese IME never swallows a shortcut mid-session.
+            F1 through F7 drive the whole interface, while F8 and F9 protect destructive
+            workspace actions. Physical key reporting keeps them working in any keyboard input
+            mode, so a Korean or Japanese IME never swallows a shortcut mid-session.
           </p>
         </div>
 
@@ -274,9 +275,10 @@
       <div class="section-head">
         <h2>Every key, in one row</h2>
         <p>
-          F1 through F7 work from either pane and with a modal open. The rest belong to the
-          workspace pane, so a shell keeps the keys it binds, and the two actions that cannot
-          be undone ask first.
+          F1 through F7 work from either pane and with a modal open. Global navigation, tab, and
+          scrollback chords work from either pane when no modal is open. F8, F9, and workspace
+          aliases belong to the workspace pane, so a shell keeps the keys it binds, and the two
+          actions that cannot be undone ask first.
         </p>
       </div>
 
@@ -298,10 +300,14 @@
         </div>
         <div class="key-row"><span class="caps"><kbd>←</kbd><kbd>→</kbd></span><span>Move between terminal tabs</span>
         </div>
+        <div class="key-row"><span class="caps"><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>T</kbd></span><span>Create and
+            open a terminal tab in the selected or current workspace</span></div>
         <div class="key-row"><span class="caps"><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>←</kbd><kbd>→</kbd></span><span>Switch
             terminal tabs from either pane</span></div>
-        <div class="key-row"><span class="caps"><kbd>Shift</kbd><kbd>PgUp</kbd></span><span>Scroll back a page at
-            once</span></div>
+        <div class="key-row"><span class="caps"><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>↑</kbd><kbd>↓</kbd></span><span>Switch
+            between workspaces with running terminals from either pane</span></div>
+        <div class="key-row"><span class="caps"><kbd>Shift</kbd><kbd>PgUp</kbd><kbd>PgDn</kbd></span><span>Enter
+            scrollback or move a page at once</span></div>
       </div>
 
       <p class="note">

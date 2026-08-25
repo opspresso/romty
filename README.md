@@ -121,6 +121,7 @@ The status bar shows the primary actions and the keys for the active pane. Press
 | Workspace | `Enter` | Open the selection |
 | Workspace | `Tab` | Focus the terminal |
 | Terminal | `Ctrl+\` | Focus the workspace and refresh it |
+| Both panes | `Ctrl`+`Shift`+`T` | Create and open a terminal tab |
 | Both panes | `Ctrl`+`Shift`+`←`/`→` | Switch terminal tab |
 | Both panes | `Ctrl`+`Shift`+`↑`/`↓` | Switch to a workspace with a running terminal |
 
@@ -149,7 +150,7 @@ Directory reads run in the background, so a slow network mount does not block th
 
 ### Switching panes and sessions
 
-The `+` key is not a shortcut. Select the `+` tab with `←`/`→` and press `Enter`. `Ctrl`+`Shift`+the arrow keys switch existing tabs or workspaces immediately and wrap at both ends.
+The `+` key is not a shortcut. Select the `+` tab with `←`/`→` and press `Enter`, or press `Ctrl`+`Shift`+`T` to create and open a tab directly. From the workspace pane, the shortcut uses the workspace under the cursor; from the terminal pane or scrollback, it uses the open terminal's workspace. `Ctrl`+`Shift`+the arrow keys switch existing tabs or workspaces immediately and wrap at both ends.
 
 `F7` switches panes in either direction. `Tab` enters the terminal and `Ctrl+\` returns to the workspace; pressing `Ctrl+\` again opens scrollback. The function-key fallback matters when the desktop intercepts `Ctrl+\` before romty receives it.
 

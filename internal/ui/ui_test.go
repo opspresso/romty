@@ -506,6 +506,126 @@ func TestDashboardCreatesOnlyOneTabWhileASelectionIsPending(t *testing.T) {
 	}
 }
 
+func TestDashboardCreatesTabWithCtrlShiftT(t *testing.T) {
+	workspace := model.Workspace{ID: "workspace-1", RootID: "root-1", Name: "alpha", Path: "/projects/alpha"}
+	existing := model.Tab{ID: "tab-1", WorkspaceID: workspace.ID, Name: "1", Running: true}
+	created := model.Tab{ID: "tab-2", WorkspaceID: workspace.ID, Name: "2", Running: true}
+	snapshot := model.Snapshot{Roots: []model.RootView{{
+		Root:        model.Root{ID: "root-1", Name: "projects", Path: "/projects"},
+		Directories: []model.WorkspaceView{{Workspace: workspace, Tabs: []model.Tab{existing}}},
+	}}}
+	backend := &fakeBackend{snapshot: snapshot, workspace: workspace, createdTab: created}
+	value := newDashboard(backend, snapshot)
+	value.selectedWorkspaceID = workspace.ID
+	value.selectedPath = workspace.Path
+	value.terminal = newEmbeddedTerminal(existing.ID, newMemoryStream(""), 40, 10)
+	value.focus = terminalPane
+	t.Cleanup(value.closeTerminal)
+
+	updated, createCommand := value.Update(newTabKey())
+	value = updated.(dashboard)
+	if createCommand == nil || !value.tabPending {
+		t.Fatalf("Ctrl+Shift+T = (command %v, pending %t), want tab creation", createCommand, value.tabPending)
+	}
+	updated, openCommand := value.Update(createCommand())
+	value = updated.(dashboard)
+	if openCommand == nil || backend.createCount != 1 || value.tabPending {
+		t.Fatalf("created tab = (command %v, calls %d, pending %t), want one tab ready to open",
+			openCommand, backend.createCount, value.tabPending)
+	}
+	updated, readCommand := value.Update(openCommand())
+	value = updated.(dashboard)
+	if readCommand == nil || value.terminal == nil || value.terminal.id != created.ID {
+		t.Fatalf("opened terminal = (command %v, terminal %v), want %q", readCommand, value.terminal, created.ID)
+	}
+}
+
+func TestDashboardCreatesTabForWorkspaceCursorWithCtrlShiftT(t *testing.T) {
+	root := model.Root{ID: "root-1", Name: "projects", Path: "/projects"}
+	alpha := model.Workspace{ID: "workspace-1", RootID: root.ID, Name: "alpha", Path: "/projects/alpha"}
+	bravo := model.Workspace{ID: "workspace-2", RootID: root.ID, Name: "bravo", Path: "/projects/bravo"}
+	alphaTab := model.Tab{ID: "tab-1", WorkspaceID: alpha.ID, Name: "1", Running: true}
+	created := model.Tab{ID: "tab-2", WorkspaceID: bravo.ID, Name: "1", Running: true}
+	snapshot := model.Snapshot{Roots: []model.RootView{{
+		Root: root,
+		Directories: []model.WorkspaceView{
+			{Workspace: alpha, Tabs: []model.Tab{alphaTab}},
+			{Workspace: bravo},
+		},
+	}}}
+	backend := &fakeBackend{snapshot: snapshot, workspace: bravo, createdTab: created}
+	value := newDashboard(backend, snapshot)
+	value.selectedWorkspaceID = alpha.ID
+	value.selectedPath = alpha.Path
+	value.terminal = newEmbeddedTerminal(alphaTab.ID, newMemoryStream(""), 40, 10)
+	value.focus = leftPane
+	value.setNavigation(2)
+	t.Cleanup(value.closeTerminal)
+
+	updated, selectCommand := value.Update(newTabKey())
+	value = updated.(dashboard)
+	if selectCommand == nil {
+		t.Fatal("Ctrl+Shift+T on the workspace cursor produced no selection command")
+	}
+	updated, createCommand := value.Update(selectCommand())
+	value = updated.(dashboard)
+	if createCommand == nil || backend.ensuredPath != bravo.Path {
+		t.Fatalf("selected workspace = (command %v, path %q), want %q", createCommand, backend.ensuredPath, bravo.Path)
+	}
+	updated, openCommand := value.Update(createCommand())
+	value = updated.(dashboard)
+	if openCommand == nil || backend.createCount != 1 || value.selectedWorkspaceID != bravo.ID {
+		t.Fatalf("created tab = (command %v, calls %d, workspace %q), want one in %q",
+			openCommand, backend.createCount, value.selectedWorkspaceID, bravo.ID)
+	}
+}
+
+func TestDashboardIgnoresCtrlShiftTWhileTabCreationCannotStart(t *testing.T) {
+	workspace := model.Workspace{ID: "workspace-1", RootID: "root-1", Name: "alpha", Path: "/projects/alpha"}
+	snapshot := model.Snapshot{Roots: []model.RootView{{
+		Root:        model.Root{ID: "root-1", Name: "projects", Path: "/projects"},
+		Directories: []model.WorkspaceView{{Workspace: workspace}},
+	}}}
+
+	for _, probe := range []struct {
+		name    string
+		prepare func(*dashboard)
+	}{
+		{name: "modal open", prepare: func(value *dashboard) { value.modal = helpModal }},
+		{name: "tab pending", prepare: func(value *dashboard) { value.tabPending = true }},
+	} {
+		t.Run(probe.name, func(t *testing.T) {
+			value := newDashboard(&fakeBackend{}, snapshot)
+			value.setNavigation(1)
+			probe.prepare(&value)
+
+			updated, command := value.Update(newTabKey())
+			value = updated.(dashboard)
+			if command != nil {
+				t.Fatalf("Ctrl+Shift+T produced command %v", command)
+			}
+		})
+	}
+}
+
+func TestDashboardRecognisesCtrlShiftTAcrossInputLayouts(t *testing.T) {
+	workspace := model.Workspace{ID: "workspace-1", RootID: "root-1", Name: "alpha", Path: "/projects/alpha"}
+	snapshot := model.Snapshot{Roots: []model.RootView{{
+		Root:        model.Root{ID: "root-1", Name: "projects", Path: "/projects"},
+		Directories: []model.WorkspaceView{{Workspace: workspace}},
+	}}}
+	value := newDashboard(&fakeBackend{}, snapshot)
+	value.setNavigation(1)
+	physicalT := tea.KeyPressMsg(tea.Key{
+		Code: 'ㅅ', BaseCode: 't', Mod: tea.ModCtrl | tea.ModShift,
+	})
+
+	_, command := value.Update(physicalT)
+	if command == nil {
+		t.Fatal("Ctrl+Shift+T with a Korean layout produced no tab command")
+	}
+}
+
 func TestDashboardAddsRootFromPrompt(t *testing.T) {
 	backend := &fakeBackend{}
 	value := newDashboard(backend, model.Snapshot{})
@@ -2754,6 +2874,10 @@ func switchTabKey(code rune) tea.KeyPressMsg {
 	return tea.KeyPressMsg(tea.Key{Code: code, Mod: tea.ModCtrl | tea.ModShift})
 }
 
+func newTabKey() tea.KeyPressMsg {
+	return tea.KeyPressMsg(tea.Key{Code: 't', ShiftedCode: 'T', Mod: tea.ModCtrl | tea.ModShift})
+}
+
 // pressSwitchTab presses Ctrl+Shift+code and runs the commands the switch
 // produces until it has settled: the workspace pane selects a workspace before
 // opening a tab, the terminal pane opens one straight away, and either way the
@@ -3242,6 +3366,7 @@ func TestDashboardShowsEssentialShortcutsOnceInHelpModal(t *testing.T) {
 		{keys: []string{"Enter"}, description: "Open selection"},
 		{keys: []string{"Tab"}, description: "Focus terminal"},
 		{keys: []string{"Ctrl+\\"}, description: "Focus workspace"},
+		{keys: []string{"Ctrl+Shift+T"}, description: "New tab"},
 		{keys: []string{"Ctrl+Shift+←/→"}, description: "Switch tab"},
 		{keys: []string{"Ctrl+Shift+↑/↓"}, description: "Switch workspace"},
 		{keys: []string{"Shift+PgUp/PgDn"}, description: "Enter one page back"},
