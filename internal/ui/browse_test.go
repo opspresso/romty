@@ -86,6 +86,32 @@ func TestBrowsePickerListsDirectoriesOnly(t *testing.T) {
 	}
 }
 
+func TestBrowsePickerReplacesControlCharactersInNames(t *testing.T) {
+	value := newDashboard(&fakeBackend{}, model.Snapshot{})
+	value.width = 120
+	value.height = 40
+	value.modal = browseModal
+	value.browse = browser{
+		path:    "/tmp/name\x1b]8;;https://example.com\x07",
+		entries: []string{"child\x1b]8;;https://example.com\x07\n"},
+		cursor:  1,
+	}
+
+	rendered := value.render()
+	if strings.Contains(rendered, "\x1b]8;;https://example.com") {
+		t.Fatalf("root picker rendered a terminal control sequence:\n%s", rendered)
+	}
+	plain := ansi.Strip(rendered)
+	for _, safe := range []string{
+		"name�]8;;https://example.com�",
+		"child�]8;;https://example.com��",
+	} {
+		if !strings.Contains(plain, safe) {
+			t.Fatalf("root picker does not contain the safe replacement %q:\n%s", safe, plain)
+		}
+	}
+}
+
 // The open directory is a row of its own, so adding the directory you walked
 // into does not depend on what it happens to contain.
 func TestBrowsePickerAddsTheOpenDirectoryFromItsOwnRow(t *testing.T) {

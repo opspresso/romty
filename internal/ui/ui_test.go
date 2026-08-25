@@ -2760,6 +2760,57 @@ func TestDashboardHighlightsNavigationAndShowsOpenTabs(t *testing.T) {
 	}
 }
 
+func TestDashboardReplacesControlCharactersInLabels(t *testing.T) {
+	hostile := "name\x1b]8;;https://example.com\x07\n"
+	safe := "name�]8;;https://example.com��"
+	safePrefix := "name�]8;;https://"
+	workspace := model.Workspace{ID: "workspace-1", RootID: "root-1", Name: hostile, Path: "/projects/workspace"}
+	value := newDashboard(&fakeBackend{}, model.Snapshot{Roots: []model.RootView{{
+		Root: model.Root{ID: "root-1", Name: hostile, Path: "/projects"},
+		Directories: []model.WorkspaceView{{
+			Workspace: workspace,
+			Tabs:      []model.Tab{{ID: "tab-1", Name: hostile, Running: true}},
+		}},
+	}}})
+	value.width = 120
+	value.height = 40
+	value.selectedWorkspaceID = workspace.ID
+	value.selectedPath = workspace.Path
+
+	rendered := value.render()
+	if strings.Contains(rendered, "\x1b]8;;https://example.com") {
+		t.Fatalf("dashboard rendered a terminal control sequence:\n%s", rendered)
+	}
+	if plain := ansi.Strip(rendered); strings.Count(plain, safePrefix) < 2 {
+		t.Fatalf("dashboard labels do not contain the safe replacement prefix %q:\n%s", safePrefix, plain)
+	}
+	tabBar := strings.Join(renderTabBar(value.styles, []model.Tab{{Name: hostile}}, 0, 120), "\n")
+	if strings.Contains(tabBar, "\x1b]8;;https://example.com") || !strings.Contains(ansi.Strip(tabBar), safe) {
+		t.Fatalf("tab label was not rendered safely: %q", tabBar)
+	}
+
+	value.inputMode = true
+	value.input = hostile
+	if rendered := value.renderStatus(120, 36)[1]; strings.Contains(rendered, "\x1b]8;;https://example.com") ||
+		!strings.Contains(ansi.Strip(rendered), safe) {
+		t.Fatalf("root input was not rendered safely: %q", rendered)
+	}
+
+	value.inputMode = false
+	value.setError(treeError, hostile)
+	if rendered := value.renderStatus(120, 36)[1]; strings.Contains(rendered, "\x1b]8;;https://example.com") ||
+		!strings.Contains(ansi.Strip(rendered), safe) {
+		t.Fatalf("error was not rendered safely: %q", rendered)
+	}
+
+	value.modal = removeRootModal
+	value.removeTarget = model.Root{Name: hostile}
+	if rendered := strings.Join(value.renderModal(120, 36), "\n"); strings.Contains(rendered, "\x1b]8;;https://example.com") ||
+		!strings.Contains(ansi.Strip(rendered), safe) {
+		t.Fatalf("confirmation was not rendered safely: %q", rendered)
+	}
+}
+
 func TestOpenTabMarkersUseAgentColors(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, model.Snapshot{})
 	tabs := []model.Tab{

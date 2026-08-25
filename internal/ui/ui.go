@@ -5,6 +5,7 @@ import (
 	"io"
 	"strings"
 	"time"
+	"unicode"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -1775,7 +1776,7 @@ func (m dashboard) renderStatus(width, bodyHeight int) []string {
 	switch {
 	case m.inputMode:
 		status = truncate(
-			m.styles.promptLabel.Render(" ROOT ")+" "+m.styles.promptText.Render(m.input)+m.styles.dividerActive.Render("█"),
+			m.styles.promptLabel.Render(" ROOT ")+" "+m.styles.promptText.Render(displayText(m.input))+m.styles.dividerActive.Render("█"),
 			width,
 		)
 	case m.errorMessage != "":
@@ -1783,7 +1784,7 @@ func (m dashboard) renderStatus(width, bodyHeight int) []string {
 		if m.noticeMessage {
 			label, text, title = m.styles.noticeLabel, m.styles.noticeText, " NOTE "
 		}
-		status = truncate(label.Render(title)+" "+text.Render(m.errorMessage), width)
+		status = truncate(label.Render(title)+" "+text.Render(displayText(m.errorMessage)), width)
 	case m.modal == helpModal:
 		shortcuts := []shortcut{{key: "Esc", description: "close"}}
 		if m.maximumHelpOffset(bodyHeight) > 0 {
@@ -1897,7 +1898,7 @@ func (m dashboard) renderModal(width, height int) []string {
 	if m.modal == removeRootModal {
 		return modalBox(m.styles, modalWidth, "Remove root",
 			"",
-			m.styles.modalStrong.Render("Forget "+m.removeTarget.Name+"?"),
+			m.styles.modalStrong.Render("Forget "+displayText(m.removeTarget.Name)+"?"),
 			"",
 			m.styles.modalBody.Render("Terminals under it keep running."),
 			"",
@@ -2086,13 +2087,13 @@ func (m dashboard) renderNavigationItem(item navItem, index, width int) string {
 	if item.lastChild {
 		branch = "└─"
 	}
-	name := indicator + " " + branch + " " + item.workspace.Name
+	name := indicator + " " + branch + " " + displayText(item.workspace.Name)
 	style := m.styles.navigationItem
 	if item.isRoot {
-		name = indicator + " ▾ " + item.root.Name
+		name = indicator + " ▾ " + displayText(item.root.Name)
 		style = m.styles.navigationRoot
 		if item.failure != "" {
-			name = indicator + " ✗ " + item.root.Name
+			name = indicator + " ✗ " + displayText(item.root.Name)
 			style = m.styles.errorText
 		}
 	}
@@ -2144,7 +2145,7 @@ func (m dashboard) renderTerminal(width int) []string {
 func renderTabBar(styles *uiStyles, tabs []model.Tab, active, width int) []string {
 	labels := make([]string, 0, len(tabs)+1)
 	for _, tab := range tabs {
-		labels = append(labels, " "+tab.Name+" ")
+		labels = append(labels, " "+displayText(tab.Name)+" ")
 	}
 	labels = append(labels, " + ")
 
@@ -2200,6 +2201,15 @@ func truncate(value string, width int) string {
 		return value
 	}
 	return ansi.Truncate(value, width, "…")
+}
+
+func displayText(value string) string {
+	return strings.Map(func(character rune) rune {
+		if unicode.IsControl(character) {
+			return '�'
+		}
+		return character
+	}, value)
 }
 
 func pad(value string, width int) string {
