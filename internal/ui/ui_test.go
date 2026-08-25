@@ -1176,7 +1176,7 @@ func TestDashboardKeepsMouseWithTheHostUnlessPassthroughIsOn(t *testing.T) {
 		t.Fatalf("mouse mode = %v, want the host to keep the mouse by default", value.View().MouseMode)
 	}
 	value.Update(tea.MouseWheelMsg{X: 40, Y: 6, Button: tea.MouseWheelUp})
-	sent := waitForGuestSilence(t, value.terminal, "")
+	waitForGuestSilence(t, value.terminal, "")
 
 	value.mousePassthrough = true
 	if value.View().MouseMode != tea.MouseModeAllMotion {
@@ -1185,7 +1185,7 @@ func TestDashboardKeepsMouseWithTheHostUnlessPassthroughIsOn(t *testing.T) {
 	leftWidth := value.dimensions().leftWidth
 	value.Update(tea.MouseWheelMsg{X: leftWidth + 3 + 4, Y: terminalTop + 2, Button: tea.MouseWheelUp})
 	waitForGuest(t, value.terminal.stream.(*memoryStream), "\x1b[<64;5;3")
-	sent = value.terminal.stream.(*memoryStream).String()
+	sent := value.terminal.stream.(*memoryStream).String()
 
 	// Events over the workspace pane are not the guest's business.
 	value.Update(tea.MouseWheelMsg{X: 1, Y: terminalTop + 2, Button: tea.MouseWheelUp})
