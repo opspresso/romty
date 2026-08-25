@@ -541,9 +541,15 @@ func (m dashboard) handleKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	if m.hookInstallPending {
+		if message.String() == "f4" {
+			return m.quit()
+		}
 		return m, nil
 	}
 	if m.modal == hookInstallModal {
+		if message.String() == "f4" {
+			return m.quit()
+		}
 		return m.handleModalKey(message)
 	}
 	if action, ok := globalKeys[message.String()]; ok {

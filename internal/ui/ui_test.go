@@ -975,6 +975,23 @@ func TestDashboardCanSkipAgentHookInstallation(t *testing.T) {
 	}
 }
 
+func TestDashboardCanQuitDuringAgentHookInstallation(t *testing.T) {
+	for _, pending := range []bool{false, true} {
+		value := newDashboard(&fakeBackend{}, model.Snapshot{})
+		value.offerAgentHooks([]agenthooks.Status{{
+			Provider: agenthooks.ProviderClaude,
+			State:    agenthooks.StateMissing,
+		}})
+		value.hookInstallPending = pending
+
+		updated, command := value.Update(key(tea.KeyF4, ""))
+		value = updated.(dashboard)
+		if !value.result.Quit || command == nil {
+			t.Fatalf("F4 with pending %v = (quit %v, command %v), want quit", pending, value.result.Quit, command)
+		}
+	}
+}
+
 func TestDashboardDoesNotPromptForCurrentAgentHooks(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, model.Snapshot{})
 	value.offerAgentHooks([]agenthooks.Status{

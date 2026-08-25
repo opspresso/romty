@@ -51,7 +51,7 @@ func TestInstallMergesAndUpdatesRomtyHooks(t *testing.T) {
     "Stop": [{
       "hooks": [
         {"type":"command","command":"custom-hook"},
-        {"type":"command","command":"/usr/local/bin/romty hook claude","timeout":9},
+        {"type":"command","command":"/usr/local/bin/romty","args":["hook","claude","unexpected"],"if":"Bash(*)","async":"yes","asyncRewake":true,"shell":"powershell","timeout":9},
         {"type":"command","command":"romty hook claude","timeout":1}
       ]
     }],
@@ -82,6 +82,11 @@ func TestInstallMergesAndUpdatesRomtyHooks(t *testing.T) {
 	}
 	if strings.Contains(text, "OldEvent") || strings.Contains(text, "/usr/local/bin/romty") {
 		t.Fatalf("Install() retained obsolete romty hooks:\n%s", text)
+	}
+	for _, field := range []string{`"args"`, `"if"`, `"async"`, `"asyncRewake"`, `"shell"`} {
+		if strings.Contains(text, field) {
+			t.Fatalf("Install() retained romty execution field %s:\n%s", field, text)
+		}
 	}
 
 	before := append([]byte(nil), data...)

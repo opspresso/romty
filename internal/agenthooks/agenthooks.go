@@ -368,6 +368,14 @@ func romtyHandler(handler map[string]any, provider Provider, desired string) boo
 	if typeName != "command" {
 		return false
 	}
+	if arguments, ok := handler["args"].([]any); ok && len(arguments) >= 2 {
+		operation, operationOK := arguments[0].(string)
+		argumentProvider, providerOK := arguments[1].(string)
+		if operationOK && providerOK && operation == "hook" && argumentProvider == string(provider) &&
+			filepath.Base(command) == "romty" {
+			return true
+		}
+	}
 	if command == desired || command == "romty hook "+string(provider) {
 		return true
 	}
@@ -385,16 +393,18 @@ func romtyHandler(handler map[string]any, provider Provider, desired string) boo
 
 func normalizeHandler(handler map[string]any, command string) bool {
 	changed := false
+	for _, field := range []string{"args", "if", "async", "asyncRewake", "shell"} {
+		if _, present := handler[field]; present {
+			delete(handler, field)
+			changed = true
+		}
+	}
 	if handler["command"] != command {
 		handler["command"] = command
 		changed = true
 	}
 	if timeout, ok := handler["timeout"].(json.Number); !ok || timeout.String() != "1" {
 		handler["timeout"] = json.Number("1")
-		changed = true
-	}
-	if async, ok := handler["async"].(bool); ok && async {
-		handler["async"] = false
 		changed = true
 	}
 	return changed
