@@ -17,13 +17,13 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6.1.0
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
           persist-credentials: false
 
       - name: Set up Go
-        uses: actions/setup-go@v7.0.0
+        uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
 
@@ -41,7 +41,7 @@ jobs:
           go test -race ./...
 
       - name: Release
-        uses: goreleaser/goreleaser-action@v7.2.3
+        uses: goreleaser/goreleaser-action@v7
         with:
           distribution: goreleaser
           version: v2.17.1
