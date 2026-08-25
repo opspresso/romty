@@ -401,6 +401,15 @@ pre {
   color: var(--accent);
 }
 
+.pane .claude {
+  color: var(--agent-claude);
+}
+
+.pane .claude-screen {
+  display: block;
+  line-height: 1;
+}
+
 .pane .branch {
   color: #c4b5fd;
 }
