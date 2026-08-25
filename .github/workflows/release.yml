@@ -56,6 +56,12 @@ jobs:
           ./scripts/render-homebrew-formula.sh "$RELEASE_TAG" dist/checksums.txt /tmp/romty.rb
           ruby -c /tmp/romty.rb
 
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: gh release edit "$RELEASE_TAG" --draft=false
+
       - name: Publish Homebrew formula
         env:
           GH_TOKEN: ${{ secrets.GHP_TOKEN }}
