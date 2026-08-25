@@ -36,7 +36,7 @@ Keep the path shallow. The `daemon.sock` path must remain below the operating sy
 
 The runtime directory and Unix socket are private to the current user. Access to the socket is equivalent to control of every shell owned by romty: a connected process can read and write terminals, create sessions, or stop the daemon.
 
-The runtime directory must be owned by the current user and cannot be a symbolic link. romty narrows it to mode `0700` and rejects a socket or log accessible by group or other users.
+The runtime directory must be owned by the current user and cannot be a symbolic link. romty narrows it to mode `0700` and `daemon.log` to mode `0600`. It rejects a socket owned by another user or accessible by group or other users, and a log that is not a singly linked regular file owned by the current user.
 
 Use `romty doctor` to check permissions, file formats, the shell, and daemon compatibility without starting the daemon. Inspect `daemon.log` when the detached daemon cannot report a failure to the TUI.
 
