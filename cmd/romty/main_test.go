@@ -62,13 +62,81 @@ func TestVersionAndHelpDoNotNeedARuntime(t *testing.T) {
 	if err := runCommand([]string{"help"}, &output); err != nil {
 		t.Fatalf("help error = %v", err)
 	}
-	for _, command := range []string{"status", "version", "help", "doctor", "list", "stop"} {
+	for _, command := range []string{"status", "version", "help", "doctor", "hooks", "list", "stop"} {
 		if !strings.Contains(output.String(), "  "+command) {
 			t.Fatalf("help does not contain %q:\n%s", command, output.String())
 		}
 	}
 	if strings.Contains(output.String(), "  daemon") {
 		t.Fatalf("help exposes the internal daemon command:\n%s", output.String())
+	}
+}
+
+func TestHooksCommandInstallsDetectedAgentHooksWithoutARuntime(t *testing.T) {
+	bin := t.TempDir()
+	for _, name := range []string{"claude", "codex"} {
+		path := filepath.Join(bin, name)
+		if err := os.WriteFile(path, []byte("#!/bin/sh\n"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	claudeHome := filepath.Join(t.TempDir(), "claude")
+	codexHome := filepath.Join(t.TempDir(), "codex")
+	t.Setenv("PATH", bin)
+	t.Setenv("CLAUDE_CONFIG_DIR", claudeHome)
+	t.Setenv("CODEX_HOME", codexHome)
+	t.Setenv("ROMTY_HOME", strings.Repeat("too-deep/", paths.SocketPathLimit))
+
+	var output bytes.Buffer
+	if err := runCommand([]string{"hooks"}, &output); err != nil {
+		t.Fatalf("hooks error = %v", err)
+	}
+	for _, want := range []string{"claude:     installed", "codex:      installed"} {
+		if !strings.Contains(output.String(), want) {
+			t.Fatalf("hooks output does not contain %q:\n%s", want, output.String())
+		}
+	}
+	for _, path := range []string{filepath.Join(claudeHome, "settings.json"), filepath.Join(codexHome, "hooks.json")} {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read installed hooks: %v", err)
+		}
+		if !bytes.Contains(data, []byte(" hook ")) {
+			t.Fatalf("installed file has no romty hook: %s", data)
+		}
+	}
+}
+
+func TestHooksCommandDoesNotOverwriteInvalidSettings(t *testing.T) {
+	bin := t.TempDir()
+	claude := filepath.Join(bin, "claude")
+	if err := os.WriteFile(claude, []byte("#!/bin/sh\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	home := t.TempDir()
+	settings := filepath.Join(home, "settings.json")
+	broken := []byte(`{"hooks":[]}`)
+	if err := os.WriteFile(settings, broken, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin)
+	t.Setenv("CLAUDE_CONFIG_DIR", home)
+	t.Setenv("CODEX_HOME", filepath.Join(t.TempDir(), "codex"))
+
+	var output bytes.Buffer
+	err := runCommand([]string{"hooks"}, &output)
+	if err == nil || !strings.Contains(err.Error(), "hooks must be an object") {
+		t.Fatalf("hooks error = %v, want invalid settings", err)
+	}
+	if !strings.Contains(output.String(), "claude:     invalid") || !strings.Contains(output.String(), "codex:      not found") {
+		t.Fatalf("hooks output = %q", output.String())
+	}
+	got, readErr := os.ReadFile(settings)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if !bytes.Equal(got, broken) {
+		t.Fatal("hooks command changed invalid settings")
 	}
 }
 
@@ -222,6 +290,12 @@ func TestPrintFieldColorsThePaddedLabel(t *testing.T) {
 	}
 }
 
+func TestCommandTextReplacesControlCharacters(t *testing.T) {
+	if got, want := commandText("/tmp/\x1b[31mconfig\n"), "/tmp/�[31mconfig�"; got != want {
+		t.Fatalf("commandText() = %q, want %q", got, want)
+	}
+}
+
 func TestRunStopsDaemon(t *testing.T) {
 	runtime := stopArgs(t)
 	server, err := daemon.New(runtime.Socket, runtime.State, "/bin/sh")
@@ -266,6 +340,9 @@ func TestBinaryStartsDaemonAndEntersTheDashboard(t *testing.T) {
 	t.Setenv("ROMTY", "")
 	t.Setenv("ROMTY_HOME", home)
 	t.Setenv("ROMTY_TEST_PROCESS", "1")
+	// The dashboard now offers to configure agents found on PATH. This test is
+	// about daemon startup and quitting, so give the child no agent binaries.
+	t.Setenv("PATH", t.TempDir())
 	runtime, err := paths.Resolve()
 	if err != nil {
 		t.Fatalf("Resolve() error = %v", err)

@@ -80,6 +80,7 @@ romty stop
 | `romty version` | Show the client version |
 | `romty help` | Show command-line help |
 | `romty doctor` | Check runtime permissions, JSON files, the shell, and daemon compatibility |
+| `romty hooks` | Detect Claude Code and Codex, then install or update their status hooks |
 | `romty list` | List roots, workspaces, and running terminal sessions |
 | `romty stop` | Stop the daemon and every running terminal session |
 
@@ -90,7 +91,7 @@ Command output uses color when connected to a terminal, stays plain when redirec
 
 ## Interface
 
-The left pane shows the workspace tree, which scrolls with the selection when the tree is taller than the pane. Each root uses one row. Each workspace uses two rows: the first holds its name and terminal markers, and the second holds Git metadata or stays blank for a non-Git directory. A marker after an item represents one running terminal tab. Claude Code markers are orange and Codex markers are blue: `●` means active or an unknown phase, `○` means idle and ready for another prompt, and `◉` means the agent is waiting for input or approval, or stopped with an error. Other terminals keep a normal `●`. Detailed phases require the optional [Claude Code or Codex hook setup](docs/agent-hooks.md); foreground process detection and agent colors work without hooks. The right pane contains the tab rail and the embedded terminal. Accent colors distinguish the current selection, active tab, and focused pane; the arrow beside the vertical divider points to the active pane.
+The left pane shows the workspace tree, which scrolls with the selection when the tree is taller than the pane. Each root uses one row. Each workspace uses two rows: the first holds its name and terminal markers, and the second holds Git metadata or stays blank for a non-Git directory. A marker after an item represents one running terminal tab. Claude Code markers are orange and Codex markers are blue: `●` means active or an unknown phase, `○` means idle and ready for another prompt, and `◉` means the agent is waiting for input or approval, or stopped with an error. Other terminals keep a normal `●`. Detailed phases require [Claude Code or Codex status hooks](docs/agent-hooks.md). On startup, romty detects installed agents and offers to install or update missing hooks; foreground process detection and agent colors work when the offer is skipped. The right pane contains the tab rail and the embedded terminal. Accent colors distinguish the current selection, active tab, and focused pane; the arrow beside the vertical divider points to the active pane.
 
 Git metadata is rendered as `(branch*) ↑N ↓N`. `*` means the worktree has tracked or untracked changes, `!` replaces it when files are conflicted, and the arrows count commits ahead of or behind the configured upstream. A detached HEAD is shown as `(@abcdef0)`. romty shows local state first, checks it every 10 seconds, and fetches remote-tracking refs separately in the background at startup and every 5 minutes. Pressing `F5` refreshes local state immediately and starts another background fetch. Fetches never prompt for credentials and time out without blocking the interface.
 
