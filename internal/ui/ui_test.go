@@ -766,14 +766,21 @@ func waitForGuest(t *testing.T, stream *memoryStream, want string) {
 	t.Fatalf("guest received %q, want it to contain %q", stream.String(), want)
 }
 
-// waitForGuestSilence gives the emulator a chance to speak and fails if it
-// does, which is the opposite assertion and cannot be polled for.
-func waitForGuestSilence(t *testing.T, stream *memoryStream, was string) {
+// waitForGuestSilence puts a marker behind the event under test. Seeing that
+// marker proves the copy goroutine processed everything before it.
+func waitForGuestSilence(t *testing.T, terminal *embeddedTerminal, was string) string {
 	t.Helper()
-	time.Sleep(100 * time.Millisecond)
-	if now := stream.String(); now != was {
-		t.Fatalf("guest received %q, want nothing beyond %q", now, was)
+	stream := terminal.stream.(*memoryStream)
+	marker := fmt.Sprintf("__romty_test_barrier_%d__", len(was))
+	if _, err := io.WriteString(terminal.emulator.InputPipe(), marker); err != nil {
+		t.Fatalf("write barrier: %v", err)
 	}
+	want := was + marker
+	waitForGuest(t, stream, want)
+	if now := stream.String(); now != want {
+		t.Fatalf("guest received %q before barrier, want %q", now, want)
+	}
+	return want
 }
 
 func plainRows(lines []string) []string {
@@ -1140,7 +1147,7 @@ func TestDashboardKeepsMouseWithTheHostUnlessPassthroughIsOn(t *testing.T) {
 		t.Fatalf("mouse mode = %v, want the host to keep the mouse by default", value.View().MouseMode)
 	}
 	value.Update(tea.MouseWheelMsg{X: 40, Y: 6, Button: tea.MouseWheelUp})
-	waitForGuestSilence(t, value.terminal.stream.(*memoryStream), "")
+	sent := waitForGuestSilence(t, value.terminal, "")
 
 	value.mousePassthrough = true
 	if value.View().MouseMode != tea.MouseModeAllMotion {
@@ -1149,11 +1156,11 @@ func TestDashboardKeepsMouseWithTheHostUnlessPassthroughIsOn(t *testing.T) {
 	leftWidth := value.dimensions().leftWidth
 	value.Update(tea.MouseWheelMsg{X: leftWidth + 3 + 4, Y: terminalTop + 2, Button: tea.MouseWheelUp})
 	waitForGuest(t, value.terminal.stream.(*memoryStream), "\x1b[<64;5;3")
-	sent := value.terminal.stream.(*memoryStream).String()
+	sent = value.terminal.stream.(*memoryStream).String()
 
 	// Events over the workspace pane are not the guest's business.
 	value.Update(tea.MouseWheelMsg{X: 1, Y: terminalTop + 2, Button: tea.MouseWheelUp})
-	waitForGuestSilence(t, value.terminal.stream.(*memoryStream), sent)
+	waitForGuestSilence(t, value.terminal, sent)
 
 	// Copy mode takes the mouse back so the host can select the scrolled page.
 	updated, _ := value.Update(key(tea.KeyF6, ""))

@@ -2,8 +2,8 @@ package daemon
 
 import (
 	"io"
+	"sync"
 	"testing"
-	"time"
 
 	"github.com/charmbracelet/x/vt"
 )
@@ -49,10 +49,10 @@ func TestStrippedHistoryMakesTheEmulatorSilent(t *testing.T) {
 // A resize after replay must stay silent too: in-band resize keeps reporting
 // for as long as the mode is set, so a replayed enable is not a one-off.
 func TestStrippedHistoryStaysSilentAcrossResize(t *testing.T) {
-	emulator, replies := newProbeEmulator(t)
+	emulator, finish := newProbeEmulator(t)
 	emulator.Write(stripQueries([]byte("\x1b[?2048h")))
 	emulator.Resize(100, 30)
-	if answer := settle(replies); answer != "" {
+	if answer := finish(); answer != "" {
 		t.Fatalf("resizing after replay answered %q", answer)
 	}
 }
@@ -62,26 +62,12 @@ func TestStrippedHistoryStaysSilentAcrossResize(t *testing.T) {
 // rather than guessing a duration that -race can outlast.
 func replyTo(t *testing.T, history string) string {
 	t.Helper()
-	emulator, replies := newProbeEmulator(t)
+	emulator, finish := newProbeEmulator(t)
 	emulator.Write([]byte(history))
-	return settle(replies)
+	return finish()
 }
 
-// settle waits until the reply buffer stops growing, so a silent result means
-// the emulator had nothing to say rather than that it was still saying it.
-func settle(replies *syncBuffer) string {
-	previous := replies.String()
-	for stable := 0; stable < 3; stable++ {
-		time.Sleep(20 * time.Millisecond)
-		if current := replies.String(); current != previous {
-			previous = current
-			stable = 0
-		}
-	}
-	return previous
-}
-
-func newProbeEmulator(t *testing.T) (*vt.SafeEmulator, *syncBuffer) {
+func newProbeEmulator(t *testing.T) (*vt.SafeEmulator, func() string) {
 	t.Helper()
 	emulator := vt.NewSafeEmulator(80, 24)
 	replies := &syncBuffer{}
@@ -90,12 +76,17 @@ func newProbeEmulator(t *testing.T) (*vt.SafeEmulator, *syncBuffer) {
 		defer close(done)
 		_, _ = io.Copy(replies, emulator)
 	}()
-	t.Cleanup(func() {
-		if closer, ok := emulator.InputPipe().(io.Closer); ok {
-			_ = closer.Close()
-		}
-		<-done
-		_ = emulator.Close()
-	})
-	return emulator, replies
+	var finishOnce sync.Once
+	finish := func() string {
+		finishOnce.Do(func() {
+			if closer, ok := emulator.InputPipe().(io.Closer); ok {
+				_ = closer.Close()
+			}
+			<-done
+			_ = emulator.Close()
+		})
+		return replies.String()
+	}
+	t.Cleanup(func() { finish() })
+	return emulator, finish
 }
