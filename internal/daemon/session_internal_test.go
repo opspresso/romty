@@ -97,6 +97,7 @@ func TestSessionReportsExitBeforeClosingClients(t *testing.T) {
 
 	readDone := make(chan struct{})
 	close(readDone)
+	exitDone := make(chan struct{})
 	exitStarted := make(chan struct{})
 	releaseExit := make(chan struct{})
 	defer func() {
@@ -109,6 +110,7 @@ func TestSessionReportsExitBeforeClosingClients(t *testing.T) {
 	value := &session{
 		command:  command,
 		readDone: readDone,
+		exitDone: exitDone,
 		onExit: func() {
 			close(exitStarted)
 			<-releaseExit
@@ -132,9 +134,21 @@ func TestSessionReportsExitBeforeClosingClients(t *testing.T) {
 	} else if timeout, ok := err.(net.Error); !ok || !timeout.Timeout() {
 		t.Fatalf("Read() error = %v, want timeout", err)
 	}
+	closed := make(chan struct{})
+	go func() {
+		value.close()
+		close(closed)
+	}()
+	select {
+	case <-closed:
+		t.Fatal("close() returned before session exit cleanup finished")
+	case <-time.After(100 * time.Millisecond):
+	}
 	close(releaseExit)
-	if err := clientConnection.SetReadDeadline(time.Now().Add(3 * time.Second)); err != nil {
-		t.Fatalf("SetReadDeadline() for close error = %v", err)
+	select {
+	case <-closed:
+	case <-time.After(3 * time.Second):
+		t.Fatal("close() did not return after session exit cleanup finished")
 	}
 	if _, err := clientConnection.Read(make([]byte, 1)); !errors.Is(err, io.EOF) {
 		t.Fatalf("Read() after exit error = %v, want EOF", err)

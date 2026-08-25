@@ -35,6 +35,7 @@ type session struct {
 	command  *exec.Cmd
 	onExit   func()
 	readDone chan struct{}
+	exitDone chan struct{}
 
 	mu      sync.Mutex
 	writeMu sync.Mutex
@@ -82,6 +83,7 @@ func startSession(id, directory, shell string, environment []string, columns, ro
 		command:  command,
 		onExit:   onExit,
 		readDone: make(chan struct{}),
+		exitDone: make(chan struct{}),
 		modes:    newModeTracker(),
 		clients:  make(map[net.Conn]*attachment),
 	}
@@ -119,6 +121,9 @@ func (s *session) read() {
 }
 
 func (s *session) wait() {
+	if s.exitDone != nil {
+		defer close(s.exitDone)
+	}
 	_ = s.command.Wait()
 	<-s.readDone
 	s.mu.Lock()
@@ -298,14 +303,21 @@ func (s *session) resize(columns, rows uint16) error {
 
 func (s *session) close() {
 	s.mu.Lock()
-	if s.closed {
-		s.mu.Unlock()
-		return
+	alreadyClosed := s.closed
+	if !alreadyClosed {
+		s.closed = true
+		_ = s.pty.Close()
 	}
-	s.closed = true
-	_ = s.pty.Close()
+	exitDone := s.exitDone
+	process := s.command.Process
 	s.mu.Unlock()
-	if s.command.Process != nil {
-		_ = s.command.Process.Kill()
+	if !alreadyClosed && process != nil {
+		_ = process.Kill()
+	}
+	// The daemon's socket and lock are its shutdown acknowledgement. Do not
+	// release them while this shell is still being reaped or its clients are
+	// still being closed, or `romty stop` can report success too early.
+	if exitDone != nil {
+		<-exitDone
 	}
 }
