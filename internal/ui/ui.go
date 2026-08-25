@@ -983,7 +983,7 @@ func (m dashboard) handleOpenedTerminal(message terminalOpenedMsg) (tea.Model, t
 	m.focus = terminalPane
 	// A terminal that opened supersedes any complaint about terminals.
 	m.clearError(terminalError)
-	return m, m.terminal.read()
+	return m, tea.Batch(m.terminal.read(), m.resizeTerminal())
 }
 
 func (m dashboard) handleTerminalOutput(message terminalOutputMsg) (tea.Model, tea.Cmd) {
@@ -1242,12 +1242,8 @@ func (m dashboard) openSelectedTerminal() tea.Cmd {
 			return terminalOpenedMsg{tabID: tab.ID, err: fmt.Errorf("terminal session has exited")}
 		}
 	}
-	columns, rows := m.terminalSize()
 	return func() tea.Msg {
 		stream, err := m.backend.OpenTerminal(tab.ID)
-		if err == nil {
-			err = m.backend.Resize(tab.ID, columns, rows)
-		}
 		if err != nil && stream != nil {
 			stream.Close()
 		}

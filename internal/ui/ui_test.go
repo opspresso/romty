@@ -247,8 +247,17 @@ func TestDashboardSelectsWorkspaceAndCreatesTerminal(t *testing.T) {
 		t.Fatalf("CreateTab() calls = %d, want 1", backend.createCount)
 	}
 
-	updated, _ = value.Update(readCommand())
-	value = updated.(dashboard)
+	followup := readCommand()
+	commands, ok := followup.(tea.BatchMsg)
+	if !ok {
+		t.Fatalf("terminal followup = %T, want read and resize commands", followup)
+	}
+	for _, command := range commands {
+		if message := command(); message != nil {
+			updated, _ = value.Update(message)
+			value = updated.(dashboard)
+		}
+	}
 	rendered := value.render()
 	if !strings.Contains(rendered, "projects") || !strings.Contains(rendered, "embedded terminal") {
 		t.Fatalf("rendered dashboard does not contain both panes:\n%s", rendered)
@@ -3440,6 +3449,51 @@ func TestDashboardIgnoresATerminalOpenedForTheTabItLeft(t *testing.T) {
 	}
 	if !stale.isClosed() {
 		t.Fatal("the terminal romty walked away from is still attached to the daemon")
+	}
+}
+
+func TestDashboardSizesTerminalWhenAttachCompletes(t *testing.T) {
+	workspace := model.Workspace{ID: "workspace-1", RootID: "root-1", Name: "alpha", Path: "/projects/alpha"}
+	tab := model.Tab{ID: "tab-1", WorkspaceID: workspace.ID, Name: "1", Running: true}
+	snapshot := model.Snapshot{Roots: []model.RootView{{
+		Root:        model.Root{ID: "root-1", Name: "projects", Path: "/projects"},
+		Directories: []model.WorkspaceView{{Workspace: workspace, Tabs: []model.Tab{tab}}},
+	}}}
+	backend := &fakeBackend{snapshot: snapshot, workspace: workspace}
+	value := newDashboard(backend, snapshot)
+	value.width = 80
+	value.height = 24
+	value.selectedWorkspaceID = workspace.ID
+	value.selectedPath = workspace.Path
+	value.setNavigation(1)
+
+	open := value.openSelectedTerminal()
+	if open == nil {
+		t.Fatal("running tab did not produce an attach command")
+	}
+	updated, resize := value.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	value = updated.(dashboard)
+	if resize != nil {
+		t.Fatal("window resize without an attached terminal contacted the daemon")
+	}
+
+	updated, followup := value.Update(open())
+	value = updated.(dashboard)
+	defer value.closeTerminal()
+	if value.terminal == nil || followup == nil {
+		t.Fatalf("attach result = (terminal %v, followup %v), want an open terminal", value.terminal, followup)
+	}
+	if commands, ok := followup().(tea.BatchMsg); ok {
+		for _, command := range commands {
+			if command != nil {
+				command()
+			}
+		}
+	}
+	wantColumns, wantRows := value.terminalSize()
+	if backend.createdColumns != wantColumns || backend.createdRows != wantRows {
+		t.Fatalf("attached PTY size = %dx%d, want current window size %dx%d",
+			backend.createdColumns, backend.createdRows, wantColumns, wantRows)
 	}
 }
 
