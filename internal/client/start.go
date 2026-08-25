@@ -11,6 +11,9 @@ import (
 )
 
 func EnsureDaemon(runtime paths.Paths, executable string) error {
+	if err := runtime.Ensure(); err != nil {
+		return err
+	}
 	backend := New(runtime.Socket)
 	// Only "nothing is listening" is grounds for starting one. Treating every
 	// failed ping as an absent daemon meant a socket that answers but cannot
@@ -25,11 +28,7 @@ func EnsureDaemon(runtime paths.Paths, executable string) error {
 	if !Unavailable(err) {
 		return err
 	}
-	if err := runtime.Ensure(); err != nil {
-		return err
-	}
-
-	logFile, err := os.OpenFile(runtime.Log, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	logFile, err := openDaemonLog(runtime.Log)
 	if err != nil {
 		return fmt.Errorf("open daemon log: %w", err)
 	}
@@ -60,4 +59,32 @@ func EnsureDaemon(runtime paths.Paths, executable string) error {
 		time.Sleep(25 * time.Millisecond)
 	}
 	return fmt.Errorf("daemon did not become ready; see %s", runtime.Log)
+}
+
+func openDaemonLog(path string) (*os.File, error) {
+	fd, err := syscall.Open(path, syscall.O_CREAT|syscall.O_APPEND|syscall.O_WRONLY|
+		syscall.O_CLOEXEC|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0o600)
+	if err != nil {
+		return nil, err
+	}
+	file := os.NewFile(uintptr(fd), path)
+	info, err := file.Stat()
+	if err != nil {
+		file.Close()
+		return nil, err
+	}
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !info.Mode().IsRegular() || !ok || stat.Uid != uint32(os.Geteuid()) || stat.Nlink != 1 {
+		file.Close()
+		return nil, fmt.Errorf("daemon log must be a regular file owned only by the current user")
+	}
+	if err := file.Chmod(0o600); err != nil {
+		file.Close()
+		return nil, err
+	}
+	if err := syscall.SetNonblock(fd, false); err != nil {
+		file.Close()
+		return nil, err
+	}
+	return file, nil
 }

@@ -70,6 +70,9 @@ func serveUnversioned(t *testing.T) string {
 	if err != nil {
 		t.Fatalf("Listen() error = %v", err)
 	}
+	if err := os.Chmod(socket, 0o600); err != nil {
+		t.Fatalf("Chmod() socket error = %v", err)
+	}
 	t.Cleanup(func() { listener.Close() })
 
 	go func() {
@@ -114,6 +117,9 @@ func TestEnsureDaemonReportsASocketThatAnswersNothing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Listen() error = %v", err)
 	}
+	if err := os.Chmod(socket, 0o600); err != nil {
+		t.Fatalf("Chmod() socket error = %v", err)
+	}
 	defer listener.Close()
 	go func() {
 		for {
@@ -139,6 +145,33 @@ func TestEnsureDaemonReportsASocketThatAnswersNothing(t *testing.T) {
 	}
 }
 
+func TestEnsureDaemonRejectsAPermissiveSocket(t *testing.T) {
+	socket := serveUnversioned(t)
+	if err := os.Chmod(socket, 0o666); err != nil {
+		t.Fatalf("Chmod() socket error = %v", err)
+	}
+
+	if err := EnsureDaemon(runtimeFor(socket), "/nonexistent/romty"); err == nil {
+		t.Fatal("EnsureDaemon() trusted a group- and world-accessible socket")
+	}
+}
+
+func TestEnsureDaemonDoesNotFollowALogSymlink(t *testing.T) {
+	directory := shortTempDir(t)
+	target := filepath.Join(directory, "target")
+	runtime := runtimeFor(filepath.Join(directory, "daemon.sock"))
+	if err := os.Symlink(target, runtime.Log); err != nil {
+		t.Fatalf("Symlink() error = %v", err)
+	}
+
+	if err := EnsureDaemon(runtime, "/nonexistent/romty"); err == nil {
+		t.Fatal("EnsureDaemon() accepted a symbolic link as daemon.log")
+	}
+	if _, err := os.Lstat(target); !os.IsNotExist(err) {
+		t.Fatalf("log symlink target was created: %v", err)
+	}
+}
+
 // runtimeFor points a romty home at an existing socket.
 func runtimeFor(socket string) paths.Paths {
 	directory := filepath.Dir(socket)
@@ -160,6 +193,9 @@ func TestOpenAttachGivesUpOnADaemonThatNeverAnswers(t *testing.T) {
 	listener, err := net.Listen("unix", socket)
 	if err != nil {
 		t.Fatalf("Listen() error = %v", err)
+	}
+	if err := os.Chmod(socket, 0o600); err != nil {
+		t.Fatalf("Chmod() socket error = %v", err)
 	}
 	defer listener.Close()
 

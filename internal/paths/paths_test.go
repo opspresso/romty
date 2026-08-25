@@ -59,3 +59,33 @@ func TestResolveAcceptsTheDefaultDirectory(t *testing.T) {
 		t.Fatalf("Resolve() error = %v", err)
 	}
 }
+
+func TestEnsureNarrowsExistingDirectoryPermissions(t *testing.T) {
+	directory := t.TempDir()
+	if err := os.Chmod(directory, 0o777); err != nil {
+		t.Fatalf("Chmod() error = %v", err)
+	}
+
+	if err := (paths.Paths{Directory: directory}).Ensure(); err != nil {
+		t.Fatalf("Ensure() error = %v", err)
+	}
+	info, err := os.Stat(directory)
+	if err != nil {
+		t.Fatalf("Stat() error = %v", err)
+	}
+	if mode := info.Mode().Perm(); mode != 0o700 {
+		t.Fatalf("directory mode = %04o, want 0700", mode)
+	}
+}
+
+func TestEnsureRejectsASymlinkDirectory(t *testing.T) {
+	base := t.TempDir()
+	directory := filepath.Join(base, "romty")
+	if err := os.Symlink(t.TempDir(), directory); err != nil {
+		t.Fatalf("Symlink() error = %v", err)
+	}
+
+	if err := (paths.Paths{Directory: directory}).Ensure(); err == nil {
+		t.Fatal("Ensure() accepted a symbolic link as the romty directory")
+	}
+}
