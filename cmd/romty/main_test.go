@@ -1,10 +1,14 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -14,7 +18,9 @@ import (
 	"github.com/opspresso/romty/internal/client"
 	"github.com/opspresso/romty/internal/daemon"
 	"github.com/opspresso/romty/internal/paths"
+	"github.com/opspresso/romty/internal/protocol"
 	"github.com/opspresso/romty/internal/testutil"
+	"github.com/opspresso/romty/internal/version"
 )
 
 func TestMain(m *testing.M) {
@@ -31,9 +37,188 @@ func TestMain(m *testing.M) {
 func TestRunRejectsNestedRomty(t *testing.T) {
 	t.Setenv("ROMTY", "1")
 
-	err := run()
+	err := runCommand(nil, io.Discard)
 	if err == nil || !strings.Contains(err.Error(), "inside a romty terminal") {
 		t.Fatalf("run() error = %v, want nested romty error", err)
+	}
+}
+
+func TestVersionAndHelpDoNotNeedARuntime(t *testing.T) {
+	t.Setenv("ROMTY", "1")
+	t.Setenv("ROMTY_HOME", strings.Repeat("too-deep/", paths.SocketPathLimit))
+	originalVersion := version.Value
+	version.Value = "9.8.7"
+	t.Cleanup(func() { version.Value = originalVersion })
+
+	var output bytes.Buffer
+	if err := runCommand([]string{"version"}, &output); err != nil {
+		t.Fatalf("version error = %v", err)
+	}
+	if got := output.String(); got != "romty v9.8.7\n" {
+		t.Fatalf("version output = %q", got)
+	}
+
+	output.Reset()
+	if err := runCommand([]string{"help"}, &output); err != nil {
+		t.Fatalf("help error = %v", err)
+	}
+	for _, command := range []string{"status", "version", "help", "doctor", "list", "stop"} {
+		if !strings.Contains(output.String(), "  "+command) {
+			t.Fatalf("help does not contain %q:\n%s", command, output.String())
+		}
+	}
+	if strings.Contains(output.String(), "  daemon") {
+		t.Fatalf("help exposes the internal daemon command:\n%s", output.String())
+	}
+}
+
+func TestStatusAndListDoNotStartAMissingDaemon(t *testing.T) {
+	home := filepath.Join(testutil.ShortTempDir(t), "romty-home")
+	t.Setenv("ROMTY", "1")
+	t.Setenv("ROMTY_HOME", home)
+
+	for _, command := range []string{"status", "list"} {
+		var output bytes.Buffer
+		if err := runCommand([]string{command}, &output); err != nil {
+			t.Fatalf("%s error = %v", command, err)
+		}
+		if got := output.String(); got != "daemon:     stopped\n" {
+			t.Fatalf("%s output = %q", command, got)
+		}
+	}
+	var doctorOutput bytes.Buffer
+	if err := runCommand([]string{"doctor"}, &doctorOutput); err != nil {
+		t.Fatalf("doctor error = %v", err)
+	}
+	for _, want := range []string{
+		"runtime:    not created",
+		"state:      not created",
+		"config:     not created",
+		"daemon:     stopped",
+	} {
+		if !strings.Contains(doctorOutput.String(), want) {
+			t.Fatalf("doctor does not contain %q:\n%s", want, doctorOutput.String())
+		}
+	}
+	if _, err := os.Stat(home); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("read-only commands created runtime directory: %v", err)
+	}
+}
+
+func TestStatusAndListDescribeTheRunningDaemon(t *testing.T) {
+	runtime := commandRuntime(t)
+	rootName := "projects\x1b]0;hostile\a"
+	rootPath := filepath.Join(testutil.ShortTempDir(t), rootName)
+	workspacePath := filepath.Join(rootPath, "alpha")
+	if err := os.MkdirAll(workspacePath, 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	backend := serveCommandDaemon(t, runtime)
+	snapshot, err := backend.AddRoot(rootPath)
+	if err != nil {
+		t.Fatalf("AddRoot() error = %v", err)
+	}
+	workspace, err := backend.EnsureWorkspace(snapshot.Roots[0].Root.ID, workspacePath)
+	if err != nil {
+		t.Fatalf("EnsureWorkspace() error = %v", err)
+	}
+	if _, err := backend.CreateTab(workspace.ID, 80, 24); err != nil {
+		t.Fatalf("CreateTab() error = %v", err)
+	}
+
+	var output bytes.Buffer
+	if err := runCommand([]string{"status"}, &output); err != nil {
+		t.Fatalf("status error = %v", err)
+	}
+	for _, want := range []string{
+		"daemon:     running",
+		fmt.Sprintf("protocol:   %d", protocol.Version),
+		"roots:      1",
+		"workspaces: 1",
+		"sessions:   1 (claude: 0, codex: 0, shell: 1)",
+	} {
+		if !strings.Contains(output.String(), want) {
+			t.Fatalf("status does not contain %q:\n%s", want, output.String())
+		}
+	}
+
+	output.Reset()
+	if err := runCommand([]string{"list"}, &output); err != nil {
+		t.Fatalf("list error = %v", err)
+	}
+	for _, want := range []string{
+		fmt.Sprintf("root:       %q  %q", rootName, snapshot.Roots[0].Root.Path),
+		fmt.Sprintf("  workspace: %q  %q", "alpha", workspace.Path),
+		"    tab:    \"1\"  shell",
+	} {
+		if !strings.Contains(output.String(), want) {
+			t.Fatalf("list does not contain %q:\n%s", want, output.String())
+		}
+	}
+	if strings.Contains(output.String(), "\x1b") || strings.Contains(output.String(), "\a") {
+		t.Fatalf("list emitted terminal control characters: %q", output.String())
+	}
+}
+
+func TestDoctorReportsInvalidStateWithoutChangingIt(t *testing.T) {
+	runtime := commandRuntime(t)
+	if err := os.Mkdir(runtime.Directory, 0o700); err != nil {
+		t.Fatalf("Mkdir() error = %v", err)
+	}
+	invalid := []byte("{not json\n")
+	if err := os.WriteFile(runtime.State, invalid, 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	var output bytes.Buffer
+	err := runCommand([]string{"doctor"}, &output)
+	if err == nil || !strings.Contains(err.Error(), "doctor found 1 problem") {
+		t.Fatalf("doctor error = %v", err)
+	}
+	for _, want := range []string{
+		"runtime:    ok",
+		"state:      error",
+		"config:     not created",
+		"daemon:     stopped",
+	} {
+		if !strings.Contains(output.String(), want) {
+			t.Fatalf("doctor does not contain %q:\n%s", want, output.String())
+		}
+	}
+	data, readErr := os.ReadFile(runtime.State)
+	if readErr != nil || !bytes.Equal(data, invalid) {
+		t.Fatalf("doctor changed invalid state: data %q, error %v", data, readErr)
+	}
+}
+
+func TestCommandThemeUsesColorOnlyForATerminal(t *testing.T) {
+	t.Setenv("NO_COLOR", "")
+	master, terminal, err := pty.Open()
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer master.Close()
+	defer terminal.Close()
+	if !newCommandTheme(terminal).enabled {
+		t.Fatal("terminal output did not enable command colors")
+	}
+	if newCommandTheme(&bytes.Buffer{}).enabled {
+		t.Fatal("buffered output enabled command colors")
+	}
+
+	t.Setenv("NO_COLOR", "1")
+	if newCommandTheme(terminal).enabled {
+		t.Fatal("NO_COLOR did not disable command colors")
+	}
+}
+
+func TestPrintFieldColorsThePaddedLabel(t *testing.T) {
+	var output bytes.Buffer
+	if err := printField(&output, commandTheme{enabled: true}, "daemon", "running"); err != nil {
+		t.Fatalf("printField() error = %v", err)
+	}
+	if got, want := output.String(), "\x1b[36mdaemon:    \x1b[0m running\n"; got != want {
+		t.Fatalf("printField() = %q, want %q", got, want)
 	}
 }
 
@@ -180,4 +365,36 @@ func stopArgs(t *testing.T) paths.Paths {
 	os.Args = []string{"romty", "stop"}
 	t.Cleanup(func() { os.Args = originalArgs })
 	return runtime
+}
+
+func commandRuntime(t *testing.T) paths.Paths {
+	t.Helper()
+	t.Setenv("ROMTY", "")
+	t.Setenv("ROMTY_HOME", filepath.Join(testutil.ShortTempDir(t), "romty-home"))
+	runtime, err := paths.Resolve()
+	if err != nil {
+		t.Fatalf("Resolve() error = %v", err)
+	}
+	return runtime
+}
+
+func serveCommandDaemon(t *testing.T, runtime paths.Paths) *client.Client {
+	t.Helper()
+	server, err := daemon.New(runtime.Socket, runtime.State, "/bin/sh")
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	server.SetLogger(testutil.QuietLogger())
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- server.Serve(ctx) }()
+	t.Cleanup(func() {
+		cancel()
+		if err := <-done; err != nil {
+			t.Fatalf("Serve() error = %v", err)
+		}
+	})
+	backend := client.New(runtime.Socket)
+	testutil.WaitForDaemon(t, backend)
+	return backend
 }

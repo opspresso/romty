@@ -43,6 +43,18 @@ func TestCallReportsAnOutdatedDaemon(t *testing.T) {
 	}
 }
 
+func TestProtocolVersionReportsAnOutdatedDaemon(t *testing.T) {
+	socket := serveUnversioned(t)
+
+	got, err := New(socket).ProtocolVersion()
+	if err != nil {
+		t.Fatalf("ProtocolVersion() error = %v", err)
+	}
+	if got != 0 {
+		t.Fatalf("ProtocolVersion() = %d, want the unstamped daemon version 0", got)
+	}
+}
+
 // The daemon answers ping and shutdown whatever version asked, and this side
 // has to accept those answers. It did not, and the two calls that carry the
 // remedy were exactly the two that could not reach it: ping reported a

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"syscall"
@@ -22,32 +23,53 @@ func main() {
 }
 
 func run() error {
-	if os.Getenv("ROMTY") == "1" {
+	return runCommand(os.Args[1:], os.Stdout)
+}
+
+func runCommand(arguments []string, output io.Writer) error {
+	if len(arguments) > 1 {
+		return fmt.Errorf("usage: romty <command>; run `romty help` for details")
+	}
+	command := ""
+	if len(arguments) == 1 {
+		command = arguments[0]
+	}
+	theme := newCommandTheme(output)
+	switch command {
+	case "help", "-h", "--help":
+		return printHelp(output, theme)
+	case "version", "-v", "--version":
+		return printVersion(output, theme)
+	case "", "daemon", "stop", "status", "doctor", "list":
+	default:
+		return fmt.Errorf("unknown command %q; run `romty help` for usage", command)
+	}
+
+	if os.Getenv("ROMTY") == "1" && (command == "" || command == "daemon" || command == "stop") {
 		return fmt.Errorf("cannot run romty inside a romty terminal")
 	}
 	runtime, err := paths.Resolve()
 	if err != nil {
 		return err
 	}
-	if len(os.Args) == 2 {
-		switch os.Args[1] {
-		case "daemon":
-			return runDaemon(runtime)
-		case "stop":
-			if err := runtime.Ensure(); err != nil {
-				return err
-			}
-			// Stopping an already stopped daemon is a no-op, not a failure.
-			if err := client.New(runtime.Socket).Shutdown(); err != nil && !client.Unavailable(err) {
-				return fmt.Errorf("stop daemon: %w", err)
-			}
-			return nil
-		default:
-			return fmt.Errorf("usage: romty [stop]")
+	switch command {
+	case "daemon":
+		return runDaemon(runtime)
+	case "stop":
+		if err := runtime.Ensure(); err != nil {
+			return err
 		}
-	}
-	if len(os.Args) != 1 {
-		return fmt.Errorf("usage: romty [stop]")
+		// Stopping an already stopped daemon is a no-op, not a failure.
+		if err := client.New(runtime.Socket).Shutdown(); err != nil && !client.Unavailable(err) {
+			return fmt.Errorf("stop daemon: %w", err)
+		}
+		return nil
+	case "status":
+		return printStatus(output, runtime, theme)
+	case "doctor":
+		return printDoctor(output, runtime, theme)
+	case "list":
+		return printList(output, runtime, theme)
 	}
 
 	executable, err := os.Executable()

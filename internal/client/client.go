@@ -49,8 +49,19 @@ func New(socket string) *Client {
 }
 
 func (c *Client) Ping() error {
-	_, err := c.call(protocol.Request{Action: protocol.ActionPing})
+	_, err := c.ProtocolVersion()
 	return err
+}
+
+// ProtocolVersion reports the protocol spoken by the running daemon. Ping is
+// version-exempt so an upgraded client can inspect an older daemon and name
+// the mismatch instead of mistaking it for a daemon that is not running.
+func (c *Client) ProtocolVersion() (int, error) {
+	response, err := c.call(protocol.Request{Action: protocol.ActionPing})
+	if err != nil {
+		return 0, err
+	}
+	return response.Version, nil
 }
 
 func (c *Client) Snapshot() (model.Snapshot, error) {
