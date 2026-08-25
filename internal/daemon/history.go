@@ -159,11 +159,22 @@ func (s *historyScanner) scanOperatingSystemCommand(data []byte, index, body int
 // which is the numeric "10;?" form used by the color queries. A payload with
 // anything else before the "?" is a value being set, such as a window title
 // that happens to end in a question mark.
+//
+// OSC 52 is the exception that rule would miss. It names the buffer to read
+// with a letter — 52;c;? is the clipboard — so the numeric test rejects it and
+// the query survives into the replay. What the terminal sends back is the
+// clipboard itself, which reaches a shell that asked nothing and lands on its
+// command line as typed text: whatever the user last copied, appearing in the
+// prompt of a session they only reattached to.
 func isQueryPayload(payload []byte) bool {
 	if len(payload) <= 2 || !bytes.HasSuffix(payload, []byte(";?")) {
 		return false
 	}
-	for _, character := range payload[:len(payload)-2] {
+	parameters := payload[:len(payload)-2]
+	if code, _, found := bytes.Cut(parameters, []byte(";")); found && bytes.Equal(code, []byte("52")) {
+		return true
+	}
+	for _, character := range parameters {
 		if (character < '0' || character > '9') && character != ';' {
 			return false
 		}
