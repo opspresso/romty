@@ -507,8 +507,14 @@ func TestAttachDoesNotReplayTerminalQueries(t *testing.T) {
 	}
 	server.SetLogger(testutil.QuietLogger())
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	go server.Serve(ctx)
+	done := make(chan error, 1)
+	go func() { done <- server.Serve(ctx) }()
+	defer func() {
+		cancel()
+		if err := <-done; err != nil {
+			t.Errorf("Serve() error = %v", err)
+		}
+	}()
 	backend := client.New(socket)
 	testutil.WaitForDaemon(t, backend)
 
