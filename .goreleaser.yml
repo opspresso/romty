@@ -2,6 +2,11 @@ version: 2
 
 project_name: romty
 
+snapshot:
+  # CI feeds the snapshot artifacts to the same formula renderer used by a
+  # release, so their version must be deterministic there.
+  version_template: 0.0.0
+
 builds:
   - id: romty
     main: ./cmd/romty
