@@ -3062,18 +3062,10 @@ func TestDashboardOpensHelpFromTheTerminalPane(t *testing.T) {
 	}
 }
 
-func TestDashboardShowsAllShortcutsInHelpModal(t *testing.T) {
+func TestDashboardShowsEssentialShortcutsOnceInHelpModal(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, model.Snapshot{})
 	value.width = 100
-	// Tall enough for the whole list: this is about what help says, and the
-	// window it fits into is what TestDashboardScrollsHelpModalOnShortTerminals
-	// covers.
 	value.height = 48
-	lines := strings.Split(value.render(), "\n")
-	status := lines[len(lines)-1]
-	if strings.Contains(status, value.styles.shortcutKey.Render(" + ")) || strings.Contains(status, value.styles.shortcutKey.Render(" , ")) {
-		t.Fatalf("hidden workspace shortcuts are shown in the status bar:\n%s", status)
-	}
 
 	updated, command := value.Update(key('?', "?"))
 	value = updated.(dashboard)
@@ -3084,9 +3076,14 @@ func TestDashboardShowsAllShortcutsInHelpModal(t *testing.T) {
 	modalLines := value.renderModal(value.width, bodyHeight)
 	plainLines := strings.Split(ansi.Strip(strings.Join(modalLines, "\n")), "\n")
 	plain := strings.Join(plainLines, "\n")
-	for _, section := range []string{"COMMANDS", "NAVIGATION", "ADD ROOT", "TERMINAL", "OTHER"} {
+	for _, section := range []string{"CORE", "NAVIGATE", "SCROLLBACK", "PICKER"} {
 		if !strings.Contains(plain, section) {
 			t.Fatalf("help modal does not contain %q section:\n%s", section, plain)
+		}
+	}
+	for _, section := range []string{"COMMANDS", "NAVIGATION", "ADD ROOT", "TERMINAL", "OTHER"} {
+		if strings.Contains(plain, section) {
+			t.Fatalf("help modal still contains legacy %q section:\n%s", section, plain)
 		}
 	}
 	shortcuts := []struct {
@@ -3100,68 +3097,36 @@ func TestDashboardShowsAllShortcutsInHelpModal(t *testing.T) {
 		{keys: []string{"F5"}, description: "Refresh"},
 		{keys: []string{"F6"}, description: "Scrollback"},
 		{keys: []string{"F7"}, description: "Switch pane"},
-		{keys: []string{"F8", "d"}, description: "Remove root"},
-		{keys: []string{"F9", "t"}, description: "Stop daemon"},
-		{keys: []string{"?", "i"}, description: "Help / About"},
-		{keys: []string{"a", ","}, description: "Add root / config"},
-		{keys: []string{"q", "r"}, description: "Quit / refresh"},
-		{keys: []string{"s"}, description: "Scrollback"},
-		{keys: []string{"↑/↓", "j/k"}, description: "Select workspace"},
-		{keys: []string{"←/→", "h/l"}, description: "Select tab / +"},
-		{keys: []string{"Enter"}, description: "Open / confirm"},
-		{keys: []string{"F7", "Tab"}, description: "Focus terminal"},
+		{keys: []string{"F8"}, description: "Remove root"},
+		{keys: []string{"F9"}, description: "Stop daemon"},
+		{keys: []string{"↑/↓"}, description: "Select workspace"},
+		{keys: []string{"←/→"}, description: "Select tab / +"},
+		{keys: []string{"Enter"}, description: "Open selection"},
+		{keys: []string{"Tab"}, description: "Focus terminal"},
 		{keys: []string{"Ctrl+\\"}, description: "Focus workspace"},
-		{keys: []string{"F6", "Ctrl+\\"}, description: "Enter / leave"},
+		{keys: []string{"Ctrl+Shift+←/→"}, description: "Switch tab"},
+		{keys: []string{"Ctrl+Shift+↑/↓"}, description: "Switch workspace"},
+		{keys: []string{"Shift+PgUp/PgDn"}, description: "Enter one page back"},
+		{keys: []string{"↑/↓"}, description: "Scroll a line"},
 		{keys: []string{"PgUp/PgDn"}, description: "Scroll a page"},
-		{keys: []string{"Shift+PgUp"}, description: "Enter at a page back"},
-		{keys: []string{"Wheel"}, description: "Scroll with the mouse"},
-		{keys: []string{"Ctrl+C"}, description: "Quit"},
-		{keys: []string{"←/→", "[/]"}, description: "Resize workspace pane"},
-		{keys: []string{"Esc"}, description: "Close / cancel"},
-		// The picker is a mode of its own, and help is the only reference the
-		// terminal pane can reach, so its keys are named here rather than left
-		// to the status bar the picker happens to show.
-		{keys: []string{"→/←", "l/h"}, description: "Open / parent"},
-		{keys: []string{"Enter"}, description: "Add the selected one"},
-		{keys: []string{"/"}, description: "Type a path instead"},
+		{keys: []string{"Home/End"}, description: "Oldest / live"},
+		{keys: []string{"Esc"}, description: "Leave scrollback"},
+		{keys: []string{"↑/↓"}, description: "Move selection"},
+		{keys: []string{"→/←"}, description: "Open / parent"},
+		{keys: []string{"Enter"}, description: "Add directory"},
+		{keys: []string{"/"}, description: "Type a path"},
+		{keys: []string{"Esc"}, description: "Close picker"},
 	}
 	for _, shortcut := range shortcuts {
 		if !helpContainsShortcut(plainLines, shortcut.description, shortcut.keys...) {
 			t.Fatalf("help modal does not contain %v %q shortcut:\n%s", shortcut.keys, shortcut.description, plain)
 		}
 	}
-	// The function key is the one that works everywhere, so it leads the row
-	// and the pane-only alias follows it.
-	for _, row := range []struct {
-		description string
-		first       string
-		second      string
-	}{
-		{description: "Focus terminal", first: "F7", second: "Tab"},
-		{description: "Remove root", first: "F8", second: "d"},
-		{description: "Stop daemon", first: "F9", second: "t"},
-	} {
-		line := helpLine(plainLines, row.description, row.first, row.second)
-		if first, second := strings.Index(line, row.first), strings.Index(line, row.second); first < 0 || first > second {
-			t.Fatalf("%q row = %q, want %s before %s", row.description, line, row.first, row.second)
+	for _, name := range []string{"F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9"} {
+		if count := strings.Count(plain, name); count != 1 {
+			t.Fatalf("help modal contains %s %d times, want once:\n%s", name, count, plain)
 		}
 	}
-	// COMMANDS holds exactly the keys that reach both panes — F1 through F7,
-	// in row order. F8, F9 and the letters are workspace-pane only and belong
-	// under NAVIGATION; listing them here would tell a terminal-pane reader to
-	// press keys their shell will swallow.
-	order := make([]string, 0, 7)
-	for _, line := range commandSection(plainLines) {
-		for _, name := range []string{"F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9"} {
-			if strings.Contains(line, name) {
-				order = append(order, name)
-			}
-		}
-	}
-	if len(order) != 7 || !slices.IsSorted(order) {
-		t.Fatalf("COMMANDS function keys read %v, want F1 through F7 in order:\n%s", order, plain)
-	}
-	// Help stands in for About in the terminal pane, so it names the build too.
 	if !strings.Contains(plain, version.String()) {
 		t.Fatalf("help modal does not show version %q:\n%s", version.String(), plain)
 	}
@@ -3202,50 +3167,12 @@ func TestDashboardScrollsHelpModalOnShortTerminals(t *testing.T) {
 		value = updated.(dashboard)
 	}
 	plain := ansi.Strip(strings.Join(value.renderModal(value.width, bodyHeight), "\n"))
-	if !strings.Contains(plain, "Close / cancel") {
+	if !strings.Contains(plain, "Close picker") {
 		t.Fatalf("help modal did not scroll to the last shortcut:\n%s", plain)
 	}
 	if strings.Contains(plain, "About") {
 		t.Fatalf("help modal kept the first shortcut after scrolling to the end:\n%s", plain)
 	}
-}
-
-// commandSection returns the help modal's COMMANDS rows, which end where the
-// next section header begins.
-func commandSection(lines []string) []string {
-	section := make([]string, 0, len(lines))
-	inside := false
-	for _, line := range lines {
-		if strings.Contains(line, "── ") {
-			if inside {
-				break
-			}
-			inside = strings.Contains(line, "COMMANDS")
-			continue
-		}
-		if inside {
-			section = append(section, line)
-		}
-	}
-	return section
-}
-
-// helpLine wants the shortcut row, not any line mentioning the description:
-// the modal's own title border says "Help" too.
-func helpLine(lines []string, description string, keys ...string) string {
-	for _, line := range lines {
-		if !strings.Contains(line, description) {
-			continue
-		}
-		matches := true
-		for _, key := range keys {
-			matches = matches && strings.Contains(line, key)
-		}
-		if matches {
-			return line
-		}
-	}
-	return ""
 }
 
 func helpContainsShortcut(lines []string, description string, keys ...string) bool {
