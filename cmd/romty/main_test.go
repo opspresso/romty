@@ -90,7 +90,7 @@ func TestBinaryStartsDaemonAndEntersTheDashboard(t *testing.T) {
 		t.Fatalf("Executable() error = %v", err)
 	}
 
-	command := exec.Command(executable)
+	command := exec.CommandContext(t.Context(), executable)
 	terminal, err := pty.StartWithSize(command, &pty.Winsize{Cols: 100, Rows: 30})
 	if err != nil {
 		t.Fatalf("start romty in PTY: %v", err)
@@ -157,7 +157,7 @@ func TestBinaryStartsDaemonAndEntersTheDashboard(t *testing.T) {
 		t.Fatal("romty did not quit from the dashboard")
 	}
 
-	stop := exec.Command(executable, "stop")
+	stop := exec.CommandContext(t.Context(), executable, "stop")
 	if output, err := stop.CombinedOutput(); err != nil {
 		t.Fatalf("romty stop error = %v\noutput:\n%s", err, output)
 	}
