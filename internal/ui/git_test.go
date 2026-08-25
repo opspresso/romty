@@ -20,7 +20,7 @@ func TestGitBehindUsesFetchedUpstream(t *testing.T) {
 	writeGitFile(t, source, "one")
 	runGit(t, "-C", source, "add", "status.txt")
 	runGit(t, "-C", source, "-c", "user.name=romty", "-c", "user.email=romty@example.com", "commit", "-m", "one")
-	if got := gitBehind(source); got != 0 {
+	if got := gitBehind(source, false); got != 0 {
 		t.Fatalf("repository without upstream behind = %d, want 0", got)
 	}
 	runGit(t, "-C", source, "remote", "add", "origin", remote)
@@ -32,25 +32,24 @@ func TestGitBehindUsesFetchedUpstream(t *testing.T) {
 	runGit(t, "-C", source, "-c", "user.name=romty", "-c", "user.email=romty@example.com", "commit", "-m", "two")
 	runGit(t, "-C", source, "push", "origin", "main")
 
-	if got := gitBehind(workspace); got != 0 {
+	if got := gitBehind(workspace, false); got != 0 {
 		t.Fatalf("behind before fetch = %d, want the stale local upstream left unchanged", got)
 	}
-	runGit(t, "-C", workspace, "fetch")
-	if got := gitBehind(workspace); got != 1 {
-		t.Fatalf("behind after fetch = %d, want 1", got)
+	if got := gitBehind(workspace, true); got != 1 {
+		t.Fatalf("behind with fetch = %d, want 1", got)
 	}
-	statuses := gitBehindWorkspaces([]string{workspace, workspace, ""})
+	statuses := gitBehindWorkspaces([]string{workspace, workspace, ""}, false)
 	if len(statuses) != 1 || statuses[workspace] != 1 {
 		t.Fatalf("workspace statuses = %#v, want the fetched repository once", statuses)
 	}
 	runGit(t, "-C", workspace, "pull", "--ff-only")
-	if got := gitBehind(workspace); got != 0 {
+	if got := gitBehind(workspace, false); got != 0 {
 		t.Fatalf("behind after pull = %d, want 0", got)
 	}
 }
 
 func TestGitBehindIgnoresDirectoriesWithoutGitMetadata(t *testing.T) {
-	if got := gitBehind(t.TempDir()); got != 0 {
+	if got := gitBehind(t.TempDir(), true); got != 0 {
 		t.Fatalf("non-repository behind = %d, want 0", got)
 	}
 }

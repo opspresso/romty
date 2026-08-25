@@ -707,7 +707,7 @@ func TestDashboardSupportsHiddenWorkspaceShortcuts(t *testing.T) {
 	if command == nil {
 		t.Fatal("r refresh command = nil")
 	}
-	command()
+	commandMessages(command)
 	if backend.snapshotCount != 1 {
 		t.Fatalf("r snapshot calls = %d, want 1", backend.snapshotCount)
 	}
@@ -784,9 +784,22 @@ func TestDashboardSupportsIMEIndependentShortcuts(t *testing.T) {
 	if command == nil {
 		t.Fatal("F5 refresh command = nil")
 	}
-	value.Update(command())
+	var forcedGitFetch bool
+	for _, message := range commandMessages(command) {
+		if status, ok := message.(gitStatusMsg); ok {
+			forcedGitFetch = !status.fetchedAt.IsZero()
+			if _, followup := value.Update(message); followup != nil {
+				t.Fatal("F5 Git fetch started another refresh loop")
+			}
+			continue
+		}
+		value.Update(message)
+	}
 	if backend.snapshotCount != 1 {
 		t.Fatalf("F5 snapshot calls = %d, want 1", backend.snapshotCount)
+	}
+	if !forcedGitFetch {
+		t.Fatal("F5 did not force a Git fetch")
 	}
 
 	value = newDashboard(backend, model.Snapshot{})
@@ -1118,6 +1131,22 @@ func rawSequences(command tea.Cmd) []string {
 		}
 	}
 	return sequences
+}
+
+func commandMessages(command tea.Cmd) []tea.Msg {
+	if command == nil {
+		return nil
+	}
+	message := command()
+	batch, ok := message.(tea.BatchMsg)
+	if !ok {
+		return []tea.Msg{message}
+	}
+	var messages []tea.Msg
+	for _, batched := range batch {
+		messages = append(messages, commandMessages(batched)...)
+	}
+	return messages
 }
 
 func TestDashboardEntersScrollbackFromEveryBinding(t *testing.T) {
@@ -1681,8 +1710,10 @@ func TestDashboardReportsBackendFailures(t *testing.T) {
 			if command == nil {
 				t.Fatalf("%s produced no command to fail", probe.name)
 			}
-			updated, _ = value.Update(command())
-			value = updated.(dashboard)
+			for _, message := range commandMessages(command) {
+				updated, _ = value.Update(message)
+				value = updated.(dashboard)
+			}
 			if !strings.Contains(value.errorMessage, probe.method+" refused") {
 				t.Fatalf("error message = %q, want the %s failure", value.errorMessage, probe.method)
 			}
@@ -3153,13 +3184,39 @@ func TestGitStatusUpdatesStateAndSchedulesAnotherRefresh(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, model.Snapshot{})
 	value.gitBehind = map[string]int{"/old": 2}
 
-	updated, command := value.Update(gitStatusMsg{value: map[string]int{"/new": 1}})
+	updated, command := value.Update(gitStatusMsg{value: map[string]int{"/new": 1}, reschedule: true})
 	value = updated.(dashboard)
 	if !reflect.DeepEqual(value.gitBehind, map[string]int{"/new": 1}) {
 		t.Fatalf("Git status = %#v, want only the current result", value.gitBehind)
 	}
 	if command == nil {
 		t.Fatal("Git status did not schedule another refresh")
+	}
+}
+
+func TestGitStatusFetchesAtStartupAndAfterInterval(t *testing.T) {
+	previousNow := now
+	current := time.Date(2026, time.August, 25, 12, 0, 0, 0, time.UTC)
+	now = func() time.Time { return current }
+	t.Cleanup(func() { now = previousNow })
+
+	value := newDashboard(&fakeBackend{}, model.Snapshot{})
+	initial := value.readGitStatus(false, true)().(gitStatusMsg)
+	if initial.fetchedAt != current {
+		t.Fatalf("initial Git fetch time = %v, want %v", initial.fetchedAt, current)
+	}
+
+	value.gitFetchedAt = current
+	current = current.Add(gitFetchInterval - time.Second)
+	beforeInterval := value.readGitStatus(false, true)().(gitStatusMsg)
+	if !beforeInterval.fetchedAt.IsZero() {
+		t.Fatalf("Git fetch before interval = %v, want no fetch", beforeInterval.fetchedAt)
+	}
+
+	current = current.Add(time.Second)
+	afterInterval := value.readGitStatus(false, true)().(gitStatusMsg)
+	if afterInterval.fetchedAt != current {
+		t.Fatalf("Git fetch after interval = %v, want %v", afterInterval.fetchedAt, current)
 	}
 }
 

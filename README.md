@@ -90,7 +90,7 @@ Command output uses color when connected to a terminal, stays plain when redirec
 
 The left pane shows the workspace tree, which scrolls with the selection when the tree is taller than the pane. A `●` after an item represents one running terminal tab. A dot turns Claude orange while Claude Code is in the foreground and Codex blue while Codex is in the foreground; other terminals keep the normal row color. The right pane contains the tab rail and the embedded terminal. Accent colors distinguish the current selection, active tab, and focused pane; the arrow beside the vertical divider points to the active pane.
 
-A `↓N` marker means a Git workspace is `N` commits behind its configured upstream and can pull remote-tracking commits. romty checks local remote-tracking refs every 10 seconds without fetching or making a network request, so run `git fetch` when you want the marker to reflect the current remote.
+A `↓N` marker means a Git workspace is `N` commits behind its configured upstream and can pull remote-tracking commits. romty checks local remote-tracking refs every 10 seconds, fetches them in the background at startup and every 5 minutes, and fetches immediately when you press `F5`. Fetches never prompt for credentials and time out without blocking the interface.
 
 The status bar shows the primary actions and the keys for the active pane. Press `F1` for the compact in-app reference.
 

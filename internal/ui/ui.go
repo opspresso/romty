@@ -33,6 +33,7 @@ const (
 	maximumReattachBackoff  = 2 * time.Second
 	agentRefreshInterval    = 2 * time.Second
 	gitRefreshInterval      = 10 * time.Second
+	gitFetchInterval        = 5 * time.Minute
 	// healthyAttachInterval is how long a terminal has to stay attached before
 	// a later drop counts as a fresh incident rather than another turn of the
 	// loop. What the backoff damps — replay, fall behind, get cut — turns over
@@ -175,6 +176,7 @@ type dashboard struct {
 	leftWidth        int
 	mousePassthrough bool
 	gitBehind        map[string]int
+	gitFetchedAt     time.Time
 	styles           *uiStyles
 }
 
@@ -190,7 +192,9 @@ type agentSnapshotMsg struct {
 }
 
 type gitStatusMsg struct {
-	value map[string]int
+	value      map[string]int
+	fetchedAt  time.Time
+	reschedule bool
 }
 
 type workspaceMsg struct {
@@ -295,7 +299,7 @@ func (m dashboard) Init() tea.Cmd {
 	// The host starts with alternate scroll on, which is what turns a wheel
 	// notch into arrow keys romty cannot tell from typed ones. Only scrollback
 	// wants them, so the mode is off until it opens.
-	return tea.Batch(tea.RequestBackgroundColor, m.refreshAgents(), m.readGitStatus(), altScrollCommand(false))
+	return tea.Batch(tea.RequestBackgroundColor, m.refreshAgents(), m.readGitStatus(true, true), altScrollCommand(false))
 }
 
 // Update wraps the state machine so every path that opens or leaves scrollback
@@ -397,7 +401,13 @@ func (m dashboard) update(message tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.refreshAgents()
 	case gitStatusMsg:
 		m.gitBehind = message.value
-		return m, m.refreshGitStatus()
+		if message.fetchedAt.After(m.gitFetchedAt) {
+			m.gitFetchedAt = message.fetchedAt
+		}
+		if message.reschedule {
+			return m, m.refreshGitStatus()
+		}
+		return m, nil
 	case workspaceMsg:
 		return m.handleWorkspace(message)
 	case tabMsg:
@@ -463,7 +473,7 @@ var globalKeys = map[string]func(dashboard) (tea.Model, tea.Cmd){
 	"f2": func(m dashboard) (tea.Model, tea.Cmd) { return m.startBrowse() },
 	"f3": func(m dashboard) (tea.Model, tea.Cmd) { return m.openModal(configModal) },
 	"f4": func(m dashboard) (tea.Model, tea.Cmd) { return m.quit() },
-	"f5": func(m dashboard) (tea.Model, tea.Cmd) { return m, m.refresh() },
+	"f5": func(m dashboard) (tea.Model, tea.Cmd) { return m.refreshAll() },
 	"f6": func(m dashboard) (tea.Model, tea.Cmd) { return m.toggleScrollback() },
 	"f7": func(m dashboard) (tea.Model, tea.Cmd) { return m.toggleFocus() },
 	// F8 and F9 are deliberately absent. They belong to the workspace pane
@@ -538,7 +548,7 @@ func (m dashboard) handleKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "q":
 		return m.quit()
 	case "r":
-		return m, m.refresh()
+		return m.refreshAll()
 	case "?":
 		return m.openModal(helpModal)
 	case "s":
@@ -1119,6 +1129,11 @@ func (m *dashboard) refresh() tea.Cmd {
 	}
 }
 
+func (m dashboard) refreshAll() (tea.Model, tea.Cmd) {
+	tree := m.refresh()
+	return m, tea.Batch(tree, m.readGitStatus(true, false))
+}
+
 func (m dashboard) refreshAgents() tea.Cmd {
 	backend := m.backend
 	return tea.Tick(agentRefreshInterval, func(time.Time) tea.Msg {
@@ -1142,17 +1157,22 @@ func (m *dashboard) updateAgents(agents map[string]model.Agent) {
 	}
 }
 
-func (m dashboard) readGitStatus() tea.Cmd {
+func (m dashboard) readGitStatus(forceFetch, reschedule bool) tea.Cmd {
 	paths := m.workspacePaths()
+	fetch := forceFetch || m.gitFetchedAt.IsZero() || now().Sub(m.gitFetchedAt) >= gitFetchInterval
+	fetchedAt := time.Time{}
+	if fetch {
+		fetchedAt = now()
+	}
 	return func() tea.Msg {
-		return gitStatusMsg{value: gitBehindWorkspaces(paths)}
+		return gitStatusMsg{value: gitBehindWorkspaces(paths, fetch), fetchedAt: fetchedAt, reschedule: reschedule}
 	}
 }
 
 func (m dashboard) refreshGitStatus() tea.Cmd {
-	paths := m.workspacePaths()
+	read := m.readGitStatus(false, true)
 	return tea.Tick(gitRefreshInterval, func(time.Time) tea.Msg {
-		return gitStatusMsg{value: gitBehindWorkspaces(paths)}
+		return read()
 	})
 }
 
