@@ -35,11 +35,14 @@ var trackedModes = []int{
 // dozen bytes; anything longer is not one being split.
 const modeCarryLimit = 128
 
-// modeTracker follows the DEC private modes a guest turns on and off. It reads
+// modeTracker follows the sticky terminal modes a guest turns on and off. It reads
 // the same bytes the recording does, but keeps only the conclusion, so it is
 // unaffected by the recording being trimmed.
 type modeTracker struct {
 	set map[int]bool
+	// keypad is DECKPAM/DECKPNM, an ESC sequence rather than a CSI mode.
+	keypad      bool
+	keypadKnown bool
 	// carry holds a sequence cut in half by a chunk boundary, since the PTY
 	// hands over whatever happens to have arrived.
 	carry []byte
@@ -56,6 +59,22 @@ func (t *modeTracker) observe(data []byte) {
 		t.carry = nil
 	}
 	for index := 0; index < len(scan); {
+		if scan[index] == escape {
+			if index+1 >= len(scan) {
+				t.hold(scan[index:])
+				return
+			}
+			switch scan[index+1] {
+			case '=':
+				t.keypad, t.keypadKnown = true, true
+				index += 2
+				continue
+			case '>':
+				t.keypad, t.keypadKnown = false, true
+				index += 2
+				continue
+			}
+		}
 		body, state := modeIntroducer(scan, index)
 		switch state {
 		case notAnIntroducer:
@@ -118,6 +137,13 @@ func (t *modeTracker) restore() []byte {
 			final = 'h'
 		}
 		fmt.Fprintf(&preamble, "\x1b[?%d%c", mode, final)
+	}
+	if t.keypadKnown {
+		if t.keypad {
+			preamble.WriteString("\x1b=")
+		} else {
+			preamble.WriteString("\x1b>")
+		}
 	}
 	return []byte(preamble.String())
 }
