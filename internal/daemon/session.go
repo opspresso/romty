@@ -129,10 +129,10 @@ func (s *session) wait() {
 	}
 	s.clients = make(map[net.Conn]*attachment)
 	s.mu.Unlock()
+	s.onExit()
 	for _, connection := range clients {
 		connection.Close()
 	}
-	s.onExit()
 }
 
 func (s *session) broadcast(data []byte) {

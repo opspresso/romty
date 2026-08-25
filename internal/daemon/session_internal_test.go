@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"errors"
+	"io"
 	"net"
 	"os"
 	"os/exec"
@@ -82,6 +83,61 @@ func TestSessionDrainsPTYBeforeReportingExit(t *testing.T) {
 	}
 	if got := string(value.history.bytes()); got != "final output" {
 		t.Fatalf("history = %q, want final output", got)
+	}
+}
+
+func TestSessionReportsExitBeforeClosingClients(t *testing.T) {
+	command := exec.Command("/bin/sh", "-c", "exit 0")
+	if err := command.Start(); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	serverConnection, clientConnection := net.Pipe()
+	defer serverConnection.Close()
+	defer clientConnection.Close()
+
+	readDone := make(chan struct{})
+	close(readDone)
+	exitStarted := make(chan struct{})
+	releaseExit := make(chan struct{})
+	defer func() {
+		select {
+		case <-releaseExit:
+		default:
+			close(releaseExit)
+		}
+	}()
+	value := &session{
+		command:  command,
+		readDone: readDone,
+		onExit: func() {
+			close(exitStarted)
+			<-releaseExit
+		},
+		clients: map[net.Conn]*attachment{serverConnection: {live: true}},
+	}
+	go value.wait()
+
+	select {
+	case <-exitStarted:
+	case <-time.After(3 * time.Second):
+		t.Fatal("session did not report exit")
+	}
+	if err := clientConnection.SetReadDeadline(time.Now().Add(100 * time.Millisecond)); err != nil {
+		t.Fatalf("SetReadDeadline() error = %v", err)
+	}
+	if _, err := clientConnection.Read(make([]byte, 1)); err == nil {
+		t.Fatal("Read() succeeded while session exit was being persisted")
+	} else if errors.Is(err, io.EOF) {
+		t.Fatal("client closed before session exit was persisted")
+	} else if timeout, ok := err.(net.Error); !ok || !timeout.Timeout() {
+		t.Fatalf("Read() error = %v, want timeout", err)
+	}
+	close(releaseExit)
+	if err := clientConnection.SetReadDeadline(time.Now().Add(3 * time.Second)); err != nil {
+		t.Fatalf("SetReadDeadline() for close error = %v", err)
+	}
+	if _, err := clientConnection.Read(make([]byte, 1)); !errors.Is(err, io.EOF) {
+		t.Fatalf("Read() after exit error = %v, want EOF", err)
 	}
 }
 
