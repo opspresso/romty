@@ -198,13 +198,13 @@ func (f *fakeBackend) CreateTab(workspaceID string, columns, rows uint16) (model
 	return f.createdTab, nil
 }
 
-func (f *fakeBackend) OpenTerminal(tabID string) (io.ReadWriteCloser, error) {
+func (f *fakeBackend) OpenTerminal(tabID string) (io.ReadWriteCloser, []byte, error) {
 	f.openedTab = tabID
 	if err := f.failure("OpenTerminal"); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	f.stream = newMemoryStream("\x1b[2J\x1b[Hembedded terminal")
-	return f.stream, nil
+	f.stream = newMemoryStream("live output")
+	return f.stream, []byte("\x1b[2J\x1b[Hembedded terminal"), nil
 }
 
 func (f *fakeBackend) Resize(_ string, columns, rows uint16) error {
@@ -1613,6 +1613,52 @@ func TestDashboardReturnsToTheTreeWhenOpeningFails(t *testing.T) {
 	}
 	if !strings.Contains(value.errorMessage, "session not found") {
 		t.Fatalf("error message = %q, want the attach failure", value.errorMessage)
+	}
+}
+
+// Recorded output is already in the emulator when the terminal becomes part
+// of the dashboard. The event loop therefore renders only the final restored
+// screen, while keeping the history available to scrollback.
+func TestDashboardAdoptsACompletedTerminalReplay(t *testing.T) {
+	workspace := model.Workspace{ID: "workspace-1", RootID: "root-1", Name: "alpha", Path: "/projects/alpha"}
+	tab := model.Tab{ID: "tab-1", WorkspaceID: workspace.ID, Name: "1", Running: true}
+	snapshot := model.Snapshot{Roots: []model.RootView{{
+		Root: model.Root{ID: "root-1", Name: "projects", Path: "/projects"},
+		Directories: []model.WorkspaceView{{
+			Workspace: workspace,
+			Tabs:      []model.Tab{tab},
+		}},
+	}}}
+	value := newDashboard(&fakeBackend{}, snapshot)
+	value.width = 80
+	value.height = 12
+	value.selectedWorkspaceID = workspace.ID
+	value.selectedPath = workspace.Path
+	var replay strings.Builder
+	for line := 1; line <= 200; line++ {
+		fmt.Fprintf(&replay, "line %03d\r\n", line)
+	}
+	stream := newMemoryStream("")
+
+	updated, command := value.Update(terminalOpenedMsg{
+		tabID:  "tab-1",
+		stream: stream,
+		replay: []byte(replay.String()),
+	})
+	value = updated.(dashboard)
+	t.Cleanup(value.closeTerminal)
+
+	if value.terminal == nil {
+		t.Fatal("the restored terminal was not adopted")
+	}
+	if value.terminal.scrollbackLen() == 0 {
+		t.Fatal("the restored terminal lost its scrollback")
+	}
+	if rendered := strings.Join(plainRows(value.terminal.render()), "\n"); !strings.Contains(rendered, "line 200") {
+		t.Fatalf("restored screen did not land on the final output:\n%s", rendered)
+	}
+	if command == nil {
+		t.Fatal("the restored terminal did not start reading live output")
 	}
 }
 

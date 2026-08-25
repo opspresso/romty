@@ -189,7 +189,7 @@ New terminals start with the environment and `$SHELL` of the romty that asked fo
 
 Pressing `F9` opens a confirmation modal because stopping the daemon terminates every running shell. Once `Enter` confirms it the shutdown cannot be cancelled, so the modal stays until the daemon reports back. The `romty stop` command performs the same shutdown directly and is intended for explicit use from outside a romty terminal; stopping a daemon that is not running succeeds without output.
 
-The daemon outlives the romty binary, so `brew upgrade` or `go install` can leave a new romty talking to a daemon the old one started. Both sides stamp the protocol they speak on every message and refuse to act on a mismatch, so the disagreement is reported as itself rather than as a missing field or an unknown action. Ping and shutdown are the exceptions, because they are how the remedy is carried out: an upgraded romty reports which side to restart, `romty stop` ends the old daemon, and the next run starts one that matches.
+The daemon outlives the romty binary, so `brew upgrade` or `go install` can leave different client and daemon versions running together. A version-exempt ping advertises each side's supported protocol range and capabilities, and ordinary requests use the highest common revision. Protocols 1 through 5 are supported: older peers keep their existing operations while newer features degrade independently. In particular, agent status requires protocol 2, ordered snapshot revisions require 3, workspace removal requires 4, and the bounded initial replay requires 5. Protocol 0 predates an explicit compatibility contract and is reported as unsupported. Shutdown remains available even when no ordinary revision overlaps, and every message that reports a mismatch ends by naming that remedy: run `romty stop` and start romty again.
 
 Reattaching replays the recorded output so the screen comes back as it was, preceded by the terminal modes the shell has set. Modes are sticky — a shell turns bracketed paste on once and never mentions it again — so a session long enough to fill the recording would otherwise lose them, and a shell that cannot tell pasted text from typed text runs a multi-line paste line by line. Tracking them separately from the recording keeps the answer independent of how much of it is left. Terminal queries are dropped from that replay: a query is an exchange that already finished, and a terminal emulator answering it a second time would send the reply to a shell that asked nothing, where it lands on the command line as typed text. Live queries are still answered normally.
 
@@ -238,7 +238,7 @@ romty TUI
                  └─ shell process
 ```
 
-The daemon keeps up to 8 MiB of output history per session. The client replays that history through its VT emulator when attaching, then continues streaming output into the terminal pane.
+The daemon keeps up to 8 MiB of output history per session. The client restores that history through its VT emulator before displaying the attached terminal, then continues streaming live output into the pane.
 
 romty manages local shells only. It does not provide remote or SSH session management.
 
@@ -253,6 +253,10 @@ go build ./...
 ```
 
 A session runs several goroutines around one emulator, so the race detector is the check that matters most here, and it is the one CI gates on.
+
+### Protocol compatibility
+
+Keep existing field meanings and stream framing stable within their protocol revision. Additive actions and optional JSON fields do not require a new revision; advertise independently usable behavior as a capability, and ignore unknown fields and capabilities. Raise `MinimumVersion` only when retaining an older wire contract is unsafe. Breaking field semantics or framing require a new revision and a preserved adapter for every revision still inside the supported range.
 
 Run an isolated development instance:
 

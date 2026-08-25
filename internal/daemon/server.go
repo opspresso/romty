@@ -286,8 +286,16 @@ func (s *Server) handle(connection net.Conn) {
 		return
 	}
 
+	// Stamped with the version the client selected, not the daemon's own: a
+	// client checks the version before it reads the error, so a reply carrying
+	// the daemon's version would be refused for the mismatch it is reporting
+	// and the sentence naming the remedy would never reach the user.
 	if err := checkClientVersion(request); err != nil {
-		_ = reply(connection, protocol.Response{Error: err.Error()})
+		_ = replyFor(connection, request, protocol.Response{Error: err.Error()})
+		return
+	}
+	if err := checkClientCapability(request); err != nil {
+		_ = replyFor(connection, request, protocol.Response{Error: err.Error()})
 		return
 	}
 
@@ -299,11 +307,11 @@ func (s *Server) handle(connection net.Conn) {
 	if request.Action == protocol.ActionAttach {
 		finish, ok := s.beginRequest(request.Action)
 		if !ok {
-			_ = reply(connection, protocol.Response{Error: "daemon is shutting down"})
+			_ = replyFor(connection, request, protocol.Response{Error: "daemon is shutting down"})
 			return
 		}
 		finish()
-		s.handleAttach(connection, request.TabID)
+		s.handleAttach(connection, request)
 		return
 	}
 	if request.Action == protocol.ActionShutdown {
@@ -313,34 +321,63 @@ func (s *Server) handle(connection net.Conn) {
 		_ = reply(connection, protocol.Response{})
 		return
 	}
-	_ = reply(connection, s.dispatch(request))
+	_ = replyFor(connection, request, s.dispatch(request))
 }
 
-// checkClientVersion refuses work for a client that speaks another protocol.
-// The client stamps every request with its version and checks the daemon's on
-// every reply, but until the daemon read that field the check only ran on one
-// side: the daemon carried out the request first and the client discovered the
-// mismatch afterwards, having already created the tab or forgotten the root.
-//
-// Which actions are carried out anyway is protocol.VersionExempt's to say, so
-// that both sides exempt the same two.
+// checkClientVersion accepts a selected revision inside the supported range.
+// Ping and shutdown stay version-exempt: one negotiates that range and the
+// other remains the remedy even when no overlap exists.
 func checkClientVersion(request protocol.Request) error {
-	if protocol.VersionExempt(request.Action) || request.Version == protocol.Version {
+	if protocol.VersionExempt(request.Action) ||
+		request.Version >= protocol.MinimumVersion && request.Version <= protocol.Version {
 		return nil
 	}
-	return protocol.VersionMismatch("daemon", protocol.Version, "client", request.Version)
+	return fmt.Errorf("daemon supports protocol %d..%d but the client selected %d; %s",
+		protocol.MinimumVersion, protocol.Version, request.Version, protocol.Remedy)
 }
 
-// reply stamps every response with the protocol version, so a client can tell
-// an old daemon from a puzzling reply, and bounds the write.
-//
-// The read that precedes it is bounded because a client that connects and never
-// finishes a request would hold a goroutine and a file descriptor for the
-// daemon's whole life. A client that sends its request and then stops reading
-// does the same thing from the other side, as soon as the reply outgrows the
-// socket buffer — which a snapshot of a large tree does.
+func checkClientCapability(request protocol.Request) error {
+	var required string
+	switch request.Action {
+	case protocol.ActionAgents:
+		required = protocol.CapabilityAgents
+	case protocol.ActionRemoveWorkspace:
+		required = protocol.CapabilityRemoveWorkspace
+	}
+	if required == "" || protocol.HasCapability(requestCapabilities(request), required) {
+		return nil
+	}
+	return fmt.Errorf("action %q requires capability %q; %s", request.Action, required, protocol.Remedy)
+}
+
+func requestCapabilities(request protocol.Request) []string {
+	supported := protocol.CapabilitiesForVersion(request.Version)
+	if request.MinVersion == 0 && len(request.Capabilities) == 0 {
+		return supported
+	}
+	result := make([]string, 0, len(supported))
+	for _, capability := range supported {
+		if protocol.HasCapability(request.Capabilities, capability) {
+			result = append(result, capability)
+		}
+	}
+	return result
+}
+
+// reply is for requests without a selected revision, while replyFor echoes the
+// negotiated one. Both bound the write so a client that stops reading cannot
+// hold a daemon goroutine and file descriptor indefinitely.
 func reply(connection net.Conn, response protocol.Response) error {
 	response.Version = protocol.Version
+	return writeResponse(connection, response)
+}
+
+func replyFor(connection net.Conn, request protocol.Request, response protocol.Response) error {
+	response.Version = request.Version
+	return writeResponse(connection, response)
+}
+
+func writeResponse(connection net.Conn, response protocol.Response) error {
 	if err := connection.SetWriteDeadline(time.Now().Add(requestTimeout)); err != nil {
 		return err
 	}
@@ -366,7 +403,11 @@ func (s *Server) dispatch(request protocol.Request) protocol.Response {
 
 	switch request.Action {
 	case protocol.ActionPing:
-		return protocol.Response{}
+		return protocol.Response{
+			MinVersion:   protocol.MinimumVersion,
+			MaxVersion:   protocol.Version,
+			Capabilities: protocol.CapabilitiesForVersion(protocol.Version),
+		}
 	case protocol.ActionSnapshot:
 		return s.snapshotResponse()
 	case protocol.ActionAgents:
@@ -723,19 +764,27 @@ func (s *Server) resize(tabID string, columns, rows uint16) protocol.Response {
 	return protocol.Response{}
 }
 
-func (s *Server) handleAttach(connection net.Conn, tabID string) {
+func (s *Server) handleAttach(connection net.Conn, request protocol.Request) {
 	s.mu.Lock()
-	value, ok := s.sessions[tabID]
+	value, ok := s.sessions[request.TabID]
 	s.mu.Unlock()
 	if !ok {
-		_ = reply(connection, protocol.Response{Error: "running terminal session not found"})
+		_ = replyFor(connection, request, protocol.Response{Error: "running terminal session not found"})
 		return
 	}
-	if err := reply(connection, protocol.Response{}); err != nil {
+	if !protocol.HasCapability(requestCapabilities(request), protocol.CapabilityReplayBoundary) {
+		if err := replyFor(connection, request, protocol.Response{}); err != nil {
+			return
+		}
+		if err := value.attach(connection); err != nil {
+			s.logger.Printf("attach to tab %s ended: %v", request.TabID, err)
+		}
 		return
 	}
-	if err := value.attach(connection); err != nil {
-		s.logger.Printf("attach to tab %s ended: %v", tabID, err)
+	if err := value.attachReady(connection, func(replayBytes int) error {
+		return replyFor(connection, request, protocol.Response{ReplayBytes: replayBytes})
+	}); err != nil {
+		s.logger.Printf("attach to tab %s ended: %v", request.TabID, err)
 	}
 }
 

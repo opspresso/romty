@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -27,10 +28,20 @@ const (
 	workspaceRemovalTimeout = 10 * time.Minute
 )
 
-var handshakeTimeout = 3 * time.Second
+var (
+	handshakeTimeout  = 3 * time.Second
+	replayReadTimeout = 2 * time.Second
+)
 
 type Client struct {
-	socket string
+	socket     string
+	protocolMu sync.Mutex
+	protocol   *negotiatedProtocol
+}
+
+type negotiatedProtocol struct {
+	selectedVersion int
+	capabilities    []string
 }
 
 type terminalStream struct {
@@ -49,19 +60,17 @@ func New(socket string) *Client {
 }
 
 func (c *Client) Ping() error {
-	_, err := c.ProtocolVersion()
+	_, err := c.probeProtocol()
 	return err
 }
 
-// ProtocolVersion reports the protocol spoken by the running daemon. Ping is
-// version-exempt so an upgraded client can inspect an older daemon and name
-// the mismatch instead of mistaking it for a daemon that is not running.
+// ProtocolVersion reports the newest protocol the running daemon supports.
 func (c *Client) ProtocolVersion() (int, error) {
-	response, err := c.call(protocol.Request{Action: protocol.ActionPing})
+	response, err := c.probeProtocol()
 	if err != nil {
 		return 0, err
 	}
-	return response.Version, nil
+	return advertisedMaximum(response), nil
 }
 
 func (c *Client) Snapshot() (model.Snapshot, error) {
@@ -76,6 +85,13 @@ func (c *Client) Snapshot() (model.Snapshot, error) {
 }
 
 func (c *Client) Agents() (map[string]model.Agent, error) {
+	supported, err := c.supports(protocol.CapabilityAgents)
+	if err != nil {
+		return nil, err
+	}
+	if !supported {
+		return map[string]model.Agent{}, nil
+	}
 	response, err := c.call(protocol.Request{Action: protocol.ActionAgents})
 	if err != nil {
 		return nil, err
@@ -125,6 +141,13 @@ func (c *Client) RemoveRoot(rootID string) (model.Snapshot, error) {
 }
 
 func (c *Client) RemoveWorkspace(rootID, path string) (model.Snapshot, error) {
+	supported, err := c.supports(protocol.CapabilityRemoveWorkspace)
+	if err != nil {
+		return model.Snapshot{}, err
+	}
+	if !supported {
+		return model.Snapshot{}, fmt.Errorf("running daemon does not support removing workspaces; %s", protocol.Remedy)
+	}
 	response, err := c.call(protocol.Request{
 		Action: protocol.ActionRemoveWorkspace,
 		RootID: rootID,
@@ -186,7 +209,12 @@ func (c *Client) Resize(tabID string, columns, rows uint16) error {
 }
 
 func (c *Client) Shutdown() error {
-	_, err := c.call(protocol.Request{Action: protocol.ActionShutdown})
+	response, probeErr := c.probeProtocol()
+	version := protocol.Version
+	if probeErr == nil {
+		version = advertisedMaximum(response)
+	}
+	_, err := c.callWithProtocol(protocol.Request{Action: protocol.ActionShutdown}, version, nil)
 	if err != nil {
 		return err
 	}
@@ -236,13 +264,27 @@ func Unavailable(err error) bool {
 	return errors.Is(err, syscall.ENOENT) || errors.Is(err, syscall.ECONNREFUSED)
 }
 
+// OpenAttach hands back the attach stream without interpreting the replay
+// boundary, so the recorded history and the live output arrive as one stream
+// the way they did before that boundary existed. Tests that read the replay as
+// it comes off the socket use it. The TUI wants OpenTerminal instead, because
+// a terminal has to restore its history before it is put on screen.
 func (c *Client) OpenAttach(tabID string) (net.Conn, *bufio.Reader, error) {
+	connection, reader, _, err := c.openAttach(tabID)
+	return connection, reader, err
+}
+
+func (c *Client) openAttach(tabID string) (net.Conn, *bufio.Reader, int, error) {
+	negotiated, err := c.negotiateProtocol()
+	if err != nil {
+		return nil, nil, 0, err
+	}
 	if err := validateDaemonSocket(c.socket); err != nil {
-		return nil, nil, err
+		return nil, nil, 0, err
 	}
 	connection, err := net.DialTimeout("unix", c.socket, dialTimeout)
 	if err != nil {
-		return nil, nil, fmt.Errorf("connect to daemon: %w", err)
+		return nil, nil, 0, fmt.Errorf("connect to daemon: %w", err)
 	}
 	// Bound the handshake alone. A daemon that accepts the connection and then
 	// says nothing — stopped, wedged, or another program holding the socket
@@ -251,53 +293,103 @@ func (c *Client) OpenAttach(tabID string) (net.Conn, *bufio.Reader, error) {
 	// nothing on the status bar to say why.
 	if err := connection.SetDeadline(time.Now().Add(handshakeTimeout)); err != nil {
 		connection.Close()
-		return nil, nil, fmt.Errorf("set daemon deadline: %w", err)
+		return nil, nil, 0, fmt.Errorf("set daemon deadline: %w", err)
 	}
-	if err := sendRequest(connection, protocol.Request{Action: protocol.ActionAttach, TabID: tabID}); err != nil {
+	if err := sendRequest(connection, protocol.Request{Action: protocol.ActionAttach, TabID: tabID},
+		negotiated.selectedVersion, negotiated.capabilities); err != nil {
 		connection.Close()
-		return nil, nil, err
+		return nil, nil, 0, err
 	}
 
 	reader := bufio.NewReader(connection)
 	var response protocol.Response
 	if err := protocol.Read(reader, &response); err != nil {
 		connection.Close()
-		return nil, nil, err
+		return nil, nil, 0, err
 	}
-	// Attach used to skip the version check the short requests run, so a
-	// mismatch here arrived as whatever the old daemon streamed next rather
-	// than as the one message that says which side to restart.
-	if err := checkResponse(protocol.ActionAttach, response); err != nil {
+	// The response must stay on the revision chosen before raw terminal bytes
+	// begin; once the stream starts there is no framed reply left to correct it.
+	if err := checkResponse(protocol.ActionAttach, response, negotiated.selectedVersion); err != nil {
 		connection.Close()
-		return nil, nil, err
+		return nil, nil, 0, err
 	}
 	// The handshake is done; what follows is a terminal that stays open for as
 	// long as the user keeps it, and wants no deadline at all.
 	if err := connection.SetDeadline(time.Time{}); err != nil {
 		connection.Close()
-		return nil, nil, fmt.Errorf("clear daemon deadline: %w", err)
+		return nil, nil, 0, fmt.Errorf("clear daemon deadline: %w", err)
 	}
-	return connection, reader, nil
+	return connection, reader, response.ReplayBytes, nil
 }
 
-func (c *Client) OpenTerminal(tabID string) (io.ReadWriteCloser, error) {
-	connection, reader, err := c.OpenAttach(tabID)
+func (c *Client) OpenTerminal(tabID string) (io.ReadWriteCloser, []byte, error) {
+	connection, reader, replayBytes, err := c.openAttach(tabID)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return &terminalStream{Conn: connection, reader: reader}, nil
+	if replayBytes < 0 || replayBytes > protocol.MaxReplayBytes {
+		connection.Close()
+		return nil, nil, fmt.Errorf("terminal replay size %d is outside 0..%d", replayBytes, protocol.MaxReplayBytes)
+	}
+	replay := make([]byte, replayBytes)
+	if err := readReplay(connection, reader, replay); err != nil {
+		connection.Close()
+		return nil, nil, fmt.Errorf("restore terminal history: %w", err)
+	}
+	return &terminalStream{Conn: connection, reader: reader}, replay, nil
 }
 
-// sendRequest stamps the protocol version and writes the request. Both paths
-// go through it because only one of them used to: OpenAttach built its request
-// inline and sent it unversioned, so the daemon had no way to tell an attach
-// from a current client apart from one that predates the field.
-func sendRequest(w io.Writer, request protocol.Request) error {
-	request.Version = protocol.Version
+func readReplay(connection net.Conn, reader io.Reader, replay []byte) error {
+	for len(replay) > 0 {
+		if err := connection.SetReadDeadline(time.Now().Add(replayReadTimeout)); err != nil {
+			return err
+		}
+		count, err := reader.Read(replay)
+		replay = replay[count:]
+		// A reader may hand over the last of the replay together with the
+		// error that ends the stream. The history is complete either way, and
+		// refusing it here would turn a restored terminal into an attach
+		// failure and the reattach backoff that follows one.
+		if len(replay) == 0 {
+			break
+		}
+		if err != nil {
+			return err
+		}
+		if count == 0 {
+			return io.ErrNoProgress
+		}
+	}
+	return connection.SetReadDeadline(time.Time{})
+}
+
+func sendRequest(w io.Writer, request protocol.Request, version int, capabilities []string) error {
+	request.Version = version
+	request.MinVersion = protocol.MinimumVersion
+	request.Capabilities = capabilities
 	return protocol.Write(w, request)
 }
 
 func (c *Client) call(request protocol.Request) (protocol.Response, error) {
+	negotiated, err := c.negotiateProtocol()
+	if err != nil {
+		return protocol.Response{}, err
+	}
+	return c.callWithProtocol(request, negotiated.selectedVersion, negotiated.capabilities)
+}
+
+func (c *Client) callWithProtocol(request protocol.Request, version int, capabilities []string) (protocol.Response, error) {
+	response, err := c.callRaw(request, version, capabilities)
+	if err != nil {
+		return protocol.Response{}, err
+	}
+	if err := checkResponse(request.Action, response, version); err != nil {
+		return protocol.Response{}, err
+	}
+	return response, nil
+}
+
+func (c *Client) callRaw(request protocol.Request, version int, capabilities []string) (protocol.Response, error) {
 	if err := validateDaemonSocket(c.socket); err != nil {
 		return protocol.Response{}, err
 	}
@@ -313,7 +405,7 @@ func (c *Client) call(request protocol.Request) (protocol.Response, error) {
 	if err := connection.SetDeadline(time.Now().Add(timeout)); err != nil {
 		return protocol.Response{}, fmt.Errorf("set daemon deadline: %w", err)
 	}
-	if err := sendRequest(connection, request); err != nil {
+	if err := sendRequest(connection, request, version, capabilities); err != nil {
 		return protocol.Response{}, err
 	}
 
@@ -321,10 +413,87 @@ func (c *Client) call(request protocol.Request) (protocol.Response, error) {
 	if err := protocol.Read(bufio.NewReader(connection), &response); err != nil {
 		return protocol.Response{}, err
 	}
-	if err := checkResponse(request.Action, response); err != nil {
+	return response, nil
+}
+
+func (c *Client) negotiateProtocol() (*negotiatedProtocol, error) {
+	c.protocolMu.Lock()
+	defer c.protocolMu.Unlock()
+	if c.protocol != nil {
+		return c.protocol, nil
+	}
+	response, err := c.probeProtocol()
+	if err != nil {
+		return nil, err
+	}
+	daemonMax := advertisedMaximum(response)
+	daemonMin := response.MinVersion
+	if daemonMin == 0 {
+		daemonMin = daemonMax
+	}
+	selected, ok := protocol.SelectVersion(
+		protocol.MinimumVersion, protocol.Version, daemonMin, daemonMax,
+	)
+	if !ok {
+		return nil, fmt.Errorf("romty supports protocol %d..%d but the running daemon supports %d..%d; %s",
+			protocol.MinimumVersion, protocol.Version, daemonMin, daemonMax, protocol.Remedy)
+	}
+	advertised := response.Capabilities
+	if response.MinVersion == 0 && len(advertised) == 0 {
+		advertised = protocol.CapabilitiesForVersion(daemonMax)
+	}
+	capabilities := intersectCapabilities(protocol.CapabilitiesForVersion(selected), advertised)
+	c.protocol = &negotiatedProtocol{
+		selectedVersion: selected,
+		capabilities:    capabilities,
+	}
+	return c.protocol, nil
+}
+
+func advertisedMaximum(response protocol.Response) int {
+	if response.MaxVersion != 0 {
+		return response.MaxVersion
+	}
+	return response.Version
+}
+
+func (c *Client) probeProtocol() (protocol.Response, error) {
+	request := protocol.Request{
+		Action:       protocol.ActionPing,
+		MinVersion:   protocol.MinimumVersion,
+		Capabilities: protocol.CapabilitiesForVersion(protocol.Version),
+	}
+	response, err := c.callRaw(request, protocol.Version, request.Capabilities)
+	if err != nil {
 		return protocol.Response{}, err
 	}
+	// A peer that refuses the ping without naming a version of its own is not
+	// one this client can negotiate with — a program holding the socket, or a
+	// reply too damaged to read — and what it said is the only clue there is.
+	// A refusal that does carry a version is an ordinary mismatch, which
+	// negotiation reports in the sentence that also names the remedy.
+	if response.Error != "" && advertisedMaximum(response) == 0 {
+		return protocol.Response{}, fmt.Errorf("daemon: %s", response.Error)
+	}
 	return response, nil
+}
+
+func (c *Client) supports(capability string) (bool, error) {
+	negotiated, err := c.negotiateProtocol()
+	if err != nil {
+		return false, err
+	}
+	return protocol.HasCapability(negotiated.capabilities, capability), nil
+}
+
+func intersectCapabilities(first, second []string) []string {
+	var result []string
+	for _, capability := range first {
+		if protocol.HasCapability(second, capability) {
+			result = append(result, capability)
+		}
+	}
+	return result
 }
 
 func validateDaemonSocket(path string) error {
@@ -348,20 +517,13 @@ func validateDaemonSocket(path string) error {
 	return nil
 }
 
-// checkResponse judges a reply before anything reads its fields. The version
-// comes first: a daemon that speaks another protocol may well have an error to
-// report, but the mismatch is what the user has to act on.
-//
-// Except for the actions protocol.VersionExempt names, which the daemon
-// carries out whatever version asked. Judging their replies by the version
-// undid that on this side: pinging a mismatched daemon reported it as no
-// daemon at all, so romty started a second one, watched it lose the lock and
-// exit, and gave up with "daemon did not become ready" — and `romty stop`, the
-// remedy every mismatch names, stopped the daemon and then reported the
-// mismatch as a failure to stop it.
-func checkResponse(action string, response protocol.Response) error {
-	if response.Version != protocol.Version && !protocol.VersionExempt(action) {
-		return protocol.VersionMismatch("romty", protocol.Version, "running daemon", response.Version)
+// checkResponse keeps an ordinary response on the revision negotiation chose.
+// Ping advertises a range and shutdown must remain reachable without overlap,
+// so neither is tied to the request's selected version.
+func checkResponse(action string, response protocol.Response, expectedVersion int) error {
+	if response.Version != expectedVersion && !protocol.VersionExempt(action) {
+		return fmt.Errorf("romty selected protocol %d but the running daemon answered with %d; %s",
+			expectedVersion, response.Version, protocol.Remedy)
 	}
 	if response.Error != "" {
 		return fmt.Errorf("daemon: %s", response.Error)

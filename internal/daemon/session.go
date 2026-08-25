@@ -173,6 +173,13 @@ func (s *session) broadcast(data []byte) {
 }
 
 func (s *session) attach(connection net.Conn) error {
+	return s.attachReady(connection, func(int) error { return nil })
+}
+
+// attachReady announces the exact initial replay before writing it. The
+// client can consume that history off-screen, then treat everything after the
+// boundary as live output.
+func (s *session) attachReady(connection net.Conn, ready func(int) error) error {
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()
@@ -191,6 +198,11 @@ func (s *session) attach(connection net.Conn) error {
 	s.clients[connection] = attached
 	s.mu.Unlock()
 
+	recorded = stripQueries(recorded)
+	if err := ready(len(resetScreen) + len(modes) + len(recorded)); err != nil {
+		s.detach(connection)
+		return err
+	}
 	if err := s.replay(connection, modes, recorded); err != nil {
 		s.detach(connection)
 		return err
@@ -222,7 +234,7 @@ func (s *session) replay(connection net.Conn, modes, recording []byte) error {
 	if err := writeReplay(connection, append([]byte(resetScreen), modes...)); err != nil {
 		return fmt.Errorf("initialize attached terminal: %w", err)
 	}
-	if err := writeReplay(connection, stripQueries(recording)); err != nil {
+	if err := writeReplay(connection, recording); err != nil {
 		return fmt.Errorf("restore terminal history: %w", err)
 	}
 	for {
@@ -251,11 +263,9 @@ func (s *session) replay(connection net.Conn, modes, recording []byte) error {
 // deadline before each one, so the timeout means "this client has stopped
 // reading" and not "this client is taking a while".
 //
-// One deadline over the whole replay meant the second. The TUI takes 32 KiB
-// per turn of its event loop, so a full recording is hundreds of turns with a
-// render between them, and an attach that was making steady progress was cut
-// off for being long. romty reattached, the daemon replayed the same
-// recording, and it was cut off again — the loop the reattach backoff damps.
+// One deadline over the whole replay meant the second: an attach that was
+// making steady progress was cut off for being long, then retried the same
+// recording and was cut off again.
 func writeReplay(connection net.Conn, data []byte) error {
 	for len(data) > 0 {
 		if err := connection.SetWriteDeadline(time.Now().Add(replayTimeout)); err != nil {
