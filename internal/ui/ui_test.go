@@ -3125,7 +3125,7 @@ func TestDashboardForgetsRetriesAfterAHealthyAttach(t *testing.T) {
 
 	// Reopen, then let the terminal run past the healthy interval before it
 	// drops. That drop starts over: an immediate reconnect, not a delayed one.
-	updated, open = value.Update(reopenTerminalMsg{})
+	updated, open = value.Update(reopenTerminalMsg{tabID: "tab-1"})
 	value = updated.(dashboard)
 	updated, _ = value.Update(open())
 	value = updated.(dashboard)
@@ -3141,7 +3141,7 @@ func TestDashboardForgetsRetriesAfterAHealthyAttach(t *testing.T) {
 	if command == nil {
 		t.Fatal("no reconnect after a healthy attach dropped")
 	}
-	if message := command(); message == (reopenTerminalMsg{}) {
+	if _, delayed := command().(reopenTerminalMsg); delayed {
 		t.Fatal("a drop after a healthy attach was delayed, want an immediate reconnect")
 	}
 }
@@ -3167,8 +3167,39 @@ func TestDashboardStillBacksOffWhenDropsAreImmediate(t *testing.T) {
 		t.Fatalf("an immediate drop = (retries %d, command %v), want one counted retry",
 			value.reattachAttempts, command)
 	}
-	if message := command(); message != (reopenTerminalMsg{}) {
+	if message := command(); message != (reopenTerminalMsg{tabID: "tab-1"}) {
 		t.Fatalf("an immediate drop returned %T, want a delayed reopen", message)
+	}
+}
+
+func TestDashboardIgnoresAReattachForTheTabItLeft(t *testing.T) {
+	tabs := []model.Tab{
+		{ID: "tab-1", WorkspaceID: "workspace-1", Name: "1", Running: true},
+		{ID: "tab-2", WorkspaceID: "workspace-1", Name: "2", Running: true},
+	}
+	value, _, refresh := exitedDashboard(t, tabs, 0)
+
+	updated, open := value.Update(refresh())
+	value = updated.(dashboard)
+	updated, _ = value.Update(open())
+	value = updated.(dashboard)
+	updated, refresh = value.Update(terminalOutputMsg{terminal: value.terminal, err: io.EOF})
+	value = updated.(dashboard)
+	updated, delayed := value.Update(refresh())
+	value = updated.(dashboard)
+	if delayed == nil {
+		t.Fatal("the repeated drop produced no delayed reattach")
+	}
+
+	updated, _ = value.Update(switchTabKey(tea.KeyRight))
+	value = updated.(dashboard)
+	if value.selectedTabID() != "tab-2" {
+		t.Fatalf("selected tab = %q, want tab-2", value.selectedTabID())
+	}
+	updated, stale := value.Update(delayed())
+	value = updated.(dashboard)
+	if stale != nil {
+		t.Fatal("a delayed reattach for tab-1 reopened tab-2")
 	}
 }
 

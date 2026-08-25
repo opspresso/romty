@@ -230,7 +230,9 @@ type resizeFailedMsg struct {
 
 // reopenTerminalMsg arrives after a backoff, so a terminal that keeps dropping
 // is retried at a pace that leaves the daemon and the UI usable.
-type reopenTerminalMsg struct{}
+type reopenTerminalMsg struct {
+	tabID string
+}
 
 func Run(backend Backend, initial model.Snapshot, configPath string) (Result, error) {
 	config, err := loadConfig(configPath)
@@ -411,6 +413,9 @@ func (m dashboard) update(message tea.Msg) (tea.Model, tea.Cmd) {
 	case browserMsg:
 		return m.handleBrowserRead(message)
 	case reopenTerminalMsg:
+		if message.tabID != m.selectedTabID() {
+			return m, nil
+		}
 		return m, m.openSelectedTerminal()
 	case daemonStoppedMsg:
 		if message.err != nil {
@@ -1007,7 +1012,7 @@ func (m dashboard) settleAfterExit() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	return m, tea.Tick(reattachBackoff(m.reattachAttempts), func(time.Time) tea.Msg {
-		return reopenTerminalMsg{}
+		return reopenTerminalMsg{tabID: tab.ID}
 	})
 }
 
