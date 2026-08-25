@@ -16,6 +16,8 @@
   --accent-surface: #134e4a;
   --accent-text: #f0fdfa;
   --danger: #fb7185;
+  --agent-claude: #d97757;
+  --agent-codex: #3b82f6;
 
   --radius: 12px;
   --radius-lg: 16px;
@@ -357,6 +359,18 @@ pre {
 
 .tree-item .running {
   color: var(--accent);
+}
+
+.tree-item .running-agents {
+  display: inline-flex;
+}
+
+.tree-item .running.claude {
+  color: var(--agent-claude);
+}
+
+.tree-item .running.codex {
+  color: var(--agent-codex);
 }
 
 .pane {
