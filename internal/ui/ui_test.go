@@ -1200,6 +1200,13 @@ func TestDashboardKeepsMouseWithTheHostUnlessPassthroughIsOn(t *testing.T) {
 	}
 }
 
+func TestDashboardRequestsAlternateKeys(t *testing.T) {
+	view := newDashboard(&fakeBackend{}, model.Snapshot{}).View()
+	if !view.KeyboardEnhancements.ReportAlternateKeys {
+		t.Fatal("dashboard did not request physical base key codes")
+	}
+}
+
 // A guest that owns the screen pages its own output, so romty must hand the key
 // over rather than swallowing it for a scrollback it cannot offer.
 func TestDashboardForwardsPagingToTheGuestThatOwnsTheScreen(t *testing.T) {

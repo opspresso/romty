@@ -130,6 +130,11 @@ func (t *embeddedTerminal) sendKey(message tea.KeyPressMsg) {
 		_, _ = io.WriteString(t.emulator.InputPipe(), sequence)
 		return
 	}
+	var ok bool
+	key, ok = layoutControlKey(key)
+	if !ok {
+		return
+	}
 	if text, ok := printableKeyText(key); ok {
 		t.emulator.SendText(text)
 		return
@@ -155,6 +160,25 @@ func (t *embeddedTerminal) sendKey(message tea.KeyPressMsg) {
 		ShiftedCode: key.ShiftedCode,
 		BaseCode:    key.BaseCode,
 	}))
+}
+
+func layoutControlKey(key tea.Key) (tea.Key, bool) {
+	mod := key.Mod &^ (tea.ModCapsLock | tea.ModNumLock | tea.ModScrollLock)
+	if mod&tea.ModCtrl == 0 || mod&^(tea.ModAlt|tea.ModCtrl) != 0 {
+		return key, true
+	}
+	// Ctrl chords follow the physical key across input layouts. Without a
+	// base code, a printable non-ASCII value cannot be mapped safely.
+	if key.BaseCode != 0 {
+		key.Code = key.BaseCode
+		key.ShiftedCode = 0
+		key.Text = ""
+		return key, true
+	}
+	if key.Code > unicode.MaxASCII && unicode.IsPrint(key.Code) {
+		return key, false
+	}
+	return key, true
 }
 
 // mouseTrackingModes are the guest mouse modes romty knows how to mirror,

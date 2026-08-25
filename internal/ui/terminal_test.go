@@ -126,7 +126,10 @@ func TestEmbeddedTerminalForwardsModifiedKeys(t *testing.T) {
 		{name: "alt+left", key: tea.Key{Code: tea.KeyLeft, Mod: tea.ModAlt}, want: "\x1b\x1b[D"},
 		{name: "ctrl+c", key: tea.Key{Code: 'c', Mod: tea.ModCtrl}, want: "\x03"},
 		{name: "ctrl+c with caps lock", key: tea.Key{Code: 'c', Mod: tea.ModCtrl | tea.ModCapsLock}, want: "\x03"},
+		{name: "ctrl+c with Korean layout", key: tea.Key{Code: 'ㅊ', BaseCode: 'c', Mod: tea.ModCtrl}, want: "\x03"},
+		{name: "ctrl+d with Korean layout", key: tea.Key{Code: 'ㅇ', BaseCode: 'd', Mod: tea.ModCtrl}, want: "\x04"},
 		{name: "alt+ctrl+c", key: tea.Key{Code: 'c', Mod: tea.ModAlt | tea.ModCtrl}, want: "\x1b\x03"},
+		{name: "alt+ctrl+c with Korean layout", key: tea.Key{Code: 'ㅊ', BaseCode: 'c', Mod: tea.ModAlt | tea.ModCtrl}, want: "\x1b\x03"},
 		{name: "ctrl+space", key: tea.Key{Code: tea.KeySpace, Mod: tea.ModCtrl}, want: "\x00"},
 		{name: "a repeated arrow", key: tea.Key{Code: tea.KeyUp, IsRepeat: true}, want: "\x1b[A"},
 		{name: "a plain rune", key: tea.Key{Code: 'x', Text: "x"}, want: "x"},
@@ -147,6 +150,14 @@ func TestEmbeddedTerminalForwardsModifiedKeys(t *testing.T) {
 			t.Fatalf("guest received %q, want %q", stream.String(), probe.want)
 		})
 	}
+}
+
+func TestEmbeddedTerminalIgnoresUnidentifiedNonASCIIControlKey(t *testing.T) {
+	terminal := newEmbeddedTerminal("tab-1", newMemoryStream(""), 40, 10)
+	defer terminal.close()
+
+	terminal.sendKey(tea.KeyPressMsg(tea.Key{Code: 'ㅊ', Mod: tea.ModCtrl}))
+	waitForGuestSilence(t, terminal, "")
 }
 
 func TestEmbeddedTerminalClampsScrollRegion(t *testing.T) {

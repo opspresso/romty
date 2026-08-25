@@ -1687,6 +1687,7 @@ func (m dashboard) View() tea.View {
 	view.AltScreen = true
 	view.WindowTitle = "romty"
 	view.MouseMode = m.mouseMode()
+	view.KeyboardEnhancements.ReportAlternateKeys = true
 	if !m.scrollback && m.focus == terminalPane && m.terminal != nil {
 		originX, originY := m.dimensions().terminalOrigin()
 		position := m.terminal.cursorPosition()
