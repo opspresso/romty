@@ -48,6 +48,10 @@ type Server struct {
 	// stopping is set once shutdown has begun, so a shell exiting because the
 	// daemon killed it is not persisted one tab at a time.
 	stopping bool
+
+	requestMu sync.Mutex
+	accepting bool
+	mutations sync.WaitGroup
 }
 
 func New(socket, statePath, shell string) (*Server, error) {
@@ -63,13 +67,14 @@ func New(socket, statePath, shell string) (*Server, error) {
 		shell = "/bin/sh"
 	}
 	return &Server{
-		socket:   socket,
-		store:    store,
-		shell:    shell,
-		logger:   log.New(os.Stderr, "romty: ", log.LstdFlags),
-		value:    value,
-		sessions: make(map[string]*session),
-		stop:     make(chan struct{}),
+		socket:    socket,
+		store:     store,
+		shell:     shell,
+		logger:    log.New(os.Stderr, "romty: ", log.LstdFlags),
+		value:     value,
+		sessions:  make(map[string]*session),
+		stop:      make(chan struct{}),
+		accepting: true,
 	}, nil
 }
 
@@ -131,13 +136,17 @@ func (s *Server) Serve(ctx context.Context) error {
 		case <-ctx.Done():
 		case <-s.stop:
 		}
+		s.beginShutdown()
 		listener.Close()
 	}()
 
 	for {
 		connection, err := listener.Accept()
 		if err != nil {
-			if ctx.Err() != nil || s.stopped() {
+			expected := ctx.Err() != nil || s.stopped()
+			s.beginShutdown()
+			s.mutations.Wait()
+			if expected {
 				return nil
 			}
 			return fmt.Errorf("accept daemon connection: %w", err)
@@ -267,14 +276,20 @@ func (s *Server) handle(connection net.Conn) {
 		return
 	}
 	if request.Action == protocol.ActionAttach {
+		finish, ok := s.beginRequest(request.Action)
+		if !ok {
+			_ = reply(connection, protocol.Response{Error: "daemon is shutting down"})
+			return
+		}
+		finish()
 		s.handleAttach(connection, request.TabID)
 		return
 	}
 	if request.Action == protocol.ActionShutdown {
 		// Stop even when the acknowledgement cannot be delivered, so a client
 		// that already timed out never leaves the daemon running unnoticed.
+		s.beginShutdown()
 		_ = reply(connection, protocol.Response{})
-		s.stopOnce.Do(func() { close(s.stop) })
 		return
 	}
 	_ = reply(connection, s.dispatch(request))
@@ -322,6 +337,12 @@ func (s *Server) stopped() bool {
 }
 
 func (s *Server) dispatch(request protocol.Request) protocol.Response {
+	finish, ok := s.beginRequest(request.Action)
+	if !ok {
+		return protocol.Response{Error: "daemon is shutting down"}
+	}
+	defer finish()
+
 	switch request.Action {
 	case protocol.ActionPing:
 		return protocol.Response{}
@@ -342,6 +363,34 @@ func (s *Server) dispatch(request protocol.Request) protocol.Response {
 	default:
 		return protocol.Response{Error: fmt.Sprintf("unknown action %q", request.Action)}
 	}
+}
+
+func (s *Server) beginRequest(action string) (func(), bool) {
+	s.requestMu.Lock()
+	defer s.requestMu.Unlock()
+	if !s.accepting {
+		return nil, false
+	}
+	switch action {
+	case protocol.ActionAddRoot, protocol.ActionRemoveRoot, protocol.ActionEnsureWorkspace,
+		protocol.ActionCreateTab, protocol.ActionResize:
+		s.mutations.Add(1)
+		return s.mutations.Done, true
+	default:
+		return func() {}, true
+	}
+}
+
+func (s *Server) beginShutdown() {
+	s.requestMu.Lock()
+	if s.accepting {
+		s.accepting = false
+		s.mu.Lock()
+		s.stopping = true
+		s.mu.Unlock()
+	}
+	s.requestMu.Unlock()
+	s.stopOnce.Do(func() { close(s.stop) })
 }
 
 func (s *Server) snapshotResponse() protocol.Response {

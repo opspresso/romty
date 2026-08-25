@@ -681,3 +681,32 @@ func TestServeClearsStaleTabsBeforeTouchingTheSocket(t *testing.T) {
 		t.Fatalf("the socket path was disturbed by a daemon that never served: %v", err)
 	}
 }
+
+func TestShutdownDrainsAdmittedMutations(t *testing.T) {
+	server := &Server{stop: make(chan struct{}), accepting: true}
+	finish, ok := server.beginRequest(protocol.ActionCreateTab)
+	if !ok {
+		t.Fatal("server rejected a mutation before shutdown")
+	}
+	server.beginShutdown()
+	if _, ok := server.beginRequest(protocol.ActionAddRoot); ok {
+		t.Fatal("server admitted a new mutation during shutdown")
+	}
+
+	drained := make(chan struct{})
+	go func() {
+		server.mutations.Wait()
+		close(drained)
+	}()
+	select {
+	case <-drained:
+		t.Fatal("shutdown passed an admitted mutation that was still running")
+	case <-time.After(100 * time.Millisecond):
+	}
+	finish()
+	select {
+	case <-drained:
+	case <-time.After(3 * time.Second):
+		t.Fatal("shutdown did not continue after the admitted mutation finished")
+	}
+}

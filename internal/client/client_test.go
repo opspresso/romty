@@ -61,6 +61,59 @@ func TestExemptCallsSurviveAnOutdatedDaemon(t *testing.T) {
 	}
 }
 
+func TestShutdownWaitsForTheDaemonToReleaseItsSocket(t *testing.T) {
+	socket := filepath.Join(shortTempDir(t), "daemon.sock")
+	listener, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatalf("Listen() error = %v", err)
+	}
+	if err := os.Chmod(socket, 0o600); err != nil {
+		t.Fatalf("Chmod() socket error = %v", err)
+	}
+	defer listener.Close()
+
+	acknowledged := make(chan struct{})
+	release := make(chan struct{})
+	go func() {
+		connection, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		defer connection.Close()
+		if _, err := bufio.NewReader(connection).ReadBytes('\n'); err != nil {
+			return
+		}
+		if _, err := connection.Write([]byte("{}\n")); err != nil {
+			return
+		}
+		close(acknowledged)
+		<-release
+		listener.Close()
+	}()
+
+	done := make(chan error, 1)
+	go func() { done <- New(socket).Shutdown() }()
+	select {
+	case <-acknowledged:
+	case <-time.After(3 * time.Second):
+		t.Fatal("fake daemon did not acknowledge shutdown")
+	}
+	select {
+	case err := <-done:
+		t.Fatalf("Shutdown() returned before daemon cleanup: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(release)
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Shutdown() error = %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("Shutdown() did not return after daemon cleanup")
+	}
+}
+
 // serveUnversioned stands in for a daemon that answers without a version, the
 // way one from before the field would.
 func serveUnversioned(t *testing.T) string {
@@ -83,10 +136,14 @@ func serveUnversioned(t *testing.T) string {
 			}
 			go func() {
 				defer connection.Close()
-				if _, err := bufio.NewReader(connection).ReadBytes('\n'); err != nil {
+				request, err := bufio.NewReader(connection).ReadBytes('\n')
+				if err != nil {
 					return
 				}
 				connection.Write([]byte("{}\n"))
+				if strings.Contains(string(request), `"action":"shutdown"`) {
+					listener.Close()
+				}
 			}()
 		}
 	}()
