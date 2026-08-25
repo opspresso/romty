@@ -476,6 +476,7 @@ var globalKeys = map[string]func(dashboard) (tea.Model, tea.Cmd){
 	// Shift+PgUp reaches the history in one press by entering scrollback itself.
 	"shift+pgup":   func(m dashboard) (tea.Model, tea.Cmd) { return m.pageHistory(1) },
 	"shift+pgdown": func(m dashboard) (tea.Model, tea.Cmd) { return m.pageHistory(-1) },
+	"ctrl+shift+t": func(m dashboard) (tea.Model, tea.Cmd) { return m.newTab() },
 	// Switching tabs from the terminal pane took Ctrl+\ and then two more keys.
 	// Ctrl+Shift+Left/Right is the chord a terminal with tabs binds, and a
 	// terminal reports it distinctly — Ctrl+Shift+Tab is not, because most
@@ -1305,6 +1306,25 @@ func (m *dashboard) moveTab(delta int) {
 	m.tabIndex = (m.tabIndex + delta + count) % count
 }
 
+func (m dashboard) newTab() (tea.Model, tea.Cmd) {
+	if m.modal != noModal || m.tabPending {
+		return m, nil
+	}
+	if m.focus == leftPane && !m.scrollback {
+		if _, ok := m.navigationItem(); !ok {
+			return m, nil
+		}
+		m.tabIndex = len(m.navigationTabs())
+		return m, m.selectWorkspace()
+	}
+	if m.terminal == nil || m.selectedWorkspaceID == "" {
+		return m, nil
+	}
+	m.tabIndex = len(m.selectedTabs())
+	m.tabPending = true
+	return m, m.createTab()
+}
+
 // switchTab opens the tab one step along the row the user is looking at, which
 // is what Left/Right and Enter do together. The row is the one renderTerminal
 // draws: the open terminal's tabs everywhere but the workspace pane, where the
@@ -1968,6 +1988,7 @@ func (m dashboard) helpEntries() []string {
 		renderHelpShortcut(m.styles, "Open selection", "Enter"),
 		renderHelpShortcut(m.styles, "Focus terminal", "Tab"),
 		renderHelpShortcut(m.styles, "Focus workspace", "Ctrl+\\"),
+		renderHelpShortcut(m.styles, "New tab", "Ctrl+Shift+T"),
 		renderHelpShortcut(m.styles, "Switch tab", "Ctrl+Shift+←/→"),
 		renderHelpShortcut(m.styles, "Switch workspace", "Ctrl+Shift+↑/↓"),
 		renderHelpSection(m.styles, "SCROLLBACK", "terminal history"),
