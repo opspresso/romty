@@ -15,6 +15,26 @@ var Value string
 // describes: a timestamp and a commit appended to the next version. It names a
 // release that was never made, so the commit alone is the honest answer.
 var pseudoVersion = regexp.MustCompile(`[-.]\d{14}-[0-9a-f]{12}(\+.*)?$`)
+var semanticVersion = regexp.MustCompile(`^v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$`)
+
+// IsRelease reports whether the running binary came from a tagged release.
+// Local go run, go build, and go install builds have a development module
+// version and must not be used as persistent hook commands.
+func IsRelease() bool {
+	if value := strings.TrimSpace(Value); value != "" {
+		return isReleaseVersion(value)
+	}
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return false
+	}
+	return isReleaseVersion(info.Main.Version)
+}
+
+func isReleaseVersion(value string) bool {
+	value = strings.TrimSpace(value)
+	return value != "0.0.0" && value != "v0.0.0" && semanticVersion.MatchString(value) && !pseudoVersion.MatchString(value)
+}
 
 // String is what romty calls itself in About. A release reports its tag, a
 // `go install` of a tagged module reports that tag, and anything else reports

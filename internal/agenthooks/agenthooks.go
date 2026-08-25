@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/opspresso/romty/internal/jsonfile"
+	"github.com/opspresso/romty/internal/version"
 )
 
 type Provider string
@@ -25,6 +26,7 @@ type State string
 
 const (
 	StateUnavailable State = "unavailable"
+	StateDevelopment State = "development"
 	StateCurrent     State = "current"
 	StateMissing     State = "missing"
 	StateOutdated    State = "outdated"
@@ -51,6 +53,8 @@ type Result struct {
 	Action   Action
 	Path     string
 }
+
+var ErrDevelopmentBuild = errors.New("agent hook installation is disabled for development builds")
 
 type definition struct {
 	provider    Provider
@@ -109,6 +113,10 @@ func Detect() []Status {
 			statuses = append(statuses, Status{Provider: value.provider, State: StateUnavailable})
 			continue
 		}
+		if !version.IsRelease() {
+			statuses = append(statuses, Status{Provider: value.provider, State: StateDevelopment})
+			continue
+		}
 		statuses = append(statuses, inspect(value))
 	}
 	return statuses
@@ -125,6 +133,9 @@ func Pending(statuses []Status) []Provider {
 }
 
 func Install(providers []Provider) ([]Result, error) {
+	if len(providers) > 0 && !version.IsRelease() {
+		return nil, ErrDevelopmentBuild
+	}
 	results := make([]Result, 0, len(providers))
 	var failures []error
 	for _, provider := range providers {

@@ -4,15 +4,20 @@ romty identifies foreground Claude Code and Codex processes without configuratio
 
 | Marker | Meaning |
 |---|---|
-| `●` | Thinking, running a tool, planning, compacting, background work, or an unknown phase |
+| `●` | Agent detected with an unknown phase |
+| `◐` `◓` `◑` `◒` | Thinking, running a tool, planning, compacting, or running background work |
 | `○` | Idle and ready for the next prompt |
-| `◉` | Waiting for user input or permission, or stopped with an error |
+| `▲` | Waiting for user input |
+| `■` | Waiting for permission approval |
+| `★` | Stopped with an error |
 
 The hook command reads JSON from standard input and sends only the tab ID, provider, session ID, event name, tool name, notification type, permission mode, and whether background work remains. It does not send or retain prompts, transcripts, tool inputs, tool outputs, or assistant messages. It writes nothing to standard output or standard error and exits successfully when it is outside a romty tab, the daemon is unavailable, or the running daemon predates hook support.
 
 ## Install or update
 
 When the TUI starts, romty looks for `claude`, `claude-code`, and `codex` on `PATH`. If a detected agent has missing or outdated romty hooks, the TUI opens a confirmation dialog. Press `Enter` to install or update every listed provider, or `Esc` to leave the files unchanged for that run.
+
+Hook installation is available only from a tagged release binary, including binaries installed from a tagged Go module. Development binaries produced by local `go run`, `go build`, or `go install` commands neither offer installation in the TUI nor write hook settings through `romty hooks`. This prevents temporary Go build-cache paths from becoming persistent hook commands.
 
 Run the same installation directly without opening the TUI:
 
@@ -35,4 +40,4 @@ Claude Code applies direct user-settings edits automatically, subject to its wor
 
 ## Verify
 
-Start Claude Code or Codex in a newly created romty tab, submit a prompt, and leave the agent waiting for another prompt. The marker should move from `●` to `○`; a permission or input request should use `◉`. `romty list` reports the same phase as `claude/idle`, `codex/waiting_approval`, and similar values.
+Start Claude Code or Codex in a newly created romty tab and submit a prompt. The marker should animate through `◐` `◓` `◑` `◒`, then settle on `○` when the agent is ready for another prompt. An input request should use `▲`, a permission request should use `■`, and a stopped error should use `★`. `romty list` reports the same phase as `claude/idle`, `codex/waiting_approval`, and similar values.

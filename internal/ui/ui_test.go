@@ -3241,21 +3241,79 @@ func TestDashboardReplacesControlCharactersInLabels(t *testing.T) {
 	}
 }
 
-func TestOpenTabMarkersUseAgentColors(t *testing.T) {
+func TestOpenTabMarkersUseAgentColorsAndPhaseShapes(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, model.Snapshot{})
 	tabs := []model.Tab{
 		{Running: true, Agent: model.AgentClaude, AgentPhase: model.AgentPhaseIdle},
 		{Running: true, Agent: model.AgentCodex, AgentPhase: model.AgentPhaseWaitingInput},
+		{Running: true, Agent: model.AgentClaude, AgentPhase: model.AgentPhaseWaitingApproval},
+		{Running: true, Agent: model.AgentCodex, AgentPhase: model.AgentPhaseError},
+		{Running: true, Agent: model.AgentClaude, AgentPhase: model.AgentPhaseWorking},
 		{Running: true},
 	}
 
 	base := value.styles.navigationSelected
-	markers := openTabMarkers(value.styles, base, tabs)
+	markers := openTabMarkers(value.styles, base, tabs, 2)
 	claude := base.Foreground(value.styles.agentClaude.GetForeground()).Render("○")
-	codex := base.Foreground(value.styles.agentCodex.GetForeground()).Render("◉")
+	codex := base.Foreground(value.styles.agentCodex.GetForeground()).Render("▲")
+	approval := base.Foreground(value.styles.agentClaude.GetForeground()).Render("■")
+	failure := base.Foreground(value.styles.agentCodex.GetForeground()).Render("★")
+	working := base.Foreground(value.styles.agentClaude.GetForeground()).Render("◑")
 	plain := base.Render("●")
-	if markers != claude+codex+plain {
-		t.Fatalf("open tab markers = %q, want Claude, Codex, and default markers", markers)
+	if markers != claude+codex+approval+failure+working+plain {
+		t.Fatalf("open tab markers = %q, want agent colors and phase shapes", markers)
+	}
+}
+
+func TestOpenTabMarkersCycleThroughEveryAnimationFrame(t *testing.T) {
+	value := newDashboard(&fakeBackend{}, model.Snapshot{})
+	base := value.styles.navigationSelected
+	style := base.Foreground(value.styles.agentClaude.GetForeground())
+	tabs := []model.Tab{{
+		Running: true, Agent: model.AgentClaude, AgentPhase: model.AgentPhaseWorking,
+	}}
+
+	for index, frame := range agentAnimationFrames {
+		marker := openTabMarkers(value.styles, base, tabs, index)
+		if marker != style.Render(frame) || lipgloss.Width(marker) != 1 {
+			t.Fatalf("animation frame %d = %q with width %d, want %q with width 1", index, marker, lipgloss.Width(marker), frame)
+		}
+	}
+}
+
+func TestAgentAnimationRunsOnlyWhileWorkIsActive(t *testing.T) {
+	snapshot := model.Snapshot{Roots: []model.RootView{{
+		Root: model.Root{ID: "root-1"},
+		Tabs: []model.Tab{{
+			ID: "tab-1", Running: true, Agent: model.AgentClaude, AgentPhase: model.AgentPhaseWorking,
+		}},
+	}}}
+	value := newDashboard(&fakeBackend{}, snapshot)
+	if !value.agentAnimationActive || !value.agentAnimationPending {
+		t.Fatal("working agent did not schedule the initial animation tick")
+	}
+
+	updated, command := value.Update(agentAnimationMsg{})
+	value = updated.(dashboard)
+	if value.agentAnimationFrame != 1 || !value.agentAnimationPending || command == nil {
+		t.Fatalf("animation tick = (frame %d, pending %v, command %v), want next frame and tick", value.agentAnimationFrame, value.agentAnimationPending, command)
+	}
+
+	value.updateAgents(map[string]model.AgentStatus{
+		"tab-1": {Agent: model.AgentClaude, Phase: model.AgentPhaseIdle},
+	})
+	updated, command = value.Update(agentAnimationMsg{})
+	value = updated.(dashboard)
+	if value.agentAnimationFrame != 1 || value.agentAnimationActive || value.agentAnimationPending || command != nil {
+		t.Fatalf("idle animation = (frame %d, pending %v, command %v), want stopped frame", value.agentAnimationFrame, value.agentAnimationPending, command)
+	}
+
+	updated, command = value.Update(agentSnapshotMsg{value: map[string]model.AgentStatus{
+		"tab-1": {Agent: model.AgentClaude, Phase: model.AgentPhaseThinking},
+	}})
+	value = updated.(dashboard)
+	if !value.agentAnimationActive || !value.agentAnimationPending || command == nil {
+		t.Fatal("new working phase did not restart the animation")
 	}
 }
 

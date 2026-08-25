@@ -122,6 +122,8 @@ func installAgentHooks(output io.Writer, theme commandTheme) error {
 		switch status.State {
 		case agenthooks.StateUnavailable:
 			value = theme.warning("not found")
+		case agenthooks.StateDevelopment:
+			value = theme.warning("development build; skipped")
 		case agenthooks.StateInvalid:
 			value = theme.failure("invalid")
 			failures = append(failures, fmt.Errorf("%s hooks: %w", status.Provider.DisplayName(), status.Err))

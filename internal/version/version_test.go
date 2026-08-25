@@ -37,3 +37,25 @@ func TestStringNamesAnUnstampedBuild(t *testing.T) {
 		t.Fatalf("String() with no stamp = %q, want a revision, a module version, or dev", got)
 	}
 }
+
+func TestIsReleaseRejectsAnUnstampedDevelopmentBuild(t *testing.T) {
+	original := version.Value
+	t.Cleanup(func() { version.Value = original })
+
+	for _, probe := range []struct {
+		value string
+		want  bool
+	}{
+		{value: "", want: false},
+		{value: "0.0.0", want: false},
+		{value: "nightly", want: false},
+		{value: "v0.16.0-0.20260826010000-abcdef123456", want: false},
+		{value: "v0.16.0-rc.1", want: true},
+		{value: "0.15.0", want: true},
+	} {
+		version.Value = probe.value
+		if got := version.IsRelease(); got != probe.want {
+			t.Fatalf("IsRelease() with %q = %t, want %t", probe.value, got, probe.want)
+		}
+	}
+}
