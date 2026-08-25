@@ -238,7 +238,7 @@ romty TUI
                  └─ shell process
 ```
 
-The daemon keeps up to 8 MiB of output history per session. The client replays that history through its VT emulator when attaching, then continues streaming output into the terminal pane.
+The daemon keeps up to 8 MiB of output history per session. The client restores that history through its VT emulator before displaying the attached terminal, then continues streaming live output into the pane.
 
 romty manages local shells only. It does not provide remote or SSH session management.
 

@@ -27,7 +27,10 @@ const (
 	workspaceRemovalTimeout = 10 * time.Minute
 )
 
-var handshakeTimeout = 3 * time.Second
+var (
+	handshakeTimeout  = 3 * time.Second
+	replayReadTimeout = 2 * time.Second
+)
 
 type Client struct {
 	socket string
@@ -237,12 +240,17 @@ func Unavailable(err error) bool {
 }
 
 func (c *Client) OpenAttach(tabID string) (net.Conn, *bufio.Reader, error) {
+	connection, reader, _, err := c.openAttach(tabID)
+	return connection, reader, err
+}
+
+func (c *Client) openAttach(tabID string) (net.Conn, *bufio.Reader, int, error) {
 	if err := validateDaemonSocket(c.socket); err != nil {
-		return nil, nil, err
+		return nil, nil, 0, err
 	}
 	connection, err := net.DialTimeout("unix", c.socket, dialTimeout)
 	if err != nil {
-		return nil, nil, fmt.Errorf("connect to daemon: %w", err)
+		return nil, nil, 0, fmt.Errorf("connect to daemon: %w", err)
 	}
 	// Bound the handshake alone. A daemon that accepts the connection and then
 	// says nothing — stopped, wedged, or another program holding the socket
@@ -251,41 +259,67 @@ func (c *Client) OpenAttach(tabID string) (net.Conn, *bufio.Reader, error) {
 	// nothing on the status bar to say why.
 	if err := connection.SetDeadline(time.Now().Add(handshakeTimeout)); err != nil {
 		connection.Close()
-		return nil, nil, fmt.Errorf("set daemon deadline: %w", err)
+		return nil, nil, 0, fmt.Errorf("set daemon deadline: %w", err)
 	}
 	if err := sendRequest(connection, protocol.Request{Action: protocol.ActionAttach, TabID: tabID}); err != nil {
 		connection.Close()
-		return nil, nil, err
+		return nil, nil, 0, err
 	}
 
 	reader := bufio.NewReader(connection)
 	var response protocol.Response
 	if err := protocol.Read(reader, &response); err != nil {
 		connection.Close()
-		return nil, nil, err
+		return nil, nil, 0, err
 	}
 	// Attach used to skip the version check the short requests run, so a
 	// mismatch here arrived as whatever the old daemon streamed next rather
 	// than as the one message that says which side to restart.
 	if err := checkResponse(protocol.ActionAttach, response); err != nil {
 		connection.Close()
-		return nil, nil, err
+		return nil, nil, 0, err
 	}
 	// The handshake is done; what follows is a terminal that stays open for as
 	// long as the user keeps it, and wants no deadline at all.
 	if err := connection.SetDeadline(time.Time{}); err != nil {
 		connection.Close()
-		return nil, nil, fmt.Errorf("clear daemon deadline: %w", err)
+		return nil, nil, 0, fmt.Errorf("clear daemon deadline: %w", err)
 	}
-	return connection, reader, nil
+	return connection, reader, response.ReplayBytes, nil
 }
 
-func (c *Client) OpenTerminal(tabID string) (io.ReadWriteCloser, error) {
-	connection, reader, err := c.OpenAttach(tabID)
+func (c *Client) OpenTerminal(tabID string) (io.ReadWriteCloser, []byte, error) {
+	connection, reader, replayBytes, err := c.openAttach(tabID)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return &terminalStream{Conn: connection, reader: reader}, nil
+	if replayBytes < 0 || replayBytes > protocol.MaxReplayBytes {
+		connection.Close()
+		return nil, nil, fmt.Errorf("terminal replay size %d is outside 0..%d", replayBytes, protocol.MaxReplayBytes)
+	}
+	replay := make([]byte, replayBytes)
+	if err := readReplay(connection, reader, replay); err != nil {
+		connection.Close()
+		return nil, nil, fmt.Errorf("restore terminal history: %w", err)
+	}
+	return &terminalStream{Conn: connection, reader: reader}, replay, nil
+}
+
+func readReplay(connection net.Conn, reader io.Reader, replay []byte) error {
+	for len(replay) > 0 {
+		if err := connection.SetReadDeadline(time.Now().Add(replayReadTimeout)); err != nil {
+			return err
+		}
+		count, err := reader.Read(replay)
+		replay = replay[count:]
+		if err != nil {
+			return err
+		}
+		if count == 0 {
+			return io.ErrNoProgress
+		}
+	}
+	return connection.SetReadDeadline(time.Time{})
 }
 
 // sendRequest stamps the protocol version and writes the request. Both paths

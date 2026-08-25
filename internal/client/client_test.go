@@ -2,6 +2,8 @@ package client
 
 import (
 	"bufio"
+	"bytes"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
@@ -10,6 +12,7 @@ import (
 	"time"
 
 	"github.com/opspresso/romty/internal/paths"
+	"github.com/opspresso/romty/internal/protocol"
 )
 
 func TestNormalizePathExpandsHome(t *testing.T) {
@@ -297,6 +300,107 @@ func TestOpenAttachGivesUpOnADaemonThatNeverAnswers(t *testing.T) {
 	}
 	if connection := <-accepted; connection != nil {
 		connection.Close()
+	}
+}
+
+// Opening a terminal prepares the recorded history before handing it to the
+// UI, so a long session can be restored without rendering every read along the
+// way. Bytes after that exact boundary stay on the stream as live output.
+func TestOpenTerminalSeparatesReplayFromLiveOutput(t *testing.T) {
+	socket := filepath.Join(shortTempDir(t), "daemon.sock")
+	listener, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatalf("Listen() error = %v", err)
+	}
+	if err := os.Chmod(socket, 0o600); err != nil {
+		t.Fatalf("Chmod() socket error = %v", err)
+	}
+	defer listener.Close()
+
+	replay := bytes.Repeat([]byte("recorded output\r\n"), 8192)
+	live := []byte("live output\r\n")
+	go func() {
+		connection, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		defer connection.Close()
+		reader := bufio.NewReader(connection)
+		var request protocol.Request
+		if err := protocol.Read(reader, &request); err != nil {
+			return
+		}
+		if err := protocol.Write(connection, protocol.Response{
+			Version:     protocol.Version,
+			ReplayBytes: len(replay),
+		}); err != nil {
+			return
+		}
+		if _, err := connection.Write(replay); err != nil {
+			return
+		}
+		_, _ = connection.Write(live)
+	}()
+
+	stream, restored, err := New(socket).OpenTerminal("tab-1")
+	if err != nil {
+		t.Fatalf("OpenTerminal() error = %v", err)
+	}
+	defer stream.Close()
+	if !bytes.Equal(restored, replay) {
+		t.Fatalf("replay length = %d, want %d", len(restored), len(replay))
+	}
+	gotLive := make([]byte, len(live))
+	if _, err := io.ReadFull(stream, gotLive); err != nil {
+		t.Fatalf("ReadFull() live output error = %v", err)
+	}
+	if !bytes.Equal(gotLive, live) {
+		t.Fatalf("live output = %q, want %q", gotLive, live)
+	}
+}
+
+func TestOpenTerminalGivesUpWhenReplayStopsMakingProgress(t *testing.T) {
+	socket := filepath.Join(shortTempDir(t), "daemon.sock")
+	listener, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatalf("Listen() error = %v", err)
+	}
+	if err := os.Chmod(socket, 0o600); err != nil {
+		t.Fatalf("Chmod() socket error = %v", err)
+	}
+	defer listener.Close()
+
+	release := make(chan struct{})
+	go func() {
+		connection, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		defer connection.Close()
+		reader := bufio.NewReader(connection)
+		var request protocol.Request
+		if err := protocol.Read(reader, &request); err != nil {
+			return
+		}
+		if err := protocol.Write(connection, protocol.Response{
+			Version:     protocol.Version,
+			ReplayBytes: 1024,
+		}); err != nil {
+			return
+		}
+		if _, err := connection.Write([]byte("partial")); err != nil {
+			return
+		}
+		<-release
+	}()
+	t.Cleanup(func() { close(release) })
+
+	previous := replayReadTimeout
+	replayReadTimeout = 200 * time.Millisecond
+	t.Cleanup(func() { replayReadTimeout = previous })
+
+	if _, _, err := New(socket).OpenTerminal("tab-1"); err == nil {
+		t.Fatal("OpenTerminal() waited forever for an incomplete replay")
 	}
 }
 

@@ -237,6 +237,38 @@ func TestAttachDoesNotStallTheSessionForOtherClients(t *testing.T) {
 	}
 }
 
+func TestAttachAnnouncesTheInitialReplayBoundary(t *testing.T) {
+	client, daemonSide := net.Pipe()
+	defer daemonSide.Close()
+
+	value := newSessionForTest()
+	value.history.append([]byte("before\x1b[6nafter"))
+
+	announced := make(chan int, 1)
+	attached := make(chan error, 1)
+	go func() {
+		attached <- value.attachReady(client, func(replayBytes int) error {
+			announced <- replayBytes
+			return nil
+		})
+	}()
+
+	want := []byte(resetScreen + "beforeafter")
+	if got := <-announced; got != len(want) {
+		t.Fatalf("announced replay bytes = %d, want %d", got, len(want))
+	}
+	replay := make([]byte, len(want))
+	daemonSide.SetReadDeadline(time.Now().Add(3 * time.Second))
+	if _, err := io.ReadFull(daemonSide, replay); err != nil {
+		t.Fatalf("ReadFull() replay error = %v", err)
+	}
+	if !bytes.Equal(replay, want) {
+		t.Fatalf("replay = %q, want %q", replay, want)
+	}
+	daemonSide.Close()
+	<-attached
+}
+
 // Output that arrives while the recording is still being written has to reach
 // the client after it, not spliced into the middle of it. The pipe is
 // unbuffered, so the replay is genuinely mid-write when the broadcast lands.
@@ -416,11 +448,8 @@ func TestShutdownDoesNotPersistTheTabsItIsKilling(t *testing.T) {
 }
 
 // A client that keeps reading must not be cut off for taking a while. One
-// deadline over the whole replay bounded the transfer rather than a stall, and
-// the TUI takes 32 KiB per turn of its event loop with a render between them,
-// so a full recording is hundreds of turns. An attach that was making steady
-// progress was dropped, romty reattached, the daemon replayed the same
-// recording, and it was dropped again.
+// deadline over the whole replay bounds the transfer rather than a stall, so a
+// large recording sent to a steadily reading client can still be dropped.
 func TestAttachSurvivesAClientThatReadsSteadilyButSlowly(t *testing.T) {
 	withHistoryLimit(t, 256*1024)
 	previous := replayTimeout
@@ -436,9 +465,8 @@ func TestAttachSurvivesAClientThatReadsSteadilyButSlowly(t *testing.T) {
 	attached := make(chan error, 1)
 	go func() { attached <- value.attach(client) }()
 
-	// Small reads with a pause between them, the way a client that renders
-	// between turns of its event loop consumes a replay. The whole transfer
-	// takes several times replayTimeout while never stalling for one.
+	// Small reads with a pause between them make the whole transfer take several
+	// times replayTimeout while never stalling for one.
 	buffer := make([]byte, 8*1024)
 	seen := 0
 	for seen < maxHistoryBytes {

@@ -731,10 +731,9 @@ func (s *Server) handleAttach(connection net.Conn, tabID string) {
 		_ = reply(connection, protocol.Response{Error: "running terminal session not found"})
 		return
 	}
-	if err := reply(connection, protocol.Response{}); err != nil {
-		return
-	}
-	if err := value.attach(connection); err != nil {
+	if err := value.attachReady(connection, func(replayBytes int) error {
+		return reply(connection, protocol.Response{ReplayBytes: replayBytes})
+	}); err != nil {
 		s.logger.Printf("attach to tab %s ended: %v", tabID, err)
 	}
 }

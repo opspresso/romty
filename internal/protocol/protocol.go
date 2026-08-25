@@ -14,7 +14,7 @@ import (
 // — `brew upgrade` replaces romty while the old daemon keeps running — so a new
 // client can meet an old daemon. Without a version that showed up as
 // `unknown action "remove_root"`, or as a field silently missing from a reply.
-const Version = 4
+const Version = 5
 
 const (
 	ActionPing            = "ping"
@@ -84,6 +84,9 @@ type Response struct {
 	Agents    map[string]model.Agent `json:"agents,omitempty"`
 	Workspace *model.Workspace       `json:"workspace,omitempty"`
 	Tab       *model.Tab             `json:"tab,omitempty"`
+	// ReplayBytes is the exact initial terminal history that follows an attach
+	// response. Anything after it is live output.
+	ReplayBytes int `json:"replay_bytes,omitempty"`
 }
 
 func Write(w io.Writer, value any) error {
@@ -102,6 +105,12 @@ func Write(w io.Writer, value any) error {
 // fields and responses a snapshot of a workspace tree, so this is far above any
 // real message while still refusing a peer that never sends a newline.
 const MaxMessageBytes = 8 << 20
+
+// MaxReplayBytes bounds what an attach asks the client to allocate before it
+// restores a terminal. The daemon currently retains at most 8 MiB plus a small
+// mode preamble, leaving room for that contract to grow without trusting an
+// arbitrary length from the socket.
+const MaxReplayBytes = 16 << 20
 
 func Read(r *bufio.Reader, value any) error {
 	data, err := readLine(r)

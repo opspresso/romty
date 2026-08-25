@@ -1028,7 +1028,7 @@ func TestAttachSendsTheProtocolVersion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateTab() error = %v", err)
 	}
-	stream, err := backend.OpenTerminal(tab.ID)
+	stream, _, err := backend.OpenTerminal(tab.ID)
 	if err != nil {
 		t.Fatalf("OpenTerminal() error = %v", err)
 	}

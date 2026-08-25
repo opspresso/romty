@@ -52,7 +52,7 @@ type Backend interface {
 	RemoveWorkspace(rootID, path string) (model.Snapshot, error)
 	EnsureWorkspace(rootID, path string) (model.Workspace, error)
 	CreateTab(workspaceID string, columns, rows uint16) (model.Tab, error)
-	OpenTerminal(tabID string) (io.ReadWriteCloser, error)
+	OpenTerminal(tabID string) (io.ReadWriteCloser, []byte, error)
 	Resize(tabID string, columns, rows uint16) error
 	Shutdown() error
 }
@@ -214,6 +214,7 @@ type tabMsg struct {
 type terminalOpenedMsg struct {
 	tabID  string
 	stream io.ReadWriteCloser
+	replay []byte
 	err    error
 }
 
@@ -976,7 +977,9 @@ func (m dashboard) handleOpenedTerminal(message terminalOpenedMsg) (tea.Model, t
 	}
 	m.closeTerminal()
 	columns, rows := m.terminalSize()
-	m.terminal = newEmbeddedTerminal(message.tabID, message.stream, int(columns), int(rows))
+	terminal := newEmbeddedTerminal(message.tabID, message.stream, int(columns), int(rows))
+	terminal.writeOutput(message.replay)
+	m.terminal = terminal
 	m.terminalOpenedAt = now()
 	// The scrollback on screen belongs to the terminal that just went away, so
 	// a switch made from it lands on the new terminal's live screen.
@@ -1245,11 +1248,11 @@ func (m dashboard) openSelectedTerminal() tea.Cmd {
 		}
 	}
 	return func() tea.Msg {
-		stream, err := m.backend.OpenTerminal(tab.ID)
+		stream, replay, err := m.backend.OpenTerminal(tab.ID)
 		if err != nil && stream != nil {
 			stream.Close()
 		}
-		return terminalOpenedMsg{tabID: tab.ID, stream: stream, err: err}
+		return terminalOpenedMsg{tabID: tab.ID, stream: stream, replay: replay, err: err}
 	}
 }
 

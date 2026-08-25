@@ -26,6 +26,22 @@ func TestMessageRoundTrip(t *testing.T) {
 	}
 }
 
+func TestAttachResponseRoundTrip(t *testing.T) {
+	want := protocol.Response{Version: protocol.Version, ReplayBytes: 123456}
+	var stream bytes.Buffer
+
+	if err := protocol.Write(&stream, want); err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+	var got protocol.Response
+	if err := protocol.Read(bufio.NewReader(&stream), &got); err != nil {
+		t.Fatalf("Read() error = %v", err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("Read() = %#v, want %#v", got, want)
+	}
+}
+
 // A peer that never sends a newline must not be able to grow the reader
 // without end: the daemon is a long-lived process reachable by anything
 // running as the same user.
