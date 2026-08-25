@@ -47,11 +47,50 @@ func newEmbeddedTerminal(id string, stream io.ReadWriteCloser, width, height int
 		EnableMode:  func(mode ansi.Mode) { terminal.trackGuestMode(mode, true) },
 		DisableMode: func(mode ansi.Mode) { terminal.trackGuestMode(mode, false) },
 	})
+	clampMargins(emulator)
 	go func() {
 		defer close(terminal.inputDone)
 		_, _ = io.Copy(stream, emulator)
 	}()
 	return terminal
+}
+
+// clampMargins keeps the guest's scroll region inside the screen romty is
+// showing. A guest keeps drawing at the size it last knew, so shrinking the
+// pane leaves DECSTBM and DECSLRM in flight that name rows or columns the
+// emulator no longer has. The emulator takes those margins at face value and
+// then indexes its buffer with them, which panics and takes the whole
+// dashboard down with it.
+//
+// The handlers registered here run before the emulator's own, which read the
+// same parameter storage: rewriting the parameter in place and returning false
+// leaves the emulator to apply a region that fits rather than one that
+// crashes. The bare Emulator is used because the write lock is already held
+// while a sequence is being handled.
+func clampMargins(safe *vt.SafeEmulator) {
+	emulator := safe.Emulator
+	// Set Top and Bottom Margins [ansi.DECSTBM].
+	emulator.RegisterCsiHandler('r', func(params ansi.Params) bool {
+		clampParameter(params, 1, emulator.Height())
+		return false
+	})
+	// Set Left and Right Margins [ansi.DECSLRM].
+	emulator.RegisterCsiHandler('s', func(params ansi.Params) bool {
+		clampParameter(params, 1, emulator.Width())
+		return false
+	})
+}
+
+func clampParameter(params ansi.Params, index, limit int) {
+	if index >= len(params) {
+		return
+	}
+	// A missing parameter reads as zero, which is never above the limit, so
+	// the emulator keeps its own default for it.
+	if params[index].Param(0) <= limit {
+		return
+	}
+	params[index] = ansi.Param(ansi.Parameter(limit, params[index].HasMore()))
 }
 
 func (t *embeddedTerminal) read() tea.Cmd {
