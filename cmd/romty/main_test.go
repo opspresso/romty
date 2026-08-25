@@ -73,6 +73,7 @@ func TestVersionAndHelpDoNotNeedARuntime(t *testing.T) {
 }
 
 func TestHooksCommandInstallsDetectedAgentHooksWithoutARuntime(t *testing.T) {
+	useReleaseBuild(t)
 	bin := t.TempDir()
 	for _, name := range []string{"claude", "codex"} {
 		path := filepath.Join(bin, name)
@@ -108,6 +109,7 @@ func TestHooksCommandInstallsDetectedAgentHooksWithoutARuntime(t *testing.T) {
 }
 
 func TestHooksCommandDoesNotOverwriteInvalidSettings(t *testing.T) {
+	useReleaseBuild(t)
 	bin := t.TempDir()
 	claude := filepath.Join(bin, "claude")
 	if err := os.WriteFile(claude, []byte("#!/bin/sh\n"), 0o700); err != nil {
@@ -138,6 +140,39 @@ func TestHooksCommandDoesNotOverwriteInvalidSettings(t *testing.T) {
 	if !bytes.Equal(got, broken) {
 		t.Fatal("hooks command changed invalid settings")
 	}
+}
+
+func TestHooksCommandSkipsDevelopmentBuild(t *testing.T) {
+	bin := t.TempDir()
+	claude := filepath.Join(bin, "claude")
+	if err := os.WriteFile(claude, []byte("#!/bin/sh\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	home := t.TempDir()
+	originalVersion := version.Value
+	version.Value = ""
+	t.Cleanup(func() { version.Value = originalVersion })
+	t.Setenv("PATH", bin)
+	t.Setenv("CLAUDE_CONFIG_DIR", home)
+	t.Setenv("CODEX_HOME", filepath.Join(t.TempDir(), "codex"))
+
+	var output bytes.Buffer
+	if err := runCommand([]string{"hooks"}, &output); err != nil {
+		t.Fatalf("hooks error = %v", err)
+	}
+	if !strings.Contains(output.String(), "claude:     development build; skipped") {
+		t.Fatalf("hooks output = %q", output.String())
+	}
+	if _, err := os.Stat(filepath.Join(home, "settings.json")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("development hooks created settings: %v", err)
+	}
+}
+
+func useReleaseBuild(t *testing.T) {
+	t.Helper()
+	original := version.Value
+	version.Value = "0.15.0"
+	t.Cleanup(func() { version.Value = original })
 }
 
 func TestStatusAndListDoNotStartAMissingDaemon(t *testing.T) {

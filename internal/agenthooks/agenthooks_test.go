@@ -7,9 +7,12 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/opspresso/romty/internal/version"
 )
 
 func TestDetectReportsOnlyAvailableAgentsAsPending(t *testing.T) {
+	useReleaseBuild(t)
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("CLAUDE_CONFIG_DIR", "")
@@ -38,6 +41,7 @@ func TestDetectReportsOnlyAvailableAgentsAsPending(t *testing.T) {
 }
 
 func TestInstallMergesAndUpdatesRomtyHooks(t *testing.T) {
+	useReleaseBuild(t)
 	home := t.TempDir()
 	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(home, "claude"))
 	settings := filepath.Join(home, "claude", "settings.json")
@@ -104,6 +108,7 @@ func TestInstallMergesAndUpdatesRomtyHooks(t *testing.T) {
 }
 
 func TestInstallCreatesCodexHooksAndHonorsCodexHome(t *testing.T) {
+	useReleaseBuild(t)
 	home := filepath.Join(t.TempDir(), "custom-codex")
 	t.Setenv("CODEX_HOME", home)
 
@@ -140,6 +145,7 @@ func TestDesiredCommandQuotesTheRunningExecutable(t *testing.T) {
 }
 
 func TestInstallRefusesMalformedSettingsWithoutChangingThem(t *testing.T) {
+	useReleaseBuild(t)
 	home := t.TempDir()
 	t.Setenv("CLAUDE_CONFIG_DIR", home)
 	path := filepath.Join(home, "settings.json")
@@ -161,6 +167,7 @@ func TestInstallRefusesMalformedSettingsWithoutChangingThem(t *testing.T) {
 }
 
 func TestInstallRefusesMalformedEventWithoutChangingSettings(t *testing.T) {
+	useReleaseBuild(t)
 	home := t.TempDir()
 	t.Setenv("CLAUDE_CONFIG_DIR", home)
 	path := filepath.Join(home, "settings.json")
@@ -182,6 +189,7 @@ func TestInstallRefusesMalformedEventWithoutChangingSettings(t *testing.T) {
 }
 
 func TestInstallPreservesASettingsSymlink(t *testing.T) {
+	useReleaseBuild(t)
 	home := t.TempDir()
 	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(home, "claude"))
 	target := filepath.Join(home, "dotfiles", "claude.json")
@@ -209,4 +217,39 @@ func TestInstallPreservesASettingsSymlink(t *testing.T) {
 	if info.Mode()&os.ModeSymlink == 0 {
 		t.Fatal("Install() replaced the settings symlink")
 	}
+}
+
+func TestDevelopmentBuildDoesNotInspectOrInstallHooks(t *testing.T) {
+	originalVersion := version.Value
+	originalFind := findExecutable
+	originalRomty := findRomtyExecutable
+	version.Value = ""
+	findExecutable = func(string) (string, error) { return "/usr/local/bin/agent", nil }
+	findRomtyExecutable = func() (string, error) {
+		t.Fatal("development hook detection resolved the temporary executable")
+		return "", nil
+	}
+	t.Cleanup(func() {
+		version.Value = originalVersion
+		findExecutable = originalFind
+		findRomtyExecutable = originalRomty
+	})
+
+	statuses := Detect()
+	if len(statuses) != 2 || statuses[0].State != StateDevelopment || statuses[1].State != StateDevelopment {
+		t.Fatalf("Detect() = %#v, want development state for both agents", statuses)
+	}
+	if pending := Pending(statuses); len(pending) != 0 {
+		t.Fatalf("Pending() = %v, want no development hooks", pending)
+	}
+	if _, err := Install([]Provider{ProviderClaude}); !errors.Is(err, ErrDevelopmentBuild) {
+		t.Fatalf("Install() error = %v, want ErrDevelopmentBuild", err)
+	}
+}
+
+func useReleaseBuild(t *testing.T) {
+	t.Helper()
+	original := version.Value
+	version.Value = "0.15.0"
+	t.Cleanup(func() { version.Value = original })
 }
