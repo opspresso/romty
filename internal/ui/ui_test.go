@@ -356,6 +356,103 @@ func TestDashboardOpensExistingWorkspaceTabWithoutCreatingOne(t *testing.T) {
 	}
 }
 
+func TestDashboardRejectsSnapshotsThatFinishOutOfOrder(t *testing.T) {
+	tree := func(revision uint64, name string) model.Snapshot {
+		return model.Snapshot{Revision: revision, Roots: []model.RootView{{
+			Root: model.Root{ID: "root-1", Name: name, Path: "/projects"},
+		}}}
+	}
+
+	value := newDashboard(&fakeBackend{}, tree(1, "initial"))
+	updated, _ := value.Update(snapshotMsg{value: tree(2, "newest"), order: 2})
+	value = updated.(dashboard)
+	updated, _ = value.Update(snapshotMsg{value: tree(1, "older revision"), order: 3})
+	value = updated.(dashboard)
+	updated, _ = value.Update(snapshotMsg{value: tree(2, "older request"), order: 1})
+	value = updated.(dashboard)
+
+	if got := value.state.Roots[0].Root.Name; got != "newest" {
+		t.Fatalf("root after out-of-order snapshots = %q, want newest", got)
+	}
+}
+
+func TestDashboardIgnoresAnOlderWorkspaceSelection(t *testing.T) {
+	workspace := func(id string) model.Workspace {
+		return model.Workspace{ID: id, RootID: "root-1", Name: id, Path: "/projects/" + id}
+	}
+	tree := func(revision uint64, names ...string) model.Snapshot {
+		directories := make([]model.WorkspaceView, 0, len(names))
+		for _, name := range names {
+			value := workspace(name)
+			directories = append(directories, model.WorkspaceView{
+				Workspace: value,
+				Tabs:      []model.Tab{{ID: name + "-tab", WorkspaceID: value.ID, Running: true}},
+			})
+		}
+		return model.Snapshot{Revision: revision, Roots: []model.RootView{{
+			Root:        model.Root{ID: "root-1", Name: "projects", Path: "/projects"},
+			Directories: directories,
+		}}}
+	}
+
+	value := newDashboard(&fakeBackend{}, tree(1, "alpha", "beta"))
+	value.selectionRequest = 2
+	updated, _ := value.Update(workspaceMsg{
+		value: workspace("beta"), snapshot: tree(3, "alpha", "beta"),
+		order: 2, selection: 2, tabID: "beta-tab",
+	})
+	value = updated.(dashboard)
+	updated, command := value.Update(workspaceMsg{
+		value: workspace("alpha"), snapshot: tree(2, "alpha", "beta"),
+		order: 1, selection: 1, tabID: "alpha-tab",
+	})
+	value = updated.(dashboard)
+
+	if command != nil || value.selectedWorkspaceID != "beta" || value.selectedPath != "/projects/beta" {
+		t.Fatalf("stale selection result = (command %v, workspace %q, path %q)", command, value.selectedWorkspaceID, value.selectedPath)
+	}
+}
+
+func TestDashboardCreatesOnlyOneTabWhileASelectionIsPending(t *testing.T) {
+	workspace := model.Workspace{ID: "workspace-1", RootID: "root-1", Name: "alpha", Path: "/projects/alpha"}
+	snapshot := model.Snapshot{Roots: []model.RootView{{
+		Root: model.Root{ID: "root-1", Name: "projects", Path: "/projects"},
+		Directories: []model.WorkspaceView{{
+			Workspace: workspace,
+		}},
+	}}}
+	backend := &fakeBackend{
+		snapshot:   snapshot,
+		workspace:  workspace,
+		createdTab: model.Tab{ID: "tab-1", WorkspaceID: workspace.ID, Name: "1", Running: true},
+	}
+	value := newDashboard(backend, snapshot)
+	value.setNavigation(1)
+
+	first := value.selectWorkspace()
+	second := value.selectWorkspace()
+	firstMessage := first()
+	secondMessage := second()
+	updated, create := value.Update(secondMessage)
+	value = updated.(dashboard)
+	updated, stale := value.Update(firstMessage)
+	value = updated.(dashboard)
+	if stale != nil {
+		t.Fatal("older selection created a second tab command")
+	}
+	if retry := value.selectWorkspace(); retry != nil {
+		t.Fatal("selection accepted another Enter while tab creation was pending")
+	}
+	if create == nil {
+		t.Fatal("newest selection did not create a tab command")
+	}
+	updated, _ = value.Update(create())
+	value = updated.(dashboard)
+	if backend.createCount != 1 || value.tabPending {
+		t.Fatalf("tab creation = (calls %d, pending %t), want (1, false)", backend.createCount, value.tabPending)
+	}
+}
+
 func TestDashboardAddsRootFromPrompt(t *testing.T) {
 	backend := &fakeBackend{}
 	value := newDashboard(backend, model.Snapshot{})

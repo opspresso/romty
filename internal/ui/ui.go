@@ -117,6 +117,12 @@ type dashboard struct {
 	backend Backend
 	state   model.Snapshot
 	result  Result
+	// snapshotOrder breaks ties between snapshots of the same daemon state,
+	// such as two directory refreshes that complete in reverse order.
+	snapshotOrder    uint64
+	snapshotApplied  uint64
+	selectionRequest uint64
+	tabPending       bool
 
 	width    int
 	height   int
@@ -172,6 +178,7 @@ type dashboard struct {
 
 type snapshotMsg struct {
 	value model.Snapshot
+	order uint64
 	err   error
 }
 
@@ -187,15 +194,19 @@ type gitStatusMsg struct {
 type workspaceMsg struct {
 	value     model.Workspace
 	snapshot  model.Snapshot
+	order     uint64
+	selection uint64
 	tabID     string
 	createTab bool
 	err       error
 }
 
 type tabMsg struct {
-	value    model.Tab
-	snapshot model.Snapshot
-	err      error
+	value     model.Tab
+	snapshot  model.Snapshot
+	order     uint64
+	selection uint64
+	err       error
 }
 
 type terminalOpenedMsg struct {
@@ -342,7 +353,14 @@ func (m dashboard) update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case snapshotMsg:
+		order := message.order
+		if order == 0 {
+			order = m.snapshotOrder
+		}
 		if message.err != nil {
+			if order < m.snapshotApplied {
+				return m, nil
+			}
 			m.setError(treeError, message.err.Error())
 			if m.terminalExited {
 				// The snapshot that would have picked a sibling tab never
@@ -354,7 +372,9 @@ func (m dashboard) update(message tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
-		m.state = message.value
+		if !m.applySnapshot(order, message.value) {
+			return m, nil
+		}
 		m.syncSelection()
 		m.ensureWorkspaceCursor()
 		m.clampTabIndex()
@@ -866,22 +886,30 @@ func (m dashboard) handleInput(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 // addRoot is shared by the typed prompt and the picker: both name a directory
 // and both leave the daemon to canonicalise and judge it.
-func (m dashboard) addRoot(path string) tea.Cmd {
+func (m *dashboard) addRoot(path string) tea.Cmd {
+	order := m.nextSnapshotOrder()
+	backend := m.backend
 	return func() tea.Msg {
-		value, err := m.backend.AddRoot(path)
-		return snapshotMsg{value: value, err: err}
+		value, err := backend.AddRoot(path)
+		return snapshotMsg{value: value, order: order, err: err}
 	}
 }
 
 func (m dashboard) handleWorkspace(message workspaceMsg) (tea.Model, tea.Cmd) {
+	if message.selection != 0 && message.selection != m.selectionRequest {
+		if message.err == nil {
+			m.applySnapshot(message.order, message.snapshot)
+		}
+		return m, nil
+	}
 	if message.err != nil {
 		m.setError(treeError, message.err.Error())
 		return m, nil
 	}
+	m.applySnapshot(message.order, message.snapshot)
 	m.selectedWorkspaceID = message.value.ID
 	m.selectedPath = message.value.Path
 	m.reattachTab, m.reattachAttempts = "", 0
-	m.state = message.snapshot
 	tabs := m.selectedTabs()
 	m.focus = leftPane
 	// The user's selection succeeded, so whatever was on the status bar is
@@ -889,6 +917,7 @@ func (m dashboard) handleWorkspace(message workspaceMsg) (tea.Model, tea.Cmd) {
 	m.clearAnyError()
 	if message.createTab {
 		m.tabIndex = len(tabs)
+		m.tabPending = true
 		return m, m.createTab()
 	}
 	for index, tab := range tabs {
@@ -903,11 +932,18 @@ func (m dashboard) handleWorkspace(message workspaceMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m dashboard) handleCreatedTab(message tabMsg) (tea.Model, tea.Cmd) {
+	if message.selection != 0 && message.selection != m.selectionRequest {
+		if message.err == nil {
+			m.applySnapshot(message.order, message.snapshot)
+		}
+		return m, nil
+	}
+	m.tabPending = false
 	if message.err != nil {
 		m.setError(terminalError, message.err.Error())
 		return m, nil
 	}
-	m.state = message.snapshot
+	m.applySnapshot(message.order, message.snapshot)
 	tabs := m.selectedTabs()
 	for index, tab := range tabs {
 		if tab.ID == message.value.ID {
@@ -1051,21 +1087,25 @@ func (m dashboard) confirmRemoveRoot() (tea.Model, tea.Cmd) {
 
 // removeRoot forgets the root the modal named. Terminals under it keep
 // running in the daemon; they are simply no longer listed.
-func (m dashboard) removeRoot() tea.Cmd {
+func (m *dashboard) removeRoot() tea.Cmd {
 	rootID := m.removeTarget.ID
 	if rootID == "" {
 		return nil
 	}
+	order := m.nextSnapshotOrder()
+	backend := m.backend
 	return func() tea.Msg {
-		value, err := m.backend.RemoveRoot(rootID)
-		return snapshotMsg{value: value, err: err}
+		value, err := backend.RemoveRoot(rootID)
+		return snapshotMsg{value: value, order: order, err: err}
 	}
 }
 
-func (m dashboard) refresh() tea.Cmd {
+func (m *dashboard) refresh() tea.Cmd {
+	order := m.nextSnapshotOrder()
+	backend := m.backend
 	return func() tea.Msg {
-		value, err := m.backend.Snapshot()
-		return snapshotMsg{value: value, err: err}
+		value, err := backend.Snapshot()
+		return snapshotMsg{value: value, order: order, err: err}
 	}
 }
 
@@ -1117,7 +1157,10 @@ func (m dashboard) workspacePaths() []string {
 	return paths
 }
 
-func (m dashboard) selectWorkspace() tea.Cmd {
+func (m *dashboard) selectWorkspace() tea.Cmd {
+	if m.tabPending {
+		return nil
+	}
 	item, ok := m.navigationItem()
 	if !ok {
 		return nil
@@ -1128,29 +1171,58 @@ func (m dashboard) selectWorkspace() tea.Cmd {
 	if !createTab {
 		tabID = tabs[m.tabIndex].ID
 	}
+	m.selectionRequest++
+	selection := m.selectionRequest
+	order := m.nextSnapshotOrder()
+	backend := m.backend
 	return func() tea.Msg {
-		workspace, err := m.backend.EnsureWorkspace(item.root.ID, item.workspace.Path)
+		workspace, err := backend.EnsureWorkspace(item.root.ID, item.workspace.Path)
 		if err != nil {
-			return workspaceMsg{err: err}
+			return workspaceMsg{selection: selection, err: err}
 		}
-		snapshot, err := m.backend.Snapshot()
-		return workspaceMsg{value: workspace, snapshot: snapshot, tabID: tabID, createTab: createTab, err: err}
+		snapshot, err := backend.Snapshot()
+		return workspaceMsg{value: workspace, snapshot: snapshot, order: order,
+			selection: selection, tabID: tabID, createTab: createTab, err: err}
 	}
 }
 
-func (m dashboard) createTab() tea.Cmd {
+func (m *dashboard) createTab() tea.Cmd {
 	if m.selectedWorkspaceID == "" {
-		return func() tea.Msg { return tabMsg{err: fmt.Errorf("select a workspace first")} }
+		return func() tea.Msg {
+			return tabMsg{selection: m.selectionRequest, err: fmt.Errorf("select a workspace first")}
+		}
 	}
 	columns, rows := m.terminalSize()
+	selection := m.selectionRequest
+	order := m.nextSnapshotOrder()
+	backend := m.backend
+	workspaceID := m.selectedWorkspaceID
 	return func() tea.Msg {
-		tab, err := m.backend.CreateTab(m.selectedWorkspaceID, columns, rows)
+		tab, err := backend.CreateTab(workspaceID, columns, rows)
 		if err != nil {
-			return tabMsg{err: err}
+			return tabMsg{selection: selection, err: err}
 		}
-		snapshot, err := m.backend.Snapshot()
-		return tabMsg{value: tab, snapshot: snapshot, err: err}
+		snapshot, err := backend.Snapshot()
+		return tabMsg{value: tab, snapshot: snapshot, order: order, selection: selection, err: err}
 	}
+}
+
+func (m *dashboard) nextSnapshotOrder() uint64 {
+	m.snapshotOrder++
+	return m.snapshotOrder
+}
+
+func (m *dashboard) applySnapshot(order uint64, snapshot model.Snapshot) bool {
+	if order == 0 {
+		order = m.snapshotOrder
+	}
+	if snapshot.Revision < m.state.Revision ||
+		(snapshot.Revision == m.state.Revision && order < m.snapshotApplied) {
+		return false
+	}
+	m.state = snapshot
+	m.snapshotApplied = order
+	return true
 }
 
 func (m dashboard) openSelectedTerminal() tea.Cmd {

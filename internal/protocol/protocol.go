@@ -14,7 +14,7 @@ import (
 // — `brew upgrade` replaces romty while the old daemon keeps running — so a new
 // client can meet an old daemon. Without a version that showed up as
 // `unknown action "remove_root"`, or as a field silently missing from a reply.
-const Version = 2
+const Version = 3
 
 const (
 	ActionPing            = "ping"

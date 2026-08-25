@@ -42,6 +42,7 @@ type Server struct {
 
 	mu       sync.Mutex
 	value    model.State
+	revision uint64
 	sessions map[string]*session
 	stop     chan struct{}
 	stopOnce sync.Once
@@ -167,6 +168,7 @@ func (s *Server) removeStaleTabs() error {
 		s.value.Tabs = tabs
 		return fmt.Errorf("remove stale terminal tabs: %w", err)
 	}
+	s.revision++
 	return nil
 }
 
@@ -439,6 +441,7 @@ func (s *Server) removeRoot(rootID string) protocol.Response {
 		s.mu.Unlock()
 		return protocol.Response{Error: err.Error()}
 	}
+	s.revision++
 	s.mu.Unlock()
 	return s.snapshotResponse()
 }
@@ -463,6 +466,7 @@ func (s *Server) addRoot(path string) protocol.Response {
 		s.mu.Unlock()
 		return protocol.Response{Error: err.Error()}
 	}
+	s.revision++
 	s.mu.Unlock()
 	return s.snapshotResponse()
 }
@@ -500,6 +504,7 @@ func (s *Server) ensureWorkspace(rootID, path string) protocol.Response {
 		s.value.Workspaces = s.value.Workspaces[:len(s.value.Workspaces)-1]
 		return protocol.Response{Error: err.Error()}
 	}
+	s.revision++
 	return protocol.Response{Workspace: &workspace}
 }
 
@@ -545,6 +550,7 @@ func (s *Server) createTab(request protocol.Request) protocol.Response {
 		value.close()
 		return protocol.Response{Error: err.Error()}
 	}
+	s.revision++
 	s.mu.Unlock()
 	return protocol.Response{Tab: &tab}
 }
@@ -583,11 +589,16 @@ func (s *Server) sessionExited(tabID string) {
 	defer s.mu.Unlock()
 	s.logger.Printf("shell for tab %s exited", tabID)
 	delete(s.sessions, tabID)
+	removed := false
 	for index := range s.value.Tabs {
 		if s.value.Tabs[index].ID == tabID {
 			s.value.Tabs = append(s.value.Tabs[:index], s.value.Tabs[index+1:]...)
+			removed = true
 			break
 		}
+	}
+	if removed {
+		s.revision++
 	}
 	if s.stopping {
 		// These shells exited because the daemon killed them, and it is
@@ -613,13 +624,14 @@ func (s *Server) sessionExited(tabID string) {
 func (s *Server) snapshot() model.Snapshot {
 	s.mu.Lock()
 	value := cloneState(s.value)
+	revision := s.revision
 	s.mu.Unlock()
 	agents := s.agents()
 	for index := range value.Tabs {
 		value.Tabs[index].Agent = agents[value.Tabs[index].ID]
 	}
 
-	result := model.Snapshot{Roots: make([]model.RootView, 0, len(value.Roots))}
+	result := model.Snapshot{Revision: revision, Roots: make([]model.RootView, 0, len(value.Roots))}
 	for _, root := range value.Roots {
 		rootWorkspace, _ := workspaceAt(value.Workspaces, root.ID, root.Path)
 		entries, err := os.ReadDir(root.Path)

@@ -710,3 +710,41 @@ func TestShutdownDrainsAdmittedMutations(t *testing.T) {
 		t.Fatal("shutdown did not continue after the admitted mutation finished")
 	}
 }
+
+func TestSnapshotRevisionAdvancesWithPersistedState(t *testing.T) {
+	base := t.TempDir()
+	rootPath := filepath.Join(base, "projects")
+	workspacePath := filepath.Join(rootPath, "alpha")
+	if err := os.MkdirAll(workspacePath, 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	server, err := New(filepath.Join(base, "daemon.sock"), filepath.Join(base, "state.json"), "/bin/sh")
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	initial := server.snapshot().Revision
+	added := server.addRoot(rootPath)
+	if added.Error != "" || added.Snapshot == nil {
+		t.Fatalf("addRoot() = %#v", added)
+	}
+	if added.Snapshot.Revision <= initial {
+		t.Fatalf("revision after add = %d, want > %d", added.Snapshot.Revision, initial)
+	}
+	rootID := added.Snapshot.Roots[0].Root.ID
+	ensured := server.ensureWorkspace(rootID, workspacePath)
+	if ensured.Error != "" {
+		t.Fatalf("ensureWorkspace() error = %s", ensured.Error)
+	}
+	afterWorkspace := server.snapshot().Revision
+	if afterWorkspace <= added.Snapshot.Revision {
+		t.Fatalf("revision after workspace = %d, want > %d", afterWorkspace, added.Snapshot.Revision)
+	}
+	removed := server.removeRoot(rootID)
+	if removed.Error != "" || removed.Snapshot == nil {
+		t.Fatalf("removeRoot() = %#v", removed)
+	}
+	if removed.Snapshot.Revision <= afterWorkspace {
+		t.Fatalf("revision after remove = %d, want > %d", removed.Snapshot.Revision, afterWorkspace)
+	}
+}

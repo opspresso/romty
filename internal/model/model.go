@@ -35,7 +35,8 @@ type Tab struct {
 }
 
 type Snapshot struct {
-	Roots []RootView `json:"roots"`
+	Revision uint64     `json:"revision"`
+	Roots    []RootView `json:"roots"`
 }
 
 type RootView struct {
