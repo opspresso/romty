@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"errors"
@@ -267,6 +268,86 @@ func TestAttachAnnouncesTheInitialReplayBoundary(t *testing.T) {
 	}
 	daemonSide.Close()
 	<-attached
+}
+
+func TestAttachKeepsLegacyReplayOnTheTerminalStream(t *testing.T) {
+	client, daemonSide := net.Pipe()
+	defer daemonSide.Close()
+
+	value := newSessionForTest()
+	value.history.append([]byte("legacy history"))
+	server := &Server{
+		sessions: map[string]*session{"tab-1": value},
+		logger:   log.New(io.Discard, "", 0),
+	}
+	done := make(chan struct{})
+	go func() {
+		server.handleAttach(client, protocol.Request{
+			Action:  protocol.ActionAttach,
+			Version: 4,
+			TabID:   "tab-1",
+		})
+		close(done)
+	}()
+
+	reader := bufio.NewReader(daemonSide)
+	var response protocol.Response
+	if err := protocol.Read(reader, &response); err != nil {
+		t.Fatalf("Read() attach response error = %v", err)
+	}
+	if response.Version != 4 || response.ReplayBytes != 0 {
+		t.Fatalf("legacy attach response = %#v, want version 4 without a replay boundary", response)
+	}
+	want := []byte(resetScreen + "legacy history")
+	replay := make([]byte, len(want))
+	if _, err := io.ReadFull(reader, replay); err != nil {
+		t.Fatalf("ReadFull() legacy replay error = %v", err)
+	}
+	if !bytes.Equal(replay, want) {
+		t.Fatalf("legacy replay = %q, want %q", replay, want)
+	}
+	daemonSide.Close()
+	<-done
+}
+
+func TestAttachInfersCapabilitiesForAPreNegotiationClient(t *testing.T) {
+	client, daemonSide := net.Pipe()
+	defer daemonSide.Close()
+
+	value := newSessionForTest()
+	value.history.append([]byte("version five history"))
+	server := &Server{
+		sessions: map[string]*session{"tab-1": value},
+		logger:   log.New(io.Discard, "", 0),
+	}
+	done := make(chan struct{})
+	go func() {
+		server.handleAttach(client, protocol.Request{
+			Action:  protocol.ActionAttach,
+			Version: 5,
+			TabID:   "tab-1",
+		})
+		close(done)
+	}()
+
+	reader := bufio.NewReader(daemonSide)
+	var response protocol.Response
+	if err := protocol.Read(reader, &response); err != nil {
+		t.Fatalf("Read() attach response error = %v", err)
+	}
+	want := []byte(resetScreen + "version five history")
+	if response.Version != 5 || response.ReplayBytes != len(want) {
+		t.Fatalf("version 5 attach response = %#v, want replay size %d", response, len(want))
+	}
+	replay := make([]byte, len(want))
+	if _, err := io.ReadFull(reader, replay); err != nil {
+		t.Fatalf("ReadFull() replay error = %v", err)
+	}
+	if !bytes.Equal(replay, want) {
+		t.Fatalf("replay = %q, want %q", replay, want)
+	}
+	daemonSide.Close()
+	<-done
 }
 
 // Output that arrives while the recording is still being written has to reach

@@ -14,7 +14,6 @@ import (
 	"github.com/opspresso/romty/internal/client"
 	"github.com/opspresso/romty/internal/model"
 	"github.com/opspresso/romty/internal/paths"
-	"github.com/opspresso/romty/internal/protocol"
 	"github.com/opspresso/romty/internal/version"
 )
 
@@ -320,7 +319,8 @@ func checkShell(output *strings.Builder, theme commandTheme) int {
 }
 
 func checkDaemon(output *strings.Builder, theme commandTheme, socket string) int {
-	daemonProtocol, err := client.New(socket).ProtocolVersion()
+	backend := client.New(socket)
+	daemonProtocol, err := backend.ProtocolVersion()
 	if client.Unavailable(err) {
 		printField(output, theme, "daemon", theme.warning("stopped"))
 		return 0
@@ -329,8 +329,8 @@ func checkDaemon(output *strings.Builder, theme commandTheme, socket string) int
 		printField(output, theme, "daemon", theme.failure("error "+fmt.Sprintf("%q", err.Error())))
 		return 1
 	}
-	if daemonProtocol != protocol.Version {
-		printField(output, theme, "daemon", theme.failure(fmt.Sprintf("error protocol %d, client protocol %d", daemonProtocol, protocol.Version)))
+	if _, err := backend.Snapshot(); err != nil {
+		printField(output, theme, "daemon", theme.failure("error "+fmt.Sprintf("%q", err.Error())))
 		return 1
 	}
 	printField(output, theme, "daemon", theme.good("running")+fmt.Sprintf(" (protocol: %d)", daemonProtocol))

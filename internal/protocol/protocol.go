@@ -10,11 +10,30 @@ import (
 	"github.com/opspresso/romty/internal/model"
 )
 
-// Version is the protocol romty speaks. The daemon outlives the client binary
-// — `brew upgrade` replaces romty while the old daemon keeps running — so a new
-// client can meet an old daemon. Without a version that showed up as
-// `unknown action "remove_root"`, or as a field silently missing from a reply.
-const Version = 5
+// Version and MinimumVersion bound the protocol revisions this binary can
+// speak. Ping advertises the range so peers choose the highest overlap instead
+// of requiring the same build on both sides.
+const (
+	Version        = 5
+	MinimumVersion = 1
+)
+
+const (
+	CapabilityAgents           = "agents"
+	CapabilitySnapshotRevision = "snapshot_revision"
+	CapabilityRemoveWorkspace  = "remove_workspace"
+	CapabilityReplayBoundary   = "replay_boundary"
+)
+
+var capabilities = []struct {
+	name  string
+	since int
+}{
+	{name: CapabilityAgents, since: 2},
+	{name: CapabilitySnapshotRevision, since: 3},
+	{name: CapabilityRemoveWorkspace, since: 4},
+	{name: CapabilityReplayBoundary, since: 5},
+}
 
 const (
 	ActionPing            = "ping"
@@ -30,15 +49,8 @@ const (
 	ActionShutdown        = "shutdown"
 )
 
-// VersionExempt reports whether an action is carried out whatever protocol the
-// two sides speak. Both sides ask, because a check that only one of them runs
-// is not an exemption: the daemon used to answer these two and the client then
-// refused the answer, which left `romty stop` — the remedy every mismatch
-// names — reporting a mismatch of its own instead of stopping the daemon.
-//
-// Ping is how EnsureDaemon decides whether a daemon is running at all, and
-// refusing it turns a version mismatch into "daemon did not become ready",
-// which names neither side. Shutdown is the remedy itself.
+// VersionExempt identifies the handshake and remedy that must work even when
+// the peers have no ordinary protocol revision in common.
 func VersionExempt(action string) bool {
 	switch action {
 	case ActionPing, ActionShutdown:
@@ -47,26 +59,19 @@ func VersionExempt(action string) bool {
 	return false
 }
 
-// VersionMismatch says which two sides cannot work together and what to do
-// about it. Both sides raise it — the daemon when it refuses a request, the
-// client when it refuses a reply — and one sentence keeps their wording and
-// their remedy from drifting apart.
-func VersionMismatch(speaker string, speakerVersion int, peer string, peerVersion int) error {
-	return fmt.Errorf("this %s speaks protocol %d but the %s speaks %d; run `romty stop` and start romty again",
-		speaker, speakerVersion, peer, peerVersion)
-}
-
 type Request struct {
 	Action string `json:"action"`
-	// Version is what the client speaks. A daemon that predates the field
-	// leaves it zero, which is how an old daemon is recognised.
-	Version     int    `json:"version,omitempty"`
-	Path        string `json:"path,omitempty"`
-	RootID      string `json:"root_id,omitempty"`
-	WorkspaceID string `json:"workspace_id,omitempty"`
-	TabID       string `json:"tab_id,omitempty"`
-	Columns     uint16 `json:"columns,omitempty"`
-	Rows        uint16 `json:"rows,omitempty"`
+	// Version is the selected revision for ordinary requests and the client's
+	// maximum during ping. A peer from before versioning leaves it zero.
+	Version      int      `json:"version,omitempty"`
+	MinVersion   int      `json:"min_version,omitempty"`
+	Capabilities []string `json:"capabilities,omitempty"`
+	Path         string   `json:"path,omitempty"`
+	RootID       string   `json:"root_id,omitempty"`
+	WorkspaceID  string   `json:"workspace_id,omitempty"`
+	TabID        string   `json:"tab_id,omitempty"`
+	Columns      uint16   `json:"columns,omitempty"`
+	Rows         uint16   `json:"rows,omitempty"`
 	// Environment is the client's environment, sent with create_tab. The
 	// daemon may have been started days ago from a different shell, so its
 	// own environment is not the one the user is working in.
@@ -77,16 +82,49 @@ type Request struct {
 
 type Response struct {
 	Error string `json:"error,omitempty"`
-	// Version is what the daemon speaks, so a client can say which side is
-	// out of date instead of reporting a puzzling missing field.
-	Version   int                    `json:"version,omitempty"`
-	Snapshot  *model.Snapshot        `json:"snapshot,omitempty"`
-	Agents    map[string]model.Agent `json:"agents,omitempty"`
-	Workspace *model.Workspace       `json:"workspace,omitempty"`
-	Tab       *model.Tab             `json:"tab,omitempty"`
+	// Version echoes the request revision so clients that predate range
+	// negotiation still see the exact version they expect.
+	Version      int                    `json:"version,omitempty"`
+	MinVersion   int                    `json:"min_version,omitempty"`
+	MaxVersion   int                    `json:"max_version,omitempty"`
+	Capabilities []string               `json:"capabilities,omitempty"`
+	Snapshot     *model.Snapshot        `json:"snapshot,omitempty"`
+	Agents       map[string]model.Agent `json:"agents,omitempty"`
+	Workspace    *model.Workspace       `json:"workspace,omitempty"`
+	Tab          *model.Tab             `json:"tab,omitempty"`
 	// ReplayBytes is the exact initial terminal history that follows an attach
 	// response. Anything after it is live output.
 	ReplayBytes int `json:"replay_bytes,omitempty"`
+}
+
+// SelectVersion returns the highest revision both peers support.
+func SelectVersion(firstMin, firstMax, secondMin, secondMax int) (int, bool) {
+	selected := min(firstMax, secondMax)
+	if selected < max(firstMin, secondMin) {
+		return 0, false
+	}
+	return selected, true
+}
+
+// CapabilitiesForVersion supplies the feature set of a peer from before
+// capability advertisement existed.
+func CapabilitiesForVersion(version int) []string {
+	var result []string
+	for _, capability := range capabilities {
+		if version >= capability.since {
+			result = append(result, capability.name)
+		}
+	}
+	return result
+}
+
+func HasCapability(capabilities []string, target string) bool {
+	for _, capability := range capabilities {
+		if capability == target {
+			return true
+		}
+	}
+	return false
 }
 
 func Write(w io.Writer, value any) error {

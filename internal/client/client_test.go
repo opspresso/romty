@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/opspresso/romty/internal/model"
 	"github.com/opspresso/romty/internal/paths"
 	"github.com/opspresso/romty/internal/protocol"
 )
@@ -39,7 +40,7 @@ func TestCallReportsAnOutdatedDaemon(t *testing.T) {
 	if err == nil {
 		t.Fatal("Snapshot() accepted a daemon that speaks a different protocol")
 	}
-	for _, want := range []string{"protocol", "romty stop"} {
+	for _, want := range []string{"protocol 1..5", "0..0"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("error = %q, want it to mention %q", err, want)
 		}
@@ -90,16 +91,24 @@ func TestShutdownWaitsForTheDaemonToReleaseItsSocket(t *testing.T) {
 	acknowledged := make(chan struct{})
 	release := make(chan struct{})
 	go func() {
-		connection, err := listener.Accept()
-		if err != nil {
-			return
-		}
-		defer connection.Close()
-		if _, err := bufio.NewReader(connection).ReadBytes('\n'); err != nil {
-			return
-		}
-		if _, err := connection.Write([]byte("{}\n")); err != nil {
-			return
+		for requestIndex := 0; requestIndex < 2; requestIndex++ {
+			connection, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			if _, err := bufio.NewReader(connection).ReadBytes('\n'); err != nil {
+				connection.Close()
+				return
+			}
+			if err := protocol.Write(connection, protocol.Response{
+				Version:      protocol.Version,
+				MinVersion:   protocol.MinimumVersion,
+				Capabilities: protocol.CapabilitiesForVersion(protocol.Version),
+			}); err != nil {
+				connection.Close()
+				return
+			}
+			connection.Close()
 		}
 		close(acknowledged)
 		<-release
@@ -320,6 +329,9 @@ func TestOpenTerminalSeparatesReplayFromLiveOutput(t *testing.T) {
 	replay := bytes.Repeat([]byte("recorded output\r\n"), 8192)
 	live := []byte("live output\r\n")
 	go func() {
+		if err := answerNegotiation(listener, protocol.Version, protocol.MinimumVersion); err != nil {
+			return
+		}
 		connection, err := listener.Accept()
 		if err != nil {
 			return
@@ -359,6 +371,187 @@ func TestOpenTerminalSeparatesReplayFromLiveOutput(t *testing.T) {
 	}
 }
 
+func TestOpenTerminalFallsBackToALegacyReplayStream(t *testing.T) {
+	socket := filepath.Join(shortTempDir(t), "daemon.sock")
+	listener, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatalf("Listen() error = %v", err)
+	}
+	if err := os.Chmod(socket, 0o600); err != nil {
+		t.Fatalf("Chmod() socket error = %v", err)
+	}
+	defer listener.Close()
+
+	legacyReplay := []byte("legacy replay\r\n")
+	go func() {
+		connection, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		var ping protocol.Request
+		if err := protocol.Read(bufio.NewReader(connection), &ping); err != nil {
+			connection.Close()
+			return
+		}
+		_ = protocol.Write(connection, protocol.Response{
+			Version: 4,
+			Error:   "this daemon speaks protocol 4 but the client speaks 5",
+		})
+		connection.Close()
+
+		connection, err = listener.Accept()
+		if err != nil {
+			return
+		}
+		defer connection.Close()
+		var attach protocol.Request
+		if err := protocol.Read(bufio.NewReader(connection), &attach); err != nil {
+			return
+		}
+		if attach.Version != 4 {
+			return
+		}
+		if err := protocol.Write(connection, protocol.Response{Version: 4}); err != nil {
+			return
+		}
+		_, _ = connection.Write(legacyReplay)
+	}()
+
+	stream, restored, err := New(socket).OpenTerminal("tab-1")
+	if err != nil {
+		t.Fatalf("OpenTerminal() error = %v", err)
+	}
+	defer stream.Close()
+	if len(restored) != 0 {
+		t.Fatalf("prepared replay = %q, want legacy output left on the stream", restored)
+	}
+	got := make([]byte, len(legacyReplay))
+	if _, err := io.ReadFull(stream, got); err != nil {
+		t.Fatalf("ReadFull() legacy replay error = %v", err)
+	}
+	if !bytes.Equal(got, legacyReplay) {
+		t.Fatalf("legacy replay = %q, want %q", got, legacyReplay)
+	}
+}
+
+func TestClientSelectsTheHighestProtocolSharedWithAFutureDaemon(t *testing.T) {
+	socket := filepath.Join(shortTempDir(t), "daemon.sock")
+	listener, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatalf("Listen() error = %v", err)
+	}
+	if err := os.Chmod(socket, 0o600); err != nil {
+		t.Fatalf("Chmod() socket error = %v", err)
+	}
+	defer listener.Close()
+
+	selected := make(chan int, 1)
+	go func() {
+		if err := answerNegotiation(listener, 8, 5); err != nil {
+			return
+		}
+		connection, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		defer connection.Close()
+		var request protocol.Request
+		if err := protocol.Read(bufio.NewReader(connection), &request); err != nil {
+			return
+		}
+		selected <- request.Version
+		_ = protocol.Write(connection, protocol.Response{
+			Version:  request.Version,
+			Snapshot: &model.Snapshot{},
+		})
+	}()
+
+	if _, err := New(socket).Snapshot(); err != nil {
+		t.Fatalf("Snapshot() error = %v", err)
+	}
+	if got := <-selected; got != protocol.Version {
+		t.Fatalf("selected protocol = %d, want %d", got, protocol.Version)
+	}
+}
+
+func TestClientUsesAnOlderDaemonSelectedProtocol(t *testing.T) {
+	socket := filepath.Join(shortTempDir(t), "daemon.sock")
+	listener, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatalf("Listen() error = %v", err)
+	}
+	if err := os.Chmod(socket, 0o600); err != nil {
+		t.Fatalf("Chmod() socket error = %v", err)
+	}
+	defer listener.Close()
+
+	selected := make(chan protocol.Request, 1)
+	go func() {
+		connection, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		var ping protocol.Request
+		if err := protocol.Read(bufio.NewReader(connection), &ping); err != nil {
+			connection.Close()
+			return
+		}
+		_ = protocol.Write(connection, protocol.Response{
+			Version: 1,
+			Error:   "this daemon speaks protocol 1 but the client speaks 5",
+		})
+		connection.Close()
+
+		connection, err = listener.Accept()
+		if err != nil {
+			return
+		}
+		defer connection.Close()
+		var request protocol.Request
+		if err := protocol.Read(bufio.NewReader(connection), &request); err != nil {
+			return
+		}
+		selected <- request
+		_ = protocol.Write(connection, protocol.Response{
+			Version:  1,
+			Snapshot: &model.Snapshot{},
+		})
+	}()
+
+	if _, err := New(socket).Snapshot(); err != nil {
+		t.Fatalf("Snapshot() error = %v", err)
+	}
+	request := <-selected
+	if request.Version != 1 || len(request.Capabilities) != 0 {
+		t.Fatalf("selected request = %#v, want protocol 1 without optional capabilities", request)
+	}
+}
+
+func TestClientDegradesFeaturesMissingFromAnOlderDaemon(t *testing.T) {
+	socket := filepath.Join(shortTempDir(t), "daemon.sock")
+	listener, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatalf("Listen() error = %v", err)
+	}
+	if err := os.Chmod(socket, 0o600); err != nil {
+		t.Fatalf("Chmod() socket error = %v", err)
+	}
+
+	go func() {
+		_ = answerNegotiation(listener, 1, 1)
+		listener.Close()
+	}()
+	backend := New(socket)
+	agents, err := backend.Agents()
+	if err != nil || len(agents) != 0 {
+		t.Fatalf("Agents() = (%v, %v), want an empty supported fallback", agents, err)
+	}
+	if _, err := backend.RemoveWorkspace("root-1", "/workspace"); err == nil ||
+		!strings.Contains(err.Error(), "does not support") {
+		t.Fatalf("RemoveWorkspace() error = %v, want an unsupported capability", err)
+	}
+}
+
 func TestOpenTerminalGivesUpWhenReplayStopsMakingProgress(t *testing.T) {
 	socket := filepath.Join(shortTempDir(t), "daemon.sock")
 	listener, err := net.Listen("unix", socket)
@@ -372,6 +565,9 @@ func TestOpenTerminalGivesUpWhenReplayStopsMakingProgress(t *testing.T) {
 
 	release := make(chan struct{})
 	go func() {
+		if err := answerNegotiation(listener, protocol.Version, protocol.MinimumVersion); err != nil {
+			return
+		}
 		connection, err := listener.Accept()
 		if err != nil {
 			return
@@ -402,6 +598,25 @@ func TestOpenTerminalGivesUpWhenReplayStopsMakingProgress(t *testing.T) {
 	if _, _, err := New(socket).OpenTerminal("tab-1"); err == nil {
 		t.Fatal("OpenTerminal() waited forever for an incomplete replay")
 	}
+}
+
+func answerNegotiation(listener net.Listener, maximum, minimum int) error {
+	connection, err := listener.Accept()
+	if err != nil {
+		return err
+	}
+	defer connection.Close()
+	reader := bufio.NewReader(connection)
+	var request protocol.Request
+	if err := protocol.Read(reader, &request); err != nil {
+		return err
+	}
+	return protocol.Write(connection, protocol.Response{
+		Version:      request.Version,
+		MinVersion:   minimum,
+		MaxVersion:   maximum,
+		Capabilities: protocol.CapabilitiesForVersion(min(maximum, protocol.Version)),
+	})
 }
 
 // shortTempDir keeps the socket path within the portable 104-byte limit, which

@@ -27,7 +27,13 @@ func TestMessageRoundTrip(t *testing.T) {
 }
 
 func TestAttachResponseRoundTrip(t *testing.T) {
-	want := protocol.Response{Version: protocol.Version, ReplayBytes: 123456}
+	want := protocol.Response{
+		Version:      protocol.Version,
+		MinVersion:   protocol.MinimumVersion,
+		MaxVersion:   protocol.Version,
+		Capabilities: protocol.CapabilitiesForVersion(protocol.Version),
+		ReplayBytes:  123456,
+	}
 	var stream bytes.Buffer
 
 	if err := protocol.Write(&stream, want); err != nil {
@@ -92,5 +98,54 @@ func TestVersionDistinguishesAnOlderDaemon(t *testing.T) {
 	}
 	if protocol.Version == 0 {
 		t.Fatal("the current version is 0, so an old daemon is indistinguishable")
+	}
+}
+
+func TestSelectVersionUsesTheHighestCommonVersion(t *testing.T) {
+	for _, probe := range []struct {
+		name       string
+		clientMin  int
+		clientMax  int
+		daemonMin  int
+		daemonMax  int
+		want       int
+		compatible bool
+	}{
+		{name: "same range", clientMin: 1, clientMax: 5, daemonMin: 1, daemonMax: 5, want: 5, compatible: true},
+		{name: "older daemon", clientMin: 1, clientMax: 5, daemonMin: 4, daemonMax: 4, want: 4, compatible: true},
+		{name: "future daemon", clientMin: 1, clientMax: 5, daemonMin: 5, daemonMax: 8, want: 5, compatible: true},
+		{name: "no overlap", clientMin: 1, clientMax: 5, daemonMin: 6, daemonMax: 8},
+	} {
+		t.Run(probe.name, func(t *testing.T) {
+			got, compatible := protocol.SelectVersion(
+				probe.clientMin, probe.clientMax, probe.daemonMin, probe.daemonMax,
+			)
+			if got != probe.want || compatible != probe.compatible {
+				t.Fatalf("SelectVersion() = (%d, %v), want (%d, %v)",
+					got, compatible, probe.want, probe.compatible)
+			}
+		})
+	}
+}
+
+func TestCapabilitiesFollowTheirIntroducedVersion(t *testing.T) {
+	for _, probe := range []struct {
+		version    int
+		capability string
+		want       bool
+	}{
+		{version: 1, capability: protocol.CapabilityAgents, want: false},
+		{version: 2, capability: protocol.CapabilityAgents, want: true},
+		{version: 2, capability: protocol.CapabilitySnapshotRevision, want: false},
+		{version: 3, capability: protocol.CapabilitySnapshotRevision, want: true},
+		{version: 3, capability: protocol.CapabilityRemoveWorkspace, want: false},
+		{version: 4, capability: protocol.CapabilityRemoveWorkspace, want: true},
+		{version: 4, capability: protocol.CapabilityReplayBoundary, want: false},
+		{version: 5, capability: protocol.CapabilityReplayBoundary, want: true},
+	} {
+		capabilities := protocol.CapabilitiesForVersion(probe.version)
+		if got := protocol.HasCapability(capabilities, probe.capability); got != probe.want {
+			t.Fatalf("version %d capability %q = %v, want %v", probe.version, probe.capability, got, probe.want)
+		}
 	}
 }

@@ -963,10 +963,26 @@ func TestCreateTabUsesTheClientEnvironment(t *testing.T) {
 	readUntil(t, connection, reader, "marker=from-the-client")
 }
 
-// The version check has to run on both sides. Until the daemon read the field
-// the client stamped, a mismatched client's request was carried out first and
-// the mismatch reported afterwards, with the tab already created.
-func TestServerRefusesAClientSpeakingAnotherProtocol(t *testing.T) {
+func TestServerAcceptsAnOlderSupportedProtocol(t *testing.T) {
+	socket, cancel, done := serveForTest(t)
+	defer func() { cancel(); <-done }()
+
+	response := speakRaw(t, socket, map[string]any{
+		"action":  "snapshot",
+		"version": protocol.MinimumVersion,
+	})
+	if response.Error != "" || response.Snapshot == nil {
+		t.Fatalf("supported protocol response = %#v, want a snapshot", response)
+	}
+	if response.Version != protocol.MinimumVersion {
+		t.Fatalf("response version = %d, want selected version %d", response.Version, protocol.MinimumVersion)
+	}
+}
+
+// A version outside the supported range is refused before dispatch, so a
+// future client's mutation cannot happen under semantics this daemon does not
+// understand.
+func TestServerRefusesAClientOutsideItsProtocolRange(t *testing.T) {
 	socket, cancel, done := serveForTest(t)
 	defer func() { cancel(); <-done }()
 
@@ -974,13 +990,37 @@ func TestServerRefusesAClientSpeakingAnotherProtocol(t *testing.T) {
 	if response.Error == "" {
 		t.Fatal("snapshot from a mismatched client was accepted")
 	}
-	for _, want := range []string{"protocol", "romty stop"} {
+	for _, want := range []string{"protocol", "selected 6"} {
 		if !strings.Contains(response.Error, want) {
 			t.Fatalf("error = %q, want it to mention %q", response.Error, want)
 		}
 	}
 	if response.Snapshot != nil {
 		t.Fatal("a refused request still returned a snapshot")
+	}
+}
+
+func TestServerPingAdvertisesItsProtocolRangeAndCapabilities(t *testing.T) {
+	socket, cancel, done := serveForTest(t)
+	defer func() { cancel(); <-done }()
+
+	response := speakRaw(t, socket, map[string]any{"action": "ping"})
+	if response.Version != 0 || response.MinVersion != protocol.MinimumVersion || response.MaxVersion != protocol.Version {
+		t.Fatalf("protocol range = %d..%d, want %d..%d",
+			response.MinVersion, response.MaxVersion, protocol.MinimumVersion, protocol.Version)
+	}
+	for _, capability := range protocol.CapabilitiesForVersion(protocol.Version) {
+		if !protocol.HasCapability(response.Capabilities, capability) {
+			t.Fatalf("ping capabilities = %q, want %q", response.Capabilities, capability)
+		}
+	}
+	legacy := speakRaw(t, socket, map[string]any{
+		"action":  "ping",
+		"version": protocol.MinimumVersion,
+	})
+	if legacy.Version != protocol.MinimumVersion {
+		t.Fatalf("legacy ping response version = %d, want request version %d",
+			legacy.Version, protocol.MinimumVersion)
 	}
 }
 
