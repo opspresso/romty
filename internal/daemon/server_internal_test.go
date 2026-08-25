@@ -86,6 +86,69 @@ func TestShutdownDoesNotWaitForDirectoryPreflight(t *testing.T) {
 	}
 }
 
+func TestShutdownDoesNotWaitForResponseSnapshot(t *testing.T) {
+	for _, action := range []string{protocol.ActionAddRoot, protocol.ActionRemoveRoot} {
+		t.Run(action, func(t *testing.T) {
+			base := t.TempDir()
+			server, err := New(filepath.Join(base, "daemon.sock"), filepath.Join(base, "state.json"), "/bin/sh")
+			if err != nil {
+				t.Fatalf("New() error = %v", err)
+			}
+			request := protocol.Request{Action: action}
+			if action == protocol.ActionAddRoot {
+				request.Path = t.TempDir()
+			} else {
+				server.value.Roots = []model.Root{
+					{ID: "remove", Name: "remove", Path: t.TempDir()},
+					{ID: "keep", Name: "keep", Path: t.TempDir()},
+				}
+				request.RootID = "remove"
+			}
+
+			entered := make(chan struct{})
+			release := make(chan struct{})
+			released := false
+			previous := readDirectory
+			readDirectory = func(string) ([]os.DirEntry, error) {
+				close(entered)
+				<-release
+				return nil, nil
+			}
+			t.Cleanup(func() {
+				readDirectory = previous
+				if !released {
+					close(release)
+				}
+			})
+
+			response := make(chan protocol.Response, 1)
+			go func() { response <- server.dispatch(request) }()
+			<-entered
+			server.beginShutdown()
+			drained := make(chan struct{})
+			go func() {
+				server.mutations.Wait()
+				close(drained)
+			}()
+			select {
+			case <-drained:
+			case <-time.After(time.Second):
+				t.Fatal("shutdown waited for response snapshot")
+			}
+
+			close(release)
+			released = true
+			result := <-response
+			if result.Error != "" {
+				t.Fatalf("response error = %q", result.Error)
+			}
+			if result.Snapshot == nil {
+				t.Fatal("response has no snapshot")
+			}
+		})
+	}
+}
+
 // A peer that connects and never finishes a request must not hold a goroutine
 // and a file descriptor for the daemon's whole life, and must not keep the
 // daemon from serving anyone else.

@@ -31,6 +31,7 @@ var ErrAlreadyRunning = errors.New("romty daemon is already running")
 var requestTimeout = 10 * time.Second
 
 var resolveDirectory = canonicalDirectory
+var readDirectory = os.ReadDir
 
 type Server struct {
 	socket string
@@ -392,7 +393,7 @@ func (s *Server) beginRequest(action string) (func(), bool) {
 		return nil, false
 	}
 	switch action {
-	case protocol.ActionRemoveRoot, protocol.ActionCreateTab, protocol.ActionResize:
+	case protocol.ActionCreateTab, protocol.ActionResize:
 		s.mutations.Add(1)
 		return s.mutations.Done, true
 	default:
@@ -431,6 +432,11 @@ func (s *Server) snapshotResponse() protocol.Response {
 // became unreadable could only be dropped by editing the state file by hand.
 // Terminals under the root keep running; they are simply no longer listed.
 func (s *Server) removeRoot(rootID string) protocol.Response {
+	finish, ok := s.beginMutation()
+	if !ok {
+		return protocol.Response{Error: "daemon is shutting down"}
+	}
+
 	s.mu.Lock()
 	index := -1
 	for position, root := range s.value.Roots {
@@ -441,6 +447,7 @@ func (s *Server) removeRoot(rootID string) protocol.Response {
 	}
 	if index < 0 {
 		s.mu.Unlock()
+		finish()
 		return protocol.Response{Error: "root not found"}
 	}
 
@@ -466,10 +473,12 @@ func (s *Server) removeRoot(rootID string) protocol.Response {
 	if err := s.store.Save(s.value); err != nil {
 		s.value = previous
 		s.mu.Unlock()
+		finish()
 		return protocol.Response{Error: err.Error()}
 	}
 	s.revision++
 	s.mu.Unlock()
+	finish()
 	return s.snapshotResponse()
 }
 
@@ -482,12 +491,12 @@ func (s *Server) addRoot(path string) protocol.Response {
 	if !ok {
 		return protocol.Response{Error: "daemon is shutting down"}
 	}
-	defer finish()
 
 	s.mu.Lock()
 	for _, root := range s.value.Roots {
 		if root.Path == canonical {
 			s.mu.Unlock()
+			finish()
 			return s.snapshotResponse()
 		}
 	}
@@ -496,10 +505,12 @@ func (s *Server) addRoot(path string) protocol.Response {
 	if err := s.store.Save(s.value); err != nil {
 		s.value.Roots = s.value.Roots[:len(s.value.Roots)-1]
 		s.mu.Unlock()
+		finish()
 		return protocol.Response{Error: err.Error()}
 	}
 	s.revision++
 	s.mu.Unlock()
+	finish()
 	return s.snapshotResponse()
 }
 
@@ -685,7 +696,7 @@ func (s *Server) snapshot() model.Snapshot {
 	result := model.Snapshot{Revision: revision, Roots: make([]model.RootView, 0, len(value.Roots))}
 	for _, root := range value.Roots {
 		rootWorkspace, _ := workspaceAt(value.Workspaces, root.ID, root.Path)
-		entries, err := os.ReadDir(root.Path)
+		entries, err := readDirectory(root.Path)
 		if err != nil {
 			directories := appendMissingRunningWorkspaces(nil, value, root)
 			result.Roots = append(result.Roots, model.RootView{
