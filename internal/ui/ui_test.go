@@ -3265,6 +3265,22 @@ func TestOpenTabMarkersUseAgentColorsAndPhaseShapes(t *testing.T) {
 	}
 }
 
+func TestOpenTabMarkersCycleThroughEveryAnimationFrame(t *testing.T) {
+	value := newDashboard(&fakeBackend{}, model.Snapshot{})
+	base := value.styles.navigationSelected
+	style := base.Foreground(value.styles.agentClaude.GetForeground())
+	tabs := []model.Tab{{
+		Running: true, Agent: model.AgentClaude, AgentPhase: model.AgentPhaseWorking,
+	}}
+
+	for index, frame := range agentAnimationFrames {
+		marker := openTabMarkers(value.styles, base, tabs, index)
+		if marker != style.Render(frame) || lipgloss.Width(marker) != 1 {
+			t.Fatalf("animation frame %d = %q with width %d, want %q with width 1", index, marker, lipgloss.Width(marker), frame)
+		}
+	}
+}
+
 func TestAgentAnimationRunsOnlyWhileWorkIsActive(t *testing.T) {
 	snapshot := model.Snapshot{Roots: []model.RootView{{
 		Root: model.Root{ID: "root-1"},
