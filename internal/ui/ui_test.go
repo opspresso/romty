@@ -3497,6 +3497,147 @@ func TestDashboardUsesCompactLeftPane(t *testing.T) {
 	}
 }
 
+func TestDashboardRestoresTheLastWorkspaceAndTab(t *testing.T) {
+	alpha := model.Workspace{ID: "workspace-1", RootID: "root-1", Name: "alpha", Path: "/projects/alpha"}
+	bravo := model.Workspace{ID: "workspace-2", RootID: "root-1", Name: "bravo", Path: "/projects/bravo"}
+	tabs := []model.Tab{
+		{ID: "tab-2", WorkspaceID: bravo.ID, Name: "1", Running: true},
+		{ID: "tab-3", WorkspaceID: bravo.ID, Name: "2", Running: true},
+	}
+	snapshot := model.Snapshot{Roots: []model.RootView{{
+		Root: model.Root{ID: "root-1", Name: "projects", Path: "/projects"},
+		Directories: []model.WorkspaceView{
+			{Workspace: alpha, Tabs: []model.Tab{{ID: "tab-1", WorkspaceID: alpha.ID, Name: "1", Running: true}}},
+			{Workspace: bravo, Tabs: tabs},
+		},
+	}}}
+	backend := &fakeBackend{snapshot: snapshot}
+	value := newDashboardWithConfig(backend, snapshot, "", Config{
+		LastWorkspacePath: bravo.Path,
+		LastTabID:         tabs[1].ID,
+	})
+
+	if value.selectedPath != bravo.Path || value.selectedWorkspaceID != bravo.ID ||
+		value.navIndex != 2 || value.tabIndex != 1 {
+		t.Fatalf("restored selection = (path %q, workspace %q, nav %d, tab %d)",
+			value.selectedPath, value.selectedWorkspaceID, value.navIndex, value.tabIndex)
+	}
+
+	var opened terminalOpenedMsg
+	for _, message := range commandMessages(value.Init()) {
+		if candidate, ok := message.(terminalOpenedMsg); ok {
+			opened = candidate
+		}
+	}
+	if opened.tabID != tabs[1].ID || backend.openedTab != tabs[1].ID {
+		t.Fatalf("startup opened tab = (%q, %q), want %q", opened.tabID, backend.openedTab, tabs[1].ID)
+	}
+	updated, _ := value.Update(opened)
+	value = updated.(dashboard)
+	t.Cleanup(value.closeTerminal)
+	if value.terminal == nil || value.terminal.id != tabs[1].ID || value.focus != terminalPane {
+		t.Fatalf("restored terminal = (%v, focus %v), want %q", value.terminal, value.focus, tabs[1].ID)
+	}
+}
+
+func TestDashboardDoesNotRestoreAMissingWorkspaceOrTab(t *testing.T) {
+	workspace := model.Workspace{ID: "workspace-1", RootID: "root-1", Name: "alpha", Path: "/projects/alpha"}
+	snapshot := model.Snapshot{Roots: []model.RootView{{
+		Root: model.Root{ID: "root-1", Name: "projects", Path: "/projects"},
+		Directories: []model.WorkspaceView{{
+			Workspace: workspace,
+			Tabs: []model.Tab{
+				{ID: "running", WorkspaceID: workspace.ID, Running: true},
+				{ID: "stopped", WorkspaceID: workspace.ID},
+			},
+		}},
+	}}}
+
+	for _, probe := range []Config{
+		{LastWorkspacePath: "/projects/missing", LastTabID: "running"},
+		{LastWorkspacePath: workspace.Path, LastTabID: "missing"},
+		{LastWorkspacePath: workspace.Path, LastTabID: "stopped"},
+	} {
+		value := newDashboardWithConfig(&fakeBackend{}, snapshot, "", probe)
+		if value.selectedPath != "" || value.selectedWorkspaceID != "" || value.restorePending {
+			t.Fatalf("invalid config %#v restored selection = (path %q, workspace %q, pending %t)",
+				probe, value.selectedPath, value.selectedWorkspaceID, value.restorePending)
+		}
+	}
+}
+
+func TestDashboardPersistsTheLastOpenedWorkspaceAndTab(t *testing.T) {
+	workspace := model.Workspace{ID: "workspace-1", RootID: "root-1", Name: "alpha", Path: "/projects/alpha"}
+	tabs := []model.Tab{
+		{ID: "tab-1", WorkspaceID: workspace.ID, Name: "1", Running: true},
+		{ID: "tab-2", WorkspaceID: workspace.ID, Name: "2", Running: true},
+	}
+	snapshot := model.Snapshot{Roots: []model.RootView{{
+		Root:        model.Root{ID: "root-1", Name: "projects", Path: "/projects"},
+		Directories: []model.WorkspaceView{{Workspace: workspace, Tabs: tabs}},
+	}}}
+	configPath := filepath.Join(t.TempDir(), "config.json")
+	value := newDashboardWithConfig(&fakeBackend{}, snapshot, configPath, Config{})
+	value.selectedWorkspaceID = workspace.ID
+	value.selectedPath = workspace.Path
+	value.tabIndex = 1
+
+	updated, command := value.Update(terminalOpenedMsg{tabID: tabs[1].ID, stream: newMemoryStream("")})
+	value = updated.(dashboard)
+	t.Cleanup(value.closeTerminal)
+	if command == nil {
+		t.Fatal("opening a different tab did not save its selection")
+	}
+	for _, message := range commandMessages(command) {
+		if saved, ok := message.(configSavedMsg); ok {
+			updated, _ = value.Update(saved)
+			value = updated.(dashboard)
+		}
+	}
+	loaded, err := loadConfig(configPath)
+	if err != nil {
+		t.Fatalf("loadConfig() error = %v", err)
+	}
+	if loaded.LastWorkspacePath != workspace.Path || loaded.LastTabID != tabs[1].ID {
+		t.Fatalf("saved selection = (%q, %q), want (%q, %q)",
+			loaded.LastWorkspacePath, loaded.LastTabID, workspace.Path, tabs[1].ID)
+	}
+}
+
+func TestDashboardRewritesAStaleSelectionSave(t *testing.T) {
+	workspace := model.Workspace{ID: "workspace-1", RootID: "root-1", Name: "alpha", Path: "/projects/alpha"}
+	tabs := []model.Tab{
+		{ID: "tab-1", WorkspaceID: workspace.ID, Running: true},
+		{ID: "tab-2", WorkspaceID: workspace.ID, Running: true},
+	}
+	snapshot := model.Snapshot{Roots: []model.RootView{{
+		Root:        model.Root{ID: "root-1", Name: "projects", Path: "/projects"},
+		Directories: []model.WorkspaceView{{Workspace: workspace, Tabs: tabs}},
+	}}}
+	configPath := filepath.Join(t.TempDir(), "config.json")
+	value := newDashboardWithConfig(&fakeBackend{}, snapshot, configPath, Config{})
+	value.rememberedWorkspacePath = workspace.Path
+	value.rememberedTabID = tabs[1].ID
+
+	updated, rewrite := value.Update(configSavedMsg{
+		lastWorkspacePath: workspace.Path,
+		lastTabID:         tabs[0].ID,
+	})
+	value = updated.(dashboard)
+	if rewrite == nil {
+		t.Fatal("an older selection save was accepted as current")
+	}
+	rewrite()
+	loaded, err := loadConfig(configPath)
+	if err != nil {
+		t.Fatalf("loadConfig() error = %v", err)
+	}
+	if loaded.LastWorkspacePath != workspace.Path || loaded.LastTabID != tabs[1].ID {
+		t.Fatalf("rewritten selection = (%q, %q), want (%q, %q)",
+			loaded.LastWorkspacePath, loaded.LastTabID, workspace.Path, tabs[1].ID)
+	}
+}
+
 func TestDashboardAdaptsChromeToTerminalBackground(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, model.Snapshot{})
 	if value.Init() == nil {

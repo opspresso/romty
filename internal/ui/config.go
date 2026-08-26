@@ -18,9 +18,11 @@ type Config struct {
 	LeftWidth int `json:"left_width,omitempty"`
 	// MousePassthrough hands the mouse to applications that ask for it, at the
 	// cost of the host terminal's drag selection while they run.
-	MousePassthrough bool   `json:"mouse_passthrough,omitempty"`
-	GitDiffView      string `json:"git_diff_view,omitempty"`
-	unknownFields    map[string]json.RawMessage
+	MousePassthrough  bool   `json:"mouse_passthrough,omitempty"`
+	GitDiffView       string `json:"git_diff_view,omitempty"`
+	LastWorkspacePath string `json:"last_workspace_path,omitempty"`
+	LastTabID         string `json:"last_tab_id,omitempty"`
+	unknownFields     map[string]json.RawMessage
 }
 
 func (c *Config) UnmarshalJSON(data []byte) error {
@@ -36,6 +38,8 @@ func (c *Config) UnmarshalJSON(data []byte) error {
 	delete(fields, "left_width")
 	delete(fields, "mouse_passthrough")
 	delete(fields, "git_diff_view")
+	delete(fields, "last_workspace_path")
+	delete(fields, "last_tab_id")
 	*c = Config(value)
 	c.unknownFields = fields
 	return nil

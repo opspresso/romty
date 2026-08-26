@@ -116,4 +116,4 @@ With passthrough enabled, the application mouse mode is mirrored until it exits 
 
 `F9` asks before stopping the daemon because this terminates every running shell. Once confirmed, shutdown cannot be cancelled.
 
-The workspace pane width and last inline or split diff layout are saved automatically in `config.json`. The pane width is constrained to 18 through 40 columns and may shrink further when the terminal is narrow.
+The last opened workspace and terminal tab, workspace pane width, and inline or split diff layout are saved automatically in `config.json`. Reopening romty reconnects to that tab when it is still running; a removed workspace or stopped tab falls back to the workspace list. The pane width is constrained to 18 through 40 columns and may shrink further when the terminal is narrow.
