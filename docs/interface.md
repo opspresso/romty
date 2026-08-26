@@ -19,6 +19,8 @@ Git metadata is rendered as `(branch*) ↑N ↓N`. `*` means the worktree has tr
 
 romty refreshes local Git state every 10 seconds. It fetches remote-tracking refs in the background at startup and every 5 minutes. `F5` refreshes local state immediately and starts another background fetch; fetches never prompt for credentials and time out without blocking the interface.
 
+Press `Ctrl`+`Shift`+`G` to open Git actions for a workspace. From the workspace pane it targets the row under the cursor; from the terminal pane or scrollback it targets the open terminal workspace. The menu provides `Status`, `Fetch`, `Pull`, and `Push`. `Pull` uses `--ff-only` so it never creates a merge commit. Commands run without interactive credential prompts, and their output or error remains in a scrollable result modal. Press `Enter` from a result to return to the action menu.
+
 ## Keyboard shortcuts
 
 `F1` through `F7` work in both panes and with regular modals open. The root path prompt and startup hook confirmation own their input until submitted or cancelled. Press `F1` for the compact in-app reference.
@@ -47,6 +49,7 @@ romty refreshes local Git state every 10 seconds. It fetches remote-tracking ref
 | Workspace | `Tab` | Focus the terminal |
 | Terminal | `Ctrl+\` | Focus the workspace and refresh it |
 | Both panes | `Ctrl`+`Shift`+`T` | Create and open a terminal tab |
+| Both panes | `Ctrl`+`Shift`+`G` | Open Git actions for the contextual workspace |
 | Both panes | `Ctrl`+`Shift`+`←`/`→` | Switch terminal tab |
 | Both panes | `Ctrl`+`Shift`+`↑`/`↓` | Switch to a workspace with a running terminal |
 
@@ -64,6 +67,8 @@ Workspace aliases are `?` Help, `a` Add root, `,` Config, `q` or `Ctrl+C` Quit, 
 | Scrollback | `F6`, `F7`, `Ctrl+\`, `Esc`, `q`, `s` | Leave scrollback |
 | Help | `↑`/`↓`, `PgUp`/`PgDn`, `Home`/`End` | Scroll the reference |
 | Config | `←`/`→`, `[`/`]` | Resize the workspace pane |
+| Git actions | `↑`/`↓`, `Enter` | Select and run an action |
+| Git result | `↑`/`↓`, `PgUp`/`PgDn`, `Home`/`End` | Scroll command output |
 | Modal or prompt | `Esc` | Cancel or skip |
 | Confirmation | `Enter` | Confirm the requested action |
 

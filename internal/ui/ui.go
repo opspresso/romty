@@ -90,6 +90,9 @@ const (
 	// settingError is about config or shutting the daemon down, which a
 	// snapshot says nothing about.
 	settingError
+	// gitError is about an explicit Git action and is cleared only by another
+	// Git action, not by a workspace or terminal refresh.
+	gitError
 )
 
 type modal int
@@ -100,6 +103,7 @@ const (
 	helpModal
 	configModal
 	browseModal
+	gitActionsModal
 	removeSelectionModal
 	shutdownModal
 	hookInstallModal
@@ -184,12 +188,20 @@ type dashboard struct {
 	browse browser
 	// config is the document as loaded, kept so saving edits it instead of
 	// reconstructing it from fields.
-	config           Config
-	leftWidth        int
-	mousePassthrough bool
-	gitStates        map[string]gitState
-	gitFetchedAt     time.Time
-	styles           *uiStyles
+	config            Config
+	leftWidth         int
+	mousePassthrough  bool
+	gitStates         map[string]gitState
+	gitFetchedAt      time.Time
+	gitActionTarget   model.Workspace
+	gitActionIndex    int
+	gitAction         gitAction
+	gitActionPending  bool
+	gitActionComplete bool
+	gitActionOutput   string
+	gitActionError    string
+	gitActionOffset   int
+	styles            *uiStyles
 }
 
 type snapshotMsg struct {
@@ -453,6 +465,8 @@ func (m dashboard) update(message tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.refreshGitStatus()
 		}
 		return m, nil
+	case gitActionMsg:
+		return m.handleGitActionResult(message)
 	case workspaceMsg:
 		return m.handleWorkspace(message)
 	case tabMsg:
@@ -542,6 +556,7 @@ var globalKeys = map[string]func(dashboard) (tea.Model, tea.Cmd){
 	"shift+pgup":   func(m dashboard) (tea.Model, tea.Cmd) { return m.pageHistory(1) },
 	"shift+pgdown": func(m dashboard) (tea.Model, tea.Cmd) { return m.pageHistory(-1) },
 	"ctrl+shift+t": func(m dashboard) (tea.Model, tea.Cmd) { return m.newTab() },
+	"ctrl+shift+g": func(m dashboard) (tea.Model, tea.Cmd) { return m.openGitActions() },
 	// Switching tabs from the terminal pane took Ctrl+\ and then two more keys.
 	// Ctrl+Shift+Left/Right is the chord a terminal with tabs binds, and a
 	// terminal reports it distinctly — Ctrl+Shift+Tab is not, because most
@@ -573,6 +588,9 @@ func (m dashboard) handleKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if message.String() == "f4" {
 			return m.quit()
 		}
+		return m, nil
+	}
+	if m.gitActionPending {
 		return m, nil
 	}
 	if m.modal == hookInstallModal {
@@ -740,6 +758,36 @@ func (m dashboard) handleModalKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 	switch m.modal {
 	case browseModal:
 		return m.handleBrowseKey(message)
+	case gitActionsModal:
+		if m.gitActionComplete {
+			page := max(modalCapacity(m.dimensions().bodyHeight)-3, 1)
+			switch message.String() {
+			case "enter":
+				return m.resetGitActionResult(), nil
+			case "up", "k":
+				return m.scrollGitAction(-1)
+			case "down", "j":
+				return m.scrollGitAction(1)
+			case "pgup", "ctrl+b":
+				return m.scrollGitAction(-page)
+			case "pgdown", "ctrl+f":
+				return m.scrollGitAction(page)
+			case "home", "g":
+				return m.scrollGitAction(-len(m.gitActionResultLines()))
+			case "end", "G":
+				return m.scrollGitAction(len(m.gitActionResultLines()))
+			}
+			return m, nil
+		}
+		switch message.String() {
+		case "up", "k":
+			m.gitActionIndex = (m.gitActionIndex - 1 + len(gitActionChoices)) % len(gitActionChoices)
+		case "down", "j":
+			m.gitActionIndex = (m.gitActionIndex + 1) % len(gitActionChoices)
+		case "enter":
+			return m.startGitAction()
+		}
+		return m, nil
 	case removeSelectionModal:
 		if message.String() == "enter" {
 			m.modal = noModal
@@ -2011,6 +2059,26 @@ func (m dashboard) renderStatus(width, bodyHeight int) []string {
 			shortcut{key: "←/→", description: "adjust width"},
 			shortcut{key: "Esc", description: "close"},
 		)
+	case m.modal == gitActionsModal && m.gitActionPending:
+		status = truncate(
+			m.styles.promptLabel.Render(" RUNNING ")+" "+m.styles.shortcutDescription.Render(m.gitAction.label()+" in "+displayText(m.gitActionTarget.Name)),
+			width,
+		)
+	case m.modal == gitActionsModal && m.gitActionComplete:
+		shortcuts := []shortcut{
+			{key: "Enter", description: "actions"},
+			{key: "Esc", description: "close"},
+		}
+		if m.maximumGitActionOffset(bodyHeight) > 0 {
+			shortcuts = append([]shortcut{{key: "↑/↓", description: "scroll"}}, shortcuts...)
+		}
+		status = renderShortcuts(m.styles, width, shortcuts...)
+	case m.modal == gitActionsModal:
+		status = renderShortcuts(m.styles, width,
+			shortcut{key: "↑/↓", description: "select"},
+			shortcut{key: "Enter", description: "run"},
+			shortcut{key: "Esc", description: "cancel"},
+		)
 	case m.modal == shutdownModal && m.shutdownPending:
 		// The request is already out; no key can take it back.
 		status = truncate(
@@ -2122,6 +2190,9 @@ func (m dashboard) renderModal(width, height int) []string {
 		// Paths are long, so the picker gets the wider box help uses.
 		return m.renderBrowseModal(min(max(width-4, 40), 64), height)
 	}
+	if m.modal == gitActionsModal {
+		return m.renderGitActionsModal(modalWidth, height)
+	}
 	if m.modal == removeSelectionModal {
 		if m.removeTarget.isRoot {
 			return modalBox(m.styles, modalWidth, "Forget root",
@@ -2213,6 +2284,7 @@ func (m dashboard) helpEntries() []string {
 		renderHelpShortcut(m.styles, "Focus terminal", "Tab"),
 		renderHelpShortcut(m.styles, "Focus workspace", "Ctrl+\\"),
 		renderHelpShortcut(m.styles, "New tab", "Ctrl+Shift+T"),
+		renderHelpShortcut(m.styles, "Git actions", "Ctrl+Shift+G"),
 		renderHelpShortcut(m.styles, "Switch tab", "Ctrl+Shift+←/→"),
 		renderHelpShortcut(m.styles, "Switch workspace", "Ctrl+Shift+↑/↓"),
 		renderHelpSection(m.styles, "SCROLLBACK", "terminal history"),
