@@ -8,6 +8,11 @@ import (
 	"github.com/alecthomas/chroma/v2/lexers"
 )
 
+const (
+	maximumHighlightedDiffLines = 5000
+	maximumHighlightedDiffBytes = 1 << 20
+)
+
 type gitSyntaxToken struct {
 	kind  chroma.TokenType
 	value string
@@ -26,6 +31,16 @@ type gitDiffHunkLine struct {
 }
 
 func highlightGitDiffSyntax(path string, lines []string) ([]gitDiffLineSyntax, bool) {
+	if len(lines) > maximumHighlightedDiffLines {
+		return nil, false
+	}
+	size := max(len(lines)-1, 0)
+	for _, line := range lines {
+		size += len(line)
+		if size > maximumHighlightedDiffBytes {
+			return nil, false
+		}
+	}
 	lexer := lexers.Match(path)
 	if lexer == nil || lexer.Config().Name == "fallback" || lexer.Config().Name == "plaintext" {
 		return nil, false

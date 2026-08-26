@@ -90,6 +90,18 @@ func TestGitDiffSyntaxFallsBackForUnknownFiles(t *testing.T) {
 	}
 }
 
+func TestGitDiffSyntaxFallsBackForLargeDiffs(t *testing.T) {
+	for _, lines := range [][]string{
+		make([]string, maximumHighlightedDiffLines+1),
+		{"@@ -1 +1 @@", "+" + strings.Repeat("x", maximumHighlightedDiffBytes)},
+	} {
+		syntax, highlighted := highlightGitDiffSyntax("main.go", lines)
+		if highlighted || syntax != nil {
+			t.Fatalf("large diff syntax = (%#v, %t), want plain text fallback", syntax, highlighted)
+		}
+	}
+}
+
 type panickingGitLexer struct {
 	chroma.Lexer
 }
