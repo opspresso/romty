@@ -426,6 +426,9 @@ func (m dashboard) update(message tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.PasteMsg:
 		if m.inputMode {
 			m.input += message.Content
+		} else if m.scrollback && m.terminal != nil {
+			m.stopScrollback()
+			m.terminal.paste(message.Content)
 		} else if !m.gitDiff.active && m.focus == terminalPane && m.terminal != nil {
 			m.terminal.paste(message.Content)
 		}
@@ -874,22 +877,16 @@ func (m dashboard) handleScrollbackKey(message tea.KeyPressMsg) (tea.Model, tea.
 		m.stopScrollback()
 		return m, nil
 	}
-	page := m.scrollbackPage()
 	switch message.String() {
 	case "esc":
 		m.stopScrollback()
-	case "up", "k":
+	case "up":
 		m.scrollTerminal(1)
-	case "down", "j":
+	case "down":
 		m.scrollTerminal(-1)
-	case "pgup", "ctrl+b":
-		m.scrollTerminal(page)
-	case "pgdown", "ctrl+f":
-		m.scrollTerminal(-page)
-	case "home", "g":
-		m.scrollTerminal(m.terminal.scrollbackLen())
-	case "end", "G":
-		m.scrollTerminal(-m.terminal.scrollbackLen())
+	default:
+		m.stopScrollback()
+		m.terminal.sendKey(message)
 	}
 	return m, nil
 }

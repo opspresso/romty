@@ -62,10 +62,11 @@ Press `Ctrl`+`Shift`+`F` to toggle the file view for the same contextual workspa
 
 | Key | Action | Applies to |
 |---|---|---|
-| `↑`/`↓` or `k`/`j` | Move one item or line | Workspace, file list, picker, Help, Git, scrollback |
+| `↑`/`↓` | Move one item or line | Workspace, file list, picker, Help, Git, scrollback |
+| `k`/`j` | Move one item or line | Workspace, file list, picker, Help, Git |
 | `←`/`→` or `h`/`l` | Select a tab, or open a picker child/parent | Workspace, picker |
-| `PgUp`/`PgDn` or `Ctrl+B`/`Ctrl+F` | Move one page | Picker, Help, Git result, file diff, scrollback |
-| `Home`/`End` or `g`/`G` | Move to the first or last item/line | Picker, Help, Git result, file diff, scrollback |
+| `PgUp`/`PgDn` or `Ctrl+B`/`Ctrl+F` | Move one page | Picker, Help, Git result, file diff |
+| `Home`/`End` or `g`/`G` | Move to the first or last item/line | Picker, Help, Git result, file diff |
 | `Shift`+`PgUp`/`PgDn` | Enter scrollback or move one page | Workspace, terminal, scrollback |
 | Mouse wheel | Scroll | Help, scrollback, file diff |
 
@@ -98,7 +99,7 @@ romty discovers direct child directories only. Press `F5` after a command adds o
 
 ## Scrollback and mouse
 
-romty keeps 10,000 scrollback lines for each terminal. Scrollback fills the width so native terminal selection copies output without the workspace tree. New output does not move a historical view; leaving returns to the live screen.
+romty keeps 10,000 scrollback lines for each terminal. Scrollback fills the width so native terminal selection copies output without the workspace tree. New output does not move a historical view. `Shift`+`PgUp`/`PgDn` and the mouse wheel continue browsing history; other terminal input, including paste, returns to the live screen and is forwarded without dropping the first input.
 
 Full-screen applications such as `vim`, `less`, and Claude Code use an alternate screen with no romty history. In that mode `Shift`+`PgUp`/`PgDn` is forwarded as plain `PgUp`/`PgDn` so the application can page itself.
 

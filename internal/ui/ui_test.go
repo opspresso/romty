@@ -1120,11 +1120,13 @@ func TestDashboardScrollsTerminalHistory(t *testing.T) {
 		t.Fatalf("wheel down offset = %d, want back at the live screen", value.scrollOffset)
 	}
 
-	// Home reaches the oldest retained line and clamps there.
-	updated, _ = value.Update(key(tea.KeyHome, ""))
-	value = updated.(dashboard)
+	// Repeated Shift+PgUp reaches the oldest retained line and clamps there.
+	for range history/value.scrollbackPage() + 1 {
+		updated, _ = value.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyPgUp, Mod: tea.ModShift}))
+		value = updated.(dashboard)
+	}
 	if value.scrollOffset != history {
-		t.Fatalf("Home offset = %d, want the full history %d", value.scrollOffset, history)
+		t.Fatalf("Shift+PgUp offset = %d, want the full history %d", value.scrollOffset, history)
 	}
 	oldest := plainRows(value.terminal.renderViewport(value.scrollOffset))[0]
 	retained := plainRows([]string{value.terminal.emulator.Scrollback().Line(0).Render()})[0]
@@ -1136,10 +1138,12 @@ func TestDashboardScrollsTerminalHistory(t *testing.T) {
 		!strings.Contains(rendered, "Ctrl+Shift+\\") {
 		t.Fatalf("status bar does not report the scrollback position:\n%s", rendered)
 	}
-	updated, _ = value.Update(key(tea.KeyEnd, ""))
-	value = updated.(dashboard)
+	for range history/value.scrollbackPage() + 1 {
+		updated, _ = value.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyPgDown, Mod: tea.ModShift}))
+		value = updated.(dashboard)
+	}
 	if value.scrollOffset != 0 {
-		t.Fatalf("End offset = %d, want the live screen", value.scrollOffset)
+		t.Fatalf("Shift+PgDown offset = %d, want the live screen", value.scrollOffset)
 	}
 
 	updated, command = value.Update(key(tea.KeyEscape, ""))
@@ -1492,8 +1496,6 @@ func TestDashboardForwardsPagingToTheGuestThatOwnsTheScreen(t *testing.T) {
 	}
 }
 
-// Ctrl+Shift+\ has a dedicated scrollback binding so Ctrl+\ can switch panes
-// without also being a hidden third step in the focus cycle.
 func TestDashboardFocusesTerminalWhenLeavingScrollback(t *testing.T) {
 	for _, leave := range []tea.KeyPressMsg{scrollbackToggleKey(), key(tea.KeyEscape, ""), key(tea.KeyF6, "")} {
 		value := scrolledDashboard(t, 200)
@@ -1504,13 +1506,6 @@ func TestDashboardFocusesTerminalWhenLeavingScrollback(t *testing.T) {
 			t.Fatalf("Ctrl+Shift+\\ = (scrollback %v, focus %v), want scrollback without moving focus",
 				value.scrollback, value.focus)
 		}
-		updated, _ = value.Update(controlBackslashKey())
-		value = updated.(dashboard)
-		if !value.scrollback || value.focus != leftPane {
-			t.Fatalf("Ctrl+\\ in scrollback = (scrollback %v, focus %v), want no change",
-				value.scrollback, value.focus)
-		}
-
 		updated, _ = value.Update(leave)
 		value = updated.(dashboard)
 		if value.scrollback || value.focus != terminalPane {
@@ -2024,17 +2019,47 @@ func TestDashboardDoesNotUseRemovedLetterShortcuts(t *testing.T) {
 		})
 	}
 
-	for _, letter := range []rune{'q', 's'} {
-		value := scrolledDashboard(t, 200)
-		updated, _ := value.Update(key(tea.KeyF6, ""))
-		value = updated.(dashboard)
-		updated, command := value.Update(key(letter, string(letter)))
-		value = updated.(dashboard)
-		if command != nil || !value.scrollback {
-			t.Fatalf("%q in scrollback = (command %v, scrollback %v), want no shortcut action",
-				letter, command, value.scrollback)
-		}
+}
+
+func TestDashboardLeavesScrollbackForTerminalInput(t *testing.T) {
+	for _, test := range []struct {
+		message tea.KeyPressMsg
+		want    string
+	}{
+		{message: key('x', "x"), want: "x"},
+		{message: key('k', "k"), want: "k"},
+		{message: key(tea.KeyEnter, ""), want: "\r"},
+		{message: key(tea.KeyPgUp, ""), want: "\x1b[5~"},
+		{message: controlBackslashKey(), want: "\x1c"},
+	} {
+		t.Run(test.message.String(), func(t *testing.T) {
+			value := scrolledDashboard(t, 200)
+			updated, _ := value.Update(key(tea.KeyF6, ""))
+			value = updated.(dashboard)
+
+			updated, _ = value.Update(test.message)
+			value = updated.(dashboard)
+			if value.scrollback || value.scrollOffset != 0 || value.focus != terminalPane {
+				t.Fatalf("%q = (scrollback %v, offset %d, focus %v), want terminal input mode",
+					test.message.String(), value.scrollback, value.scrollOffset, value.focus)
+			}
+			waitForGuest(t, value.terminal.stream.(*memoryStream), test.want)
+		})
 	}
+}
+
+func TestDashboardLeavesScrollbackForPaste(t *testing.T) {
+	value := scrolledDashboard(t, 200)
+	updated, _ := value.Update(key(tea.KeyF6, ""))
+	value = updated.(dashboard)
+
+	updated, _ = value.Update(tea.PasteMsg{Content: "pasted"})
+	value = updated.(dashboard)
+	if value.scrollback || value.scrollOffset != 0 || value.focus != terminalPane {
+		t.Fatalf("paste = (scrollback %v, offset %d, focus %v), want terminal input mode",
+			value.scrollback, value.scrollOffset, value.focus)
+	}
+	waitForGuest(t, value.terminal.stream.(*memoryStream), "pasted")
 }
 
 // Unbound letters always belong to the shell in the terminal pane.
