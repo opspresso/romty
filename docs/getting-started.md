@@ -5,7 +5,7 @@
 - macOS or Linux
 - Go 1.25 or later when building from source
 
-romty manages local shells. It does not provide remote or SSH session management.
+romty manages shells local to the machine where it runs; it does not provide remote or SSH session management. To keep sessions on an always-on machine, connect to that host with SSH and run romty there. See [Remote access over SSH](runtime.md#remote-access-over-ssh).
 
 ## Install
 

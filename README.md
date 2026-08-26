@@ -6,6 +6,16 @@ romty is a terminal workspace manager for macOS and Linux. A detached local daem
 
 Website: [romty.dev](https://romty.dev)
 
+## Why romty
+
+AI coding agents often need more time and compute than a laptop can reliably provide. romty is designed to run on an always-on workstation at home or at the office, beside the repositories and tools the agents use. Connect to that machine over Tailscale and SSH, start romty and an agent, then disconnect without terminating the terminal session. The next SSH login can reopen the same romty workspace and continue from its retained output.
+
+Tailscale and SSH provide access to the machine; romty does not expose a network service. Its client and daemon communicate through a private Unix socket on that host. Sessions survive SSH disconnects and TUI exits, but not a machine shutdown or an explicit `romty stop`.
+
+```text
+laptop -> Tailscale -> SSH -> always-on machine -> romty -> AI coding agent
+```
+
 ## Features
 
 - Organize roots and their direct child directories as a workspace tree.

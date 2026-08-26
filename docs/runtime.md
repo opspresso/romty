@@ -1,5 +1,22 @@
 # Runtime
 
+## Remote access over SSH
+
+romty can keep AI coding sessions on an always-on macOS or Linux machine while the operator moves between laptops or locations. Install and run romty on the machine that owns the repositories and compute. Reach that machine through a private network such as Tailscale, log in with SSH, and run `romty` inside the SSH session.
+
+Closing SSH or exiting the TUI with `F4` leaves the daemon, PTYs, shells, and agent processes running on that machine. A later SSH login under the same Unix user can run `romty` again and reopen the live tabs with retained output. The host must remain powered on, and `romty stop` intentionally terminates every managed shell.
+
+```text
+local laptop
+    -> Tailscale or another private network
+        -> SSH
+            -> remote host: romty TUI
+                -> private local Unix socket
+                    -> romty daemon -> PTY -> AI coding agent
+```
+
+Tailscale and SSH are transport and login layers, not romty dependencies. romty does not listen on the tailnet or expose a TCP port; the TUI still reaches the daemon through the remote host's user-owned Unix socket. Normal SSH and host security practices remain responsible for remote access.
+
 ## Session lifecycle
 
 The TUI communicates with a detached local daemon over a Unix socket. The daemon owns the shell PTYs, so closing the TUI or its host terminal does not terminate running sessions. Reopening romty reconnects and restores recent output before continuing with the live stream.

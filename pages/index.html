@@ -4,18 +4,18 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>romty — persistent terminal workspaces</title>
+  <title>romty — keep AI coding sessions running</title>
   <meta name="description"
-    content="romty is a terminal workspace manager that keeps shell sessions running while its TUI is closed. Workspace tree, terminal tabs, and persistent PTY sessions in one process-light interface for macOS and Linux.">
+    content="Run AI coding agents on an always-on machine and reconnect over Tailscale and SSH. romty keeps terminal workspaces alive while its TUI is closed or disconnected.">
   <link rel="canonical" href="https://romty.dev/">
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="images/apple-touch-icon.png">
 
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://romty.dev/">
-  <meta property="og:title" content="romty — persistent terminal workspaces">
+  <meta property="og:title" content="romty — keep AI coding sessions running">
   <meta property="og:description"
-    content="Your shells keep running after you close the TUI. A workspace tree, terminal tabs, and persistent PTY sessions for macOS and Linux.">
+    content="Leave the machine, not the session. Run agents on an always-on host and reconnect over Tailscale and SSH.">
   <!-- Raster, not the SVG: no link-preview crawler renders SVG, and iOS ignores
        it for the touch icon. -->
   <meta property="og:image" content="https://romty.dev/images/og.png">
@@ -49,6 +49,7 @@
         <img src="images/romty.svg" alt="">romty
       </a>
       <div class="nav-links">
+        <a href="#remote">Remote workflow</a>
         <a href="#features">Features</a>
         <a href="#install">Install</a>
         <a href="#shortcuts" data-optional>Shortcuts</a>
@@ -60,12 +61,12 @@
   <header class="hero">
     <div class="container">
       <span class="eyebrow">roam + tty</span>
-      <h1>romty</h1>
-      <p class="lead">Your shells keep running. The TUI doesn't have to.</p>
+      <h1>Leave the machine.<br><span>Keep the agent running.</span></h1>
+      <p class="lead">AI coding sessions belong on the machine that can stay on.</p>
       <p class="sub">
-        A terminal workspace manager for macOS and Linux. Close the window, reboot your
-        editor, come back tomorrow — a detached daemon owns the PTYs, so the sessions are
-        still there with their output intact.
+        Run romty on a powerful workstation at home or at the office. Connect through
+        Tailscale and SSH, start an agent, disconnect, and return from anywhere to the same
+        terminal session with its output intact.
       </p>
       <div class="cta">
         <span class="copy-line">
@@ -83,6 +84,38 @@
       </div>
     </div>
   </header>
+
+  <section class="remote-story" id="remote">
+    <div class="container">
+      <figure class="remote-visual">
+        <img src="images/romty-remote-agent.webp"
+          alt="A travel laptop reconnecting through a private mesh to an always-on workstation where AI coding agents continue running"
+          width="1672" height="941">
+        <figcaption>
+          <span>your laptop</span>
+          <b>Tailscale &rarr; SSH &rarr; romty</b>
+          <span>always-on machine</span>
+        </figcaption>
+      </figure>
+      <div class="remote-copy">
+        <p class="remote-kicker">One session. More than one place.</p>
+        <h2>The compute stays put. You don't have to.</h2>
+        <p>
+          Your laptop is only the way in. The agent, shell, working tree, and romty daemon
+          stay together on the remote machine, so closing SSH does not interrupt the work.
+        </p>
+        <ol class="remote-steps">
+          <li><b>Connect</b><span>Reach your private machine with Tailscale and SSH.</span></li>
+          <li><b>Run</b><span>Start romty and your coding agents beside the source tree.</span></li>
+          <li><b>Return</b><span>Reconnect later and reopen the same live terminal tabs.</span></li>
+        </ol>
+        <p class="remote-note">
+          Tailscale is optional transport, not a romty dependency. romty stays local to the
+          remote host and listens only on a Unix socket owned by your user.
+        </p>
+      </div>
+    </div>
+  </section>
 
   <section class="demo">
     <div class="container">
@@ -214,11 +247,11 @@
               <path d="M12 7v4" />
             </svg>
           </span>
-          <h3>The mouse stays yours</h3>
+          <h3>Scroll from the live screen</h3>
           <p>
-            romty leaves mouse tracking off, so your terminal's own selection and copy keep
-            working over it. File view claims the wheel for diff scrolling, and applications
-            that want the mouse can have it per configuration.
+            The wheel enters terminal history without a mode switch, while typing returns to
+            the live shell without dropping the first key. Applications that request the mouse
+            can still have it through passthrough.
           </p>
         </div>
 
