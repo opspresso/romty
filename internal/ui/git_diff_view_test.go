@@ -50,7 +50,12 @@ func TestDashboardTogglesGitDiffViewForContextWorkspace(t *testing.T) {
 	if diffCommand == nil || len(value.gitDiff.files) != 2 || value.gitDiff.fileIndex != 0 || !value.gitDiff.diffPending {
 		t.Fatalf("changed files result = (command %v, state %#v)", diffCommand, value.gitDiff)
 	}
-	updated, _ = value.Update(diffCommand())
+	diffMessage := diffCommand()
+	loadedDiff := diffMessage.(gitFileDiffMsg)
+	if loadedDiff.lines == nil || !loadedDiff.syntaxHighlighted {
+		t.Fatalf("background diff result was not prepared for rendering: %#v", loadedDiff)
+	}
+	updated, _ = value.Update(diffMessage)
 	value = updated.(dashboard)
 	rendered := ansi.Strip(value.render())
 	for _, fragment := range []string{"Changes · alpha", "README.md", "▾ internal/", "▾ ui/", "view.go", "Diff · README.md", "-old", "+new"} {
@@ -78,11 +83,15 @@ func TestDashboardExpandsTabsInLoadedGitDiff(t *testing.T) {
 		request:   1,
 	}
 
+	lines := normalizeGitDiffLines("@@ -1 +1 @@\n-\told\tvalue\n+\tnew\tvalue")
+	syntax, syntaxHighlighted := highlightGitDiffSyntax("file.go", lines)
 	updated, _ := value.handleGitFileDiff(gitFileDiffMsg{
-		path:     "/projects/alpha",
-		filePath: "file.go",
-		request:  1,
-		diff:     "@@ -1 +1 @@\n-\told\tvalue\n+\tnew\tvalue",
+		path:              "/projects/alpha",
+		filePath:          "file.go",
+		request:           1,
+		lines:             lines,
+		syntax:            syntax,
+		syntaxHighlighted: syntaxHighlighted,
 	})
 	value = updated.(dashboard)
 
@@ -212,14 +221,14 @@ func TestSplitGitDiffRowsPairRemovedAndAddedLines(t *testing.T) {
 		" tail",
 	})
 	want := []gitSplitDiffRow{
-		{full: "Staged changes"},
-		{full: "diff --git a/file.txt b/file.txt"},
-		{full: "@@ -1,3 +1,4 @@"},
-		{left: " same", right: " same"},
-		{left: "-old one", right: "+new one"},
-		{left: "-old two", right: "+new two"},
-		{right: "+new three"},
-		{left: " tail", right: " tail"},
+		{full: "Staged changes", fullIndex: 0, leftIndex: -1, rightIndex: -1},
+		{full: "diff --git a/file.txt b/file.txt", fullIndex: 1, leftIndex: -1, rightIndex: -1},
+		{full: "@@ -1,3 +1,4 @@", fullIndex: 2, leftIndex: -1, rightIndex: -1},
+		{left: " same", right: " same", fullIndex: -1, leftIndex: 3, rightIndex: 3},
+		{left: "-old one", right: "+new one", fullIndex: -1, leftIndex: 4, rightIndex: 6},
+		{left: "-old two", right: "+new two", fullIndex: -1, leftIndex: 5, rightIndex: 7},
+		{right: "+new three", fullIndex: -1, leftIndex: -1, rightIndex: 8},
+		{left: " tail", right: " tail", fullIndex: -1, leftIndex: 9, rightIndex: 9},
 	}
 	if len(rows) != len(want) {
 		t.Fatalf("split rows = %#v, want %#v", rows, want)
@@ -241,17 +250,17 @@ func TestSplitGitDiffRowsKeepNoNewlineMarkersWithChanges(t *testing.T) {
 			name:  "both sides",
 			lines: []string{"-old", "\\ No newline at end of file", "+new", "\\ No newline at end of file"},
 			want: []gitSplitDiffRow{
-				{left: "-old", right: "+new"},
-				{left: "\\ No newline at end of file", right: "\\ No newline at end of file"},
+				{left: "-old", right: "+new", fullIndex: -1, leftIndex: 0, rightIndex: 2},
+				{left: "\\ No newline at end of file", right: "\\ No newline at end of file", fullIndex: -1, leftIndex: 1, rightIndex: 3},
 			},
 		},
 		{
 			name:  "removed side only",
 			lines: []string{"-old", "\\ No newline at end of file", "+new one", "+new two"},
 			want: []gitSplitDiffRow{
-				{left: "-old", right: "+new one"},
-				{right: "+new two"},
-				{left: "\\ No newline at end of file"},
+				{left: "-old", right: "+new one", fullIndex: -1, leftIndex: 0, rightIndex: 2},
+				{right: "+new two", fullIndex: -1, leftIndex: -1, rightIndex: 3},
+				{left: "\\ No newline at end of file", fullIndex: -1, leftIndex: 1, rightIndex: -1},
 			},
 		},
 	} {

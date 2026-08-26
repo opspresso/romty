@@ -17,6 +17,14 @@ type uiStyles struct {
 	diffAdded           lipgloss.Style
 	diffRemoved         lipgloss.Style
 	diffHunk            lipgloss.Style
+	diffAddedLine       lipgloss.Style
+	diffRemovedLine     lipgloss.Style
+	syntaxKeyword       lipgloss.Style
+	syntaxName          lipgloss.Style
+	syntaxString        lipgloss.Style
+	syntaxNumber        lipgloss.Style
+	syntaxComment       lipgloss.Style
+	syntaxOperator      lipgloss.Style
 	tab                 lipgloss.Style
 	tabSelected         lipgloss.Style
 	tabRail             lipgloss.Style
@@ -49,6 +57,9 @@ func newUIStyles(hasDarkBackground bool) *uiStyles {
 	accentText := lightDark(lipgloss.Color("#115E59"), lipgloss.Color("#F0FDFA"))
 	errorColor := lightDark(lipgloss.Color("#BE123C"), lipgloss.Color("#FB7185"))
 	errorText := lightDark(lipgloss.Color("#FFFFFF"), lipgloss.Color("#0F172A"))
+	addedColor := lightDark(lipgloss.Color("#15803D"), lipgloss.Color("#86EFAC"))
+	addedBackground := lightDark(lipgloss.Color("#DAFBE1"), lipgloss.Color("#12261E"))
+	removedBackground := lightDark(lipgloss.Color("#FFEBE9"), lipgloss.Color("#301B1F"))
 
 	return &uiStyles{
 		paneTitle:           lipgloss.NewStyle().Foreground(muted).Bold(true),
@@ -62,9 +73,17 @@ func newUIStyles(hasDarkBackground bool) *uiStyles {
 		gitBranch:           lipgloss.NewStyle().Foreground(muted),
 		gitStatus:           lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B")),
 		gitConflict:         lipgloss.NewStyle().Foreground(errorColor),
-		diffAdded:           lipgloss.NewStyle().Foreground(lightDark(lipgloss.Color("#15803D"), lipgloss.Color("#86EFAC"))),
+		diffAdded:           lipgloss.NewStyle().Foreground(addedColor),
 		diffRemoved:         lipgloss.NewStyle().Foreground(errorColor),
 		diffHunk:            lipgloss.NewStyle().Foreground(accent).Bold(true),
+		diffAddedLine:       lipgloss.NewStyle().Foreground(addedColor).Background(addedBackground),
+		diffRemovedLine:     lipgloss.NewStyle().Foreground(errorColor).Background(removedBackground),
+		syntaxKeyword:       lipgloss.NewStyle().Foreground(lightDark(lipgloss.Color("#7C3AED"), lipgloss.Color("#C084FC"))).Bold(true),
+		syntaxName:          lipgloss.NewStyle().Foreground(lightDark(lipgloss.Color("#0369A1"), lipgloss.Color("#7DD3FC"))),
+		syntaxString:        lipgloss.NewStyle().Foreground(lightDark(lipgloss.Color("#047857"), lipgloss.Color("#6EE7B7"))),
+		syntaxNumber:        lipgloss.NewStyle().Foreground(lightDark(lipgloss.Color("#B45309"), lipgloss.Color("#FBBF24"))),
+		syntaxComment:       lipgloss.NewStyle().Foreground(muted).Italic(true),
+		syntaxOperator:      lipgloss.NewStyle().Foreground(accent),
 		tab:                 lipgloss.NewStyle().Foreground(muted).Background(surface),
 		tabSelected:         lipgloss.NewStyle().Foreground(accentText).Background(accentSurface).Bold(true),
 		tabRail:             lipgloss.NewStyle().Foreground(border),

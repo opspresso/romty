@@ -145,23 +145,26 @@ type dashboard struct {
 	// cursorPath is what the cursor is actually on. navIndex is only where
 	// that lands in the tree as it stands, and the tree is rebuilt on every
 	// refresh.
-	cursorPath            string
-	tabIndex              int
-	selectedWorkspaceID   string
-	selectedPath          string
-	inputMode             bool
-	input                 string
-	errorMessage          string
-	errorFrom             errorSource
-	noticeMessage         bool
-	terminal              *embeddedTerminal
-	modal                 modal
-	shutdownPending       bool
-	hookStatuses          []agenthooks.Status
-	hookInstallPending    bool
-	agentAnimationFrame   int
-	agentAnimationActive  bool
-	agentAnimationPending bool
+	cursorPath              string
+	tabIndex                int
+	selectedWorkspaceID     string
+	selectedPath            string
+	rememberedWorkspacePath string
+	rememberedTabID         string
+	restorePending          bool
+	inputMode               bool
+	input                   string
+	errorMessage            string
+	errorFrom               errorSource
+	noticeMessage           bool
+	terminal                *embeddedTerminal
+	modal                   modal
+	shutdownPending         bool
+	hookStatuses            []agenthooks.Status
+	hookInstallPending      bool
+	agentAnimationFrame     int
+	agentAnimationActive    bool
+	agentAnimationPending   bool
 	// removeTarget is the item the confirmation modal is asking about, held so
 	// the answer applies to the item the question named.
 	removeTarget   navItem
@@ -252,9 +255,11 @@ type terminalOpenedMsg struct {
 }
 
 type configSavedMsg struct {
-	leftWidth   int
-	gitDiffView string
-	err         error
+	leftWidth         int
+	gitDiffView       string
+	lastWorkspacePath string
+	lastTabID         string
+	err               error
 }
 
 type daemonStoppedMsg struct {
@@ -333,6 +338,7 @@ func newDashboardWithConfig(backend Backend, initial model.Snapshot, configPath 
 		gitFetchedAt:     now(),
 	}
 	value.ensureWorkspaceCursor()
+	value.restoreSelection()
 	value.agentAnimationActive = value.hasAnimatedAgent()
 	value.agentAnimationPending = value.agentAnimationActive
 	return value
@@ -343,6 +349,9 @@ func (m dashboard) Init() tea.Cmd {
 	// notch into arrow keys romty cannot tell from typed ones. Only scrollback
 	// wants them, so the mode is off until it opens.
 	commands := []tea.Cmd{tea.RequestBackgroundColor, m.refreshAgents(), m.initialGitStatus(), altScrollCommand(false)}
+	if m.restorePending {
+		commands = append(commands, m.openSelectedTerminal())
+	}
 	if m.agentAnimationPending {
 		commands = append(commands, animateAgentMarker())
 	}
@@ -502,7 +511,9 @@ func (m dashboard) update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.clearError(settingError)
 		}
 		viewChanged := message.gitDiffView != "" && message.gitDiffView != gitDiffViewSetting(m.gitDiffSplit)
-		if message.leftWidth != m.leftWidth || viewChanged {
+		selectionChanged := message.lastWorkspacePath != m.rememberedWorkspacePath ||
+			message.lastTabID != m.rememberedTabID
+		if message.leftWidth != m.leftWidth || viewChanged || selectionChanged {
 			// The width moved while this one was being written, so it is
 			// already out of date. A later save answers whatever this one said.
 			return m, m.saveConfig()
@@ -1061,9 +1072,12 @@ func (m dashboard) saveConfig() tea.Cmd {
 	config := m.config
 	config.LeftWidth = m.leftWidth
 	config.GitDiffView = gitDiffViewSetting(m.gitDiffSplit)
+	config.LastWorkspacePath = m.rememberedWorkspacePath
+	config.LastTabID = m.rememberedTabID
 	return func() tea.Msg {
 		return configSavedMsg{
 			leftWidth: config.LeftWidth, gitDiffView: config.GitDiffView,
+			lastWorkspacePath: config.LastWorkspacePath, lastTabID: config.LastTabID,
 			err: saveConfig(path, config),
 		}
 	}
@@ -1179,6 +1193,7 @@ func (m dashboard) handleOpenedTerminal(message terminalOpenedMsg) (tea.Model, t
 		}
 		return m, nil
 	}
+	m.restorePending = false
 	if message.err != nil {
 		m.setError(terminalError, message.err.Error())
 		m.focus = leftPane
@@ -1196,7 +1211,11 @@ func (m dashboard) handleOpenedTerminal(message terminalOpenedMsg) (tea.Model, t
 	m.focus = terminalPane
 	// A terminal that opened supersedes any complaint about terminals.
 	m.clearError(terminalError)
-	return m, tea.Batch(m.terminal.read(), m.resizeTerminal())
+	commands := []tea.Cmd{m.terminal.read(), m.resizeTerminal()}
+	if m.rememberSelection(message.tabID) && m.configPath != "" {
+		commands = append(commands, m.saveConfig())
+	}
+	return m, tea.Batch(commands...)
 }
 
 func (m dashboard) handleTerminalOutput(message terminalOutputMsg) (tea.Model, tea.Cmd) {
@@ -1826,6 +1845,50 @@ func (m *dashboard) syncSelection() {
 	}
 	m.selectedWorkspaceID = ""
 	m.selectedPath = ""
+}
+
+func (m *dashboard) restoreSelection() {
+	path, tabID := m.config.LastWorkspacePath, m.config.LastTabID
+	if path == "" || tabID == "" {
+		return
+	}
+	for navIndex, item := range m.navigationItems() {
+		if item.workspace.Path != path {
+			continue
+		}
+		for tabIndex, tab := range runningTabs(item.tabs) {
+			if tab.ID != tabID {
+				continue
+			}
+			m.navIndex = navIndex
+			m.cursorPath = path
+			m.tabIndex = tabIndex
+			m.selectedWorkspaceID = tab.WorkspaceID
+			m.selectedPath = path
+			m.rememberedWorkspacePath = path
+			m.rememberedTabID = tabID
+			m.restorePending = true
+			return
+		}
+	}
+}
+
+func (m *dashboard) rememberSelection(tabID string) bool {
+	for _, item := range m.navigationItems() {
+		if item.workspace.Path != m.selectedPath {
+			continue
+		}
+		for _, tab := range runningTabs(item.tabs) {
+			if tab.ID != tabID {
+				continue
+			}
+			changed := m.rememberedWorkspacePath != item.workspace.Path || m.rememberedTabID != tab.ID
+			m.rememberedWorkspacePath = item.workspace.Path
+			m.rememberedTabID = tab.ID
+			return changed
+		}
+	}
+	return false
 }
 
 func (m dashboard) navigationItems() []navItem {

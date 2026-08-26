@@ -14,7 +14,12 @@ import (
 
 func TestConfigRoundTrip(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "nested", "config.json")
-	want := Config{LeftWidth: 24, GitDiffView: "split"}
+	want := Config{
+		LeftWidth:         24,
+		GitDiffView:       "split",
+		LastWorkspacePath: "/projects/romty",
+		LastTabID:         "tab-2",
+	}
 
 	if err := saveConfig(path, want); err != nil {
 		t.Fatalf("saveConfig() error = %v", err)
@@ -23,7 +28,9 @@ func TestConfigRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("loadConfig() error = %v", err)
 	}
-	if got.LeftWidth != want.LeftWidth || got.MousePassthrough != want.MousePassthrough || got.GitDiffView != want.GitDiffView {
+	if got.LeftWidth != want.LeftWidth || got.MousePassthrough != want.MousePassthrough ||
+		got.GitDiffView != want.GitDiffView || got.LastWorkspacePath != want.LastWorkspacePath ||
+		got.LastTabID != want.LastTabID {
 		t.Fatalf("loadConfig() = %#v, want %#v", got, want)
 	}
 	info, err := os.Stat(path)

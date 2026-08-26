@@ -19,7 +19,7 @@ romty stores data in a `romty` directory under the user configuration directory:
 | File | Purpose |
 |---|---|
 | `state.json` | Roots, workspaces, and terminal tab metadata |
-| `config.json` | TUI settings such as workspace pane width, mouse passthrough, and the last diff layout |
+| `config.json` | TUI settings such as the last workspace and tab, workspace pane width, mouse passthrough, and diff layout |
 | `daemon.sock` | Local client-daemon Unix socket |
 | `daemon.sock.lock` | Lock held by the running daemon |
 | `daemon.log` | Detached daemon output and failures |
