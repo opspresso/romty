@@ -142,6 +142,87 @@ func TestDashboardColorsChangedFilesByStatus(t *testing.T) {
 	}
 }
 
+func TestSplitGitDiffRowsPairRemovedAndAddedLines(t *testing.T) {
+	rows := splitGitDiffRows([]string{
+		"Staged changes",
+		"diff --git a/file.txt b/file.txt",
+		"@@ -1,3 +1,4 @@",
+		" same",
+		"-old one",
+		"-old two",
+		"+new one",
+		"+new two",
+		"+new three",
+		" tail",
+	})
+	want := []gitSplitDiffRow{
+		{full: "Staged changes"},
+		{full: "diff --git a/file.txt b/file.txt"},
+		{full: "@@ -1,3 +1,4 @@"},
+		{left: " same", right: " same"},
+		{left: "-old one", right: "+new one"},
+		{left: "-old two", right: "+new two"},
+		{right: "+new three"},
+		{left: " tail", right: " tail"},
+	}
+	if len(rows) != len(want) {
+		t.Fatalf("split rows = %#v, want %#v", rows, want)
+	}
+	for index := range want {
+		if rows[index] != want[index] {
+			t.Fatalf("split row %d = %#v, want %#v", index, rows[index], want[index])
+		}
+	}
+}
+
+func TestDashboardTogglesInlineAndSplitGitDiff(t *testing.T) {
+	value := newDashboard(&fakeBackend{}, model.Snapshot{})
+	value.width = 120
+	value.height = 20
+	value.gitDiff = gitDiffView{
+		active:    true,
+		target:    model.Workspace{Name: "alpha", Path: "/projects/alpha"},
+		files:     []gitChangedFile{{Path: "file.txt", IndexStatus: ' ', WorkTreeStatus: 'M'}},
+		diffLines: []string{"@@ -1 +1 @@", "-old", "+new"},
+	}
+
+	inline := ansi.Strip(value.render())
+	if !strings.Contains(inline, "Diff · file.txt · inline") {
+		t.Fatalf("inline title is missing:\n%s", inline)
+	}
+	updated, _ := value.Update(key('v', "v"))
+	value = updated.(dashboard)
+	split := ansi.Strip(value.render())
+	if !value.gitDiff.split || !strings.Contains(split, "Diff · file.txt · split") ||
+		!lineContainsInOrder(split, "-old", "│", "+new") {
+		t.Fatalf("split view is incomplete:\n%s", split)
+	}
+	updated, _ = value.Update(key('v', "v"))
+	value = updated.(dashboard)
+	if value.gitDiff.split {
+		t.Fatal("a second v did not restore inline view")
+	}
+}
+
+func lineContainsInOrder(value string, fragments ...string) bool {
+	for _, line := range strings.Split(value, "\n") {
+		position := 0
+		matched := true
+		for _, fragment := range fragments {
+			index := strings.Index(line[position:], fragment)
+			if index < 0 {
+				matched = false
+				break
+			}
+			position += index + len(fragment)
+		}
+		if matched {
+			return true
+		}
+	}
+	return false
+}
+
 func TestDashboardGitDiffViewHandlesCleanAndFailedReads(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, model.Snapshot{})
 	value.gitDiff = gitDiffView{active: true, target: model.Workspace{Name: "alpha", Path: "/projects/alpha"}, filesPending: true, request: 1}

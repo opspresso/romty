@@ -23,6 +23,7 @@ type gitDiffView struct {
 	fileIndex    int
 	diffLines    []string
 	diffOffset   int
+	split        bool
 	filesPending bool
 	diffPending  bool
 	err          string
@@ -153,6 +154,9 @@ func (m dashboard) handleGitDiffKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd
 		return m, m.loadChangedFiles()
 	case "esc":
 		return m.toggleGitDiffView()
+	case "v":
+		m.gitDiff.split = !m.gitDiff.split
+		m.gitDiff.diffOffset = min(m.gitDiff.diffOffset, m.maximumGitDiffOffset())
 	case "up", "k":
 		return m.moveGitDiffFile(-1)
 	case "down", "j":
@@ -190,7 +194,11 @@ func (m dashboard) gitDiffPageSize() int {
 }
 
 func (m dashboard) maximumGitDiffOffset() int {
-	return max(len(m.gitDiff.diffLines)-m.gitDiffPageSize(), 0)
+	lineCount := len(m.gitDiff.diffLines)
+	if m.gitDiff.split {
+		lineCount = len(splitGitDiffRows(m.gitDiff.diffLines))
+	}
+	return max(lineCount-m.gitDiffPageSize(), 0)
 }
 
 func (m dashboard) renderGitDiffPanes(leftWidth, rightWidth, height int) []string {
@@ -289,7 +297,11 @@ func (m dashboard) renderGitFileDiff(width, height int) []string {
 	if path != "" {
 		title += " · " + displayText(path)
 	}
-	title += " "
+	mode := "inline"
+	if m.gitDiff.split {
+		mode = "split"
+	}
+	title += " · " + mode + " "
 	header := m.styles.paneTitle.Render(truncate(title, width))
 	header += m.styles.tabRail.Render(strings.Repeat("─", max(width-lipgloss.Width(header), 0)))
 	lines := []string{header, ""}
@@ -303,11 +315,88 @@ func (m dashboard) renderGitFileDiff(width, height int) []string {
 	}
 	capacity := max(height-len(lines), 0)
 	start := min(m.gitDiff.diffOffset, m.maximumGitDiffOffset())
+	if m.gitDiff.split {
+		rows := splitGitDiffRows(m.gitDiff.diffLines)
+		end := min(start+capacity, len(rows))
+		for _, row := range rows[start:end] {
+			lines = append(lines, m.renderGitSplitDiffRow(row, width))
+		}
+		return lines
+	}
 	end := min(start+capacity, len(m.gitDiff.diffLines))
 	for _, line := range m.gitDiff.diffLines[start:end] {
 		lines = append(lines, m.renderGitDiffLine(displayText(line), width))
 	}
 	return lines
+}
+
+type gitSplitDiffRow struct {
+	full  string
+	left  string
+	right string
+}
+
+func splitGitDiffRows(lines []string) []gitSplitDiffRow {
+	rows := make([]gitSplitDiffRow, 0, len(lines))
+	for index := 0; index < len(lines); {
+		line := lines[index]
+		if isRemovedDiffLine(line) || isAddedDiffLine(line) {
+			removed, added := make([]string, 0), make([]string, 0)
+			for index < len(lines) && (isRemovedDiffLine(lines[index]) || isAddedDiffLine(lines[index])) {
+				if isRemovedDiffLine(lines[index]) {
+					removed = append(removed, lines[index])
+				} else {
+					added = append(added, lines[index])
+				}
+				index++
+			}
+			for row := range max(len(removed), len(added)) {
+				value := gitSplitDiffRow{}
+				if row < len(removed) {
+					value.left = removed[row]
+				}
+				if row < len(added) {
+					value.right = added[row]
+				}
+				rows = append(rows, value)
+			}
+			continue
+		}
+		if strings.HasPrefix(line, " ") {
+			rows = append(rows, gitSplitDiffRow{left: line, right: line})
+		} else {
+			rows = append(rows, gitSplitDiffRow{full: line})
+		}
+		index++
+	}
+	return rows
+}
+
+func isRemovedDiffLine(line string) bool {
+	return strings.HasPrefix(line, "-") && !strings.HasPrefix(line, "---")
+}
+
+func isAddedDiffLine(line string) bool {
+	return strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "+++")
+}
+
+func (m dashboard) renderGitSplitDiffRow(row gitSplitDiffRow, width int) string {
+	if row.full != "" {
+		return m.renderGitDiffLine(displayText(row.full), width)
+	}
+	leftWidth := max((width-separatorWidth)/2, 1)
+	rightWidth := max(width-leftWidth-separatorWidth, 1)
+	separator := " " + m.styles.divider.Render("│") + " "
+	leftStyle, rightStyle := m.styles.navigationItem, m.styles.navigationItem
+	if isRemovedDiffLine(row.left) {
+		leftStyle = m.styles.diffRemoved
+	}
+	if isAddedDiffLine(row.right) {
+		rightStyle = m.styles.diffAdded
+	}
+	left := leftStyle.Render(pad(truncate(displayText(row.left), leftWidth), leftWidth))
+	right := rightStyle.Render(truncate(displayText(row.right), rightWidth))
+	return left + separator + right
 }
 
 func (m dashboard) renderGitDiffLine(line string, width int) string {
