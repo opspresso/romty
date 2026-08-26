@@ -111,7 +111,23 @@ func TestDashboardNavigatesAndScrollsGitDiffView(t *testing.T) {
 	if value.gitDiff.diffOffset != value.maximumGitDiffOffset() {
 		t.Fatalf("End diff offset = %d, want %d", value.gitDiff.diffOffset, value.maximumGitDiffOffset())
 	}
-
+	maximum := value.gitDiff.diffOffset
+	updated, _ = value.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyUp, Mod: tea.ModCtrl}))
+	value = updated.(dashboard)
+	if value.gitDiff.diffOffset != maximum-1 {
+		t.Fatalf("Ctrl+Up diff offset = %d, want %d", value.gitDiff.diffOffset, maximum-1)
+	}
+	updated, _ = value.Update(tea.MouseWheelMsg{
+		X: value.dimensions().leftWidth + separatorWidth,
+		Y: 4, Button: tea.MouseWheelUp,
+	})
+	value = updated.(dashboard)
+	if value.gitDiff.diffOffset != max(maximum-4, 0) {
+		t.Fatalf("wheel up diff offset = %d, want %d", value.gitDiff.diffOffset, max(maximum-4, 0))
+	}
+	if value.View().MouseMode != tea.MouseModeCellMotion {
+		t.Fatalf("file view mouse mode = %v, want cell motion", value.View().MouseMode)
+	}
 }
 
 func TestDashboardColorsChangedFilesByStatus(t *testing.T) {

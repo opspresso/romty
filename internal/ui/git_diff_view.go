@@ -166,6 +166,10 @@ func (m dashboard) handleGitDiffKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd
 		return m.moveGitDiffFile(-1)
 	case "down", "j":
 		return m.moveGitDiffFile(1)
+	case "ctrl+up":
+		m.scrollGitDiff(-1)
+	case "ctrl+down":
+		m.scrollGitDiff(1)
 	case "pgup", "ctrl+b":
 		m.scrollGitDiff(-m.gitDiffPageSize())
 	case "pgdown", "ctrl+f":
@@ -174,6 +178,20 @@ func (m dashboard) handleGitDiffKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd
 		m.gitDiff.diffOffset = 0
 	case "end", "G":
 		m.gitDiff.diffOffset = m.maximumGitDiffOffset()
+	}
+	return m, nil
+}
+
+func (m dashboard) handleGitDiffMouse(message tea.MouseMsg) (tea.Model, tea.Cmd) {
+	wheel, ok := message.(tea.MouseWheelMsg)
+	if !ok || wheel.X < m.dimensions().leftWidth+separatorWidth {
+		return m, nil
+	}
+	switch wheel.Button {
+	case tea.MouseWheelUp:
+		m.scrollGitDiff(-3)
+	case tea.MouseWheelDown:
+		m.scrollGitDiff(3)
 	}
 	return m, nil
 }

@@ -408,7 +408,7 @@ func (m dashboard) update(message tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleKey(message)
 	case tea.MouseClickMsg, tea.MouseReleaseMsg, tea.MouseWheelMsg, tea.MouseMotionMsg:
 		if m.gitDiff.active {
-			return m, nil
+			return m.handleGitDiffMouse(message.(tea.MouseMsg))
 		}
 		return m.forwardMouse(message.(tea.MouseMsg))
 	case tea.PasteMsg:
@@ -1991,12 +1991,16 @@ func (m dashboard) View() tea.View {
 }
 
 // mouseMode keeps the mouse with the host terminal, where its native drag
-// selection lives. Copy mode takes the wheel through alternate scroll, which
-// arrives as arrow keys, instead of claiming the mouse. The only handover is
-// to a guest application that asked for the mouse, and only when the user
-// opted in, which is the same trade tmux makes for `set -g mouse on`.
+// selection lives. File view temporarily claims it for wheel scrolling. Copy
+// mode takes the wheel through alternate scroll, which arrives as arrow keys,
+// instead of claiming the mouse. The other handover is to a guest application
+// that asked for the mouse, and only when the user opted in, which is the same
+// trade tmux makes for `set -g mouse on`.
 func (m dashboard) mouseMode() tea.MouseMode {
-	if m.gitDiff.active || !m.mousePassthrough || m.scrollback || m.terminal == nil {
+	if m.gitDiff.active {
+		return tea.MouseModeCellMotion
+	}
+	if !m.mousePassthrough || m.scrollback || m.terminal == nil {
 		return tea.MouseModeNone
 	}
 	return m.terminal.guestMouseMode()
