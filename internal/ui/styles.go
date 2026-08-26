@@ -14,6 +14,9 @@ type uiStyles struct {
 	gitBranch           lipgloss.Style
 	gitStatus           lipgloss.Style
 	gitConflict         lipgloss.Style
+	diffAdded           lipgloss.Style
+	diffRemoved         lipgloss.Style
+	diffHunk            lipgloss.Style
 	tab                 lipgloss.Style
 	tabSelected         lipgloss.Style
 	tabRail             lipgloss.Style
@@ -59,6 +62,9 @@ func newUIStyles(hasDarkBackground bool) *uiStyles {
 		gitBranch:           lipgloss.NewStyle().Foreground(muted),
 		gitStatus:           lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B")),
 		gitConflict:         lipgloss.NewStyle().Foreground(errorColor),
+		diffAdded:           lipgloss.NewStyle().Foreground(lightDark(lipgloss.Color("#15803D"), lipgloss.Color("#86EFAC"))),
+		diffRemoved:         lipgloss.NewStyle().Foreground(errorColor),
+		diffHunk:            lipgloss.NewStyle().Foreground(accent).Bold(true),
 		tab:                 lipgloss.NewStyle().Foreground(muted).Background(surface),
 		tabSelected:         lipgloss.NewStyle().Foreground(accentText).Background(accentSurface).Bold(true),
 		tabRail:             lipgloss.NewStyle().Foreground(border),

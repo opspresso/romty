@@ -21,6 +21,8 @@ romty refreshes local Git state every 10 seconds. It fetches remote-tracking ref
 
 Press `Ctrl`+`Shift`+`G` to open Git actions for a workspace. From the workspace pane it targets the row under the cursor; from the terminal pane or scrollback it targets the open terminal workspace. The menu provides `Status`, `Fetch`, `Pull`, and `Push`. `Pull` uses `--ff-only` so it never creates a merge commit. Commands run without interactive credential prompts, and their output or error remains in a scrollable result modal. Press `Enter` from a result to return to the action menu.
 
+Press `Ctrl`+`Shift`+`F` to toggle the file view for the same contextual workspace. Its left pane shows staged, unstaged, and untracked files as a directory tree. Added and untracked files are green, modified and renamed files are amber, and deleted or conflicted files are red. The right pane shows the selected file's Git diff; press `v` to switch between inline and split layouts. The last layout is restored when the view or romty is opened again. A file with both staged and unstaged edits shows both sections, and an untracked text file is compared with an empty file. Press `↑`/`↓` to select a file, use `Ctrl`+`↑`/`↓`, the mouse wheel, or the paging keys to read its diff, and press `r` to reload the worktree.
+
 ## Keyboard shortcuts
 
 `F1` through `F7` work in both panes and with regular modals open. The root path prompt owns its input until submitted or cancelled. While a daemon stop, hook installation, or Git command is running, only `F4` is accepted so the TUI can close. Press `F1` for the complete in-app reference.
@@ -65,6 +67,7 @@ Press `Ctrl`+`Shift`+`G` to open Git actions for a workspace. From the workspace
 | Both panes | `Ctrl`+`Shift`+`\` | Enter or leave scrollback |
 | Both panes | `Ctrl`+`Shift`+`T` | Create and open a terminal tab |
 | Both panes | `Ctrl`+`Shift`+`G` | Open Git actions for the contextual workspace |
+| Both panes | `Ctrl`+`Shift`+`F` | Toggle the changed-file tree and Git diff for the contextual workspace |
 | Both panes | `Ctrl`+`Shift`+`←`/`→` | Switch terminal tab |
 | Both panes | `Ctrl`+`Shift`+`↑`/`↓` | Switch to a workspace with a running terminal |
 
@@ -96,6 +99,13 @@ Press `Ctrl`+`Shift`+`G` to open Git actions for a workspace. From the workspace
 | Git result | `Home`/`End` or `g`/`G` | Move to the first or last output line |
 | Git result | `Enter` / `Esc` | Return to the actions / close the result |
 | Running Git action | `F4` | Cancel the Git command and close the TUI |
+| File view | `↑`/`↓` or `k`/`j` | Select a changed file |
+| File view | `v` | Toggle the diff between inline and split layouts |
+| File view | `Ctrl`+`↑`/`↓` or mouse wheel | Move through the diff by line |
+| File view | `PgUp`/`PgDn` or `Ctrl+B`/`Ctrl+F` | Move one diff page |
+| File view | `Home`/`End` or `g`/`G` | Move to the first or last diff line |
+| File view | `F5` or `r` | Reload changed files and the selected diff |
+| File view | `Ctrl`+`Shift`+`F` or `Esc` | Close the file view |
 | Path prompt | Text or paste / `Backspace` | Enter or erase a path |
 | Path prompt | `Enter` / `Esc` | Submit / cancel |
 | Confirmation | `Enter` / `Esc` | Confirm / cancel |
@@ -116,7 +126,7 @@ romty keeps 10,000 scrollback lines for each terminal. Scrollback fills the widt
 
 Full-screen applications such as `vim`, `less`, and Claude Code use an alternate screen with no romty history. In that mode `Shift`+`PgUp`/`PgDn` is forwarded as plain `PgUp`/`PgDn` so the application can page itself.
 
-The mouse stays with the host terminal for native selection. Set `mouse_passthrough` in `config.json` to let applications receive it instead:
+The mouse stays with the host terminal for native selection except while file view is open, when its wheel scrolls the diff. Set `mouse_passthrough` in `config.json` to let applications receive it instead:
 
 ```json
 { "mouse_passthrough": true }
@@ -130,4 +140,4 @@ With passthrough enabled, the application mouse mode is mirrored until it exits 
 
 `F9` or `t` asks before stopping the daemon because this terminates every running shell. Once confirmed, shutdown cannot be cancelled.
 
-The workspace pane width is saved automatically in `config.json`. It is constrained to 18 through 40 columns and may shrink further when the terminal is narrow.
+The workspace pane width and last inline or split diff layout are saved automatically in `config.json`. The pane width is constrained to 18 through 40 columns and may shrink further when the terminal is narrow.

@@ -8,15 +8,18 @@ import (
 )
 
 const (
-	minimumLeftWidth = 18
-	maximumLeftWidth = 40
+	minimumLeftWidth  = 18
+	maximumLeftWidth  = 40
+	gitDiffViewInline = "inline"
+	gitDiffViewSplit  = "split"
 )
 
 type Config struct {
 	LeftWidth int `json:"left_width,omitempty"`
 	// MousePassthrough hands the mouse to applications that ask for it, at the
 	// cost of the host terminal's drag selection while they run.
-	MousePassthrough bool `json:"mouse_passthrough,omitempty"`
+	MousePassthrough bool   `json:"mouse_passthrough,omitempty"`
+	GitDiffView      string `json:"git_diff_view,omitempty"`
 	unknownFields    map[string]json.RawMessage
 }
 
@@ -32,6 +35,7 @@ func (c *Config) UnmarshalJSON(data []byte) error {
 	}
 	delete(fields, "left_width")
 	delete(fields, "mouse_passthrough")
+	delete(fields, "git_diff_view")
 	*c = Config(value)
 	c.unknownFields = fields
 	return nil
@@ -82,6 +86,9 @@ func saveConfig(path string, value Config) error {
 func validateConfig(value Config) error {
 	if value.LeftWidth != 0 && (value.LeftWidth < minimumLeftWidth || value.LeftWidth > maximumLeftWidth) {
 		return fmt.Errorf("left_width must be between %d and %d", minimumLeftWidth, maximumLeftWidth)
+	}
+	if value.GitDiffView != "" && value.GitDiffView != gitDiffViewInline && value.GitDiffView != gitDiffViewSplit {
+		return fmt.Errorf("git_diff_view must be %q or %q", gitDiffViewInline, gitDiffViewSplit)
 	}
 	return nil
 }

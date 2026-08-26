@@ -217,7 +217,8 @@
           <h3>The mouse stays yours</h3>
           <p>
             romty leaves mouse tracking off, so your terminal's own selection and copy keep
-            working over it. Applications that want the mouse can have it, per configuration.
+            working over it. File view claims the wheel for diff scrolling, and applications
+            that want the mouse can have it per configuration.
           </p>
         </div>
 
@@ -289,7 +290,7 @@
         <div class="key-row"><span class="caps"><kbd>F4</kbd><kbd>q</kbd><kbd>Ctrl+C</kbd></span><span>Quit romty</span>
         </div>
         <div class="key-row"><span class="caps"><kbd>F5</kbd><kbd>r</kbd></span><span>Refresh workspaces and Git
-            state</span></div>
+            state, or reload the file view</span></div>
         <div class="key-row"><span class="caps"><kbd>F6</kbd><kbd>s</kbd></span><span>Enter or leave scrollback</span>
         </div>
         <div class="key-row"><span class="caps"><kbd>F7</kbd></span><span>Switch between the panes</span></div>
@@ -299,7 +300,7 @@
             shell (workspace pane)</span></div>
         <div class="key-row"><span class="caps"><kbd>i</kbd></span><span>Open About (workspace pane)</span></div>
         <div class="key-row"><span class="caps"><kbd>↑/↓</kbd><kbd>k/j</kbd></span><span>Move
-            through workspaces, pickers, help, Git actions, or scrollable output</span>
+            through workspaces, changed files, pickers, help, Git actions, or scrollable output</span>
         </div>
         <div class="key-row"><span class="caps"><kbd>←/→</kbd><kbd>h/l</kbd></span><span>Move
             between terminal tabs, or open a picker directory and return to its parent</span>
@@ -316,6 +317,12 @@
             open a terminal tab in the selected or current workspace</span></div>
         <div class="key-row"><span class="caps"><kbd>Ctrl+Shift+G</kbd></span><span>Open Git
             actions for the selected or current workspace</span></div>
+        <div class="key-row"><span class="caps"><kbd>Ctrl+Shift+F</kbd></span><span>Toggle the changed-file tree
+            and Git diff for the selected or current workspace</span></div>
+        <div class="key-row"><span class="caps"><kbd>v</kbd></span><span>Toggle a file diff between inline and
+            split layouts; the last layout is remembered</span></div>
+        <div class="key-row"><span class="caps"><kbd>Ctrl+↑/↓</kbd><kbd>Wheel</kbd></span><span>Move through a file
+            diff by line</span></div>
         <div class="key-row"><span class="caps"><kbd>Ctrl+Shift+←/→</kbd></span><span>Switch
             terminal tabs from either pane</span></div>
         <div class="key-row"><span class="caps"><kbd>Ctrl+Shift+↑/↓</kbd></span><span>Switch
@@ -323,7 +330,7 @@
         <div class="key-row"><span class="caps"><kbd>Shift+PgUp/PgDn</kbd></span><span>Enter
             scrollback or move a page at once</span></div>
         <div class="key-row"><span class="caps"><kbd>PgUp/PgDn</kbd><kbd>Ctrl+B/F</kbd></span><span>Move
-            a page in a picker, help, Git result, or scrollback</span></div>
+            a page in a picker, help, Git result, file diff, or scrollback</span></div>
         <div class="key-row"><span class="caps"><kbd>Home/End</kbd><kbd>g/G</kbd></span><span>Move
             to the beginning or end of contextual lists and output</span></div>
         <div class="key-row"><span class="caps"><kbd>←/→</kbd><kbd>[/]</kbd></span><span>Resize the workspace pane

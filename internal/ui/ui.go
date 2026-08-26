@@ -202,6 +202,8 @@ type dashboard struct {
 	gitActionError    string
 	gitActionOffset   int
 	gitActionCancel   func()
+	gitDiff           gitDiffView
+	gitDiffSplit      bool
 	styles            *uiStyles
 }
 
@@ -250,8 +252,9 @@ type terminalOpenedMsg struct {
 }
 
 type configSavedMsg struct {
-	leftWidth int
-	err       error
+	leftWidth   int
+	gitDiffView string
+	err         error
 }
 
 type daemonStoppedMsg struct {
@@ -325,6 +328,7 @@ func newDashboardWithConfig(backend Backend, initial model.Snapshot, configPath 
 		config:           config,
 		leftWidth:        config.LeftWidth,
 		mousePassthrough: config.MousePassthrough,
+		gitDiffSplit:     config.GitDiffView == gitDiffViewSplit,
 		styles:           newUIStyles(true),
 		gitFetchedAt:     now(),
 	}
@@ -403,11 +407,14 @@ func (m dashboard) update(message tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyPressMsg:
 		return m.handleKey(message)
 	case tea.MouseClickMsg, tea.MouseReleaseMsg, tea.MouseWheelMsg, tea.MouseMotionMsg:
+		if m.gitDiff.active {
+			return m.handleGitDiffMouse(message.(tea.MouseMsg))
+		}
 		return m.forwardMouse(message.(tea.MouseMsg))
 	case tea.PasteMsg:
 		if m.inputMode {
 			m.input += message.Content
-		} else if m.focus == terminalPane && m.terminal != nil {
+		} else if !m.gitDiff.active && m.focus == terminalPane && m.terminal != nil {
 			m.terminal.paste(message.Content)
 		}
 		return m, nil
@@ -468,6 +475,10 @@ func (m dashboard) update(message tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case gitActionMsg:
 		return m.handleGitActionResult(message)
+	case gitChangedFilesMsg:
+		return m.handleGitChangedFiles(message)
+	case gitFileDiffMsg:
+		return m.handleGitFileDiff(message)
 	case workspaceMsg:
 		return m.handleWorkspace(message)
 	case tabMsg:
@@ -487,7 +498,8 @@ func (m dashboard) update(message tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.clearError(settingError)
 		}
-		if message.leftWidth != m.leftWidth {
+		viewChanged := message.gitDiffView != "" && message.gitDiffView != gitDiffViewSetting(m.gitDiffSplit)
+		if message.leftWidth != m.leftWidth || viewChanged {
 			// The width moved while this one was being written, so it is
 			// already out of date. A later save answers whatever this one said.
 			return m, m.saveConfig()
@@ -561,6 +573,7 @@ var globalKeys = map[string]func(dashboard) (tea.Model, tea.Cmd){
 	},
 	"ctrl+shift+t": func(m dashboard) (tea.Model, tea.Cmd) { return m.newTab() },
 	"ctrl+shift+g": func(m dashboard) (tea.Model, tea.Cmd) { return m.openGitActions() },
+	"ctrl+shift+f": func(m dashboard) (tea.Model, tea.Cmd) { return m.toggleGitDiffView() },
 	// Switching tabs from the terminal pane took Ctrl+\ and then two more keys.
 	// Ctrl+Shift+Left/Right is the chord a terminal with tabs binds, and a
 	// terminal reports it distinctly — Ctrl+Shift+Tab is not, because most
@@ -605,6 +618,18 @@ func (m dashboard) handleKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m.quit()
 		}
 		return m.handleModalKey(message)
+	}
+	if m.gitDiff.active && m.modal != noModal {
+		if action, ok := globalKeys[message.String()]; ok {
+			return action(m)
+		}
+		return m.handleModalKey(message)
+	}
+	if m.gitDiff.active {
+		if message.String() == "ctrl+shift+f" {
+			return m.toggleGitDiffView()
+		}
+		return m.handleGitDiffKey(message)
 	}
 	if action, ok := globalKeys[message.String()]; ok {
 		return action(m)
@@ -1028,8 +1053,12 @@ func (m dashboard) saveConfig() tea.Cmd {
 	// whatever a newer one had written.
 	config := m.config
 	config.LeftWidth = m.leftWidth
+	config.GitDiffView = gitDiffViewSetting(m.gitDiffSplit)
 	return func() tea.Msg {
-		return configSavedMsg{leftWidth: config.LeftWidth, err: saveConfig(path, config)}
+		return configSavedMsg{
+			leftWidth: config.LeftWidth, gitDiffView: config.GitDiffView,
+			err: saveConfig(path, config),
+		}
 	}
 }
 
@@ -1953,7 +1982,7 @@ func (m dashboard) View() tea.View {
 	view.WindowTitle = "romty"
 	view.MouseMode = m.mouseMode()
 	view.KeyboardEnhancements.ReportAlternateKeys = true
-	if !m.scrollback && m.focus == terminalPane && m.terminal != nil {
+	if !m.gitDiff.active && !m.scrollback && m.focus == terminalPane && m.terminal != nil {
 		originX, originY := m.dimensions().terminalOrigin()
 		position := m.terminal.cursorPosition()
 		view.Cursor = tea.NewCursor(originX+position.X, originY+position.Y)
@@ -1962,11 +1991,15 @@ func (m dashboard) View() tea.View {
 }
 
 // mouseMode keeps the mouse with the host terminal, where its native drag
-// selection lives. Copy mode takes the wheel through alternate scroll, which
-// arrives as arrow keys, instead of claiming the mouse. The only handover is
-// to a guest application that asked for the mouse, and only when the user
-// opted in, which is the same trade tmux makes for `set -g mouse on`.
+// selection lives. File view temporarily claims it for wheel scrolling. Copy
+// mode takes the wheel through alternate scroll, which arrives as arrow keys,
+// instead of claiming the mouse. The other handover is to a guest application
+// that asked for the mouse, and only when the user opted in, which is the same
+// trade tmux makes for `set -g mouse on`.
 func (m dashboard) mouseMode() tea.MouseMode {
+	if m.gitDiff.active {
+		return tea.MouseModeCellMotion
+	}
 	if !m.mousePassthrough || m.scrollback || m.terminal == nil {
 		return tea.MouseModeNone
 	}
@@ -1980,7 +2013,9 @@ func (m dashboard) render() string {
 	// it hides are not built at all: rendering both meant every frame drew the
 	// workspace tree and a second terminal viewport it then threw away.
 	var lines []string
-	if m.scrollback {
+	if m.gitDiff.active {
+		lines = m.renderGitDiffPanes(view.leftWidth, view.rightWidth, view.bodyHeight)
+	} else if m.scrollback {
 		lines = m.renderRows(m.renderTerminal(width), width, view.bodyHeight)
 	} else {
 		lines = m.renderPanes(view.leftWidth, view.rightWidth, view.bodyHeight)
@@ -2118,6 +2153,19 @@ func (m dashboard) renderStatus(width, bodyHeight int) []string {
 		status = renderShortcuts(m.styles, width,
 			shortcut{key: "Enter", description: "install hooks"},
 			shortcut{key: "Esc", description: "skip"},
+		)
+	case m.gitDiff.active:
+		rail = renderShortcutRail(m.styles, width,
+			shortcut{key: "Ctrl+Shift+F", description: "close file view"},
+		)
+		status = renderShortcuts(m.styles, width,
+			shortcut{key: "↑/↓", description: "file"},
+			shortcut{key: "v", description: "layout"},
+			shortcut{key: "Ctrl+↑/↓", description: "line"},
+			shortcut{key: "PgUp/PgDn", description: "diff"},
+			shortcut{key: "Home/End", description: "first/last"},
+			shortcut{key: "r", description: "refresh"},
+			shortcut{key: "Esc", description: "close"},
 		)
 	case m.scrollback:
 		status = truncate(
@@ -2268,7 +2316,7 @@ func (m dashboard) helpEntries() []string {
 	return []string{
 		m.styles.modalStrong.Render("romty") + m.styles.empty.Render("  "+version.String()) +
 			m.styles.modalBody.Render("  "+tagline),
-		renderHelpSection(m.styles, "CORE", "function keys global; aliases workspace-only"),
+		renderHelpSection(m.styles, "CORE", "both panes; aliases workspace-only"),
 		renderHelpShortcut(m.styles, "Help", "F1", "?"),
 		renderHelpShortcut(m.styles, "Add root", "F2", "a"),
 		renderHelpShortcut(m.styles, "Config", "F3", ","),
@@ -2287,8 +2335,17 @@ func (m dashboard) helpEntries() []string {
 		renderHelpShortcut(m.styles, "Toggle pane focus", "Ctrl+\\"),
 		renderHelpShortcut(m.styles, "New tab", "Ctrl+Shift+T"),
 		renderHelpShortcut(m.styles, "Git actions", "Ctrl+Shift+G"),
+		renderHelpShortcut(m.styles, "Toggle file view", "Ctrl+Shift+F"),
 		renderHelpShortcut(m.styles, "Switch tab", "Ctrl+Shift+←/→"),
 		renderHelpShortcut(m.styles, "Switch workspace", "Ctrl+Shift+↑/↓"),
+		renderHelpSection(m.styles, "FILES", "changed file tree and Git diff"),
+		renderHelpShortcut(m.styles, "Select changed file", "↑/↓", "k/j"),
+		renderHelpShortcut(m.styles, "Toggle diff layout", "v"),
+		renderHelpShortcut(m.styles, "Scroll file diff line", "Ctrl+↑/↓", "Wheel"),
+		renderHelpShortcut(m.styles, "Scroll file diff", "PgUp/PgDn", "Ctrl+B/F"),
+		renderHelpShortcut(m.styles, "First / last diff line", "Home/End", "g/G"),
+		renderHelpShortcut(m.styles, "Refresh changed files", "r"),
+		renderHelpShortcut(m.styles, "Close file view", "Esc"),
 		renderHelpSection(m.styles, "SCROLLBACK", "terminal history"),
 		renderHelpShortcut(m.styles, "Enter / page history", "Shift+PgUp/PgDn"),
 		renderHelpShortcut(m.styles, "Toggle scrollback", "Ctrl+Shift+\\"),
