@@ -52,6 +52,10 @@ func TestReadGitChangedFilesPreservesRenameSource(t *testing.T) {
 	if files[0].Path != "renamed.txt" || files[0].OldPath != "staged.txt" || files[0].IndexStatus != 'R' {
 		t.Fatalf("renamed file = %#v", files[0])
 	}
+	diff, err := readGitFileDiff(repository, files[0])
+	if err != nil || !strings.Contains(diff, "rename from staged.txt") || !strings.Contains(diff, "rename to renamed.txt") {
+		t.Fatalf("renamed file diff = (%q, %v)", diff, err)
+	}
 }
 
 func TestReadGitFileDiffCombinesStagedAndUnstagedChanges(t *testing.T) {

@@ -71,6 +71,10 @@ func parseGitChangedFiles(output string) ([]gitChangedFile, error) {
 
 func readGitFileDiff(path string, file gitChangedFile) (string, error) {
 	sections := make([]string, 0, 2)
+	paths := []string{file.Path}
+	if file.OldPath != "" {
+		paths = append([]string{file.OldPath}, paths...)
+	}
 	if file.IndexStatus == '?' && file.WorkTreeStatus == '?' {
 		output, err := runGitDiff(path, true, "diff", "--no-index", "--no-ext-diff", "--no-color", "--", "/dev/null", file.Path)
 		if err != nil {
@@ -79,7 +83,8 @@ func readGitFileDiff(path string, file gitChangedFile) (string, error) {
 		return diffSection("Untracked file", output), nil
 	}
 	if file.IndexStatus != ' ' {
-		output, err := runGitDiff(path, false, "diff", "--cached", "--no-ext-diff", "--no-color", "--", file.Path)
+		arguments := append([]string{"diff", "--cached", "--no-ext-diff", "--no-color", "--"}, paths...)
+		output, err := runGitDiff(path, false, arguments...)
 		if err != nil {
 			return "", fmt.Errorf("read staged diff: %w", err)
 		}
@@ -88,7 +93,8 @@ func readGitFileDiff(path string, file gitChangedFile) (string, error) {
 		}
 	}
 	if file.WorkTreeStatus != ' ' {
-		output, err := runGitDiff(path, false, "diff", "--no-ext-diff", "--no-color", "--", file.Path)
+		arguments := append([]string{"diff", "--no-ext-diff", "--no-color", "--"}, paths...)
+		output, err := runGitDiff(path, false, arguments...)
 		if err != nil {
 			return "", fmt.Errorf("read unstaged diff: %w", err)
 		}
