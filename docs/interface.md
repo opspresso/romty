@@ -61,8 +61,8 @@ Press `Ctrl`+`Shift`+`G` to open Git actions for a workspace. From the workspace
 | Workspace | `←`/`→` or `h`/`l` | Select a terminal tab or `+` |
 | Workspace | `Enter` | Open the selection |
 | Workspace | `Tab` | Focus the terminal |
-| Terminal | `Ctrl+\` | Focus the workspace and refresh it |
-| Workspace | `Ctrl+\` | Enter scrollback; press it again to leave |
+| Both panes | `Ctrl+\` | Toggle focus between the workspace and terminal panes |
+| Both panes | `Ctrl`+`Shift`+`\` | Enter or leave scrollback |
 | Both panes | `Ctrl`+`Shift`+`T` | Create and open a terminal tab |
 | Both panes | `Ctrl`+`Shift`+`G` | Open Git actions for the contextual workspace |
 | Both panes | `Ctrl`+`Shift`+`←`/`→` | Switch terminal tab |
@@ -82,7 +82,7 @@ Press `Ctrl`+`Shift`+`G` to open Git actions for a workspace. From the workspace
 | Scrollback | `PgUp`/`PgDn` or `Ctrl+B`/`Ctrl+F` | Move one history page |
 | Scrollback | `Home`/`End` or `g`/`G` | Move to the oldest output or live screen |
 | Scrollback | Wheel | Move through history |
-| Scrollback | `F6`, `F7`, `Ctrl+\`, `Esc`, `q`, `s` | Leave scrollback |
+| Scrollback | `F6`, `F7`, `Ctrl`+`Shift`+`\`, `Esc`, `q`, `s` | Leave scrollback |
 | Help | `↑`/`↓` or `k`/`j` | Move one reference line |
 | Help | `PgUp`/`PgDn` or `Ctrl+B`/`Ctrl+F` | Move one reference page |
 | Help | `Home`/`End` or `g`/`G` | Move to the first or last reference entry |
@@ -106,7 +106,7 @@ Press `Ctrl`+`Shift`+`G` to open Git actions for a workspace. From the workspace
 
 The `+` key is not a shortcut. Select the `+` tab with `←`/`→` and press `Enter`, or use `Ctrl`+`Shift`+`T`. From the workspace pane the shortcut uses the workspace under the cursor; from the terminal pane or scrollback it uses the open terminal workspace. The switch shortcuts wrap at both ends.
 
-`F7` switches panes. `Tab` enters the terminal and `Ctrl+\` returns to the workspace; pressing `Ctrl+\` again opens scrollback. In the terminal pane only global shortcuts are captured. Other keyboard and paste input, including `F8`, `F9`, and ordinary `Ctrl` combinations, is forwarded to the PTY.
+`F7` and `Ctrl+\` switch panes in either direction. `Tab` also enters the terminal. `Ctrl`+`Shift`+`\` enters or leaves scrollback. In the terminal pane only global shortcuts are captured. Other keyboard and paste input, including `F8`, `F9`, and ordinary `Ctrl` combinations, is forwarded to the PTY.
 
 romty discovers direct child directories only. Press `F5` after a command adds or removes a child. An unreadable root is marked `✗` and listed without workspaces; other roots remain usable.
 

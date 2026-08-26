@@ -1158,7 +1158,8 @@ func TestDashboardScrollsTerminalHistory(t *testing.T) {
 		t.Fatalf("oldest visible row = %q, want the first retained line %q", oldest, retained)
 	}
 	if rendered := ansi.Strip(value.render()); !strings.Contains(rendered, "SCROLLBACK") ||
-		!strings.Contains(rendered, fmt.Sprintf("%d/%d", history, history)) {
+		!strings.Contains(rendered, fmt.Sprintf("%d/%d", history, history)) ||
+		!strings.Contains(rendered, "Ctrl+Shift+\\") {
 		t.Fatalf("status bar does not report the scrollback position:\n%s", rendered)
 	}
 	updated, _ = value.Update(key(tea.KeyEnd, ""))
@@ -1266,8 +1267,20 @@ func TestDashboardEntersScrollbackFromEveryBinding(t *testing.T) {
 	}{
 		{name: "F6", enter: []tea.KeyPressMsg{key(tea.KeyF6, "")}, focus: terminalPane},
 		{
-			name:  "Ctrl+\\ twice",
-			enter: []tea.KeyPressMsg{tea.KeyPressMsg(tea.Key{Code: '\\', Mod: tea.ModCtrl}), tea.KeyPressMsg(tea.Key{Code: '\\', Mod: tea.ModCtrl})},
+			name:  "Ctrl+Shift+\\",
+			enter: []tea.KeyPressMsg{scrollbackToggleKey()},
+			focus: terminalPane,
+		},
+		{
+			name:  "Ctrl+Shift+\\ from the workspace pane",
+			enter: []tea.KeyPressMsg{scrollbackToggleKey()},
+			focus: leftPane,
+		},
+		{
+			name: "Ctrl+Shift+\\ with an alternate layout",
+			enter: []tea.KeyPressMsg{tea.KeyPressMsg(tea.Key{
+				Code: '₩', ShiftedCode: '|', BaseCode: '\\', Mod: tea.ModCtrl | tea.ModShift,
+			})},
 			focus: terminalPane,
 		},
 		{
@@ -1505,21 +1518,22 @@ func TestDashboardForwardsPagingToTheGuestThatOwnsTheScreen(t *testing.T) {
 	}
 }
 
-// Ctrl+\ cycles terminal -> workspace -> scrollback -> terminal, so leaving
-// scrollback puts the keyboard back where the full-width view already is.
+// Ctrl+Shift+\ has a dedicated scrollback binding so Ctrl+\ can switch panes
+// without also being a hidden third step in the focus cycle.
 func TestDashboardFocusesTerminalWhenLeavingScrollback(t *testing.T) {
-	control := tea.KeyPressMsg(tea.Key{Code: '\\', Mod: tea.ModCtrl})
-	for _, leave := range []tea.KeyPressMsg{control, key(tea.KeyEscape, ""), key('q', "q"), key(tea.KeyF6, "")} {
+	for _, leave := range []tea.KeyPressMsg{scrollbackToggleKey(), key(tea.KeyEscape, ""), key('q', "q"), key(tea.KeyF6, "")} {
 		value := scrolledDashboard(t, 200)
-		updated, _ := value.Update(control)
-		value = updated.(dashboard)
-		if value.focus != leftPane {
-			t.Fatalf("Ctrl+\\ focus = %v, want the workspace pane", value.focus)
-		}
-		updated, _ = value.Update(control)
+		value.focus = leftPane
+		updated, _ := value.Update(scrollbackToggleKey())
 		value = updated.(dashboard)
 		if !value.scrollback || value.focus != leftPane {
-			t.Fatalf("second Ctrl+\\ = (scrollback %v, focus %v), want scrollback without moving focus",
+			t.Fatalf("Ctrl+Shift+\\ = (scrollback %v, focus %v), want scrollback without moving focus",
+				value.scrollback, value.focus)
+		}
+		updated, _ = value.Update(controlBackslashKey())
+		value = updated.(dashboard)
+		if !value.scrollback || value.focus != leftPane {
+			t.Fatalf("Ctrl+\\ in scrollback = (scrollback %v, focus %v), want no change",
 				value.scrollback, value.focus)
 		}
 
@@ -1535,27 +1549,39 @@ func TestDashboardFocusesTerminalWhenLeavingScrollback(t *testing.T) {
 	}
 }
 
-// Tab moved into the terminal and Ctrl+\ moved out, so neither key alone got
-// you back and forth. F7 does both, which matters on Windows, where a global
-// hotkey often takes Ctrl+\ before the terminal ever sees it.
+// F7 and Ctrl+\ both move between panes in one key. Keeping both bindings
+// matters on systems where a desktop environment holds one of them globally.
 func TestDashboardSwitchesPanesWithOneKey(t *testing.T) {
-	value := scrolledDashboard(t, 200)
+	for _, binding := range []struct {
+		name string
+		key  tea.KeyPressMsg
+	}{
+		{name: "F7", key: key(tea.KeyF7, "")},
+		{name: "Ctrl+\\", key: controlBackslashKey()},
+		{name: "Ctrl+\\ with an alternate layout", key: tea.KeyPressMsg(tea.Key{
+			Code: '₩', BaseCode: '\\', Mod: tea.ModCtrl,
+		})},
+	} {
+		t.Run(binding.name, func(t *testing.T) {
+			value := scrolledDashboard(t, 200)
+			updated, command := value.Update(binding.key)
+			value = updated.(dashboard)
+			if value.focus != leftPane || command == nil {
+				t.Fatalf("terminal -> workspace = (focus %v, command %v), want a refreshed workspace", value.focus, command)
+			}
 
-	updated, command := value.Update(key(tea.KeyF7, ""))
-	value = updated.(dashboard)
-	if value.focus != leftPane || command == nil {
-		t.Fatalf("F7 in the terminal = (focus %v, command %v), want the workspace pane refreshed", value.focus, command)
-	}
-
-	updated, _ = value.Update(key(tea.KeyF7, ""))
-	value = updated.(dashboard)
-	if value.focus != terminalPane {
-		t.Fatalf("F7 in the workspace = focus %v, want the terminal", value.focus)
+			updated, _ = value.Update(binding.key)
+			value = updated.(dashboard)
+			if value.focus != terminalPane {
+				t.Fatalf("workspace -> terminal = focus %v, want the terminal", value.focus)
+			}
+		})
 	}
 
 	// Scrollback covers the terminal, so switching away from the terminal has
 	// to leave it rather than land the keyboard behind the full-width view.
-	updated, _ = value.Update(key(tea.KeyF6, ""))
+	value := scrolledDashboard(t, 200)
+	updated, _ := value.Update(key(tea.KeyF6, ""))
 	value = updated.(dashboard)
 	if !value.scrollback {
 		t.Fatal("F6 did not open scrollback")
@@ -2618,7 +2644,7 @@ func TestDashboardRefusesScrollbackWithoutTerminal(t *testing.T) {
 	for _, message := range []tea.KeyPressMsg{
 		key(tea.KeyF6, ""),
 		tea.KeyPressMsg(tea.Key{Code: tea.KeyPgUp, Mod: tea.ModShift}),
-		tea.KeyPressMsg(tea.Key{Code: '\\', Mod: tea.ModCtrl}),
+		scrollbackToggleKey(),
 	} {
 		updated, _ := value.Update(message)
 		value = updated.(dashboard)
@@ -3668,16 +3694,17 @@ func TestDashboardShowsCompleteShortcutReferenceInHelpModal(t *testing.T) {
 		{keys: []string{"←/→", "h/l"}, description: "Select tab / +"},
 		{keys: []string{"Enter"}, description: "Open selection"},
 		{keys: []string{"Tab"}, description: "Focus terminal"},
-		{keys: []string{"Ctrl+\\"}, description: "Focus workspace"},
+		{keys: []string{"Ctrl+\\"}, description: "Toggle pane focus"},
 		{keys: []string{"Ctrl+Shift+T"}, description: "New tab"},
 		{keys: []string{"Ctrl+Shift+G"}, description: "Git actions"},
 		{keys: []string{"Ctrl+Shift+←/→"}, description: "Switch tab"},
 		{keys: []string{"Ctrl+Shift+↑/↓"}, description: "Switch workspace"},
 		{keys: []string{"Shift+PgUp/PgDn"}, description: "Enter / page history"},
+		{keys: []string{"Ctrl+Shift+\\"}, description: "Toggle scrollback"},
 		{keys: []string{"↑/↓", "k/j"}, description: "Scroll history line"},
 		{keys: []string{"PgUp/PgDn", "Ctrl+B/F"}, description: "Scroll history page"},
 		{keys: []string{"Home/End", "g/G"}, description: "Oldest / live"},
-		{keys: []string{"Esc", "q", "s", "Ctrl+\\"}, description: "Leave scrollback"},
+		{keys: []string{"Esc", "q", "s"}, description: "Leave scrollback"},
 		{keys: []string{"↑/↓", "k/j"}, description: "Move picker selection"},
 		{keys: []string{"PgUp/PgDn", "Ctrl+B/F"}, description: "Page picker"},
 		{keys: []string{"Home/End", "g/G"}, description: "First / last directory"},
@@ -3833,6 +3860,14 @@ func TestDashboardAdjustsAndPersistsLeftPaneWidth(t *testing.T) {
 
 func key(code rune, text string) tea.KeyPressMsg {
 	return tea.KeyPressMsg(tea.Key{Code: code, Text: text})
+}
+
+func controlBackslashKey() tea.KeyPressMsg {
+	return tea.KeyPressMsg(tea.Key{Code: '\\', Mod: tea.ModCtrl})
+}
+
+func scrollbackToggleKey() tea.KeyPressMsg {
+	return tea.KeyPressMsg(tea.Key{Code: '\\', ShiftedCode: '|', Mod: tea.ModCtrl | tea.ModShift})
 }
 
 // The backoff damps a terminal that is dropping now, not one that has dropped
