@@ -556,6 +556,9 @@ var globalKeys = map[string]func(dashboard) (tea.Model, tea.Cmd){
 	// Shift+PgUp reaches the history in one press by entering scrollback itself.
 	"shift+pgup":   func(m dashboard) (tea.Model, tea.Cmd) { return m.pageHistory(1) },
 	"shift+pgdown": func(m dashboard) (tea.Model, tea.Cmd) { return m.pageHistory(-1) },
+	"ctrl+shift+\\": func(m dashboard) (tea.Model, tea.Cmd) {
+		return m.toggleScrollback()
+	},
 	"ctrl+shift+t": func(m dashboard) (tea.Model, tea.Cmd) { return m.newTab() },
 	"ctrl+shift+g": func(m dashboard) (tea.Model, tea.Cmd) { return m.openGitActions() },
 	// Switching tabs from the terminal pane took Ctrl+\ and then two more keys.
@@ -612,11 +615,10 @@ func (m dashboard) handleKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.scrollback {
 		return m.handleScrollbackKey(message)
 	}
+	if message.String() == "ctrl+\\" {
+		return m.toggleFocus()
+	}
 	if m.focus == terminalPane {
-		if message.String() == "ctrl+\\" {
-			m.focusNavigation()
-			return m, m.refresh()
-		}
 		if m.terminal != nil {
 			m.terminal.sendKey(message)
 		}
@@ -646,9 +648,6 @@ func (m dashboard) handleKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.confirmRemoveSelection()
 	case "t", "f9":
 		return m.openModal(shutdownModal)
-	case "ctrl+\\":
-		// A second Ctrl+\ after leaving the terminal opens its scrollback.
-		return m.toggleScrollback()
 	case "up", "k":
 		m.moveNavigation(-1)
 	case "down", "j":
@@ -848,7 +847,7 @@ func (m dashboard) handleScrollbackKey(message tea.KeyPressMsg) (tea.Model, tea.
 	switch message.String() {
 	// s enters scrollback from the workspace pane, so it leaves it too rather
 	// than being the one alias that only works in one direction.
-	case "esc", "q", "s", "ctrl+\\":
+	case "esc", "q", "s":
 		m.stopScrollback()
 	case "up", "k":
 		m.scrollTerminal(1)
@@ -904,11 +903,8 @@ func (m dashboard) translateMouse(mouse tea.Mouse) (uv.Mouse, bool) {
 	return translated, true
 }
 
-// toggleFocus moves between the panes in one key. Tab and Ctrl+\ each did it
-// in one direction only, and Ctrl+\ does not always arrive: an application or
-// desktop environment can hold that chord as a global hotkey — 1Password does
-// — and romty never sees a key the system intercepted first, which left the
-// terminal pane with no way out.
+// toggleFocus moves between the panes in one key. Both F7 and Ctrl+\ use it so
+// either chord can stand in for one intercepted by a desktop environment.
 func (m dashboard) toggleFocus() (tea.Model, tea.Cmd) {
 	if m.scrollback {
 		// Scrollback fills the screen with the terminal, so leaving the
@@ -2130,7 +2126,7 @@ func (m dashboard) renderStatus(width, bodyHeight int) []string {
 				renderShortcuts(m.styles, width,
 					shortcut{key: "↑/↓", description: "line"},
 					shortcut{key: "PgUp/PgDn", description: "page"},
-					shortcut{key: "Esc", description: "exit"},
+					shortcut{key: "Ctrl+Shift+\\", description: "exit"},
 				),
 			width,
 		)
@@ -2288,17 +2284,18 @@ func (m dashboard) helpEntries() []string {
 		renderHelpShortcut(m.styles, "Select tab / +", "←/→", "h/l"),
 		renderHelpShortcut(m.styles, "Open selection", "Enter"),
 		renderHelpShortcut(m.styles, "Focus terminal", "Tab"),
-		renderHelpShortcut(m.styles, "Focus workspace", "Ctrl+\\"),
+		renderHelpShortcut(m.styles, "Toggle pane focus", "Ctrl+\\"),
 		renderHelpShortcut(m.styles, "New tab", "Ctrl+Shift+T"),
 		renderHelpShortcut(m.styles, "Git actions", "Ctrl+Shift+G"),
 		renderHelpShortcut(m.styles, "Switch tab", "Ctrl+Shift+←/→"),
 		renderHelpShortcut(m.styles, "Switch workspace", "Ctrl+Shift+↑/↓"),
 		renderHelpSection(m.styles, "SCROLLBACK", "terminal history"),
 		renderHelpShortcut(m.styles, "Enter / page history", "Shift+PgUp/PgDn"),
+		renderHelpShortcut(m.styles, "Toggle scrollback", "Ctrl+Shift+\\"),
 		renderHelpShortcut(m.styles, "Scroll history line", "↑/↓", "k/j"),
 		renderHelpShortcut(m.styles, "Scroll history page", "PgUp/PgDn", "Ctrl+B/F"),
 		renderHelpShortcut(m.styles, "Oldest / live", "Home/End", "g/G"),
-		renderHelpShortcut(m.styles, "Leave scrollback", "Esc", "q", "s", "Ctrl+\\"),
+		renderHelpShortcut(m.styles, "Leave scrollback", "Esc", "q", "s"),
 		renderHelpSection(m.styles, "PICKER", "add a root"),
 		renderHelpShortcut(m.styles, "Move picker selection", "↑/↓", "k/j"),
 		renderHelpShortcut(m.styles, "Page picker", "PgUp/PgDn", "Ctrl+B/F"),
