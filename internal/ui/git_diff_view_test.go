@@ -110,6 +110,36 @@ func TestDashboardNavigatesAndScrollsGitDiffView(t *testing.T) {
 	if value.gitDiff.diffOffset != value.maximumGitDiffOffset() {
 		t.Fatalf("End diff offset = %d, want %d", value.gitDiff.diffOffset, value.maximumGitDiffOffset())
 	}
+
+}
+
+func TestDashboardColorsChangedFilesByStatus(t *testing.T) {
+	value := newDashboard(&fakeBackend{}, model.Snapshot{})
+	value.gitDiff = gitDiffView{
+		active:    true,
+		fileIndex: -1,
+		files: []gitChangedFile{
+			{Path: "added.txt", IndexStatus: 'A', WorkTreeStatus: ' '},
+			{Path: "modified.txt", IndexStatus: ' ', WorkTreeStatus: 'M'},
+			{Path: "deleted.txt", IndexStatus: 'D', WorkTreeStatus: ' '},
+		},
+	}
+
+	rows := gitDiffTreeRows(value.gitDiff.files)
+	rendered := make([]string, 0, len(rows))
+	for _, row := range rows {
+		rendered = append(rendered, value.renderGitDiffTreeRow(row, 30))
+	}
+	joined := strings.Join(rendered, "\n")
+	for _, status := range []string{
+		value.styles.diffAdded.Render("A "),
+		value.styles.gitStatus.Render("M "),
+		value.styles.diffRemoved.Render("D "),
+	} {
+		if !strings.Contains(joined, status) {
+			t.Fatalf("file tree does not contain colored status %q:\n%q", status, joined)
+		}
+	}
 }
 
 func TestDashboardGitDiffViewHandlesCleanAndFailedReads(t *testing.T) {

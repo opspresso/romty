@@ -254,8 +254,30 @@ func (m dashboard) renderGitDiffTreeRow(row gitDiffTreeRow, width int) string {
 		indicator = "▌"
 		style = m.styles.navigationSelected
 	}
-	line := indicator + prefix + status + " " + displayText(row.name)
-	return style.Render(pad(truncate(line, width), width))
+	prefix = indicator + prefix
+	name := " " + displayText(row.name)
+	used := lipgloss.Width(prefix) + lipgloss.Width(status)
+	if used >= width {
+		return style.Render(truncate(prefix+status+name, width))
+	}
+	name = pad(truncate(name, width-used), width-used)
+	statusStyle := m.gitChangedFileStyle(file)
+	if row.fileIndex == m.gitDiff.fileIndex {
+		statusStyle = statusStyle.Background(style.GetBackground()).Bold(true)
+	}
+	return style.Render(prefix) + statusStyle.Render(status) + style.Render(name)
+}
+
+func (m dashboard) gitChangedFileStyle(file gitChangedFile) lipgloss.Style {
+	status := string([]byte{file.IndexStatus, file.WorkTreeStatus})
+	switch {
+	case strings.Contains(status, "U"), status == "AA", status == "DD", strings.Contains(status, "D"):
+		return m.styles.diffRemoved
+	case status == "??", file.IndexStatus == 'A':
+		return m.styles.diffAdded
+	default:
+		return m.styles.gitStatus
+	}
 }
 
 func (m dashboard) renderGitFileDiff(width, height int) []string {
