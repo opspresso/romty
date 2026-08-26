@@ -3701,6 +3701,8 @@ func TestDashboardShowsCompleteShortcutReferenceInHelpModal(t *testing.T) {
 		{keys: []string{"Ctrl+Shift+←/→"}, description: "Switch tab"},
 		{keys: []string{"Ctrl+Shift+↑/↓"}, description: "Switch workspace"},
 		{keys: []string{"↑/↓", "k/j"}, description: "Select changed file"},
+		{keys: []string{"v"}, description: "Toggle diff layout"},
+		{keys: []string{"Ctrl+↑/↓", "Wheel"}, description: "Scroll file diff line"},
 		{keys: []string{"PgUp/PgDn", "Ctrl+B/F"}, description: "Scroll file diff"},
 		{keys: []string{"Home/End", "g/G"}, description: "First / last diff line"},
 		{keys: []string{"r"}, description: "Refresh changed files"},

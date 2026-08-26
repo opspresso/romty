@@ -2160,6 +2160,8 @@ func (m dashboard) renderStatus(width, bodyHeight int) []string {
 		)
 		status = renderShortcuts(m.styles, width,
 			shortcut{key: "↑/↓", description: "file"},
+			shortcut{key: "v", description: "layout"},
+			shortcut{key: "Ctrl+↑/↓", description: "line"},
 			shortcut{key: "PgUp/PgDn", description: "diff"},
 			shortcut{key: "Home/End", description: "first/last"},
 			shortcut{key: "r", description: "refresh"},
@@ -2338,6 +2340,8 @@ func (m dashboard) helpEntries() []string {
 		renderHelpShortcut(m.styles, "Switch workspace", "Ctrl+Shift+↑/↓"),
 		renderHelpSection(m.styles, "FILES", "changed file tree and Git diff"),
 		renderHelpShortcut(m.styles, "Select changed file", "↑/↓", "k/j"),
+		renderHelpShortcut(m.styles, "Toggle diff layout", "v"),
+		renderHelpShortcut(m.styles, "Scroll file diff line", "Ctrl+↑/↓", "Wheel"),
 		renderHelpShortcut(m.styles, "Scroll file diff", "PgUp/PgDn", "Ctrl+B/F"),
 		renderHelpShortcut(m.styles, "First / last diff line", "Home/End", "g/G"),
 		renderHelpShortcut(m.styles, "Refresh changed files", "r"),
