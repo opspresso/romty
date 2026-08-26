@@ -3626,10 +3626,10 @@ func TestDashboardOpensHelpFromTheTerminalPane(t *testing.T) {
 	}
 }
 
-func TestDashboardShowsEssentialShortcutsOnceInHelpModal(t *testing.T) {
+func TestDashboardShowsCompleteShortcutReferenceInHelpModal(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, model.Snapshot{})
 	value.width = 100
-	value.height = 48
+	value.height = 80
 
 	updated, command := value.Update(key('?', "?"))
 	value = updated.(dashboard)
@@ -3640,7 +3640,7 @@ func TestDashboardShowsEssentialShortcutsOnceInHelpModal(t *testing.T) {
 	modalLines := value.renderModal(value.width, bodyHeight)
 	plainLines := strings.Split(ansi.Strip(strings.Join(modalLines, "\n")), "\n")
 	plain := strings.Join(plainLines, "\n")
-	for _, section := range []string{"CORE", "NAVIGATE", "SCROLLBACK", "PICKER"} {
+	for _, section := range []string{"CORE", "NAVIGATE", "SCROLLBACK", "PICKER", "HELP", "CONFIG", "GIT", "PROMPTS"} {
 		if !strings.Contains(plain, section) {
 			t.Fatalf("help modal does not contain %q section:\n%s", section, plain)
 		}
@@ -3654,33 +3654,55 @@ func TestDashboardShowsEssentialShortcutsOnceInHelpModal(t *testing.T) {
 		keys        []string
 		description string
 	}{
-		{keys: []string{"F1"}, description: "Help"},
-		{keys: []string{"F2"}, description: "Add root"},
-		{keys: []string{"F3"}, description: "Config"},
-		{keys: []string{"F4"}, description: "Quit"},
-		{keys: []string{"F5"}, description: "Refresh"},
-		{keys: []string{"F6"}, description: "Scrollback"},
+		{keys: []string{"F1", "?"}, description: "Help"},
+		{keys: []string{"F2", "a"}, description: "Add root"},
+		{keys: []string{"F3", ","}, description: "Config"},
+		{keys: []string{"F4", "q", "Ctrl+C"}, description: "Quit"},
+		{keys: []string{"F5", "r"}, description: "Refresh"},
+		{keys: []string{"F6", "s"}, description: "Scrollback"},
 		{keys: []string{"F7"}, description: "Switch pane"},
-		{keys: []string{"F8"}, description: "Remove selection"},
-		{keys: []string{"F9"}, description: "Stop daemon"},
-		{keys: []string{"↑/↓"}, description: "Select workspace"},
-		{keys: []string{"←/→"}, description: "Select tab / +"},
+		{keys: []string{"F8", "d"}, description: "Remove selection"},
+		{keys: []string{"F9", "t"}, description: "Stop daemon"},
+		{keys: []string{"i"}, description: "About"},
+		{keys: []string{"↑/↓", "k/j"}, description: "Select workspace"},
+		{keys: []string{"←/→", "h/l"}, description: "Select tab / +"},
 		{keys: []string{"Enter"}, description: "Open selection"},
 		{keys: []string{"Tab"}, description: "Focus terminal"},
 		{keys: []string{"Ctrl+\\"}, description: "Focus workspace"},
 		{keys: []string{"Ctrl+Shift+T"}, description: "New tab"},
+		{keys: []string{"Ctrl+Shift+G"}, description: "Git actions"},
 		{keys: []string{"Ctrl+Shift+←/→"}, description: "Switch tab"},
 		{keys: []string{"Ctrl+Shift+↑/↓"}, description: "Switch workspace"},
-		{keys: []string{"Shift+PgUp/PgDn"}, description: "Enter one page back"},
-		{keys: []string{"↑/↓"}, description: "Scroll a line"},
-		{keys: []string{"PgUp/PgDn"}, description: "Scroll a page"},
-		{keys: []string{"Home/End"}, description: "Oldest / live"},
-		{keys: []string{"Esc"}, description: "Leave scrollback"},
-		{keys: []string{"↑/↓"}, description: "Move selection"},
-		{keys: []string{"→/←"}, description: "Open / parent"},
+		{keys: []string{"Shift+PgUp/PgDn"}, description: "Enter / page history"},
+		{keys: []string{"↑/↓", "k/j"}, description: "Scroll history line"},
+		{keys: []string{"PgUp/PgDn", "Ctrl+B/F"}, description: "Scroll history page"},
+		{keys: []string{"Home/End", "g/G"}, description: "Oldest / live"},
+		{keys: []string{"Esc", "q", "s", "Ctrl+\\"}, description: "Leave scrollback"},
+		{keys: []string{"↑/↓", "k/j"}, description: "Move picker selection"},
+		{keys: []string{"PgUp/PgDn", "Ctrl+B/F"}, description: "Page picker"},
+		{keys: []string{"Home/End", "g/G"}, description: "First / last directory"},
+		{keys: []string{"→/←", "l/h"}, description: "Open / parent"},
 		{keys: []string{"Enter"}, description: "Add directory"},
 		{keys: []string{"/"}, description: "Type a path"},
 		{keys: []string{"Esc"}, description: "Close picker"},
+		{keys: []string{"↑/↓", "k/j"}, description: "Scroll help line"},
+		{keys: []string{"PgUp/PgDn", "Ctrl+B/F"}, description: "Scroll help page"},
+		{keys: []string{"Home/End", "g/G"}, description: "First / last help entry"},
+		{keys: []string{"Esc"}, description: "Close help"},
+		{keys: []string{"←/→", "[/]"}, description: "Adjust pane width"},
+		{keys: []string{"Esc"}, description: "Close config"},
+		{keys: []string{"↑/↓", "k/j"}, description: "Select Git action"},
+		{keys: []string{"Enter"}, description: "Run Git action"},
+		{keys: []string{"↑/↓", "k/j"}, description: "Scroll Git result line"},
+		{keys: []string{"PgUp/PgDn", "Ctrl+B/F"}, description: "Scroll Git result page"},
+		{keys: []string{"Home/End", "g/G"}, description: "First / last Git result"},
+		{keys: []string{"Enter"}, description: "Return to Git actions"},
+		{keys: []string{"Esc"}, description: "Close Git actions"},
+		{keys: []string{"Enter"}, description: "Submit path"},
+		{keys: []string{"Backspace"}, description: "Erase path character"},
+		{keys: []string{"Esc"}, description: "Cancel path prompt"},
+		{keys: []string{"Enter"}, description: "Confirm action"},
+		{keys: []string{"Esc"}, description: "Cancel confirmation"},
 	}
 	for _, shortcut := range shortcuts {
 		if !helpContainsShortcut(plainLines, shortcut.description, shortcut.keys...) {
@@ -3732,7 +3754,7 @@ func TestDashboardScrollsHelpModalOnShortTerminals(t *testing.T) {
 		value = updated.(dashboard)
 	}
 	plain := ansi.Strip(strings.Join(value.renderModal(value.width, bodyHeight), "\n"))
-	if !strings.Contains(plain, "Close picker") {
+	if !strings.Contains(plain, "Cancel confirmation") {
 		t.Fatalf("help modal did not scroll to the last shortcut:\n%s", plain)
 	}
 	if strings.Contains(plain, "About") {

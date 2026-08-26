@@ -23,7 +23,7 @@ Press `Ctrl`+`Shift`+`G` to open Git actions for a workspace. From the workspace
 
 ## Keyboard shortcuts
 
-`F1` through `F7` work in both panes and with regular modals open. The root path prompt and startup hook confirmation own their input until submitted or cancelled. Press `F1` for the compact in-app reference.
+`F1` through `F7` work in both panes and with regular modals open. The root path prompt owns its input until submitted or cancelled. While a daemon stop, hook installation, or Git command is running, only `F4` is accepted so the TUI can close. Press `F1` for the complete in-app reference.
 
 ### Core
 
@@ -33,44 +33,72 @@ Press `Ctrl`+`Shift`+`G` to open Git actions for a workspace. From the workspace
 | Both panes | `F2` | Add a root |
 | Both panes | `F3` | Open config |
 | Both panes | `F4` | Close the TUI and leave sessions running |
-| Both panes | `F5` | Refresh |
+| Both panes | `F5` | Refresh workspaces and Git state |
 | Both panes | `F6` | Enter or leave scrollback |
 | Both panes | `F7` | Switch pane |
 | Workspace | `F8` | Delete the selected workspace or forget the selected root after confirmation |
 | Workspace | `F9` | Stop the daemon and running shells after confirmation |
 
+### Workspace aliases
+
+| Key | Action |
+|---|---|
+| `?` | Open help |
+| `a` | Add a root |
+| `,` | Open config |
+| `q` or `Ctrl+C` | Close the TUI and leave sessions running |
+| `r` | Refresh workspaces and Git state |
+| `s` | Enter or leave scrollback |
+| `d` | Remove the selected workspace or root after confirmation |
+| `t` | Stop the daemon and running shells after confirmation |
+| `i` | Open About |
+
 ### Navigation
 
 | Scope | Key | Action |
 |---|---|---|
-| Workspace | `↑`/`↓` | Select a root or workspace |
-| Workspace | `←`/`→` | Select a terminal tab or `+` |
+| Workspace | `↑`/`↓` or `k`/`j` | Select a root or workspace |
+| Workspace | `←`/`→` or `h`/`l` | Select a terminal tab or `+` |
 | Workspace | `Enter` | Open the selection |
 | Workspace | `Tab` | Focus the terminal |
 | Terminal | `Ctrl+\` | Focus the workspace and refresh it |
+| Workspace | `Ctrl+\` | Enter scrollback; press it again to leave |
 | Both panes | `Ctrl`+`Shift`+`T` | Create and open a terminal tab |
 | Both panes | `Ctrl`+`Shift`+`G` | Open Git actions for the contextual workspace |
 | Both panes | `Ctrl`+`Shift`+`←`/`→` | Switch terminal tab |
 | Both panes | `Ctrl`+`Shift`+`↑`/`↓` | Switch to a workspace with a running terminal |
 
-Workspace aliases are `?` Help, `a` Add root, `,` Config, `q` or `Ctrl+C` Quit, `r` Refresh, `s` Scrollback, `d` Remove selection, `t` Stop daemon, and `i` About. `j`/`k`, `h`/`l`, `Ctrl+B`/`Ctrl+F`, and `g`/`G` mirror the corresponding arrow, page, and end keys where applicable.
-
 ### Contextual modes
 
 | Mode | Key | Action |
 |---|---|---|
-| Picker | `↑`/`↓`, `PgUp`/`PgDn`, `Home`/`End` | Move through directories |
-| Picker | `→`/`←` | Open a directory or go to its parent |
+| Picker | `↑`/`↓` or `k`/`j` | Move one directory |
+| Picker | `PgUp`/`PgDn` or `Ctrl+B`/`Ctrl+F` | Move one page |
+| Picker | `Home`/`End` or `g`/`G` | Move to the first or last directory |
+| Picker | `→`/`←` or `l`/`h` | Open a directory or go to its parent |
 | Picker | `Enter` / `/` / `Esc` | Add the selection / type a path / close |
 | Terminal / scrollback | `Shift`+`PgUp`/`PgDn` | Enter scrollback or move one page |
-| Scrollback | `↑`/`↓`, `PgUp`/`PgDn`, `Home`/`End`, Wheel | Move through history |
+| Scrollback | `↑`/`↓` or `k`/`j` | Move one history line |
+| Scrollback | `PgUp`/`PgDn` or `Ctrl+B`/`Ctrl+F` | Move one history page |
+| Scrollback | `Home`/`End` or `g`/`G` | Move to the oldest output or live screen |
+| Scrollback | Wheel | Move through history |
 | Scrollback | `F6`, `F7`, `Ctrl+\`, `Esc`, `q`, `s` | Leave scrollback |
-| Help | `↑`/`↓`, `PgUp`/`PgDn`, `Home`/`End` | Scroll the reference |
+| Help | `↑`/`↓` or `k`/`j` | Move one reference line |
+| Help | `PgUp`/`PgDn` or `Ctrl+B`/`Ctrl+F` | Move one reference page |
+| Help | `Home`/`End` or `g`/`G` | Move to the first or last reference entry |
+| Help | `Esc` | Close help |
 | Config | `←`/`→`, `[`/`]` | Resize the workspace pane |
-| Git actions | `↑`/`↓`, `Enter` | Select and run an action |
-| Git result | `↑`/`↓`, `PgUp`/`PgDn`, `Home`/`End` | Scroll command output |
-| Modal or prompt | `Esc` | Cancel or skip |
-| Confirmation | `Enter` | Confirm the requested action |
+| Config | `Esc` | Close config |
+| Git actions | `↑`/`↓` or `k`/`j` | Select an action |
+| Git actions | `Enter` / `Esc` | Run the action / close the menu |
+| Git result | `↑`/`↓` or `k`/`j` | Move one output line |
+| Git result | `PgUp`/`PgDn` or `Ctrl+B`/`Ctrl+F` | Move one output page |
+| Git result | `Home`/`End` or `g`/`G` | Move to the first or last output line |
+| Git result | `Enter` / `Esc` | Return to the actions / close the result |
+| Running Git action | `F4` | Cancel the Git command and close the TUI |
+| Path prompt | Text or paste / `Backspace` | Enter or erase a path |
+| Path prompt | `Enter` / `Esc` | Submit / cancel |
+| Confirmation | `Enter` / `Esc` | Confirm / cancel |
 
 ## Roots, workspaces, and tabs
 
