@@ -407,6 +407,9 @@ func (m dashboard) update(message tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyPressMsg:
 		return m.handleKey(message)
 	case tea.MouseClickMsg, tea.MouseReleaseMsg, tea.MouseWheelMsg, tea.MouseMotionMsg:
+		if m.modal == helpModal {
+			return m.handleHelpMouse(message.(tea.MouseMsg))
+		}
 		if m.gitDiff.active {
 			return m.handleGitDiffMouse(message.(tea.MouseMsg))
 		}
@@ -657,21 +660,13 @@ func (m dashboard) handleKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.focusTerminal()
 	case "i":
 		return m.openModal(aboutModal)
-	case "a":
-		return m.startBrowse()
 	case ",":
 		return m.openModal(configModal)
-	case "q":
-		return m.quit()
-	case "r":
-		return m.refreshAll()
 	case "?":
 		return m.openModal(helpModal)
-	case "s":
-		return m.toggleScrollback()
-	case "d", "f8":
+	case "f8":
 		return m.confirmRemoveSelection()
-	case "t", "f9":
+	case "f9":
 		return m.openModal(shutdownModal)
 	case "up", "k":
 		m.moveNavigation(-1)
@@ -870,9 +865,7 @@ func (m dashboard) handleScrollbackKey(message tea.KeyPressMsg) (tea.Model, tea.
 	}
 	page := m.scrollbackPage()
 	switch message.String() {
-	// s enters scrollback from the workspace pane, so it leaves it too rather
-	// than being the one alias that only works in one direction.
-	case "esc", "q", "s":
+	case "esc":
 		m.stopScrollback()
 	case "up", "k":
 		m.scrollTerminal(1)
@@ -1025,6 +1018,20 @@ func (m dashboard) scrollbackPage() int {
 func (m dashboard) scrollHelp(delta int) (tea.Model, tea.Cmd) {
 	bodyHeight := m.dimensions().bodyHeight
 	m.helpOffset = min(max(m.helpOffset+delta, 0), m.maximumHelpOffset(bodyHeight))
+	return m, nil
+}
+
+func (m dashboard) handleHelpMouse(message tea.MouseMsg) (tea.Model, tea.Cmd) {
+	wheel, ok := message.(tea.MouseWheelMsg)
+	if !ok {
+		return m, nil
+	}
+	switch wheel.Button {
+	case tea.MouseWheelUp:
+		return m.scrollHelp(-3)
+	case tea.MouseWheelDown:
+		return m.scrollHelp(3)
+	}
 	return m, nil
 }
 
@@ -1991,12 +1998,15 @@ func (m dashboard) View() tea.View {
 }
 
 // mouseMode keeps the mouse with the host terminal, where its native drag
-// selection lives. File view temporarily claims it for wheel scrolling. Copy
-// mode takes the wheel through alternate scroll, which arrives as arrow keys,
-// instead of claiming the mouse. The other handover is to a guest application
-// that asked for the mouse, and only when the user opted in, which is the same
-// trade tmux makes for `set -g mouse on`.
+// selection lives. Help and file view temporarily claim it for wheel scrolling.
+// Copy mode takes the wheel through alternate scroll, which arrives as arrow
+// keys, instead of claiming the mouse. The other handover is to a guest
+// application that asked for the mouse, and only when the user opted in, which
+// is the same trade tmux makes for `set -g mouse on`.
 func (m dashboard) mouseMode() tea.MouseMode {
+	if m.modal == helpModal {
+		return tea.MouseModeCellMotion
+	}
 	if m.gitDiff.active {
 		return tea.MouseModeCellMotion
 	}
@@ -2021,7 +2031,7 @@ func (m dashboard) render() string {
 		lines = m.renderPanes(view.leftWidth, view.rightWidth, view.bodyHeight)
 	}
 	if m.modal != noModal {
-		lines = m.overlayModal(lines, width, view.bodyHeight)
+		lines = m.overlayModal(width, view.bodyHeight)
 	}
 	lines = append(lines, m.renderStatus(width, view.bodyHeight)...)
 	return strings.Join(lines, "\n")
@@ -2085,7 +2095,7 @@ func (m dashboard) renderStatus(width, bodyHeight int) []string {
 	case m.modal == helpModal:
 		shortcuts := []shortcut{{key: "Esc", description: "close"}}
 		if m.maximumHelpOffset(bodyHeight) > 0 {
-			shortcuts = append([]shortcut{{key: "↑/↓", description: "scroll"}}, shortcuts...)
+			shortcuts = append([]shortcut{{key: "↑/↓/Wheel", description: "scroll"}}, shortcuts...)
 		}
 		status = renderShortcuts(m.styles, width, shortcuts...)
 	case m.modal == aboutModal:
@@ -2160,11 +2170,11 @@ func (m dashboard) renderStatus(width, bodyHeight int) []string {
 		)
 		status = renderShortcuts(m.styles, width,
 			shortcut{key: "↑/↓", description: "file"},
-			shortcut{key: "v", description: "layout"},
+			shortcut{key: "F6", description: "layout"},
 			shortcut{key: "Ctrl+↑/↓", description: "line"},
 			shortcut{key: "PgUp/PgDn", description: "diff"},
 			shortcut{key: "Home/End", description: "first/last"},
-			shortcut{key: "r", description: "refresh"},
+			shortcut{key: "F5", description: "refresh"},
 			shortcut{key: "Esc", description: "close"},
 		)
 	case m.scrollback:
@@ -2213,9 +2223,15 @@ func (m dashboard) scrollbackPosition() string {
 	return fmt.Sprintf("%d/%d", m.scrollOffset, m.terminal.scrollbackLen())
 }
 
-func (m dashboard) overlayModal(lines []string, width, height int) []string {
+// overlayModal replaces the body with a blank backdrop before centering the
+// modal, so workspace and terminal content cannot show around it.
+func (m dashboard) overlayModal(width, height int) []string {
 	modalLines := m.renderModal(width, height)
-	top := max((len(lines)-len(modalLines))/2, 0)
+	lines := make([]string, height)
+	for row := range lines {
+		lines[row] = strings.Repeat(" ", width)
+	}
+	top := max((height-len(modalLines))/2, 0)
 	for index, line := range modalLines {
 		row := top + index
 		if row >= len(lines) {
@@ -2230,14 +2246,14 @@ func (m dashboard) overlayModal(lines []string, width, height int) []string {
 }
 
 func (m dashboard) renderModal(width, height int) []string {
-	modalWidth := min(max(width-8, 32), 56)
+	modalWidth := min(max(width-4, 32), 72)
 	if m.modal == helpModal {
-		modalWidth = min(max(width-4, 40), 64)
+		modalWidth = min(max(width-4, 32), 80)
 		return m.renderHelpModal(modalWidth, height)
 	}
 	if m.modal == browseModal {
 		// Paths are long, so the picker gets the wider box help uses.
-		return m.renderBrowseModal(min(max(width-4, 40), 64), height)
+		return m.renderBrowseModal(min(max(width-4, 32), 80), height)
 	}
 	if m.modal == gitActionsModal {
 		return m.renderGitActionsModal(modalWidth, height)
@@ -2316,73 +2332,41 @@ func (m dashboard) helpEntries() []string {
 	return []string{
 		m.styles.modalStrong.Render("romty") + m.styles.empty.Render("  "+version.String()) +
 			m.styles.modalBody.Render("  "+tagline),
-		renderHelpSection(m.styles, "CORE", "both panes; aliases workspace-only"),
+		renderHelpSection(m.styles, "GLOBAL", "function keys both panes; other keys contextual"),
 		renderHelpShortcut(m.styles, "Help", "F1", "?"),
-		renderHelpShortcut(m.styles, "Add root", "F2", "a"),
+		renderHelpShortcut(m.styles, "Add root", "F2"),
 		renderHelpShortcut(m.styles, "Config", "F3", ","),
-		renderHelpShortcut(m.styles, "Quit", "F4", "q", "Ctrl+C"),
-		renderHelpShortcut(m.styles, "Refresh", "F5", "r"),
-		renderHelpShortcut(m.styles, "Scrollback", "F6", "s"),
-		renderHelpShortcut(m.styles, "Switch pane", "F7"),
-		renderHelpShortcut(m.styles, "Remove selection", "F8", "d"),
-		renderHelpShortcut(m.styles, "Stop daemon", "F9", "t"),
+		renderHelpShortcut(m.styles, "Quit", "F4", "Ctrl+C"),
+		renderHelpShortcut(m.styles, "Refresh workspaces/files", "F5"),
+		renderHelpShortcut(m.styles, "Toggle scrollback", "F6", "Ctrl+Shift+\\"),
+		renderHelpShortcut(m.styles, "Toggle pane focus", "F7", "Ctrl+\\"),
+		renderHelpSection(m.styles, "WORKSPACE", "workspace pane only"),
+		renderHelpShortcut(m.styles, "Remove selection", "F8"),
+		renderHelpShortcut(m.styles, "Stop daemon", "F9"),
 		renderHelpShortcut(m.styles, "About", "i"),
-		renderHelpSection(m.styles, "NAVIGATE", "workspaces and terminals"),
-		renderHelpShortcut(m.styles, "Select workspace", "↑/↓", "k/j"),
-		renderHelpShortcut(m.styles, "Select tab / +", "←/→", "h/l"),
-		renderHelpShortcut(m.styles, "Open selection", "Enter"),
 		renderHelpShortcut(m.styles, "Focus terminal", "Tab"),
-		renderHelpShortcut(m.styles, "Toggle pane focus", "Ctrl+\\"),
+		renderHelpSection(m.styles, "SWITCH", "workspace and terminal context"),
 		renderHelpShortcut(m.styles, "New tab", "Ctrl+Shift+T"),
 		renderHelpShortcut(m.styles, "Git actions", "Ctrl+Shift+G"),
 		renderHelpShortcut(m.styles, "Toggle file view", "Ctrl+Shift+F"),
 		renderHelpShortcut(m.styles, "Switch tab", "Ctrl+Shift+←/→"),
 		renderHelpShortcut(m.styles, "Switch workspace", "Ctrl+Shift+↑/↓"),
-		renderHelpSection(m.styles, "FILES", "changed file tree and Git diff"),
-		renderHelpShortcut(m.styles, "Select changed file", "↑/↓", "k/j"),
-		renderHelpShortcut(m.styles, "Toggle diff layout", "v"),
-		renderHelpShortcut(m.styles, "Scroll file diff line", "Ctrl+↑/↓", "Wheel"),
-		renderHelpShortcut(m.styles, "Scroll file diff", "PgUp/PgDn", "Ctrl+B/F"),
-		renderHelpShortcut(m.styles, "First / last diff line", "Home/End", "g/G"),
-		renderHelpShortcut(m.styles, "Refresh changed files", "r"),
-		renderHelpShortcut(m.styles, "Close file view", "Esc"),
-		renderHelpSection(m.styles, "SCROLLBACK", "terminal history"),
-		renderHelpShortcut(m.styles, "Enter / page history", "Shift+PgUp/PgDn"),
-		renderHelpShortcut(m.styles, "Toggle scrollback", "Ctrl+Shift+\\"),
-		renderHelpShortcut(m.styles, "Scroll history line", "↑/↓", "k/j"),
-		renderHelpShortcut(m.styles, "Scroll history page", "PgUp/PgDn", "Ctrl+B/F"),
-		renderHelpShortcut(m.styles, "Oldest / live", "Home/End", "g/G"),
-		renderHelpShortcut(m.styles, "Leave scrollback", "Esc", "q", "s"),
-		renderHelpSection(m.styles, "PICKER", "add a root"),
-		renderHelpShortcut(m.styles, "Move picker selection", "↑/↓", "k/j"),
-		renderHelpShortcut(m.styles, "Page picker", "PgUp/PgDn", "Ctrl+B/F"),
-		renderHelpShortcut(m.styles, "First / last directory", "Home/End", "g/G"),
-		renderHelpShortcut(m.styles, "Open / parent", "→/←", "l/h"),
-		renderHelpShortcut(m.styles, "Add directory", "Enter"),
-		renderHelpShortcut(m.styles, "Type a path", "/"),
-		renderHelpShortcut(m.styles, "Close picker", "Esc"),
-		renderHelpSection(m.styles, "HELP", "in-app reference"),
-		renderHelpShortcut(m.styles, "Scroll help line", "↑/↓", "k/j"),
-		renderHelpShortcut(m.styles, "Scroll help page", "PgUp/PgDn", "Ctrl+B/F"),
-		renderHelpShortcut(m.styles, "First / last help entry", "Home/End", "g/G"),
-		renderHelpShortcut(m.styles, "Close help", "Esc"),
-		renderHelpSection(m.styles, "CONFIG", "workspace pane"),
-		renderHelpShortcut(m.styles, "Adjust pane width", "←/→", "[/]"),
-		renderHelpShortcut(m.styles, "Close config", "Esc"),
-		renderHelpSection(m.styles, "GIT", "workspace actions and results"),
-		renderHelpShortcut(m.styles, "Select Git action", "↑/↓", "k/j"),
-		renderHelpShortcut(m.styles, "Run Git action", "Enter"),
-		renderHelpShortcut(m.styles, "Scroll Git result line", "↑/↓", "k/j"),
-		renderHelpShortcut(m.styles, "Scroll Git result page", "PgUp/PgDn", "Ctrl+B/F"),
-		renderHelpShortcut(m.styles, "First / last Git result", "Home/End", "g/G"),
-		renderHelpShortcut(m.styles, "Return to Git actions", "Enter"),
-		renderHelpShortcut(m.styles, "Close Git actions", "Esc"),
-		renderHelpSection(m.styles, "PROMPTS", "path and confirmations"),
-		renderHelpShortcut(m.styles, "Submit path", "Enter"),
+		renderHelpSection(m.styles, "MOVE", "lists, output and file view"),
+		renderHelpShortcut(m.styles, "Move one item / line", "↑/↓", "k/j"),
+		renderHelpShortcut(m.styles, "Tab; picker child/parent", "←/→", "h/l"),
+		renderHelpShortcut(m.styles, "Previous / next page", "PgUp/PgDn", "Ctrl+B/F"),
+		renderHelpShortcut(m.styles, "First / last item/line", "Home/End", "g/G"),
+		renderHelpShortcut(m.styles, "Enter / page scrollback", "Shift+PgUp/PgDn"),
+		renderHelpShortcut(m.styles, "Scroll Help/history/diff", "Wheel"),
+		renderHelpSection(m.styles, "FILE DIFF", "changed file tree and diff"),
+		renderHelpShortcut(m.styles, "Toggle diff layout", "F6"),
+		renderHelpShortcut(m.styles, "Scroll diff one line", "Ctrl+↑/↓"),
+		renderHelpSection(m.styles, "CONTEXT", "workspace, picker, modals and prompts"),
+		renderHelpShortcut(m.styles, "Activate / submit", "Enter"),
+		renderHelpShortcut(m.styles, "Close / cancel / leave", "Esc"),
+		renderHelpShortcut(m.styles, "Type a picker path", "/"),
 		renderHelpShortcut(m.styles, "Erase path character", "Backspace"),
-		renderHelpShortcut(m.styles, "Cancel path prompt", "Esc"),
-		renderHelpShortcut(m.styles, "Confirm action", "Enter"),
-		renderHelpShortcut(m.styles, "Cancel confirmation", "Esc"),
+		renderHelpShortcut(m.styles, "Adjust pane width", "←/→", "[/]"),
 	}
 }
 

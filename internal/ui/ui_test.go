@@ -670,7 +670,7 @@ func TestDashboardAcceptsPastedRootPath(t *testing.T) {
 	}
 }
 
-func TestDashboardSupportsHiddenWorkspaceShortcuts(t *testing.T) {
+func TestDashboardSupportsRemainingWorkspaceShortcuts(t *testing.T) {
 	backend := &fakeBackend{}
 
 	value := newDashboard(backend, model.Snapshot{})
@@ -681,36 +681,10 @@ func TestDashboardSupportsHiddenWorkspaceShortcuts(t *testing.T) {
 	}
 
 	value = newDashboard(backend, model.Snapshot{})
-	updated, command = value.Update(key('a', "a"))
-	value = updated.(dashboard)
-	// The picker reads the directory off the update loop, so opening it leaves
-	// a read pending rather than blocking on a slow mount.
-	if value.modal != browseModal || command == nil {
-		t.Fatalf("a result = (modal %v, command %v), want the root picker reading", value.modal, command)
-	}
-
-	value = newDashboard(backend, model.Snapshot{})
 	updated, command = value.Update(key(',', ","))
 	value = updated.(dashboard)
 	if value.modal != configModal || command != nil {
 		t.Fatalf(", result = (modal %v, command %v), want config modal", value.modal, command)
-	}
-
-	value = newDashboard(backend, model.Snapshot{})
-	updated, command = value.Update(key('q', "q"))
-	value = updated.(dashboard)
-	if !value.result.Quit || command == nil {
-		t.Fatalf("q result = (quit %v, command %v), want quit", value.result.Quit, command)
-	}
-
-	value = newDashboard(backend, model.Snapshot{})
-	_, command = value.Update(key('r', "r"))
-	if command == nil {
-		t.Fatal("r refresh command = nil")
-	}
-	commandMessages(command)
-	if backend.snapshotCount != 1 {
-		t.Fatalf("r snapshot calls = %d, want 1", backend.snapshotCount)
 	}
 }
 
@@ -1329,10 +1303,10 @@ func TestDashboardHoldsScrollbackViewportOnNewOutput(t *testing.T) {
 	}
 
 	// Leaving scrollback returns to the live screen, which has the new output.
-	updated, _ = value.Update(key('q', "q"))
+	updated, _ = value.Update(key(tea.KeyF6, ""))
 	value = updated.(dashboard)
 	if value.scrollback || value.scrollOffset != 0 {
-		t.Fatalf("q = (scrollback %v, offset %d), want the live screen", value.scrollback, value.scrollOffset)
+		t.Fatalf("F6 = (scrollback %v, offset %d), want the live screen", value.scrollback, value.scrollOffset)
 	}
 	if !strings.Contains(ansi.Strip(strings.Join(value.terminal.renderViewport(0), "\n")), "fresh-b") {
 		t.Fatal("live screen does not show the output that arrived during scrollback")
@@ -1521,7 +1495,7 @@ func TestDashboardForwardsPagingToTheGuestThatOwnsTheScreen(t *testing.T) {
 // Ctrl+Shift+\ has a dedicated scrollback binding so Ctrl+\ can switch panes
 // without also being a hidden third step in the focus cycle.
 func TestDashboardFocusesTerminalWhenLeavingScrollback(t *testing.T) {
-	for _, leave := range []tea.KeyPressMsg{scrollbackToggleKey(), key(tea.KeyEscape, ""), key('q', "q"), key(tea.KeyF6, "")} {
+	for _, leave := range []tea.KeyPressMsg{scrollbackToggleKey(), key(tea.KeyEscape, ""), key(tea.KeyF6, "")} {
 		value := scrolledDashboard(t, 200)
 		value.focus = leftPane
 		updated, _ := value.Update(scrollbackToggleKey())
@@ -2002,10 +1976,10 @@ func TestDashboardShowsAndRemovesAnUnreadableRoot(t *testing.T) {
 	}
 
 	value.setNavigation(0)
-	updated, command := value.Update(key('d', "d"))
+	updated, command := value.Update(key(tea.KeyF8, ""))
 	value = updated.(dashboard)
 	if value.modal != removeSelectionModal || command != nil {
-		t.Fatalf("d = (modal %v, command %v), want a confirmation first", value.modal, command)
+		t.Fatalf("F8 = (modal %v, command %v), want a confirmation first", value.modal, command)
 	}
 	body := ansi.Strip(strings.Join(value.renderModal(value.width, value.dimensions().bodyHeight), "\n"))
 	if !strings.Contains(body, "gone") || !strings.Contains(body, "directory stays on disk") ||
@@ -2035,38 +2009,39 @@ func twoRootSnapshot() model.Snapshot {
 	}}
 }
 
-// Every command reachable from the workspace pane has a letter next to its
-// function key. Scrollback and stopping the daemon were the two without one.
-func TestDashboardGivesScrollbackAndShutdownALetter(t *testing.T) {
-	value := scrolledDashboard(t, 200)
-	value.focus = leftPane
+func TestDashboardDoesNotUseRemovedLetterShortcuts(t *testing.T) {
+	for _, letter := range []rune{'a', 'q', 'r', 's', 'd', 't'} {
+		t.Run(string(letter), func(t *testing.T) {
+			value := scrolledDashboard(t, 200)
+			value.focus = leftPane
 
-	updated, _ := value.Update(key('s', "s"))
-	value = updated.(dashboard)
-	if !value.scrollback {
-		t.Fatal("s did not open scrollback")
-	}
-	// The letter toggles, like the function key it stands in for; being the
-	// one alias that only worked one way would be a trap.
-	updated, _ = value.Update(key('s', "s"))
-	value = updated.(dashboard)
-	if value.scrollback {
-		t.Fatal("a second s did not leave scrollback")
+			updated, command := value.Update(key(letter, string(letter)))
+			value = updated.(dashboard)
+			if command != nil || value.scrollback || value.modal != noModal {
+				t.Fatalf("%q = (command %v, scrollback %v, modal %v), want no shortcut action",
+					letter, command, value.scrollback, value.modal)
+			}
+		})
 	}
 
-	value.focus = leftPane
-	updated, command := value.Update(key('t', "t"))
-	value = updated.(dashboard)
-	if value.modal != shutdownModal || command != nil {
-		t.Fatalf("t = (modal %v, command %v), want the shutdown confirmation", value.modal, command)
+	for _, letter := range []rune{'q', 's'} {
+		value := scrolledDashboard(t, 200)
+		updated, _ := value.Update(key(tea.KeyF6, ""))
+		value = updated.(dashboard)
+		updated, command := value.Update(key(letter, string(letter)))
+		value = updated.(dashboard)
+		if command != nil || !value.scrollback {
+			t.Fatalf("%q in scrollback = (command %v, scrollback %v), want no shortcut action",
+				letter, command, value.scrollback)
+		}
 	}
 }
 
-// The letters belong to the workspace pane; the terminal owns its own input.
-func TestDashboardSendsTheNewLettersToTheShell(t *testing.T) {
+// Unbound letters always belong to the shell in the terminal pane.
+func TestDashboardSendsUnboundLettersToTheShell(t *testing.T) {
 	value := scrolledDashboard(t, 200)
 
-	for _, letter := range []rune{'s', 't'} {
+	for _, letter := range []rune{'a', 'q', 'r', 's', 'd', 't'} {
 		updated, _ := value.Update(key(letter, string(letter)))
 		value = updated.(dashboard)
 		if value.scrollback || value.modal != noModal {
@@ -3601,7 +3576,7 @@ func TestDashboardKeepsNavigationCursorVisible(t *testing.T) {
 	}
 }
 
-func TestDashboardShowsAboutModalWithoutReplacingDashboard(t *testing.T) {
+func TestDashboardCentersModalOverCoveredDashboard(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, model.Snapshot{})
 	value.width = 100
 	value.height = 30
@@ -3612,11 +3587,29 @@ func TestDashboardShowsAboutModalWithoutReplacingDashboard(t *testing.T) {
 		t.Fatalf("modal = %v, want about", value.modal)
 	}
 	rendered := value.render()
-	// The pane title only ever comes from the dashboard behind the modal; the
-	// modal body renders "romty" too, so a bare substring proves nothing.
-	if !strings.Contains(rendered, "About") || !strings.Contains(rendered, "Persistent terminal workspace manager") ||
-		!strings.Contains(rendered, value.styles.paneTitleActive.Render(" romty ")) {
-		t.Fatalf("about modal or dashboard background is missing:\n%s", rendered)
+	if !strings.Contains(rendered, "About") || !strings.Contains(rendered, "Persistent terminal workspace manager") {
+		t.Fatalf("about modal is missing:\n%s", rendered)
+	}
+	if strings.Contains(rendered, value.styles.paneTitleActive.Render(" romty ")) {
+		t.Fatalf("dashboard remains visible behind the modal:\n%s", rendered)
+	}
+	modalLines := value.renderModal(value.width, value.dimensions().bodyHeight)
+	if width := lipgloss.Width(modalLines[0]); width != 72 {
+		t.Fatalf("about modal width = %d, want 72", width)
+	}
+	bodyHeight := value.dimensions().bodyHeight
+	body := strings.Split(ansi.Strip(rendered), "\n")[:bodyHeight]
+	top := (bodyHeight - len(modalLines)) / 2
+	if left := strings.Index(body[top], "╭"); left != 14 {
+		t.Fatalf("about modal left edge = %d, want 14:\n%s", left, ansi.Strip(rendered))
+	}
+	for row := range body {
+		if row >= top && row < top+len(modalLines) {
+			continue
+		}
+		if strings.TrimSpace(body[row]) != "" {
+			t.Fatalf("modal backdrop row %d is not blank:\n%s", row, ansi.Strip(rendered))
+		}
 	}
 	// About is where a user reads which romty they are running, so it names
 	// the build rather than leaving a bug report to guess at it.
@@ -3656,6 +3649,9 @@ func TestDashboardShowsCompleteShortcutReferenceInHelpModal(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, model.Snapshot{})
 	value.width = 100
 	value.height = 80
+	if entries := value.helpEntries(); len(entries) != 36 {
+		t.Fatalf("help entries = %d, want 6 sections and 29 shortcuts", len(entries))
+	}
 
 	updated, command := value.Update(key('?', "?"))
 	value = updated.(dashboard)
@@ -3664,16 +3660,19 @@ func TestDashboardShowsCompleteShortcutReferenceInHelpModal(t *testing.T) {
 	}
 	bodyHeight := value.dimensions().bodyHeight
 	modalLines := value.renderModal(value.width, bodyHeight)
+	if width := lipgloss.Width(modalLines[0]); width != 80 {
+		t.Fatalf("help modal width = %d, want 80", width)
+	}
 	plainLines := strings.Split(ansi.Strip(strings.Join(modalLines, "\n")), "\n")
 	plain := strings.Join(plainLines, "\n")
-	for _, section := range []string{"CORE", "NAVIGATE", "FILES", "SCROLLBACK", "PICKER", "HELP", "CONFIG", "GIT", "PROMPTS"} {
+	for _, section := range []string{"GLOBAL", "WORKSPACE", "SWITCH", "MOVE", "FILE DIFF", "CONTEXT"} {
 		if !strings.Contains(plain, section) {
 			t.Fatalf("help modal does not contain %q section:\n%s", section, plain)
 		}
 	}
-	for _, section := range []string{"COMMANDS", "NAVIGATION", "ADD ROOT", "TERMINAL", "OTHER"} {
+	for _, section := range []string{"CORE", "NAVIGATE", "FILES", "SCROLLBACK", "PICKER", "HELP", "CONFIG", "GIT", "PROMPTS"} {
 		if strings.Contains(plain, section) {
-			t.Fatalf("help modal still contains legacy %q section:\n%s", section, plain)
+			t.Fatalf("help modal still contains duplicated %q section:\n%s", section, plain)
 		}
 	}
 	shortcuts := []struct {
@@ -3681,63 +3680,34 @@ func TestDashboardShowsCompleteShortcutReferenceInHelpModal(t *testing.T) {
 		description string
 	}{
 		{keys: []string{"F1", "?"}, description: "Help"},
-		{keys: []string{"F2", "a"}, description: "Add root"},
+		{keys: []string{"F2"}, description: "Add root"},
 		{keys: []string{"F3", ","}, description: "Config"},
-		{keys: []string{"F4", "q", "Ctrl+C"}, description: "Quit"},
-		{keys: []string{"F5", "r"}, description: "Refresh"},
-		{keys: []string{"F6", "s"}, description: "Scrollback"},
-		{keys: []string{"F7"}, description: "Switch pane"},
-		{keys: []string{"F8", "d"}, description: "Remove selection"},
-		{keys: []string{"F9", "t"}, description: "Stop daemon"},
+		{keys: []string{"F4", "Ctrl+C"}, description: "Quit"},
+		{keys: []string{"F5"}, description: "Refresh workspaces/files"},
+		{keys: []string{"F6", "Ctrl+Shift+\\"}, description: "Toggle scrollback"},
+		{keys: []string{"F7", "Ctrl+\\"}, description: "Toggle pane focus"},
+		{keys: []string{"F8"}, description: "Remove selection"},
+		{keys: []string{"F9"}, description: "Stop daemon"},
 		{keys: []string{"i"}, description: "About"},
-		{keys: []string{"↑/↓", "k/j"}, description: "Select workspace"},
-		{keys: []string{"←/→", "h/l"}, description: "Select tab / +"},
-		{keys: []string{"Enter"}, description: "Open selection"},
 		{keys: []string{"Tab"}, description: "Focus terminal"},
-		{keys: []string{"Ctrl+\\"}, description: "Toggle pane focus"},
 		{keys: []string{"Ctrl+Shift+T"}, description: "New tab"},
 		{keys: []string{"Ctrl+Shift+G"}, description: "Git actions"},
 		{keys: []string{"Ctrl+Shift+F"}, description: "Toggle file view"},
 		{keys: []string{"Ctrl+Shift+←/→"}, description: "Switch tab"},
 		{keys: []string{"Ctrl+Shift+↑/↓"}, description: "Switch workspace"},
-		{keys: []string{"↑/↓", "k/j"}, description: "Select changed file"},
-		{keys: []string{"v"}, description: "Toggle diff layout"},
-		{keys: []string{"Ctrl+↑/↓", "Wheel"}, description: "Scroll file diff line"},
-		{keys: []string{"PgUp/PgDn", "Ctrl+B/F"}, description: "Scroll file diff"},
-		{keys: []string{"Home/End", "g/G"}, description: "First / last diff line"},
-		{keys: []string{"r"}, description: "Refresh changed files"},
-		{keys: []string{"Esc"}, description: "Close file view"},
-		{keys: []string{"Shift+PgUp/PgDn"}, description: "Enter / page history"},
-		{keys: []string{"Ctrl+Shift+\\"}, description: "Toggle scrollback"},
-		{keys: []string{"↑/↓", "k/j"}, description: "Scroll history line"},
-		{keys: []string{"PgUp/PgDn", "Ctrl+B/F"}, description: "Scroll history page"},
-		{keys: []string{"Home/End", "g/G"}, description: "Oldest / live"},
-		{keys: []string{"Esc", "q", "s"}, description: "Leave scrollback"},
-		{keys: []string{"↑/↓", "k/j"}, description: "Move picker selection"},
-		{keys: []string{"PgUp/PgDn", "Ctrl+B/F"}, description: "Page picker"},
-		{keys: []string{"Home/End", "g/G"}, description: "First / last directory"},
-		{keys: []string{"→/←", "l/h"}, description: "Open / parent"},
-		{keys: []string{"Enter"}, description: "Add directory"},
-		{keys: []string{"/"}, description: "Type a path"},
-		{keys: []string{"Esc"}, description: "Close picker"},
-		{keys: []string{"↑/↓", "k/j"}, description: "Scroll help line"},
-		{keys: []string{"PgUp/PgDn", "Ctrl+B/F"}, description: "Scroll help page"},
-		{keys: []string{"Home/End", "g/G"}, description: "First / last help entry"},
-		{keys: []string{"Esc"}, description: "Close help"},
-		{keys: []string{"←/→", "[/]"}, description: "Adjust pane width"},
-		{keys: []string{"Esc"}, description: "Close config"},
-		{keys: []string{"↑/↓", "k/j"}, description: "Select Git action"},
-		{keys: []string{"Enter"}, description: "Run Git action"},
-		{keys: []string{"↑/↓", "k/j"}, description: "Scroll Git result line"},
-		{keys: []string{"PgUp/PgDn", "Ctrl+B/F"}, description: "Scroll Git result page"},
-		{keys: []string{"Home/End", "g/G"}, description: "First / last Git result"},
-		{keys: []string{"Enter"}, description: "Return to Git actions"},
-		{keys: []string{"Esc"}, description: "Close Git actions"},
-		{keys: []string{"Enter"}, description: "Submit path"},
+		{keys: []string{"↑/↓", "k/j"}, description: "Move one item / line"},
+		{keys: []string{"←/→", "h/l"}, description: "Tab; picker child/parent"},
+		{keys: []string{"PgUp/PgDn", "Ctrl+B/F"}, description: "Previous / next page"},
+		{keys: []string{"Home/End", "g/G"}, description: "First / last item/line"},
+		{keys: []string{"Shift+PgUp/PgDn"}, description: "Enter / page scrollback"},
+		{keys: []string{"Wheel"}, description: "Scroll Help/history/diff"},
+		{keys: []string{"F6"}, description: "Toggle diff layout"},
+		{keys: []string{"Ctrl+↑/↓"}, description: "Scroll diff one line"},
+		{keys: []string{"Enter"}, description: "Activate / submit"},
+		{keys: []string{"Esc"}, description: "Close / cancel / leave"},
+		{keys: []string{"/"}, description: "Type a picker path"},
 		{keys: []string{"Backspace"}, description: "Erase path character"},
-		{keys: []string{"Esc"}, description: "Cancel path prompt"},
-		{keys: []string{"Enter"}, description: "Confirm action"},
-		{keys: []string{"Esc"}, description: "Cancel confirmation"},
+		{keys: []string{"←/→", "[/]"}, description: "Adjust pane width"},
 	}
 	for _, shortcut := range shortcuts {
 		if !helpContainsShortcut(plainLines, shortcut.description, shortcut.keys...) {
@@ -3745,8 +3715,18 @@ func TestDashboardShowsCompleteShortcutReferenceInHelpModal(t *testing.T) {
 		}
 	}
 	for _, name := range []string{"F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9"} {
-		if count := strings.Count(plain, name); count != 1 {
-			t.Fatalf("help modal contains %s %d times, want once:\n%s", name, count, plain)
+		want := 1
+		if name == "F6" {
+			want = 2
+		}
+		if count := strings.Count(plain, name); count != want {
+			t.Fatalf("help modal contains %s %d times, want %d:\n%s", name, count, want, plain)
+		}
+	}
+	help := strings.Join(value.helpEntries(), "\n")
+	for _, key := range []string{"a", "q", "r", "s", "d", "t", "v"} {
+		if strings.Contains(help, value.styles.shortcutKey.Render(" "+key+" ")) {
+			t.Fatalf("help modal still contains removed %q shortcut:\n%s", key, plain)
 		}
 	}
 	if !strings.Contains(plain, version.String()) {
@@ -3756,8 +3736,8 @@ func TestDashboardShowsCompleteShortcutReferenceInHelpModal(t *testing.T) {
 		t.Fatalf("help modal height = %d, want at most %d", len(modalLines), value.height-2)
 	}
 	for index, line := range modalLines {
-		if lineWidth := lipgloss.Width(line); lineWidth > 64 {
-			t.Fatalf("help modal line %d width = %d, want at most 64", index, lineWidth)
+		if lineWidth := lipgloss.Width(line); lineWidth > 80 {
+			t.Fatalf("help modal line %d width = %d, want at most 80", index, lineWidth)
 		}
 	}
 }
@@ -3789,11 +3769,42 @@ func TestDashboardScrollsHelpModalOnShortTerminals(t *testing.T) {
 		value = updated.(dashboard)
 	}
 	plain := ansi.Strip(strings.Join(value.renderModal(value.width, bodyHeight), "\n"))
-	if !strings.Contains(plain, "Cancel confirmation") {
+	if !strings.Contains(plain, "Adjust pane width") {
 		t.Fatalf("help modal did not scroll to the last shortcut:\n%s", plain)
 	}
 	if strings.Contains(plain, "About") {
 		t.Fatalf("help modal kept the first shortcut after scrolling to the end:\n%s", plain)
+	}
+}
+
+func TestDashboardScrollsHelpModalWithMouseWheel(t *testing.T) {
+	value := newDashboard(&fakeBackend{}, model.Snapshot{})
+	value.width = 100
+	value.height = 20
+	updated, _ := value.Update(key('?', "?"))
+	value = updated.(dashboard)
+
+	if value.View().MouseMode != tea.MouseModeCellMotion {
+		t.Fatalf("help mouse mode = %v, want cell motion", value.View().MouseMode)
+	}
+	if rendered := ansi.Strip(value.render()); !strings.Contains(rendered, "↑/↓/Wheel") {
+		t.Fatalf("help status does not advertise wheel scrolling:\n%s", rendered)
+	}
+	updated, _ = value.Update(tea.MouseWheelMsg{X: 50, Y: 10, Button: tea.MouseWheelDown})
+	value = updated.(dashboard)
+	if value.helpOffset != 3 {
+		t.Fatalf("wheel down help offset = %d, want 3", value.helpOffset)
+	}
+	updated, _ = value.Update(tea.MouseWheelMsg{X: 50, Y: 10, Button: tea.MouseWheelUp})
+	value = updated.(dashboard)
+	if value.helpOffset != 0 {
+		t.Fatalf("wheel up help offset = %d, want 0", value.helpOffset)
+	}
+
+	updated, _ = value.Update(key(tea.KeyEscape, ""))
+	value = updated.(dashboard)
+	if value.View().MouseMode != tea.MouseModeNone {
+		t.Fatalf("mouse mode after closing help = %v, want none", value.View().MouseMode)
 	}
 }
 

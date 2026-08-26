@@ -439,7 +439,7 @@ func TestBinaryStartsDaemonAndEntersTheDashboard(t *testing.T) {
 		for range chunks {
 		}
 	}()
-	if _, err := terminal.Write([]byte("q")); err != nil {
+	if _, err := terminal.Write([]byte("\x1bOS")); err != nil {
 		t.Fatalf("quit dashboard: %v", err)
 	}
 	done := make(chan error, 1)

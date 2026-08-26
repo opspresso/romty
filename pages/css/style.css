@@ -587,6 +587,15 @@ pre.block .prompt {
 
 /* ----------------------------------------------------------- shortcuts */
 
+.shortcut-groups {
+  display: grid;
+  gap: 2rem;
+}
+
+.shortcut-group h3 {
+  margin-bottom: 0.6rem;
+}
+
 .keys {
   display: grid;
   gap: 0.6rem 2.5rem;
@@ -619,8 +628,9 @@ kbd {
 
 .key-row .caps {
   display: flex;
+  flex-wrap: wrap;
   gap: 0.35rem;
-  flex: 0 0 8.5rem;
+  flex: 0 0 11.5rem;
 }
 
 .note {
@@ -762,6 +772,6 @@ kbd {
   }
 
   .key-row .caps {
-    flex-basis: 7rem;
+    flex-basis: 8rem;
   }
 }

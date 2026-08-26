@@ -21,94 +21,70 @@ romty refreshes local Git state every 10 seconds. It fetches remote-tracking ref
 
 Press `Ctrl`+`Shift`+`G` to open Git actions for a workspace. From the workspace pane it targets the row under the cursor; from the terminal pane or scrollback it targets the open terminal workspace. The menu provides `Status`, `Fetch`, `Pull`, and `Push`. `Pull` uses `--ff-only` so it never creates a merge commit. Commands run without interactive credential prompts, and their output or error remains in a scrollable result modal. Press `Enter` from a result to return to the action menu.
 
-Press `Ctrl`+`Shift`+`F` to toggle the file view for the same contextual workspace. Its left pane shows staged, unstaged, and untracked files as a directory tree. Added and untracked files are green, modified and renamed files are amber, and deleted or conflicted files are red. The right pane shows the selected file's Git diff; press `v` to switch between inline and split layouts. The last layout is restored when the view or romty is opened again. A file with both staged and unstaged edits shows both sections, and an untracked text file is compared with an empty file. Press `↑`/`↓` to select a file, use `Ctrl`+`↑`/`↓`, the mouse wheel, or the paging keys to read its diff, and press `r` to reload the worktree.
+Press `Ctrl`+`Shift`+`F` to toggle the file view for the same contextual workspace. Its left pane shows staged, unstaged, and untracked files as a directory tree. Added and untracked files are green, modified and renamed files are amber, and deleted or conflicted files are red. The right pane shows the selected file's Git diff; press `F6` to switch between inline and split layouts. The last layout is restored when the view or romty is opened again. A file with both staged and unstaged edits shows both sections, and an untracked text file is compared with an empty file. Press `↑`/`↓` to select a file, use `Ctrl`+`↑`/`↓`, the mouse wheel, or the paging keys to read its diff, and press `F5` to reload the worktree.
 
 ## Keyboard shortcuts
 
-`F1` through `F7` work in both panes and with regular modals open. The root path prompt owns its input until submitted or cancelled. While a daemon stop, hook installation, or Git command is running, only `F4` is accepted so the TUI can close. Press `F1` for the complete in-app reference.
+`F1` through `F7` work in both panes and with regular modals open. Alternatives listed beside them are contextual; file view also assigns its own actions to `F5` and `F6`. The root path prompt owns its input until submitted or cancelled. While daemon shutdown, hook installation, or a Git command is running, only `F4` is accepted. Press `F1` for the in-app reference.
 
-### Core
-
-| Scope | Key | Action |
-|---|---|---|
-| Both panes | `F1` | Open help |
-| Both panes | `F2` | Add a root |
-| Both panes | `F3` | Open config |
-| Both panes | `F4` | Close the TUI and leave sessions running |
-| Both panes | `F5` | Refresh workspaces and Git state |
-| Both panes | `F6` | Enter or leave scrollback |
-| Both panes | `F7` | Switch pane |
-| Workspace | `F8` | Delete the selected workspace or forget the selected root after confirmation |
-| Workspace | `F9` | Stop the daemon and running shells after confirmation |
-
-### Workspace aliases
+### Global
 
 | Key | Action |
 |---|---|
-| `?` | Open help |
-| `a` | Add a root |
-| `,` | Open config |
-| `q` or `Ctrl+C` | Close the TUI and leave sessions running |
-| `r` | Refresh workspaces and Git state |
-| `s` | Enter or leave scrollback |
-| `d` | Remove the selected workspace or root after confirmation |
-| `t` | Stop the daemon and running shells after confirmation |
+| `F1` or `?` | Open Help |
+| `F2` | Add a root |
+| `F3` or `,` | Open Config |
+| `F4` or `Ctrl+C` | Close the TUI and leave sessions running |
+| `F5` | Refresh workspaces and Git state, or reload file view |
+| `F6` or `Ctrl`+`Shift`+`\` | Enter or leave scrollback |
+| `F7` or `Ctrl+\` | Toggle pane focus |
+
+### Workspace
+
+| Key | Action |
+|---|---|
+| `F8` | Delete the selected workspace or forget the selected root after confirmation |
+| `F9` | Stop the daemon and running shells after confirmation |
 | `i` | Open About |
+| `Tab` | Focus the terminal |
 
-### Navigation
+### Switch
 
-| Scope | Key | Action |
+| Key | Action |
+|---|---|
+| `Ctrl`+`Shift`+`T` | Create and open a terminal tab |
+| `Ctrl`+`Shift`+`G` | Open Git actions for the contextual workspace |
+| `Ctrl`+`Shift`+`F` | Toggle changed files and Git diff |
+| `Ctrl`+`Shift`+`←`/`→` | Switch terminal tab |
+| `Ctrl`+`Shift`+`↑`/`↓` | Switch to a workspace with a running terminal |
+
+### Move
+
+| Key | Action | Applies to |
 |---|---|---|
-| Workspace | `↑`/`↓` or `k`/`j` | Select a root or workspace |
-| Workspace | `←`/`→` or `h`/`l` | Select a terminal tab or `+` |
-| Workspace | `Enter` | Open the selection |
-| Workspace | `Tab` | Focus the terminal |
-| Both panes | `Ctrl+\` | Toggle focus between the workspace and terminal panes |
-| Both panes | `Ctrl`+`Shift`+`\` | Enter or leave scrollback |
-| Both panes | `Ctrl`+`Shift`+`T` | Create and open a terminal tab |
-| Both panes | `Ctrl`+`Shift`+`G` | Open Git actions for the contextual workspace |
-| Both panes | `Ctrl`+`Shift`+`F` | Toggle the changed-file tree and Git diff for the contextual workspace |
-| Both panes | `Ctrl`+`Shift`+`←`/`→` | Switch terminal tab |
-| Both panes | `Ctrl`+`Shift`+`↑`/`↓` | Switch to a workspace with a running terminal |
+| `↑`/`↓` or `k`/`j` | Move one item or line | Workspace, file list, picker, Help, Git, scrollback |
+| `←`/`→` or `h`/`l` | Select a tab, or open a picker child/parent | Workspace, picker |
+| `PgUp`/`PgDn` or `Ctrl+B`/`Ctrl+F` | Move one page | Picker, Help, Git result, file diff, scrollback |
+| `Home`/`End` or `g`/`G` | Move to the first or last item/line | Picker, Help, Git result, file diff, scrollback |
+| `Shift`+`PgUp`/`PgDn` | Enter scrollback or move one page | Workspace, terminal, scrollback |
+| Mouse wheel | Scroll | Help, scrollback, file diff |
 
-### Contextual modes
+### File diff
 
-| Mode | Key | Action |
-|---|---|---|
-| Picker | `↑`/`↓` or `k`/`j` | Move one directory |
-| Picker | `PgUp`/`PgDn` or `Ctrl+B`/`Ctrl+F` | Move one page |
-| Picker | `Home`/`End` or `g`/`G` | Move to the first or last directory |
-| Picker | `→`/`←` or `l`/`h` | Open a directory or go to its parent |
-| Picker | `Enter` / `/` / `Esc` | Add the selection / type a path / close |
-| Terminal / scrollback | `Shift`+`PgUp`/`PgDn` | Enter scrollback or move one page |
-| Scrollback | `↑`/`↓` or `k`/`j` | Move one history line |
-| Scrollback | `PgUp`/`PgDn` or `Ctrl+B`/`Ctrl+F` | Move one history page |
-| Scrollback | `Home`/`End` or `g`/`G` | Move to the oldest output or live screen |
-| Scrollback | Wheel | Move through history |
-| Scrollback | `F6`, `F7`, `Ctrl`+`Shift`+`\`, `Esc`, `q`, `s` | Leave scrollback |
-| Help | `↑`/`↓` or `k`/`j` | Move one reference line |
-| Help | `PgUp`/`PgDn` or `Ctrl+B`/`Ctrl+F` | Move one reference page |
-| Help | `Home`/`End` or `g`/`G` | Move to the first or last reference entry |
-| Help | `Esc` | Close help |
-| Config | `←`/`→`, `[`/`]` | Resize the workspace pane |
-| Config | `Esc` | Close config |
-| Git actions | `↑`/`↓` or `k`/`j` | Select an action |
-| Git actions | `Enter` / `Esc` | Run the action / close the menu |
-| Git result | `↑`/`↓` or `k`/`j` | Move one output line |
-| Git result | `PgUp`/`PgDn` or `Ctrl+B`/`Ctrl+F` | Move one output page |
-| Git result | `Home`/`End` or `g`/`G` | Move to the first or last output line |
-| Git result | `Enter` / `Esc` | Return to the actions / close the result |
-| Running Git action | `F4` | Cancel the Git command and close the TUI |
-| File view | `↑`/`↓` or `k`/`j` | Select a changed file |
-| File view | `v` | Toggle the diff between inline and split layouts |
-| File view | `Ctrl`+`↑`/`↓` or mouse wheel | Move through the diff by line |
-| File view | `PgUp`/`PgDn` or `Ctrl+B`/`Ctrl+F` | Move one diff page |
-| File view | `Home`/`End` or `g`/`G` | Move to the first or last diff line |
-| File view | `F5` or `r` | Reload changed files and the selected diff |
-| File view | `Ctrl`+`Shift`+`F` or `Esc` | Close the file view |
-| Path prompt | Text or paste / `Backspace` | Enter or erase a path |
-| Path prompt | `Enter` / `Esc` | Submit / cancel |
-| Confirmation | `Enter` / `Esc` | Confirm / cancel |
+| Key | Action |
+|---|---|
+| `F6` | Toggle inline and split layouts |
+| `Ctrl`+`↑`/`↓` | Move through the diff one line at a time |
+
+### Context
+
+| Key | Action |
+|---|---|
+| `Enter` | Open, run, return, submit, or confirm in the workspace, picker, Git views, and prompts |
+| `Esc` | Close a modal or file view, cancel a prompt, or leave scrollback |
+| `/` | Type a path in the root picker |
+| `Backspace` | Erase a path character |
+| `←`/`→` or `[`/`]` | Resize the workspace pane in Config |
 
 ## Roots, workspaces, and tabs
 
@@ -116,7 +92,7 @@ Press `Ctrl`+`Shift`+`F` to toggle the file view for the same contextual workspa
 
 The `+` key is not a shortcut. Select the `+` tab with `←`/`→` and press `Enter`, or use `Ctrl`+`Shift`+`T`. From the workspace pane the shortcut uses the workspace under the cursor; from the terminal pane or scrollback it uses the open terminal workspace. The switch shortcuts wrap at both ends.
 
-`F7` and `Ctrl+\` switch panes in either direction. `Tab` also enters the terminal. `Ctrl`+`Shift`+`\` enters or leaves scrollback. In the terminal pane only global shortcuts are captured. Other keyboard and paste input, including `F8`, `F9`, and ordinary `Ctrl` combinations, is forwarded to the PTY.
+Pane focus and scrollback toggles are reversible. In the terminal pane only Global and Switch shortcuts are captured. Other keyboard and paste input, including `F8`, `F9`, and ordinary `Ctrl` combinations, is forwarded to the PTY.
 
 romty discovers direct child directories only. Press `F5` after a command adds or removes a child. An unreadable root is marked `✗` and listed without workspaces; other roots remain usable.
 
@@ -136,8 +112,8 @@ With passthrough enabled, the application mouse mode is mirrored until it exits 
 
 ## Destructive actions and config
 
-`F8` or `d` acts on the highlighted row. Deleting a workspace recursively removes all of its contents. Forgetting a root removes it only from romty. Both actions terminate terminal sessions under the selected item.
+`F8` acts on the highlighted row. Deleting a workspace recursively removes all of its contents. Forgetting a root removes it only from romty. Both actions terminate terminal sessions under the selected item.
 
-`F9` or `t` asks before stopping the daemon because this terminates every running shell. Once confirmed, shutdown cannot be cancelled.
+`F9` asks before stopping the daemon because this terminates every running shell. Once confirmed, shutdown cannot be cancelled.
 
 The workspace pane width and last inline or split diff layout are saved automatically in `config.json`. The pane width is constrained to 18 through 40 columns and may shrink further when the terminal is narrow.

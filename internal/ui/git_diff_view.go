@@ -142,9 +142,42 @@ func (m dashboard) handleGitFileDiff(message gitFileDiffMsg) (tea.Model, tea.Cmd
 		m.gitDiff.diffLines = nil
 		return m, nil
 	}
-	m.gitDiff.diffLines = strings.Split(message.diff, "\n")
+	m.gitDiff.diffLines = normalizeGitDiffLines(message.diff)
 	m.gitDiff.err = ""
 	return m, nil
+}
+
+func normalizeGitDiffLines(diff string) []string {
+	lines := strings.Split(diff, "\n")
+	for index, line := range lines {
+		lines[index] = expandGitDiffTabs(line)
+	}
+	return lines
+}
+
+func expandGitDiffTabs(line string) string {
+	if !strings.ContainsRune(line, '\t') {
+		return line
+	}
+	const tabWidth = 4
+	prefix := ""
+	if strings.HasPrefix(line, "+") || strings.HasPrefix(line, "-") || strings.HasPrefix(line, " ") {
+		prefix, line = line[:1], line[1:]
+	}
+	var result strings.Builder
+	result.WriteString(prefix)
+	column := 0
+	for _, character := range line {
+		if character == '\t' {
+			spaces := tabWidth - column%tabWidth
+			result.WriteString(strings.Repeat(" ", spaces))
+			column += spaces
+			continue
+		}
+		result.WriteRune(character)
+		column += lipgloss.Width(string(character))
+	}
+	return result.String()
 }
 
 func (m dashboard) handleGitDiffKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
@@ -153,11 +186,11 @@ func (m dashboard) handleGitDiffKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd
 		return m.openModal(helpModal)
 	case "f4":
 		return m.quit()
-	case "f5", "r":
+	case "f5":
 		return m, m.loadChangedFiles()
 	case "esc":
 		return m.toggleGitDiffView()
-	case "v":
+	case "f6":
 		m.gitDiff.split = !m.gitDiff.split
 		m.gitDiffSplit = m.gitDiff.split
 		m.gitDiff.diffOffset = min(m.gitDiff.diffOffset, m.maximumGitDiffOffset())

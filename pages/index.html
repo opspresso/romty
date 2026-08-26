@@ -274,72 +274,79 @@
   <section class="band" id="shortcuts">
     <div class="container">
       <div class="section-head">
-        <h2>Every shortcut, in one place</h2>
+        <h2>Shortcut map</h2>
         <p>
-          F1 through F7 work from either pane and with regular modals open. Letter aliases, F8,
-          and F9 belong to the workspace pane, so a shell keeps the keys it binds. Contextual
-          views reuse the same navigation keys, and destructive actions ask first.
+          F1 through F7 work from either pane and with regular modals open. Alternatives shown
+          beside them are contextual, and file view assigns its own actions to F5 and F6.
+          Destructive actions ask first.
         </p>
       </div>
 
-      <div class="keys">
-        <div class="key-row"><span class="caps"><kbd>F1</kbd><kbd>?</kbd></span><span>Open help</span></div>
-        <div class="key-row"><span class="caps"><kbd>F2</kbd><kbd>a</kbd></span><span>Pick a root directory to
-            add</span></div>
-        <div class="key-row"><span class="caps"><kbd>F3</kbd><kbd>,</kbd></span><span>Open config</span></div>
-        <div class="key-row"><span class="caps"><kbd>F4</kbd><kbd>q</kbd><kbd>Ctrl+C</kbd></span><span>Quit romty</span>
-        </div>
-        <div class="key-row"><span class="caps"><kbd>F5</kbd><kbd>r</kbd></span><span>Refresh workspaces and Git
-            state, or reload the file view</span></div>
-        <div class="key-row"><span class="caps"><kbd>F6</kbd><kbd>s</kbd></span><span>Enter or leave scrollback</span>
-        </div>
-        <div class="key-row"><span class="caps"><kbd>F7</kbd></span><span>Switch between the panes</span></div>
-        <div class="key-row"><span class="caps"><kbd>F8</kbd><kbd>d</kbd></span><span>Delete the selected workspace
-            or forget the selected root, terminating its shells (workspace pane)</span></div>
-        <div class="key-row"><span class="caps"><kbd>F9</kbd><kbd>t</kbd></span><span>Stop the daemon and every
-            shell (workspace pane)</span></div>
-        <div class="key-row"><span class="caps"><kbd>i</kbd></span><span>Open About (workspace pane)</span></div>
-        <div class="key-row"><span class="caps"><kbd>↑/↓</kbd><kbd>k/j</kbd></span><span>Move
-            through workspaces, changed files, pickers, help, Git actions, or scrollable output</span>
-        </div>
-        <div class="key-row"><span class="caps"><kbd>←/→</kbd><kbd>h/l</kbd></span><span>Move
-            between terminal tabs, or open a picker directory and return to its parent</span>
-        </div>
-        <div class="key-row"><span class="caps"><kbd>Enter</kbd></span><span>Open, run, return, submit, or confirm
-            the contextual selection</span></div>
-        <div class="key-row"><span class="caps"><kbd>Tab</kbd></span><span>Focus the terminal from the workspace
-            pane</span></div>
-        <div class="key-row"><span class="caps"><kbd>Ctrl+\</kbd></span><span>Toggle focus between the workspace
-            and terminal panes</span></div>
-        <div class="key-row"><span class="caps"><kbd>Ctrl+Shift+\</kbd></span><span>Enter or leave scrollback</span>
-        </div>
-        <div class="key-row"><span class="caps"><kbd>Ctrl+Shift+T</kbd></span><span>Create and
-            open a terminal tab in the selected or current workspace</span></div>
-        <div class="key-row"><span class="caps"><kbd>Ctrl+Shift+G</kbd></span><span>Open Git
-            actions for the selected or current workspace</span></div>
-        <div class="key-row"><span class="caps"><kbd>Ctrl+Shift+F</kbd></span><span>Toggle the changed-file tree
-            and Git diff for the selected or current workspace</span></div>
-        <div class="key-row"><span class="caps"><kbd>v</kbd></span><span>Toggle a file diff between inline and
-            split layouts; the last layout is remembered</span></div>
-        <div class="key-row"><span class="caps"><kbd>Ctrl+↑/↓</kbd><kbd>Wheel</kbd></span><span>Move through a file
-            diff by line</span></div>
-        <div class="key-row"><span class="caps"><kbd>Ctrl+Shift+←/→</kbd></span><span>Switch
-            terminal tabs from either pane</span></div>
-        <div class="key-row"><span class="caps"><kbd>Ctrl+Shift+↑/↓</kbd></span><span>Switch
-            between workspaces with running terminals from either pane</span></div>
-        <div class="key-row"><span class="caps"><kbd>Shift+PgUp/PgDn</kbd></span><span>Enter
-            scrollback or move a page at once</span></div>
-        <div class="key-row"><span class="caps"><kbd>PgUp/PgDn</kbd><kbd>Ctrl+B/F</kbd></span><span>Move
-            a page in a picker, help, Git result, file diff, or scrollback</span></div>
-        <div class="key-row"><span class="caps"><kbd>Home/End</kbd><kbd>g/G</kbd></span><span>Move
-            to the beginning or end of contextual lists and output</span></div>
-        <div class="key-row"><span class="caps"><kbd>←/→</kbd><kbd>[/]</kbd></span><span>Resize the workspace pane
-            in config</span></div>
-        <div class="key-row"><span class="caps"><kbd>/</kbd></span><span>Type a path in the root picker</span></div>
-        <div class="key-row"><span class="caps"><kbd>Backspace</kbd></span><span>Erase a character in the path
-            prompt</span></div>
-        <div class="key-row"><span class="caps"><kbd>Esc</kbd></span><span>Close or cancel the current contextual
-            view</span></div>
+      <div class="shortcut-groups">
+        <section class="shortcut-group">
+          <h3>Global</h3>
+          <div class="keys">
+            <div class="key-row"><span class="caps"><kbd>F1</kbd><kbd>?</kbd></span><span>Open Help</span></div>
+            <div class="key-row"><span class="caps"><kbd>F2</kbd></span><span>Add a root</span></div>
+            <div class="key-row"><span class="caps"><kbd>F3</kbd><kbd>,</kbd></span><span>Open Config</span></div>
+            <div class="key-row"><span class="caps"><kbd>F4</kbd><kbd>Ctrl+C</kbd></span><span>Close the TUI and leave sessions running</span></div>
+            <div class="key-row"><span class="caps"><kbd>F5</kbd></span><span>Refresh workspaces and Git state, or reload file view</span></div>
+            <div class="key-row"><span class="caps"><kbd>F6</kbd><kbd>Ctrl+Shift+\</kbd></span><span>Enter or leave scrollback</span></div>
+            <div class="key-row"><span class="caps"><kbd>F7</kbd><kbd>Ctrl+\</kbd></span><span>Toggle pane focus</span></div>
+          </div>
+        </section>
+
+        <section class="shortcut-group">
+          <h3>Workspace</h3>
+          <div class="keys">
+            <div class="key-row"><span class="caps"><kbd>F8</kbd></span><span>Delete the selected workspace or forget the selected root</span></div>
+            <div class="key-row"><span class="caps"><kbd>F9</kbd></span><span>Stop the daemon and every running shell</span></div>
+            <div class="key-row"><span class="caps"><kbd>i</kbd></span><span>Open About</span></div>
+            <div class="key-row"><span class="caps"><kbd>Tab</kbd></span><span>Focus the terminal</span></div>
+          </div>
+        </section>
+
+        <section class="shortcut-group">
+          <h3>Switch</h3>
+          <div class="keys">
+            <div class="key-row"><span class="caps"><kbd>Ctrl+Shift+T</kbd></span><span>Create and open a terminal tab</span></div>
+            <div class="key-row"><span class="caps"><kbd>Ctrl+Shift+G</kbd></span><span>Open Git actions for the contextual workspace</span></div>
+            <div class="key-row"><span class="caps"><kbd>Ctrl+Shift+F</kbd></span><span>Toggle changed files and Git diff</span></div>
+            <div class="key-row"><span class="caps"><kbd>Ctrl+Shift+←/→</kbd></span><span>Switch terminal tab</span></div>
+            <div class="key-row"><span class="caps"><kbd>Ctrl+Shift+↑/↓</kbd></span><span>Switch to a workspace with a running terminal</span></div>
+          </div>
+        </section>
+
+        <section class="shortcut-group">
+          <h3>Move</h3>
+          <div class="keys">
+            <div class="key-row"><span class="caps"><kbd>↑/↓</kbd><kbd>k/j</kbd></span><span>Move one item or line</span></div>
+            <div class="key-row"><span class="caps"><kbd>←/→</kbd><kbd>h/l</kbd></span><span>Select a tab, or open a picker child or parent</span></div>
+            <div class="key-row"><span class="caps"><kbd>PgUp/PgDn</kbd><kbd>Ctrl+B/F</kbd></span><span>Move one page</span></div>
+            <div class="key-row"><span class="caps"><kbd>Home/End</kbd><kbd>g/G</kbd></span><span>Move to the first or last item or line</span></div>
+            <div class="key-row"><span class="caps"><kbd>Shift+PgUp/PgDn</kbd></span><span>Enter scrollback or move one page</span></div>
+            <div class="key-row"><span class="caps"><kbd>Wheel</kbd></span><span>Scroll Help, history, or a file diff</span></div>
+          </div>
+        </section>
+
+        <section class="shortcut-group">
+          <h3>File diff</h3>
+          <div class="keys">
+            <div class="key-row"><span class="caps"><kbd>F6</kbd></span><span>Toggle inline and split layouts; the last layout is remembered</span></div>
+            <div class="key-row"><span class="caps"><kbd>Ctrl+↑/↓</kbd></span><span>Move through the diff one line at a time</span></div>
+          </div>
+        </section>
+
+        <section class="shortcut-group">
+          <h3>Context</h3>
+          <div class="keys">
+            <div class="key-row"><span class="caps"><kbd>Enter</kbd></span><span>Open, run, return, submit, or confirm in the workspace, picker, Git views, and prompts</span></div>
+            <div class="key-row"><span class="caps"><kbd>Esc</kbd></span><span>Close a modal or file view, cancel a prompt, or leave scrollback</span></div>
+            <div class="key-row"><span class="caps"><kbd>/</kbd></span><span>Type a path in the root picker</span></div>
+            <div class="key-row"><span class="caps"><kbd>Backspace</kbd></span><span>Erase a path character</span></div>
+            <div class="key-row"><span class="caps"><kbd>←/→</kbd><kbd>[/]</kbd></span><span>Resize the workspace pane in Config</span></div>
+          </div>
+        </section>
       </div>
 
       <p class="note">

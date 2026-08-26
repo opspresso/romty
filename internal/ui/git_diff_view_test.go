@@ -66,6 +66,45 @@ func TestDashboardTogglesGitDiffViewForContextWorkspace(t *testing.T) {
 	}
 }
 
+func TestDashboardExpandsTabsInLoadedGitDiff(t *testing.T) {
+	value := newDashboard(&fakeBackend{}, model.Snapshot{})
+	value.width = 100
+	value.height = 20
+	value.gitDiff = gitDiffView{
+		active:    true,
+		target:    model.Workspace{Name: "alpha", Path: "/projects/alpha"},
+		files:     []gitChangedFile{{Path: "file.go", WorkTreeStatus: 'M'}},
+		fileIndex: 0,
+		request:   1,
+	}
+
+	updated, _ := value.handleGitFileDiff(gitFileDiffMsg{
+		path:     "/projects/alpha",
+		filePath: "file.go",
+		request:  1,
+		diff:     "@@ -1 +1 @@\n-\told\tvalue\n+\tnew\tvalue",
+	})
+	value = updated.(dashboard)
+
+	for _, line := range value.gitDiff.diffLines {
+		if strings.ContainsRune(line, '\t') {
+			t.Fatalf("loaded diff still contains a tab: %q", line)
+		}
+	}
+	for _, split := range []bool{false, true} {
+		value.gitDiff.split = split
+		rendered := ansi.Strip(strings.Join(value.renderGitFileDiff(80, 10), "\n"))
+		for _, fragment := range []string{"-    old value", "+    new value"} {
+			if !strings.Contains(rendered, fragment) {
+				t.Fatalf("split=%t diff does not contain %q:\n%s", split, fragment, rendered)
+			}
+		}
+		if strings.ContainsRune(rendered, '�') {
+			t.Fatalf("split=%t diff contains a replacement character:\n%s", split, rendered)
+		}
+	}
+}
+
 func TestDashboardNavigatesAndScrollsGitDiffView(t *testing.T) {
 	previousDiff := loadGitFileDiff
 	t.Cleanup(func() { loadGitFileDiff = previousDiff })
@@ -245,17 +284,38 @@ func TestDashboardTogglesInlineAndSplitGitDiff(t *testing.T) {
 	if !strings.Contains(inline, "Diff · file.txt · inline") {
 		t.Fatalf("inline title is missing:\n%s", inline)
 	}
-	updated, _ := value.Update(key('v', "v"))
+	updated, command := value.Update(key('v', "v"))
+	value = updated.(dashboard)
+	if command != nil || value.gitDiff.split {
+		t.Fatalf("v = (command %v, split %t), want no shortcut action", command, value.gitDiff.split)
+	}
+	updated, _ = value.Update(key(tea.KeyF6, ""))
 	value = updated.(dashboard)
 	split := ansi.Strip(value.render())
 	if !value.gitDiff.split || !strings.Contains(split, "Diff · file.txt · split") ||
 		!lineContainsInOrder(split, "-old", "│", "+new") {
 		t.Fatalf("split view is incomplete:\n%s", split)
 	}
-	updated, _ = value.Update(key('v', "v"))
+	updated, _ = value.Update(key(tea.KeyF6, ""))
 	value = updated.(dashboard)
 	if value.gitDiff.split {
-		t.Fatal("a second v did not restore inline view")
+		t.Fatal("a second F6 did not restore inline view")
+	}
+}
+
+func TestDashboardRefreshesGitDiffWithF5Only(t *testing.T) {
+	value := newDashboard(&fakeBackend{}, model.Snapshot{})
+	value.gitDiff = gitDiffView{active: true, target: model.Workspace{Name: "alpha", Path: "/projects/alpha"}}
+
+	updated, command := value.Update(key('r', "r"))
+	value = updated.(dashboard)
+	if command != nil || value.gitDiff.filesPending {
+		t.Fatalf("r = (command %v, pending %t), want no shortcut action", command, value.gitDiff.filesPending)
+	}
+	updated, command = value.Update(key(tea.KeyF5, ""))
+	value = updated.(dashboard)
+	if command == nil || !value.gitDiff.filesPending {
+		t.Fatalf("F5 = (command %v, pending %t), want file refresh", command, value.gitDiff.filesPending)
 	}
 }
 
@@ -275,10 +335,10 @@ func TestDashboardPersistsAndRestoresGitDiffViewMode(t *testing.T) {
 	if value.gitDiff.split {
 		t.Fatal("new file view did not default to inline")
 	}
-	updated, save := value.Update(key('v', "v"))
+	updated, save := value.Update(key(tea.KeyF6, ""))
 	value = updated.(dashboard)
 	if save == nil || !value.gitDiff.split {
-		t.Fatalf("v = (save %v, split %t), want split persisted", save, value.gitDiff.split)
+		t.Fatalf("F6 = (save %v, split %t), want split persisted", save, value.gitDiff.split)
 	}
 	updated, _ = value.Update(save())
 	value = updated.(dashboard)
