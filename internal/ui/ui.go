@@ -201,6 +201,7 @@ type dashboard struct {
 	gitActionOutput   string
 	gitActionError    string
 	gitActionOffset   int
+	gitActionCancel   func()
 	styles            *uiStyles
 }
 
@@ -591,6 +592,9 @@ func (m dashboard) handleKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	if m.gitActionPending {
+		if message.String() == "f4" {
+			return m.quit()
+		}
 		return m, nil
 	}
 	if m.modal == hookInstallModal {
@@ -660,6 +664,7 @@ func (m dashboard) handleKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m dashboard) quit() (tea.Model, tea.Cmd) {
+	m.cancelGitAction()
 	m.closeTerminal()
 	m.result.Quit = true
 	return m, tea.Quit

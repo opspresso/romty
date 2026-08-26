@@ -154,13 +154,22 @@ func TestDashboardHoldsGitActionModalWhileCommandRuns(t *testing.T) {
 	value.modal = gitActionsModal
 	value.gitActionPending = true
 	value.gitAction = gitPullAction
+	cancelled := false
+	value.gitActionCancel = func() { cancelled = true }
 
-	for _, message := range []tea.KeyPressMsg{key(tea.KeyEscape, ""), key(tea.KeyF4, ""), key(tea.KeyF1, "")} {
+	for _, message := range []tea.KeyPressMsg{key(tea.KeyEscape, ""), key(tea.KeyF1, "")} {
 		updated, command := value.Update(message)
 		value = updated.(dashboard)
-		if command != nil || value.modal != gitActionsModal || value.result.Quit {
-			t.Fatalf("%q during Git action = (command %v, modal %v, quit %t)", message.String(), command, value.modal, value.result.Quit)
+		if command != nil || value.modal != gitActionsModal || value.result.Quit || cancelled {
+			t.Fatalf("%q during Git action = (command %v, modal %v, quit %t, cancelled %t)",
+				message.String(), command, value.modal, value.result.Quit, cancelled)
 		}
+	}
+
+	updated, command := value.Update(key(tea.KeyF4, ""))
+	value = updated.(dashboard)
+	if command == nil || !value.result.Quit || !cancelled {
+		t.Fatalf("F4 during Git action = (command %v, quit %t, cancelled %t)", command, value.result.Quit, cancelled)
 	}
 }
 
@@ -226,7 +235,7 @@ func TestExecuteGitStatusAction(t *testing.T) {
 		t.Skip("git is not installed")
 	}
 	repository := t.TempDir()
-	command := exec.Command("git", "init", "--initial-branch=main", repository)
+	command := exec.CommandContext(t.Context(), "git", "init", "--initial-branch=main", repository)
 	command.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1")
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("initialize Git repository: %v\n%s", err, output)

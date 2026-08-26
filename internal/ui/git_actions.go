@@ -83,11 +83,15 @@ type gitActionMsg struct {
 }
 
 func executeGitAction(path string, action gitAction) (string, error) {
+	return executeGitActionContext(context.Background(), path, action)
+}
+
+func executeGitActionContext(parent context.Context, path string, action gitAction) (string, error) {
 	arguments, err := action.arguments()
 	if err != nil {
 		return "", err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), gitActionTimeout)
+	ctx, cancel := context.WithTimeout(parent, gitActionTimeout)
 	defer cancel()
 	command := exec.CommandContext(ctx, "git", append([]string{"-C", path}, arguments...)...)
 	command.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GCM_INTERACTIVE=Never")
@@ -144,8 +148,10 @@ func (m dashboard) startGitAction() (tea.Model, tea.Cmd) {
 	m.gitActionOffset = 0
 	path := m.gitActionTarget.Path
 	action := m.gitAction
+	ctx, cancel := context.WithCancel(context.Background())
+	m.gitActionCancel = cancel
 	return m, func() tea.Msg {
-		output, err := executeGitAction(path, action)
+		output, err := executeGitActionContext(ctx, path, action)
 		return gitActionMsg{path: path, action: action, output: output, err: err}
 	}
 }
@@ -155,12 +161,21 @@ func (m dashboard) handleGitActionResult(message gitActionMsg) (tea.Model, tea.C
 		return m, nil
 	}
 	m.gitActionPending = false
+	m.cancelGitAction()
 	m.gitActionComplete = true
 	m.gitActionOutput = message.output
 	if message.err != nil {
 		m.gitActionError = message.err.Error()
 	}
 	return m, m.readGitStatus(false, false)
+}
+
+func (m *dashboard) cancelGitAction() {
+	if m.gitActionCancel == nil {
+		return
+	}
+	m.gitActionCancel()
+	m.gitActionCancel = nil
 }
 
 func (m dashboard) resetGitActionResult() dashboard {
