@@ -103,13 +103,15 @@ romty keeps 10,000 scrollback lines for each terminal. Scrollback fills the widt
 
 Full-screen applications such as `vim`, `less`, and Claude Code use an alternate screen with no romty history. In that mode `Shift`+`PgUp`/`PgDn` is forwarded as plain `PgUp`/`PgDn` so the application can page itself.
 
-The mouse stays with the host terminal for native selection except while file view is open, when its wheel scrolls the diff. Set `mouse_passthrough` in `config.json` to let applications receive it instead:
+On the live screen, the mouse wheel enters scrollback and scrolls three lines per notch. Because romty captures the live mouse, native selection uses the terminal bypass modifier: `Option` on macOS or `Shift` elsewhere. Scrollback releases mouse capture, so plain click-drag selects the full-width terminal output. File view captures the wheel to scroll its diff.
+
+Set `mouse_passthrough` in `config.json` to let applications receive the mouse when they request it instead:
 
 ```json
 { "mouse_passthrough": true }
 ```
 
-With passthrough enabled, the application mouse mode is mirrored until it exits or scrollback opens. Native selection then uses the terminal bypass modifier: `Option` on macOS or `Shift` elsewhere. If the terminal does not support alternate scroll, use the keyboard to navigate scrollback.
+With passthrough enabled, the application mouse mode is mirrored until it exits or scrollback opens. If the terminal does not support alternate scroll, use the keyboard to navigate scrollback.
 
 ## Destructive actions and config
 

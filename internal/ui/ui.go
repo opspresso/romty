@@ -422,7 +422,14 @@ func (m dashboard) update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if m.gitDiff.active {
 			return m.handleGitDiffMouse(message.(tea.MouseMsg))
 		}
-		return m.forwardMouse(message.(tea.MouseMsg))
+		mouse := message.(tea.MouseMsg)
+		if wheel, ok := message.(tea.MouseWheelMsg); ok && !m.guestOwnsMouse() {
+			return m.handleTerminalWheel(wheel)
+		}
+		if m.guestOwnsMouse() {
+			return m.forwardMouse(mouse)
+		}
+		return m, nil
 	case tea.PasteMsg:
 		if m.inputMode {
 			m.input += message.Content
@@ -911,6 +918,26 @@ func (m dashboard) forwardMouse(message tea.MouseMsg) (tea.Model, tea.Cmd) {
 		m.terminal.sendMouse(uv.MouseWheelEvent(mouse))
 	case tea.MouseMotionMsg:
 		m.terminal.sendMouse(uv.MouseMotionEvent(mouse))
+	}
+	return m, nil
+}
+
+func (m dashboard) handleTerminalWheel(wheel tea.MouseWheelMsg) (tea.Model, tea.Cmd) {
+	if m.terminal == nil {
+		return m, nil
+	}
+	if _, inside := m.translateMouse(wheel.Mouse()); !inside && !m.scrollback {
+		return m, nil
+	}
+	switch wheel.Button {
+	case tea.MouseWheelUp:
+		if m.scrollback || m.startScrollback() {
+			m.scrollTerminal(3)
+		}
+	case tea.MouseWheelDown:
+		if m.scrollback {
+			m.scrollTerminal(-3)
+		}
 	}
 	return m, nil
 }
@@ -2057,12 +2084,10 @@ func (m dashboard) View() tea.View {
 	return view
 }
 
-// mouseMode keeps the mouse with the host terminal, where its native drag
-// selection lives. Help and file view temporarily claim it for wheel scrolling.
-// Copy mode takes the wheel through alternate scroll, which arrives as arrow
-// keys, instead of claiming the mouse. The other handover is to a guest
-// application that asked for the mouse, and only when the user opted in, which
-// is the same trade tmux makes for `set -g mouse on`.
+// mouseMode claims the live terminal's wheel so it can enter scrollback. Copy
+// mode gives the mouse back to the host for native selection and takes its
+// wheel through alternate scroll instead. A guest application that asked for
+// the mouse takes precedence only when the user opted into passthrough.
 func (m dashboard) mouseMode() tea.MouseMode {
 	if m.modal == helpModal {
 		return tea.MouseModeCellMotion
@@ -2070,10 +2095,17 @@ func (m dashboard) mouseMode() tea.MouseMode {
 	if m.gitDiff.active {
 		return tea.MouseModeCellMotion
 	}
-	if !m.mousePassthrough || m.scrollback || m.terminal == nil {
+	if m.scrollback || m.terminal == nil {
 		return tea.MouseModeNone
 	}
-	return m.terminal.guestMouseMode()
+	if m.guestOwnsMouse() {
+		return m.terminal.guestMouseMode()
+	}
+	return tea.MouseModeCellMotion
+}
+
+func (m dashboard) guestOwnsMouse() bool {
+	return m.mousePassthrough && m.terminal != nil && m.terminal.guestMouseMode() != tea.MouseModeNone
 }
 
 func (m dashboard) render() string {

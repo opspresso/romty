@@ -1084,9 +1084,9 @@ func TestDashboardScrollsTerminalHistory(t *testing.T) {
 	value := scrolledDashboard(t, 200)
 	history := value.terminal.scrollbackLen()
 
-	// The mouse stays with the host terminal until scrollback mode is entered.
-	if value.View().MouseMode != tea.MouseModeNone {
-		t.Fatalf("mouse mode outside scrollback = %v, want none", value.View().MouseMode)
+	// The live screen captures the wheel so it can enter scrollback directly.
+	if value.View().MouseMode != tea.MouseModeCellMotion {
+		t.Fatalf("mouse mode outside scrollback = %v, want cell motion", value.View().MouseMode)
 	}
 	live := plainRows(value.terminal.renderViewport(0))
 
@@ -1148,13 +1148,35 @@ func TestDashboardScrollsTerminalHistory(t *testing.T) {
 
 	updated, command = value.Update(key(tea.KeyEscape, ""))
 	value = updated.(dashboard)
-	if value.scrollback || value.scrollOffset != 0 || value.View().MouseMode != tea.MouseModeNone {
-		t.Fatalf("Esc = (scrollback %v, offset %d, mouse %v), want the mouse returned to the host",
+	if value.scrollback || value.scrollOffset != 0 || value.View().MouseMode != tea.MouseModeCellMotion {
+		t.Fatalf("Esc = (scrollback %v, offset %d, mouse %v), want live wheel capture restored",
 			value.scrollback, value.scrollOffset, value.View().MouseMode)
 	}
 	if sequences := rawSequences(command); !slices.Contains(sequences, ansi.ResetMode(altScrollMode)) {
 		t.Fatalf("Esc sequences = %q, want alternate scroll given up", sequences)
 	}
+}
+
+func TestDashboardEntersScrollbackFromLiveMouseWheel(t *testing.T) {
+	value := scrolledDashboard(t, 200)
+	leftWidth := value.dimensions().leftWidth
+
+	updated, _ := value.Update(tea.MouseWheelMsg{
+		X: leftWidth + 3, Y: terminalTop + 2, Button: tea.MouseWheelUp,
+	})
+	value = updated.(dashboard)
+	if !value.scrollback || value.scrollOffset != 3 {
+		t.Fatalf("wheel up = (scrollback %v, offset %d), want three lines of history",
+			value.scrollback, value.scrollOffset)
+	}
+
+	updated, _ = value.Update(key('x', "x"))
+	value = updated.(dashboard)
+	if value.scrollback || value.scrollOffset != 0 {
+		t.Fatalf("typing = (scrollback %v, offset %d), want the live screen",
+			value.scrollback, value.scrollOffset)
+	}
+	waitForGuest(t, value.terminal.stream.(*memoryStream), "x")
 }
 
 // Outside scrollback the host's alternate scroll turns a wheel notch into three
@@ -1441,11 +1463,17 @@ func TestDashboardKeepsMouseWithTheHostUnlessPassthroughIsOn(t *testing.T) {
 	if value.terminal.guestMouseMode() != tea.MouseModeAllMotion {
 		t.Fatalf("guest mouse mode = %v, want all motion", value.terminal.guestMouseMode())
 	}
-	if value.View().MouseMode != tea.MouseModeNone {
-		t.Fatalf("mouse mode = %v, want the host to keep the mouse by default", value.View().MouseMode)
+	if value.View().MouseMode != tea.MouseModeCellMotion {
+		t.Fatalf("mouse mode = %v, want romty to capture the live wheel", value.View().MouseMode)
 	}
-	value.Update(tea.MouseWheelMsg{X: 40, Y: 6, Button: tea.MouseWheelUp})
+	updated, _ := value.Update(tea.MouseWheelMsg{X: 40, Y: 6, Button: tea.MouseWheelUp})
+	value = updated.(dashboard)
+	if !value.scrollback {
+		t.Fatal("wheel did not open scrollback while passthrough was disabled")
+	}
 	waitForGuestSilence(t, value.terminal, "")
+	updated, _ = value.Update(key(tea.KeyEscape, ""))
+	value = updated.(dashboard)
 
 	value.mousePassthrough = true
 	if value.View().MouseMode != tea.MouseModeAllMotion {
@@ -1461,7 +1489,7 @@ func TestDashboardKeepsMouseWithTheHostUnlessPassthroughIsOn(t *testing.T) {
 	waitForGuestSilence(t, value.terminal, sent)
 
 	// Copy mode takes the mouse back so the host can select the scrolled page.
-	updated, _ := value.Update(key(tea.KeyF6, ""))
+	updated, _ = value.Update(key(tea.KeyF6, ""))
 	value = updated.(dashboard)
 	if !value.scrollback || value.View().MouseMode != tea.MouseModeNone {
 		t.Fatalf("copy mode = (scrollback %v, mouse %v), want the mouse returned to the host",
@@ -2721,7 +2749,7 @@ func shortcutOrder(rendered string, values ...string) bool {
 	return true
 }
 
-func TestDashboardKeepsNativeMouseSelectionAndUsesKeyboardFocus(t *testing.T) {
+func TestDashboardCapturesLiveMouseWheelAndUsesKeyboardFocus(t *testing.T) {
 	stream := newMemoryStream("")
 	terminal := newEmbeddedTerminal("tab-1", stream, 40, 10)
 	defer terminal.close()
@@ -2732,8 +2760,8 @@ func TestDashboardKeepsNativeMouseSelectionAndUsesKeyboardFocus(t *testing.T) {
 	value.terminal = terminal
 	value.focus = terminalPane
 
-	if view := value.View(); view.MouseMode != tea.MouseModeNone {
-		t.Fatalf("initial mouse mode = %v, want none", view.MouseMode)
+	if view := value.View(); view.MouseMode != tea.MouseModeCellMotion {
+		t.Fatalf("initial mouse mode = %v, want cell motion", view.MouseMode)
 	}
 	if rendered := value.render(); strings.Contains(rendered, "Ctrl+G") || strings.Contains(rendered, "mouse focus") {
 		t.Fatalf("mouse focus mode is still advertised:\n%s", rendered)
@@ -2748,8 +2776,8 @@ func TestDashboardKeepsNativeMouseSelectionAndUsesKeyboardFocus(t *testing.T) {
 	if rendered := value.render(); !strings.Contains(rendered, separator) {
 		t.Fatalf("workspace focus is not visible:\n%s", rendered)
 	}
-	if view := value.View(); view.MouseMode != tea.MouseModeNone {
-		t.Fatalf("mouse mode after Ctrl+\\ = %v, want none", view.MouseMode)
+	if view := value.View(); view.MouseMode != tea.MouseModeCellMotion {
+		t.Fatalf("mouse mode after Ctrl+\\ = %v, want cell motion", view.MouseMode)
 	}
 }
 
