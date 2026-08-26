@@ -6,7 +6,7 @@ The website source is kept in `pages/`. This directory contains product and cont
 
 - [Getting started](getting-started.md) — install romty, create the first workspace, and use CLI commands
 - [Interface](interface.md) — navigate workspaces and terminals, use scrollback and the mouse, and interpret markers
-- [Runtime](runtime.md) — understand the daemon, persistent sessions, local files, and security boundary
+- [Runtime](runtime.md) — run agents on an always-on machine over SSH, and understand session persistence, local files, and the security boundary
 - [Agent status hooks](agent-hooks.md) — install Claude Code and Codex hooks and verify agent phases
 
 ## Contributor guide
