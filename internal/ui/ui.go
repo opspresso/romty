@@ -202,6 +202,7 @@ type dashboard struct {
 	gitActionError    string
 	gitActionOffset   int
 	gitActionCancel   func()
+	gitDiff           gitDiffView
 	styles            *uiStyles
 }
 
@@ -403,11 +404,14 @@ func (m dashboard) update(message tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyPressMsg:
 		return m.handleKey(message)
 	case tea.MouseClickMsg, tea.MouseReleaseMsg, tea.MouseWheelMsg, tea.MouseMotionMsg:
+		if m.gitDiff.active {
+			return m, nil
+		}
 		return m.forwardMouse(message.(tea.MouseMsg))
 	case tea.PasteMsg:
 		if m.inputMode {
 			m.input += message.Content
-		} else if m.focus == terminalPane && m.terminal != nil {
+		} else if !m.gitDiff.active && m.focus == terminalPane && m.terminal != nil {
 			m.terminal.paste(message.Content)
 		}
 		return m, nil
@@ -468,6 +472,10 @@ func (m dashboard) update(message tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case gitActionMsg:
 		return m.handleGitActionResult(message)
+	case gitChangedFilesMsg:
+		return m.handleGitChangedFiles(message)
+	case gitFileDiffMsg:
+		return m.handleGitFileDiff(message)
 	case workspaceMsg:
 		return m.handleWorkspace(message)
 	case tabMsg:
@@ -561,6 +569,7 @@ var globalKeys = map[string]func(dashboard) (tea.Model, tea.Cmd){
 	},
 	"ctrl+shift+t": func(m dashboard) (tea.Model, tea.Cmd) { return m.newTab() },
 	"ctrl+shift+g": func(m dashboard) (tea.Model, tea.Cmd) { return m.openGitActions() },
+	"ctrl+shift+f": func(m dashboard) (tea.Model, tea.Cmd) { return m.toggleGitDiffView() },
 	// Switching tabs from the terminal pane took Ctrl+\ and then two more keys.
 	// Ctrl+Shift+Left/Right is the chord a terminal with tabs binds, and a
 	// terminal reports it distinctly — Ctrl+Shift+Tab is not, because most
@@ -605,6 +614,18 @@ func (m dashboard) handleKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m.quit()
 		}
 		return m.handleModalKey(message)
+	}
+	if m.gitDiff.active && m.modal != noModal {
+		if action, ok := globalKeys[message.String()]; ok {
+			return action(m)
+		}
+		return m.handleModalKey(message)
+	}
+	if m.gitDiff.active {
+		if message.String() == "ctrl+shift+f" {
+			return m.toggleGitDiffView()
+		}
+		return m.handleGitDiffKey(message)
 	}
 	if action, ok := globalKeys[message.String()]; ok {
 		return action(m)
@@ -1953,7 +1974,7 @@ func (m dashboard) View() tea.View {
 	view.WindowTitle = "romty"
 	view.MouseMode = m.mouseMode()
 	view.KeyboardEnhancements.ReportAlternateKeys = true
-	if !m.scrollback && m.focus == terminalPane && m.terminal != nil {
+	if !m.gitDiff.active && !m.scrollback && m.focus == terminalPane && m.terminal != nil {
 		originX, originY := m.dimensions().terminalOrigin()
 		position := m.terminal.cursorPosition()
 		view.Cursor = tea.NewCursor(originX+position.X, originY+position.Y)
@@ -1967,7 +1988,7 @@ func (m dashboard) View() tea.View {
 // to a guest application that asked for the mouse, and only when the user
 // opted in, which is the same trade tmux makes for `set -g mouse on`.
 func (m dashboard) mouseMode() tea.MouseMode {
-	if !m.mousePassthrough || m.scrollback || m.terminal == nil {
+	if m.gitDiff.active || !m.mousePassthrough || m.scrollback || m.terminal == nil {
 		return tea.MouseModeNone
 	}
 	return m.terminal.guestMouseMode()
@@ -1980,7 +2001,9 @@ func (m dashboard) render() string {
 	// it hides are not built at all: rendering both meant every frame drew the
 	// workspace tree and a second terminal viewport it then threw away.
 	var lines []string
-	if m.scrollback {
+	if m.gitDiff.active {
+		lines = m.renderGitDiffPanes(view.leftWidth, view.rightWidth, view.bodyHeight)
+	} else if m.scrollback {
 		lines = m.renderRows(m.renderTerminal(width), width, view.bodyHeight)
 	} else {
 		lines = m.renderPanes(view.leftWidth, view.rightWidth, view.bodyHeight)
@@ -2118,6 +2141,17 @@ func (m dashboard) renderStatus(width, bodyHeight int) []string {
 		status = renderShortcuts(m.styles, width,
 			shortcut{key: "Enter", description: "install hooks"},
 			shortcut{key: "Esc", description: "skip"},
+		)
+	case m.gitDiff.active:
+		rail = renderShortcutRail(m.styles, width,
+			shortcut{key: "Ctrl+Shift+F", description: "close file view"},
+		)
+		status = renderShortcuts(m.styles, width,
+			shortcut{key: "↑/↓", description: "file"},
+			shortcut{key: "PgUp/PgDn", description: "diff"},
+			shortcut{key: "Home/End", description: "first/last"},
+			shortcut{key: "r", description: "refresh"},
+			shortcut{key: "Esc", description: "close"},
 		)
 	case m.scrollback:
 		status = truncate(
