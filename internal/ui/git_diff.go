@@ -116,7 +116,7 @@ func runGitDiff(path string, allowDifferenceExit bool, arguments ...string) (str
 	output, err := command.CombinedOutput()
 	value := strings.TrimRight(string(output), "\n")
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-		return value, fmt.Errorf("Git diff timed out after %s", gitDiffTimeout)
+		return value, fmt.Errorf("git diff timed out after %s", gitDiffTimeout)
 	}
 	var exitError *exec.ExitError
 	if allowDifferenceExit && errors.As(err, &exitError) && exitError.ExitCode() == 1 {
