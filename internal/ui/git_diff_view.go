@@ -17,17 +17,19 @@ var (
 )
 
 type gitDiffView struct {
-	active       bool
-	target       model.Workspace
-	files        []gitChangedFile
-	fileIndex    int
-	diffLines    []string
-	diffOffset   int
-	split        bool
-	filesPending bool
-	diffPending  bool
-	err          string
-	request      uint64
+	active            bool
+	target            model.Workspace
+	files             []gitChangedFile
+	fileIndex         int
+	diffLines         []string
+	diffSyntax        []gitDiffLineSyntax
+	diffOffset        int
+	split             bool
+	syntaxHighlighted bool
+	filesPending      bool
+	diffPending       bool
+	err               string
+	request           uint64
 }
 
 type gitChangedFilesMsg struct {
@@ -38,11 +40,13 @@ type gitChangedFilesMsg struct {
 }
 
 type gitFileDiffMsg struct {
-	path     string
-	filePath string
-	request  uint64
-	diff     string
-	err      error
+	path              string
+	filePath          string
+	request           uint64
+	lines             []string
+	syntax            []gitDiffLineSyntax
+	syntaxHighlighted bool
+	err               error
 }
 
 func (m dashboard) toggleGitDiffView() (tea.Model, tea.Cmd) {
@@ -92,6 +96,8 @@ func (m dashboard) handleGitChangedFiles(message gitChangedFilesMsg) (tea.Model,
 	if message.err != nil {
 		m.gitDiff.files = nil
 		m.gitDiff.diffLines = nil
+		m.gitDiff.diffSyntax = nil
+		m.gitDiff.syntaxHighlighted = false
 		m.gitDiff.err = message.err.Error()
 		return m, nil
 	}
@@ -104,6 +110,8 @@ func (m dashboard) handleGitChangedFiles(message gitChangedFilesMsg) (tea.Model,
 		}
 	}
 	m.gitDiff.diffLines = nil
+	m.gitDiff.diffSyntax = nil
+	m.gitDiff.syntaxHighlighted = false
 	m.gitDiff.diffOffset = 0
 	m.gitDiff.err = ""
 	if len(m.gitDiff.files) == 0 {
@@ -122,11 +130,18 @@ func (m *dashboard) loadSelectedFileDiff() tea.Cmd {
 	file := m.gitDiff.files[m.gitDiff.fileIndex]
 	m.gitDiff.diffPending = true
 	m.gitDiff.diffLines = nil
+	m.gitDiff.diffSyntax = nil
+	m.gitDiff.syntaxHighlighted = false
 	m.gitDiff.diffOffset = 0
 	m.gitDiff.err = ""
 	return func() tea.Msg {
 		diff, err := loadGitFileDiff(path, file)
-		return gitFileDiffMsg{path: path, filePath: file.Path, request: request, diff: diff, err: err}
+		message := gitFileDiffMsg{path: path, filePath: file.Path, request: request, err: err}
+		if err == nil {
+			message.lines = normalizeGitDiffLines(diff)
+			message.syntax, message.syntaxHighlighted = highlightGitDiffSyntax(file.Path, message.lines)
+		}
+		return message
 	}
 }
 
@@ -140,9 +155,13 @@ func (m dashboard) handleGitFileDiff(message gitFileDiffMsg) (tea.Model, tea.Cmd
 	if message.err != nil {
 		m.gitDiff.err = message.err.Error()
 		m.gitDiff.diffLines = nil
+		m.gitDiff.diffSyntax = nil
+		m.gitDiff.syntaxHighlighted = false
 		return m, nil
 	}
-	m.gitDiff.diffLines = normalizeGitDiffLines(message.diff)
+	m.gitDiff.diffLines = message.lines
+	m.gitDiff.diffSyntax = message.syntax
+	m.gitDiff.syntaxHighlighted = message.syntaxHighlighted
 	m.gitDiff.err = ""
 	return m, nil
 }
@@ -387,16 +406,24 @@ func (m dashboard) renderGitFileDiff(width, height int) []string {
 		return lines
 	}
 	end := min(start+capacity, len(m.gitDiff.diffLines))
-	for _, line := range m.gitDiff.diffLines[start:end] {
-		lines = append(lines, m.renderGitDiffLine(displayText(line), width))
+	for index, line := range m.gitDiff.diffLines[start:end] {
+		lines = append(lines, m.renderGitDiffLineAt(displayText(line), start+index, width))
 	}
 	return lines
 }
 
 type gitSplitDiffRow struct {
-	full  string
-	left  string
-	right string
+	full       string
+	left       string
+	right      string
+	fullIndex  int
+	leftIndex  int
+	rightIndex int
+}
+
+type indexedGitDiffLine struct {
+	text  string
+	index int
 }
 
 func splitGitDiffRows(lines []string) []gitSplitDiffRow {
@@ -404,53 +431,58 @@ func splitGitDiffRows(lines []string) []gitSplitDiffRow {
 	for index := 0; index < len(lines); {
 		line := lines[index]
 		if isRemovedDiffLine(line) || isAddedDiffLine(line) {
-			removed, added := make([]string, 0), make([]string, 0)
-			removedNoNewline, addedNoNewline := "", ""
+			removed, added := make([]indexedGitDiffLine, 0), make([]indexedGitDiffLine, 0)
+			removedNoNewline := indexedGitDiffLine{index: -1}
+			addedNoNewline := indexedGitDiffLine{index: -1}
 			lastSide := byte(0)
 		changeBlock:
 			for index < len(lines) {
 				switch {
 				case isRemovedDiffLine(lines[index]):
-					removed = append(removed, lines[index])
+					removed = append(removed, indexedGitDiffLine{text: lines[index], index: index})
 					lastSide = '-'
 				case isAddedDiffLine(lines[index]):
-					added = append(added, lines[index])
+					added = append(added, indexedGitDiffLine{text: lines[index], index: index})
 					lastSide = '+'
 				case isNoNewlineDiffLine(lines[index]) && lastSide == '-':
-					removedNoNewline = lines[index]
+					removedNoNewline = indexedGitDiffLine{text: lines[index], index: index}
 				case isNoNewlineDiffLine(lines[index]) && lastSide == '+':
-					addedNoNewline = lines[index]
+					addedNoNewline = indexedGitDiffLine{text: lines[index], index: index}
 				default:
 					break changeBlock
 				}
 				index++
 			}
 			for row := range max(len(removed), len(added)) {
-				value := gitSplitDiffRow{}
+				value := gitSplitDiffRow{fullIndex: -1, leftIndex: -1, rightIndex: -1}
 				if row < len(removed) {
-					value.left = removed[row]
+					value.left = removed[row].text
+					value.leftIndex = removed[row].index
 				}
 				if row < len(added) {
-					value.right = added[row]
+					value.right = added[row].text
+					value.rightIndex = added[row].index
 				}
 				rows = append(rows, value)
 			}
-			if removedNoNewline != "" || addedNoNewline != "" {
-				value := gitSplitDiffRow{}
-				if removedNoNewline != "" {
-					value.left = removedNoNewline
+			if removedNoNewline.index >= 0 || addedNoNewline.index >= 0 {
+				value := gitSplitDiffRow{fullIndex: -1, leftIndex: -1, rightIndex: -1}
+				if removedNoNewline.index >= 0 {
+					value.left = removedNoNewline.text
+					value.leftIndex = removedNoNewline.index
 				}
-				if addedNoNewline != "" {
-					value.right = addedNoNewline
+				if addedNoNewline.index >= 0 {
+					value.right = addedNoNewline.text
+					value.rightIndex = addedNoNewline.index
 				}
 				rows = append(rows, value)
 			}
 			continue
 		}
 		if strings.HasPrefix(line, " ") {
-			rows = append(rows, gitSplitDiffRow{left: line, right: line})
+			rows = append(rows, gitSplitDiffRow{left: line, right: line, fullIndex: -1, leftIndex: index, rightIndex: index})
 		} else {
-			rows = append(rows, gitSplitDiffRow{full: line})
+			rows = append(rows, gitSplitDiffRow{full: line, fullIndex: index, leftIndex: -1, rightIndex: -1})
 		}
 		index++
 	}
@@ -471,37 +503,74 @@ func isNoNewlineDiffLine(line string) bool {
 
 func (m dashboard) renderGitSplitDiffRow(row gitSplitDiffRow, width int) string {
 	if row.full != "" {
-		return m.renderGitDiffLine(displayText(row.full), width)
+		return m.renderGitDiffLineAt(displayText(row.full), row.fullIndex, width)
 	}
 	leftWidth := max((width-separatorWidth)/2, 1)
 	rightWidth := max(width-leftWidth-separatorWidth, 1)
 	separator := " " + m.styles.divider.Render("│") + " "
-	leftStyle, rightStyle := m.styles.navigationItem, m.styles.navigationItem
-	if isRemovedDiffLine(row.left) {
-		leftStyle = m.styles.diffRemoved
-	}
-	if isAddedDiffLine(row.right) {
-		rightStyle = m.styles.diffAdded
-	}
-	left := leftStyle.Render(pad(truncate(displayText(row.left), leftWidth), leftWidth))
-	right := rightStyle.Render(truncate(displayText(row.right), rightWidth))
+	left := pad(m.renderGitDiffLineAt(displayText(row.left), row.leftIndex, leftWidth), leftWidth)
+	right := m.renderGitDiffLineAt(displayText(row.right), row.rightIndex, rightWidth)
 	return left + separator + right
+}
+
+func (m dashboard) renderGitDiffLineAt(line string, index, width int) string {
+	if !m.gitDiff.syntaxHighlighted || index < 0 || index >= len(m.gitDiff.diffSyntax) || len(line) == 0 {
+		return m.renderGitDiffLine(line, width)
+	}
+	syntax := m.gitDiff.diffSyntax[index]
+	var tokens []gitSyntaxToken
+	highlighted := false
+	prefixStyle := m.styles.navigationItem
+	lineStyle := lipgloss.NewStyle()
+	changed := false
+	switch {
+	case isRemovedDiffLine(line):
+		tokens, highlighted, prefixStyle = syntax.old, syntax.oldHighlighted, m.styles.diffRemovedLine
+		lineStyle, changed = m.styles.diffRemovedLine, true
+	case isAddedDiffLine(line):
+		tokens, highlighted, prefixStyle = syntax.new, syntax.newHighlighted, m.styles.diffAddedLine
+		lineStyle, changed = m.styles.diffAddedLine, true
+	case strings.HasPrefix(line, " "):
+		tokens, highlighted = syntax.new, syntax.newHighlighted
+	}
+	if !highlighted || gitSyntaxText(tokens) != line[1:] {
+		return m.renderGitDiffLine(line, width)
+	}
+	var result strings.Builder
+	result.WriteString(prefixStyle.Render(line[:1]))
+	for _, token := range tokens {
+		style := m.gitSyntaxStyle(token.kind)
+		if changed {
+			style = style.Background(lineStyle.GetBackground())
+		}
+		result.WriteString(style.Render(displayText(token.value)))
+	}
+	rendered := truncate(result.String(), width)
+	if changed {
+		rendered += lineStyle.Render(strings.Repeat(" ", max(width-lipgloss.Width(rendered), 0)))
+	}
+	return rendered
 }
 
 func (m dashboard) renderGitDiffLine(line string, width int) string {
 	style := m.styles.navigationItem
+	changed := false
 	switch {
 	case strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "+++"):
-		style = m.styles.diffAdded
+		style, changed = m.styles.diffAddedLine, true
 	case strings.HasPrefix(line, "-") && !strings.HasPrefix(line, "---"):
-		style = m.styles.diffRemoved
+		style, changed = m.styles.diffRemovedLine, true
 	case strings.HasPrefix(line, "@@"):
 		style = m.styles.diffHunk
 	case strings.HasPrefix(line, "diff --git"), strings.HasPrefix(line, "index "),
 		strings.HasPrefix(line, "---"), strings.HasPrefix(line, "+++"):
 		style = m.styles.empty
 	}
-	return style.Render(truncate(line, width))
+	line = truncate(line, width)
+	if changed {
+		line = pad(line, width)
+	}
+	return style.Render(line)
 }
 
 type gitDiffTreeNode struct {
