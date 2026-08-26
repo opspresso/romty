@@ -3666,7 +3666,7 @@ func TestDashboardShowsCompleteShortcutReferenceInHelpModal(t *testing.T) {
 	modalLines := value.renderModal(value.width, bodyHeight)
 	plainLines := strings.Split(ansi.Strip(strings.Join(modalLines, "\n")), "\n")
 	plain := strings.Join(plainLines, "\n")
-	for _, section := range []string{"CORE", "NAVIGATE", "SCROLLBACK", "PICKER", "HELP", "CONFIG", "GIT", "PROMPTS"} {
+	for _, section := range []string{"CORE", "NAVIGATE", "FILES", "SCROLLBACK", "PICKER", "HELP", "CONFIG", "GIT", "PROMPTS"} {
 		if !strings.Contains(plain, section) {
 			t.Fatalf("help modal does not contain %q section:\n%s", section, plain)
 		}
@@ -3697,8 +3697,14 @@ func TestDashboardShowsCompleteShortcutReferenceInHelpModal(t *testing.T) {
 		{keys: []string{"Ctrl+\\"}, description: "Toggle pane focus"},
 		{keys: []string{"Ctrl+Shift+T"}, description: "New tab"},
 		{keys: []string{"Ctrl+Shift+G"}, description: "Git actions"},
+		{keys: []string{"Ctrl+Shift+F"}, description: "Toggle file view"},
 		{keys: []string{"Ctrl+Shift+←/→"}, description: "Switch tab"},
 		{keys: []string{"Ctrl+Shift+↑/↓"}, description: "Switch workspace"},
+		{keys: []string{"↑/↓", "k/j"}, description: "Select changed file"},
+		{keys: []string{"PgUp/PgDn", "Ctrl+B/F"}, description: "Scroll file diff"},
+		{keys: []string{"Home/End", "g/G"}, description: "First / last diff line"},
+		{keys: []string{"r"}, description: "Refresh changed files"},
+		{keys: []string{"Esc"}, description: "Close file view"},
 		{keys: []string{"Shift+PgUp/PgDn"}, description: "Enter / page history"},
 		{keys: []string{"Ctrl+Shift+\\"}, description: "Toggle scrollback"},
 		{keys: []string{"↑/↓", "k/j"}, description: "Scroll history line"},
