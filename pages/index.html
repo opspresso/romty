@@ -273,12 +273,11 @@
   <section class="band" id="shortcuts">
     <div class="container">
       <div class="section-head">
-        <h2>Every key, in one row</h2>
+        <h2>Every shortcut, in one place</h2>
         <p>
-          F1 through F7 work from either pane and with a modal open. Global navigation, tab, and
-          scrollback chords work from either pane when no modal is open. F8, F9, and workspace
-          aliases belong to the workspace pane, so a shell keeps the keys it binds, and the two
-          actions that cannot be undone ask first.
+          F1 through F7 work from either pane and with regular modals open. Letter aliases, F8,
+          and F9 belong to the workspace pane, so a shell keeps the keys it binds. Contextual
+          views reuse the same navigation keys, and destructive actions ask first.
         </p>
       </div>
 
@@ -287,8 +286,10 @@
         <div class="key-row"><span class="caps"><kbd>F2</kbd><kbd>a</kbd></span><span>Pick a root directory to
             add</span></div>
         <div class="key-row"><span class="caps"><kbd>F3</kbd><kbd>,</kbd></span><span>Open config</span></div>
-        <div class="key-row"><span class="caps"><kbd>F4</kbd><kbd>q</kbd></span><span>Quit romty</span></div>
-        <div class="key-row"><span class="caps"><kbd>F5</kbd><kbd>r</kbd></span><span>Refresh the tree</span></div>
+        <div class="key-row"><span class="caps"><kbd>F4</kbd><kbd>q</kbd><kbd>Ctrl+C</kbd></span><span>Quit romty</span>
+        </div>
+        <div class="key-row"><span class="caps"><kbd>F5</kbd><kbd>r</kbd></span><span>Refresh workspaces and Git
+            state</span></div>
         <div class="key-row"><span class="caps"><kbd>F6</kbd><kbd>s</kbd></span><span>Enter or leave scrollback</span>
         </div>
         <div class="key-row"><span class="caps"><kbd>F7</kbd></span><span>Switch between the panes</span></div>
@@ -296,25 +297,47 @@
             or forget the selected root, terminating its shells (workspace pane)</span></div>
         <div class="key-row"><span class="caps"><kbd>F9</kbd><kbd>t</kbd></span><span>Stop the daemon and every
             shell (workspace pane)</span></div>
-        <div class="key-row"><span class="caps"><kbd>↑</kbd><kbd>↓</kbd></span><span>Move between workspaces</span>
+        <div class="key-row"><span class="caps"><kbd>i</kbd></span><span>Open About (workspace pane)</span></div>
+        <div class="key-row"><span class="caps"><kbd>↑/↓</kbd><kbd>k/j</kbd></span><span>Move
+            through workspaces, pickers, help, Git actions, or scrollable output</span>
         </div>
-        <div class="key-row"><span class="caps"><kbd>←</kbd><kbd>→</kbd></span><span>Move between terminal tabs</span>
+        <div class="key-row"><span class="caps"><kbd>←/→</kbd><kbd>h/l</kbd></span><span>Move
+            between terminal tabs, or open a picker directory and return to its parent</span>
         </div>
-        <div class="key-row"><span class="caps"><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>T</kbd></span><span>Create and
+        <div class="key-row"><span class="caps"><kbd>Enter</kbd></span><span>Open, run, return, submit, or confirm
+            the contextual selection</span></div>
+        <div class="key-row"><span class="caps"><kbd>Tab</kbd></span><span>Focus the terminal from the workspace
+            pane</span></div>
+        <div class="key-row"><span class="caps"><kbd>Ctrl+\</kbd></span><span>Focus the workspace from the
+            terminal, or enter and leave scrollback from the workspace pane</span></div>
+        <div class="key-row"><span class="caps"><kbd>Ctrl+Shift+T</kbd></span><span>Create and
             open a terminal tab in the selected or current workspace</span></div>
-        <div class="key-row"><span class="caps"><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>←</kbd><kbd>→</kbd></span><span>Switch
+        <div class="key-row"><span class="caps"><kbd>Ctrl+Shift+G</kbd></span><span>Open Git
+            actions for the selected or current workspace</span></div>
+        <div class="key-row"><span class="caps"><kbd>Ctrl+Shift+←/→</kbd></span><span>Switch
             terminal tabs from either pane</span></div>
-        <div class="key-row"><span class="caps"><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>↑</kbd><kbd>↓</kbd></span><span>Switch
+        <div class="key-row"><span class="caps"><kbd>Ctrl+Shift+↑/↓</kbd></span><span>Switch
             between workspaces with running terminals from either pane</span></div>
-        <div class="key-row"><span class="caps"><kbd>Shift</kbd><kbd>PgUp</kbd><kbd>PgDn</kbd></span><span>Enter
+        <div class="key-row"><span class="caps"><kbd>Shift+PgUp/PgDn</kbd></span><span>Enter
             scrollback or move a page at once</span></div>
+        <div class="key-row"><span class="caps"><kbd>PgUp/PgDn</kbd><kbd>Ctrl+B/F</kbd></span><span>Move
+            a page in a picker, help, Git result, or scrollback</span></div>
+        <div class="key-row"><span class="caps"><kbd>Home/End</kbd><kbd>g/G</kbd></span><span>Move
+            to the beginning or end of contextual lists and output</span></div>
+        <div class="key-row"><span class="caps"><kbd>←/→</kbd><kbd>[/]</kbd></span><span>Resize the workspace pane
+            in config</span></div>
+        <div class="key-row"><span class="caps"><kbd>/</kbd></span><span>Type a path in the root picker</span></div>
+        <div class="key-row"><span class="caps"><kbd>Backspace</kbd></span><span>Erase a character in the path
+            prompt</span></div>
+        <div class="key-row"><span class="caps"><kbd>Esc</kbd></span><span>Close or cancel the current contextual
+            view</span></div>
       </div>
 
       <p class="note">
         Everything else goes to the shell, including <kbd>Ctrl</kbd>+<kbd>←</kbd>, pasted text,
         and the function keys a full-screen program binds above F7 — <code>htop</code> keeps its
-        <kbd>F9</kbd>. <kbd>Ctrl</kbd>+<kbd>\</kbd> also leaves the terminal pane, and
-        <kbd>Tab</kbd> enters it from the workspace tree.
+        <kbd>F9</kbd>. See the <a href="https://github.com/opspresso/romty/blob/main/docs/interface.md">interface
+          guide</a> for scope and mode details.
       </p>
     </div>
   </section>
