@@ -203,6 +203,7 @@ type dashboard struct {
 	gitActionOffset   int
 	gitActionCancel   func()
 	gitDiff           gitDiffView
+	gitDiffSplit      bool
 	styles            *uiStyles
 }
 
@@ -251,8 +252,9 @@ type terminalOpenedMsg struct {
 }
 
 type configSavedMsg struct {
-	leftWidth int
-	err       error
+	leftWidth   int
+	gitDiffView string
+	err         error
 }
 
 type daemonStoppedMsg struct {
@@ -326,6 +328,7 @@ func newDashboardWithConfig(backend Backend, initial model.Snapshot, configPath 
 		config:           config,
 		leftWidth:        config.LeftWidth,
 		mousePassthrough: config.MousePassthrough,
+		gitDiffSplit:     config.GitDiffView == gitDiffViewSplit,
 		styles:           newUIStyles(true),
 		gitFetchedAt:     now(),
 	}
@@ -495,7 +498,8 @@ func (m dashboard) update(message tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.clearError(settingError)
 		}
-		if message.leftWidth != m.leftWidth {
+		viewChanged := message.gitDiffView != "" && message.gitDiffView != gitDiffViewSetting(m.gitDiffSplit)
+		if message.leftWidth != m.leftWidth || viewChanged {
 			// The width moved while this one was being written, so it is
 			// already out of date. A later save answers whatever this one said.
 			return m, m.saveConfig()
@@ -1049,8 +1053,12 @@ func (m dashboard) saveConfig() tea.Cmd {
 	// whatever a newer one had written.
 	config := m.config
 	config.LeftWidth = m.leftWidth
+	config.GitDiffView = gitDiffViewSetting(m.gitDiffSplit)
 	return func() tea.Msg {
-		return configSavedMsg{leftWidth: config.LeftWidth, err: saveConfig(path, config)}
+		return configSavedMsg{
+			leftWidth: config.LeftWidth, gitDiffView: config.GitDiffView,
+			err: saveConfig(path, config),
+		}
 	}
 }
 

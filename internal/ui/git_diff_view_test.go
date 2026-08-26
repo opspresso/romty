@@ -2,6 +2,7 @@ package ui
 
 import (
 	"errors"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -201,6 +202,52 @@ func TestDashboardTogglesInlineAndSplitGitDiff(t *testing.T) {
 	value = updated.(dashboard)
 	if value.gitDiff.split {
 		t.Fatal("a second v did not restore inline view")
+	}
+}
+
+func TestDashboardPersistsAndRestoresGitDiffViewMode(t *testing.T) {
+	workspace := model.Workspace{ID: "workspace-1", RootID: "root-1", Name: "alpha", Path: "/projects/alpha"}
+	snapshot := model.Snapshot{Roots: []model.RootView{{
+		Root:        model.Root{ID: "root-1", Name: "projects", Path: "/projects"},
+		Directories: []model.WorkspaceView{{Workspace: workspace}},
+	}}}
+	configPath := filepath.Join(t.TempDir(), "config.json")
+	value := newDashboardWithConfig(&fakeBackend{}, snapshot, configPath, Config{})
+	value.gitStates = map[string]gitState{workspace.Path: {Branch: "main", Dirty: true}}
+	value.setNavigation(1)
+
+	updated, _ := value.Update(gitDiffViewKey())
+	value = updated.(dashboard)
+	if value.gitDiff.split {
+		t.Fatal("new file view did not default to inline")
+	}
+	updated, save := value.Update(key('v', "v"))
+	value = updated.(dashboard)
+	if save == nil || !value.gitDiff.split {
+		t.Fatalf("v = (save %v, split %t), want split persisted", save, value.gitDiff.split)
+	}
+	updated, _ = value.Update(save())
+	value = updated.(dashboard)
+	loaded, err := loadConfig(configPath)
+	if err != nil || loaded.GitDiffView != "split" {
+		t.Fatalf("stored config = (%#v, %v), want split", loaded, err)
+	}
+
+	updated, _ = value.Update(gitDiffViewKey())
+	value = updated.(dashboard)
+	updated, _ = value.Update(gitDiffViewKey())
+	value = updated.(dashboard)
+	if !value.gitDiff.split {
+		t.Fatal("reopened file view forgot split mode")
+	}
+
+	restarted := newDashboardWithConfig(&fakeBackend{}, snapshot, configPath, loaded)
+	restarted.gitStates = value.gitStates
+	restarted.setNavigation(1)
+	updated, _ = restarted.Update(gitDiffViewKey())
+	restarted = updated.(dashboard)
+	if !restarted.gitDiff.split {
+		t.Fatal("restarted dashboard forgot split mode")
 	}
 }
 

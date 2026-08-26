@@ -59,7 +59,10 @@ func (m dashboard) toggleGitDiffView() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.stopScrollback()
-	m.gitDiff = gitDiffView{active: true, target: target.workspace, request: m.gitDiff.request}
+	m.gitDiff = gitDiffView{
+		active: true, target: target.workspace, request: m.gitDiff.request,
+		split: m.gitDiffSplit,
+	}
 	m.clearAnyError()
 	return m, m.loadChangedFiles()
 }
@@ -156,7 +159,9 @@ func (m dashboard) handleGitDiffKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd
 		return m.toggleGitDiffView()
 	case "v":
 		m.gitDiff.split = !m.gitDiff.split
+		m.gitDiffSplit = m.gitDiff.split
 		m.gitDiff.diffOffset = min(m.gitDiff.diffOffset, m.maximumGitDiffOffset())
+		return m, m.saveConfig()
 	case "up", "k":
 		return m.moveGitDiffFile(-1)
 	case "down", "j":
@@ -171,6 +176,13 @@ func (m dashboard) handleGitDiffKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd
 		m.gitDiff.diffOffset = m.maximumGitDiffOffset()
 	}
 	return m, nil
+}
+
+func gitDiffViewSetting(split bool) string {
+	if split {
+		return gitDiffViewSplit
+	}
+	return gitDiffViewInline
 }
 
 func (m dashboard) moveGitDiffFile(delta int) (tea.Model, tea.Cmd) {
