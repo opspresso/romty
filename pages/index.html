@@ -119,55 +119,74 @@
 
   <section class="demo">
     <div class="container">
+      <div class="window-scroll" role="region" aria-label="Current romty interface preview" tabindex="0">
       <div class="window">
         <div class="window-bar">
           <span class="dot red"></span><span class="dot amber"></span><span class="dot green"></span>
-          <span class="window-title">romty</span>
+          <span class="window-title">ssh — home-workstation — romty</span>
         </div>
         <div class="screen">
           <div class="tree">
-            <div class="tree-title">romty</div>
-            <div class="tree-root">▾ nalbam</div>
-            <div class="tree-item"><span>— dotfiles</span><span class="running" title="bash running"
-                aria-label="bash running">●</span></div>
-            <div class="tree-item"><span>— nalbam</span></div>
-            <div class="tree-item"><span>— resume</span></div>
-            <div class="tree-root" style="margin-top:.5rem">▾ opspresso</div>
-            <div class="tree-item"><span>— agent-studio</span><span class="running claude"
-                title="Claude Code running" aria-label="Claude Code running">●</span></div>
-            <div class="tree-item"><span>— homebrew-tap</span></div>
-            <div class="tree-item current"><span>— romty</span><span class="running-agents"><span
-                  class="running claude" title="Claude Code running" aria-label="Claude Code running">●</span><span
-                  class="running codex" title="Codex running" aria-label="Codex running">●</span><span class="running"
-                  title="bash running" aria-label="bash running">●</span></span></div>
-            <div class="tree-item"><span>— toast-app</span></div>
-            <div class="tree-item"><span>— vibemon-app</span></div>
+            <div class="tree-title"><b> romty </b><span></span></div>
+            <div class="tree-spacer"></div>
+            <div class="tree-root">  ▾ personal</div>
+            <div class="tree-workspace">
+              <div class="tree-row"><span>  - dotfiles</span><span class="markers"><i class="shell">●</i></span></div>
+              <div class="git-row">    (main)</div>
+            </div>
+            <div class="tree-workspace">
+              <div class="tree-row"><span>  - notes</span></div>
+              <div class="git-row">    (main*)</div>
+            </div>
+            <div class="tree-root separated">  ▾ opspresso</div>
+            <div class="tree-workspace">
+              <div class="tree-row"><span>  - agent-studio</span><span class="markers"><i class="claude">○</i></span></div>
+              <div class="git-row">    (main) <em>↓1</em></div>
+            </div>
+            <div class="tree-workspace current">
+              <div class="tree-row"><span>▎ - romty</span><span class="markers"><i class="claude">■</i><i class="codex working" aria-label="Codex working"></i><i class="shell">●</i></span></div>
+              <div class="git-row">▎   (main*) <em>↑1</em></div>
+            </div>
+            <div class="tree-workspace">
+              <div class="tree-row"><span>  - homebrew-tap</span></div>
+              <div class="git-row">    (main)</div>
+            </div>
           </div>
+          <div class="pane-divider"><span>│<b>▶</b></span><span>│</span></div>
           <div class="pane">
-            <div class="tabs"><span class="active">▸ 1</span> &nbsp; 2 &nbsp; 3 &nbsp; +</div>
-            <pre><span class="claude-screen"><span class="claude">╭─ Claude Code ──────────────────────────────────────────────╮</span>
-<span class="claude">│</span>                                                            <span class="claude">│</span>
-<span class="claude">│</span>                    Welcome back romty!                     <span class="claude">│</span>
-<span class="claude">│</span>                                                            <span class="claude">│</span>
-<span class="claude">│</span>                          <span class="claude">▐▛███▛█</span>                           <span class="claude">│</span>
-<span class="claude">│</span>                         <span class="claude">▝▜██████▀</span>                          <span class="claude">│</span>
-<span class="claude">│</span>                           <span class="claude">▝▝ ▝▝</span>                            <span class="claude">│</span>
-<span class="claude">│</span>                                                            <span class="claude">│</span>
-<span class="claude">╰────────────────────────────────────────────────────────────╯</span></span>
-──────────────────────────────────────────────────────────────
-<span class="path">❯</span> <span class="caret"></span>
-──────────────────────────────────────────────────────────────</pre>
+            <div class="tabs">
+              <div class="tabs-line"><span> 1 </span><span class="active"> 2 </span><span> 3 </span><span> + </span></div>
+              <div class="tab-rail"><i>───</i><span>─</span><b>━━━</b><span>─</span><i>───</i><span>─</span><i>───</i><span class="fill"></span></div>
+            </div>
+            <pre class="agent-session"><span class="codex">╭─ Codex ─────────────────────────────────────────────────────╮</span>
+<span class="codex">│</span>  Update the homepage demo to match the current romty UI.     <span class="codex">│</span>
+<span class="codex">╰──────────────────────────────────────────────────────────────╯</span>
+
+<span class="muted">• Explored</span>
+  └ Read <span class="path">pages/index.html</span>, <span class="path">internal/ui/ui.go</span>
+
+<span class="muted">• Edited</span> <span class="path">pages/index.html</span> <span class="added">+64</span> <span class="removed">-29</span>
+  └ Synced workspace rows, tabs, agent phases, and shortcuts
+
+<span class="muted">• Ran</span> go test ./...
+  └ <span class="added">ok</span>  github.com/opspresso/romty/internal/ui
+
+<span class="codex working-line"><i class="working">◑</i> Working</span>  <span class="muted">rebuilding the live preview</span>
+
+<span class="path">›</span> <span class="caret"></span></pre>
           </div>
+          <div class="shortcut-rail"><span></span><div><kbd> Ctrl+\ </kbd> navigation</div></div>
           <div class="statusbar">
-            <span><b>F1</b>help</span>
-            <span><b>F2</b>add root</span>
-            <span><b>F3</b>config</span>
-            <span><b>F4</b>quit</span>
-            <span><b>F5</b>refresh</span>
-            <span><b>F6</b>scrollback</span>
-            <span><b>F7</b>focus</span>
+            <span><kbd> F1 </kbd> help</span>
+            <span><kbd> F2 </kbd> add root</span>
+            <span><kbd> F3 </kbd> config</span>
+            <span><kbd> F4 </kbd> quit</span>
+            <span><kbd> F5 </kbd> refresh</span>
+            <span><kbd> F6 </kbd> scrollback</span>
+            <span><kbd> F7 </kbd> focus</span>
           </div>
         </div>
+      </div>
       </div>
     </div>
   </section>
