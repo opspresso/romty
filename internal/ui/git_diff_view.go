@@ -372,11 +372,23 @@ func splitGitDiffRows(lines []string) []gitSplitDiffRow {
 		line := lines[index]
 		if isRemovedDiffLine(line) || isAddedDiffLine(line) {
 			removed, added := make([]string, 0), make([]string, 0)
-			for index < len(lines) && (isRemovedDiffLine(lines[index]) || isAddedDiffLine(lines[index])) {
-				if isRemovedDiffLine(lines[index]) {
+			removedNoNewline, addedNoNewline := "", ""
+			lastSide := byte(0)
+		changeBlock:
+			for index < len(lines) {
+				switch {
+				case isRemovedDiffLine(lines[index]):
 					removed = append(removed, lines[index])
-				} else {
+					lastSide = '-'
+				case isAddedDiffLine(lines[index]):
 					added = append(added, lines[index])
+					lastSide = '+'
+				case isNoNewlineDiffLine(lines[index]) && lastSide == '-':
+					removedNoNewline = lines[index]
+				case isNoNewlineDiffLine(lines[index]) && lastSide == '+':
+					addedNoNewline = lines[index]
+				default:
+					break changeBlock
 				}
 				index++
 			}
@@ -387,6 +399,16 @@ func splitGitDiffRows(lines []string) []gitSplitDiffRow {
 				}
 				if row < len(added) {
 					value.right = added[row]
+				}
+				rows = append(rows, value)
+			}
+			if removedNoNewline != "" || addedNoNewline != "" {
+				value := gitSplitDiffRow{}
+				if removedNoNewline != "" {
+					value.left = removedNoNewline
+				}
+				if addedNoNewline != "" {
+					value.right = addedNoNewline
 				}
 				rows = append(rows, value)
 			}
@@ -408,6 +430,10 @@ func isRemovedDiffLine(line string) bool {
 
 func isAddedDiffLine(line string) bool {
 	return strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "+++")
+}
+
+func isNoNewlineDiffLine(line string) bool {
+	return strings.HasPrefix(line, "\\ ")
 }
 
 func (m dashboard) renderGitSplitDiffRow(row gitSplitDiffRow, width int) string {

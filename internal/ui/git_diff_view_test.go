@@ -192,6 +192,44 @@ func TestSplitGitDiffRowsPairRemovedAndAddedLines(t *testing.T) {
 	}
 }
 
+func TestSplitGitDiffRowsKeepNoNewlineMarkersWithChanges(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		lines []string
+		want  []gitSplitDiffRow
+	}{
+		{
+			name:  "both sides",
+			lines: []string{"-old", "\\ No newline at end of file", "+new", "\\ No newline at end of file"},
+			want: []gitSplitDiffRow{
+				{left: "-old", right: "+new"},
+				{left: "\\ No newline at end of file", right: "\\ No newline at end of file"},
+			},
+		},
+		{
+			name:  "removed side only",
+			lines: []string{"-old", "\\ No newline at end of file", "+new one", "+new two"},
+			want: []gitSplitDiffRow{
+				{left: "-old", right: "+new one"},
+				{right: "+new two"},
+				{left: "\\ No newline at end of file"},
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			rows := splitGitDiffRows(test.lines)
+			if len(rows) != len(test.want) {
+				t.Fatalf("split rows = %#v, want %#v", rows, test.want)
+			}
+			for index := range test.want {
+				if rows[index] != test.want[index] {
+					t.Fatalf("split row %d = %#v, want %#v", index, rows[index], test.want[index])
+				}
+			}
+		})
+	}
+}
+
 func TestDashboardTogglesInlineAndSplitGitDiff(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, model.Snapshot{})
 	value.width = 120
