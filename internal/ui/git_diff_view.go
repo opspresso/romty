@@ -236,7 +236,7 @@ func (m dashboard) handleGitDiffKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd
 
 func (m dashboard) handleGitDiffMouse(message tea.MouseMsg) (tea.Model, tea.Cmd) {
 	wheel, ok := message.(tea.MouseWheelMsg)
-	if !ok || wheel.X < m.dimensions().leftWidth+separatorWidth {
+	if !ok || wheel.X < m.gitDiffLayout().leftWidth+separatorWidth {
 		return m, nil
 	}
 	switch wheel.Button {

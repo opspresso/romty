@@ -97,6 +97,21 @@ func TestAdjustingOneSettingKeepsTheRest(t *testing.T) {
 	if written.GitDiffView != "split" {
 		t.Fatalf("adjusting the pane width changed git_diff_view to %q", written.GitDiffView)
 	}
+
+	// The other way round: the mouse setting persists and leaves the width be.
+	updated, save = value.Update(key('m', "m"))
+	value = updated.(dashboard)
+	if save == nil {
+		t.Fatal("toggling the scrollback mouse produced no save")
+	}
+	save()
+	if written, err = loadConfig(path); err != nil {
+		t.Fatalf("loadConfig() after toggle error = %v", err)
+	}
+	if !written.ScrollbackMouse || written.LeftWidth != 25 {
+		t.Fatalf("after toggle = (scrollback_mouse %v, left_width %d), want the setting saved beside the width",
+			written.ScrollbackMouse, written.LeftWidth)
+	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("ReadFile() after save error = %v", err)

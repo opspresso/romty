@@ -29,6 +29,16 @@ const (
 	// panes. The terminal's origin, the right pane's width and the mouse
 	// translation all depend on it agreeing with what is rendered.
 	separatorWidth = 3
+	// wheelLines is how far one notch of the wheel moves. It is what a terminal
+	// sends for alternate scroll, so a guest that is given cursor keys instead
+	// of mouse reports moves by the same amount romty's own scrollback does.
+	wheelLines = 3
+	// narrowLayoutWidth is the width below which the workspace pane gives way
+	// to the terminal it is focused away from. A phone's SSH client is around
+	// 40 to 60 columns, where the pane's 18 column minimum and its separator
+	// take half the screen and leave the terminal unusable. Above this the
+	// split is worth its width, so the layout does not move under a desktop.
+	narrowLayoutWidth = 80
 
 	maximumReattachAttempts = 3
 	initialReattachBackoff  = 250 * time.Millisecond
@@ -180,10 +190,14 @@ type dashboard struct {
 	scrollback       bool
 	// altScroll is the host's alternate scroll as romty last set it, so the
 	// sequence is sent on the transitions and not on every message.
-	altScroll    bool
-	scrollOffset int
-	helpOffset   int
-	configPath   string
+	altScroll bool
+	// terminalFullWidth is the narrow layout as the PTY was last told it, so
+	// hiding or restoring the workspace pane resizes once rather than every
+	// message asking the daemon for the size it already has.
+	terminalFullWidth bool
+	scrollOffset      int
+	helpOffset        int
+	configPath        string
 	// homePath is where the root picker opens, resolved once at startup.
 	homePath string
 	// browse is the root picker's state, kept on the dashboard so the modal
@@ -194,6 +208,7 @@ type dashboard struct {
 	config            Config
 	leftWidth         int
 	mousePassthrough  bool
+	scrollbackMouse   bool
 	gitStates         map[string]gitState
 	gitFetchedAt      time.Time
 	gitActionTarget   model.Workspace
@@ -256,6 +271,7 @@ type terminalOpenedMsg struct {
 
 type configSavedMsg struct {
 	leftWidth         int
+	scrollbackMouse   bool
 	gitDiffView       string
 	lastWorkspacePath string
 	lastTabID         string
@@ -333,6 +349,7 @@ func newDashboardWithConfig(backend Backend, initial model.Snapshot, configPath 
 		config:           config,
 		leftWidth:        config.LeftWidth,
 		mousePassthrough: config.MousePassthrough,
+		scrollbackMouse:  config.ScrollbackMouse,
 		gitDiffSplit:     config.GitDiffView == gitDiffViewSplit,
 		styles:           newUIStyles(true),
 		gitFetchedAt:     now(),
@@ -368,7 +385,23 @@ func (m dashboard) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		return updated, command
 	}
 	value, command = value.syncAgentAnimation(command)
+	value, command = value.syncTerminalSize(command)
 	return value.syncAltScroll(command)
+}
+
+// syncTerminalSize reports the width the narrow layout just gave or took back.
+// Hiding the workspace pane resizes the terminal as surely as dragging the
+// window does, and focus moves from the toggle, Tab, an opened terminal and a
+// closed scrollback alike — none of which can return a command from where they
+// set it. Every one of them passes through Update, so this is the one place
+// that sees them all.
+func (m dashboard) syncTerminalSize(command tea.Cmd) (dashboard, tea.Cmd) {
+	hidden := m.navigationHidden()
+	if hidden == m.terminalFullWidth {
+		return m, command
+	}
+	m.terminalFullWidth = hidden
+	return m, tea.Batch(command, m.resizeTerminal())
 }
 
 func (m dashboard) syncAgentAnimation(command tea.Cmd) (dashboard, tea.Cmd) {
@@ -383,12 +416,15 @@ func (m dashboard) syncAgentAnimation(command tea.Cmd) (dashboard, tea.Cmd) {
 // gives it up on the way out. Outside scrollback the arrow keys it sends have
 // nowhere good to go: over the workspace pane they walk the tree three rows per
 // notch, and over the terminal they reach the shell as history keys nobody
-// pressed.
+// pressed. It is not asked for when romty is keeping the mouse in scrollback,
+// because a host that is reporting the mouse sends the wheel as mouse events
+// and never as those arrow keys.
 func (m dashboard) syncAltScroll(command tea.Cmd) (tea.Model, tea.Cmd) {
-	if m.altScroll == m.scrollback {
+	wanted := m.scrollback && !m.scrollbackMouse
+	if m.altScroll == wanted {
 		return m, command
 	}
-	m.altScroll = m.scrollback
+	m.altScroll = wanted
 	return m, tea.Batch(command, altScrollCommand(m.altScroll))
 }
 
@@ -523,7 +559,8 @@ func (m dashboard) update(message tea.Msg) (tea.Model, tea.Cmd) {
 		viewChanged := message.gitDiffView != "" && message.gitDiffView != gitDiffViewSetting(m.gitDiffSplit)
 		selectionChanged := message.lastWorkspacePath != m.rememberedWorkspacePath ||
 			message.lastTabID != m.rememberedTabID
-		if message.leftWidth != m.leftWidth || viewChanged || selectionChanged {
+		if message.leftWidth != m.leftWidth || message.scrollbackMouse != m.scrollbackMouse ||
+			viewChanged || selectionChanged {
 			// The width moved while this one was being written, so it is
 			// already out of date. A later save answers whatever this one said.
 			return m, m.saveConfig()
@@ -598,7 +635,7 @@ var globalKeys = map[string]func(dashboard) (tea.Model, tea.Cmd){
 	"ctrl+shift+t": func(m dashboard) (tea.Model, tea.Cmd) { return m.newTab() },
 	"ctrl+shift+g": func(m dashboard) (tea.Model, tea.Cmd) { return m.openGitActions() },
 	"ctrl+shift+f": func(m dashboard) (tea.Model, tea.Cmd) { return m.toggleGitDiffView() },
-	// Switching tabs from the terminal pane took Ctrl+\ and then two more keys.
+	// Switching tabs from the terminal pane took Ctrl+/ and then two more keys.
 	// Ctrl+Shift+Left/Right is the chord a terminal with tabs binds, and a
 	// terminal reports it distinctly — Ctrl+Shift+Tab is not, because most
 	// terminals send it as a plain Shift+Tab. The unshifted arrows stay with
@@ -664,7 +701,7 @@ func (m dashboard) handleKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.scrollback {
 		return m.handleScrollbackKey(message)
 	}
-	if message.String() == "ctrl+\\" {
+	if isFocusToggle(message.String()) {
 		return m.toggleFocus()
 	}
 	if m.focus == terminalPane {
@@ -870,6 +907,8 @@ func (m dashboard) handleModalKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 			return m.adjustLeftWidth(-1)
 		case "right", "]":
 			return m.adjustLeftWidth(1)
+		case "m":
+			return m.toggleScrollbackMouse()
 		}
 	}
 	return m, nil
@@ -926,18 +965,53 @@ func (m dashboard) handleTerminalWheel(wheel tea.MouseWheelMsg) (tea.Model, tea.
 	if m.terminal == nil {
 		return m, nil
 	}
-	if _, inside := m.translateMouse(wheel.Mouse()); !inside && !m.scrollback {
+	mouse, inside := m.translateMouse(wheel.Mouse())
+	if !inside && !m.scrollback {
 		return m, nil
+	}
+	if !m.scrollback && m.terminal.altScreen() {
+		return m.scrollGuest(mouse, wheel.Button)
 	}
 	switch wheel.Button {
 	case tea.MouseWheelUp:
 		if m.scrollback || m.startScrollback() {
-			m.scrollTerminal(3)
+			m.scrollTerminal(wheelLines)
+			return m, nil
 		}
+		// Saying nothing is what a dead wheel looks like. Scrollback that has
+		// nothing to show is not a fault of the terminal or of the user, and
+		// the same sentence answers Shift+PgUp.
+		m.setNotice(terminalError, m.scrollbackUnavailable())
 	case tea.MouseWheelDown:
 		if m.scrollback {
-			m.scrollTerminal(-3)
+			m.scrollTerminal(-wheelLines)
 		}
+	}
+	return m, nil
+}
+
+// scrollGuest hands the wheel to an application that owns the screen. Its
+// history is its own — romty has none to offer — and this is what a terminal
+// does with the wheel in the alternate screen: mouse reports to an application
+// that asked for the mouse, and the cursor keys of alternate scroll to one that
+// did not. Without it the wheel did nothing at all inside vim, less, or an
+// agent, which is every full-screen program romty exists to keep running.
+func (m dashboard) scrollGuest(mouse uv.Mouse, button tea.MouseButton) (tea.Model, tea.Cmd) {
+	if m.terminal.guestMouseMode() != tea.MouseModeNone {
+		m.terminal.sendMouse(uv.MouseWheelEvent(mouse))
+		return m, nil
+	}
+	var code rune
+	switch button {
+	case tea.MouseWheelUp:
+		code = tea.KeyUp
+	case tea.MouseWheelDown:
+		code = tea.KeyDown
+	default:
+		return m, nil
+	}
+	for range wheelLines {
+		m.terminal.sendKey(tea.KeyPressMsg(tea.Key{Code: code}))
 	}
 	return m, nil
 }
@@ -956,7 +1030,16 @@ func (m dashboard) translateMouse(mouse tea.Mouse) (uv.Mouse, bool) {
 	return translated, true
 }
 
-// toggleFocus moves between the panes in one key. Both F7 and Ctrl+\ use it so
+// isFocusToggle reports the two encodings of Ctrl+/. A terminal that speaks the
+// Kitty keyboard protocol names the key it was given; every other one sends
+// 0x1F, which is decoded as Ctrl+_ because that is the other key the byte
+// stands for. A phone's SSH client is in the second group, and it is the one
+// the narrow layout exists for, so both have to reach the toggle.
+func isFocusToggle(key string) bool {
+	return key == "ctrl+/" || key == "ctrl+_"
+}
+
+// toggleFocus moves between the panes in one key. Both F7 and Ctrl+/ use it so
 // either chord can stand in for one intercepted by a desktop environment.
 func (m dashboard) toggleFocus() (tea.Model, tea.Cmd) {
 	if m.scrollback {
@@ -1081,9 +1164,14 @@ func (m dashboard) shutdownDaemon() tea.Cmd {
 }
 
 func (m dashboard) adjustLeftWidth(delta int) (tea.Model, tea.Cmd) {
-	current := m.dimensions().leftWidth
+	current := m.paneWidth()
 	maximum := min(maximumLeftWidth, max(m.width, 40)-20)
 	m.leftWidth = min(max(current+delta, minimumLeftWidth), maximum)
+	return m, m.saveConfig()
+}
+
+func (m dashboard) toggleScrollbackMouse() (tea.Model, tea.Cmd) {
+	m.scrollbackMouse = !m.scrollbackMouse
 	return m, m.saveConfig()
 }
 
@@ -1095,12 +1183,14 @@ func (m dashboard) saveConfig() tea.Cmd {
 	// whatever a newer one had written.
 	config := m.config
 	config.LeftWidth = m.leftWidth
+	config.ScrollbackMouse = m.scrollbackMouse
 	config.GitDiffView = gitDiffViewSetting(m.gitDiffSplit)
 	config.LastWorkspacePath = m.rememberedWorkspacePath
 	config.LastTabID = m.rememberedTabID
 	return func() tea.Msg {
 		return configSavedMsg{
-			leftWidth: config.LeftWidth, gitDiffView: config.GitDiffView,
+			leftWidth: config.LeftWidth, scrollbackMouse: config.ScrollbackMouse,
+			gitDiffView:       config.GitDiffView,
 			lastWorkspacePath: config.LastWorkspacePath, lastTabID: config.LastTabID,
 			err: saveConfig(path, config),
 		}
@@ -2034,7 +2124,11 @@ func runningTabs(tabs []model.Tab) []model.Tab {
 // unnamed ints, which every one of nineteen call sites unpacked positionally:
 // swapping two widths compiled, rendered, and only looked wrong.
 type layout struct {
-	leftWidth      int
+	leftWidth int
+	// separator is what sits between the panes, which is zero while the
+	// workspace pane is hidden. The origin and the mouse translation read it
+	// rather than separatorWidth, because a hidden pane draws no divider.
+	separator      int
 	rightWidth     int
 	bodyHeight     int
 	terminalHeight int
@@ -2044,21 +2138,58 @@ type layout struct {
 // the cursor and mouse translation both need. Deriving it here keeps it tied
 // to the separator and tab bar rather than repeated as a literal.
 func (l layout) terminalOrigin() (int, int) {
-	return l.leftWidth + separatorWidth, terminalTop
+	return l.leftWidth + l.separator, terminalTop
+}
+
+// paneWidth is the workspace pane's width as configured, whether or not the
+// narrow layout is currently showing it. Config reads and adjusts this one,
+// because a hidden pane still has a width to come back to.
+func (m dashboard) paneWidth() int {
+	width := max(m.width, 40)
+	leftWidth := m.leftWidth
+	if leftWidth == 0 {
+		leftWidth = min(max(width/4, minimumLeftWidth), 28)
+	}
+	return min(leftWidth, width-20)
+}
+
+// navigationHidden reports whether the terminal has the whole screen. The
+// workspace tree is not what the keyboard is in, and on a narrow screen it is
+// half of what the terminal could be, so focus takes it away and Ctrl+/ or F7
+// brings it back.
+func (m dashboard) navigationHidden() bool {
+	if max(m.width, 40) >= narrowLayoutWidth {
+		return false
+	}
+	return m.focus == terminalPane && m.terminal != nil
+}
+
+// gitDiffLayout is the file view's own split. The file view has two panes of
+// its own, so the narrow layout does not apply to it, and it is kept out of
+// dimensions rather than folded into it: the terminal is not on screen while
+// the view is open, and sizing the PTY to a split it never appears in made a
+// full-screen guest reflow on the way in and again on the way out.
+func (m dashboard) gitDiffLayout() layout {
+	width := max(m.width, 40)
+	view := m.dimensions()
+	view.leftWidth = m.paneWidth()
+	view.separator = separatorWidth
+	view.rightWidth = max(width-view.leftWidth-separatorWidth, 17)
+	return view
 }
 
 func (m dashboard) dimensions() layout {
 	width := max(m.width, 40)
 	height := max(m.height, 10)
-	leftWidth := m.leftWidth
-	if leftWidth == 0 {
-		leftWidth = min(max(width/4, minimumLeftWidth), 28)
+	leftWidth, separator := m.paneWidth(), separatorWidth
+	if m.navigationHidden() {
+		leftWidth, separator = 0, 0
 	}
-	leftWidth = min(leftWidth, width-20)
 	bodyHeight := height - 2
 	return layout{
 		leftWidth:      leftWidth,
-		rightWidth:     max(width-leftWidth-separatorWidth, 17),
+		separator:      separator,
+		rightWidth:     max(width-leftWidth-separator, 17),
 		bodyHeight:     bodyHeight,
 		terminalHeight: max(bodyHeight-terminalTop, 1),
 	}
@@ -2095,7 +2226,17 @@ func (m dashboard) mouseMode() tea.MouseMode {
 	if m.gitDiff.active {
 		return tea.MouseModeCellMotion
 	}
-	if m.scrollback || m.terminal == nil {
+	if m.scrollback {
+		// Keeping the mouse is the only way to hear the wheel on a terminal
+		// with no alternate scroll, which is what a phone SSH client and some
+		// desktop terminals are. It costs the drag selection, so it is asked
+		// for rather than assumed.
+		if m.scrollbackMouse {
+			return tea.MouseModeCellMotion
+		}
+		return tea.MouseModeNone
+	}
+	if m.terminal == nil {
 		return tea.MouseModeNone
 	}
 	if m.guestOwnsMouse() {
@@ -2104,8 +2245,12 @@ func (m dashboard) mouseMode() tea.MouseMode {
 	return tea.MouseModeCellMotion
 }
 
+// guestOwnsMouse reports whether passthrough has handed the mouse to the guest.
+// Scrollback is romty's own view of output the guest has already printed, so
+// the guest does not own the mouse there however the passthrough is set.
 func (m dashboard) guestOwnsMouse() bool {
-	return m.mousePassthrough && m.terminal != nil && m.terminal.guestMouseMode() != tea.MouseModeNone
+	return m.mousePassthrough && !m.scrollback &&
+		m.terminal != nil && m.terminal.guestMouseMode() != tea.MouseModeNone
 }
 
 func (m dashboard) render() string {
@@ -2115,11 +2260,15 @@ func (m dashboard) render() string {
 	// it hides are not built at all: rendering both meant every frame drew the
 	// workspace tree and a second terminal viewport it then threw away.
 	var lines []string
-	if m.gitDiff.active {
-		lines = m.renderGitDiffPanes(view.leftWidth, view.rightWidth, view.bodyHeight)
-	} else if m.scrollback {
+	switch {
+	case m.gitDiff.active:
+		diff := m.gitDiffLayout()
+		lines = m.renderGitDiffPanes(diff.leftWidth, diff.rightWidth, diff.bodyHeight)
+	case m.scrollback || m.navigationHidden():
+		// The narrow layout lays out the way scrollback does, because a pane
+		// that is hidden is not a pane to leave empty beside a divider.
 		lines = m.renderRows(m.renderTerminal(width), width, view.bodyHeight)
-	} else {
+	default:
 		lines = m.renderPanes(view.leftWidth, view.rightWidth, view.bodyHeight)
 	}
 	if m.modal != noModal {
@@ -2195,6 +2344,7 @@ func (m dashboard) renderStatus(width, bodyHeight int) []string {
 	case m.modal == configModal:
 		status = renderShortcuts(m.styles, width,
 			shortcut{key: "←/→", description: "adjust width"},
+			shortcut{key: "m", description: "scrollback mouse"},
 			shortcut{key: "Esc", description: "close"},
 		)
 	case m.modal == gitActionsModal && m.gitActionPending:
@@ -2291,7 +2441,7 @@ func (m dashboard) renderStatus(width, bodyHeight int) []string {
 			// F7 is already in the status row below, so naming it here too
 			// stacked one keycap over itself under two different labels. The
 			// rail carries what the row cannot.
-			contextShortcuts = []shortcut{{key: "Ctrl+\\", description: "navigation"}}
+			contextShortcuts = []shortcut{{key: "Ctrl+/", description: "navigation"}}
 		}
 		rail = renderShortcutRail(m.styles, width, contextShortcuts...)
 		status = renderShortcuts(m.styles, width,
@@ -2404,11 +2554,14 @@ func (m dashboard) renderModal(width, height int) []string {
 		return modalBox(m.styles, modalWidth, "Agent hooks", lines...)
 	}
 	if m.modal == configModal {
+		// Six lines and its borders are what the shortest screen romty lays out
+		// for can hold without the box losing its bottom edge.
 		return modalBox(m.styles, modalWidth, "Config",
 			"",
-			m.styles.modalStrong.Render(fmt.Sprintf("Left pane width: %d", m.dimensions().leftWidth)),
-			"",
+			m.styles.modalStrong.Render(fmt.Sprintf("Left pane width: %d", m.paneWidth())),
 			m.styles.modalBody.Render("Use ←/→ or [/] to adjust"),
+			m.styles.modalStrong.Render("Scrollback mouse: "+onOff(m.scrollbackMouse)),
+			m.styles.modalBody.Render("Press m to toggle"),
 			"",
 		)
 	}
@@ -2431,7 +2584,7 @@ func (m dashboard) helpEntries() []string {
 		renderHelpShortcut(m.styles, "Quit", "F4", "Ctrl+C"),
 		renderHelpShortcut(m.styles, "Refresh workspaces/files", "F5"),
 		renderHelpShortcut(m.styles, "Toggle scrollback", "F6", "Ctrl+Shift+\\"),
-		renderHelpShortcut(m.styles, "Toggle pane focus", "F7", "Ctrl+\\"),
+		renderHelpShortcut(m.styles, "Toggle pane focus", "F7", "Ctrl+/"),
 		renderHelpSection(m.styles, "WORKSPACE", "workspace pane only"),
 		renderHelpShortcut(m.styles, "Remove selection", "F8"),
 		renderHelpShortcut(m.styles, "Stop daemon", "F9"),
@@ -2459,6 +2612,7 @@ func (m dashboard) helpEntries() []string {
 		renderHelpShortcut(m.styles, "Type a picker path", "/"),
 		renderHelpShortcut(m.styles, "Erase path character", "Backspace"),
 		renderHelpShortcut(m.styles, "Adjust pane width", "←/→", "[/]"),
+		renderHelpShortcut(m.styles, "Toggle scrollback mouse", "m"),
 	}
 }
 
@@ -2755,6 +2909,13 @@ func truncate(value string, width int) string {
 		return value
 	}
 	return ansi.Truncate(value, width, "…")
+}
+
+func onOff(value bool) string {
+	if value {
+		return "on"
+	}
+	return "off"
 }
 
 func displayText(value string) string {

@@ -4,6 +4,8 @@
 
 The left pane shows roots, their direct child workspaces, Git state, and one marker for each running terminal tab. The right pane contains the selected tab rail and embedded terminal. The divider arrow points toward the focused pane.
 
+Below 80 columns the workspace pane takes half the screen from the terminal, so focusing the terminal hides it and gives the terminal the full width. `Ctrl`+`/` or `F7` brings it back and moves the focus with it. At 80 columns and above both panes stay on screen, and focus never resizes the terminal. A terminal that speaks the Kitty keyboard protocol reports `Ctrl`+`/` as itself; every other terminal, including phone SSH clients, sends it as `Ctrl`+`_`, and romty accepts both.
+
 Claude Code markers are orange and Codex markers are blue. Foreground process detection supplies the color without configuration; [agent status hooks](agent-hooks.md) add the phase:
 
 | Marker | Meaning |
@@ -37,7 +39,7 @@ Press `Ctrl`+`Shift`+`F` to toggle the file view for the same contextual workspa
 | `F4` or `Ctrl+C` | Close the TUI and leave sessions running |
 | `F5` | Refresh workspaces and Git state, or reload file view |
 | `F6` or `Ctrl`+`Shift`+`\` | Enter or leave scrollback |
-| `F7` or `Ctrl+\` | Toggle pane focus |
+| `F7` or `Ctrl`+`/` | Toggle pane focus |
 
 ### Workspace
 
@@ -68,7 +70,7 @@ Press `Ctrl`+`Shift`+`F` to toggle the file view for the same contextual workspa
 | `PgUp`/`PgDn` or `Ctrl+B`/`Ctrl+F` | Move one page | Picker, Help, Git result, file diff |
 | `Home`/`End` or `g`/`G` | Move to the first or last item/line | Picker, Help, Git result, file diff |
 | `Shift`+`PgUp`/`PgDn` | Enter scrollback or move one page | Workspace, terminal, scrollback |
-| Mouse wheel | Scroll | Help, scrollback, file diff |
+| Mouse wheel | Scroll | Help, scrollback, file diff, terminal |
 
 ### File diff
 
@@ -86,6 +88,7 @@ Press `Ctrl`+`Shift`+`F` to toggle the file view for the same contextual workspa
 | `/` | Type a path in the root picker |
 | `Backspace` | Erase a path character |
 | `←`/`→` or `[`/`]` | Resize the workspace pane in Config |
+| `m` | Toggle the scrollback mouse in Config |
 
 ## Roots, workspaces, and tabs
 
@@ -101,9 +104,9 @@ romty discovers direct child directories only. Press `F5` after a command adds o
 
 romty keeps 10,000 scrollback lines for each terminal. Scrollback fills the width so native terminal selection copies output without the workspace tree. New output does not move a historical view. `Shift`+`PgUp`/`PgDn` and the mouse wheel continue browsing history; other terminal input, including paste, returns to the live screen and is forwarded without dropping the first input.
 
-Full-screen applications such as `vim`, `less`, and Claude Code use an alternate screen with no romty history. In that mode `Shift`+`PgUp`/`PgDn` is forwarded as plain `PgUp`/`PgDn` so the application can page itself.
+Full-screen applications such as `vim`, `less`, and Claude Code use an alternate screen with no romty history. In that mode `Shift`+`PgUp`/`PgDn` is forwarded as plain `PgUp`/`PgDn` so the application can page itself, and the wheel goes to the application as well: as mouse reports when it asked for the mouse, and otherwise as three cursor keys per notch, which is what a terminal sends for alternate scroll. This does not depend on `mouse_passthrough`.
 
-On the live screen, the mouse wheel enters scrollback and scrolls three lines per notch. Because romty captures the live mouse, native selection uses the terminal bypass modifier: `Option` on macOS or `Shift` elsewhere. Scrollback releases mouse capture, so plain click-drag selects the full-width terminal output. File view captures the wheel to scroll its diff.
+On the live main screen, the mouse wheel enters scrollback and scrolls three lines per notch. Scrolling up with no history to show reports why in the status bar, so scrolling up with no response at all means the terminal is not sending wheel events and its mouse reporting setting needs checking. Because romty captures the live mouse, native selection uses the terminal bypass modifier: `Option` on macOS or `Shift` elsewhere. Scrollback releases mouse capture, so plain click-drag selects the full-width terminal output. File view captures the wheel to scroll its diff.
 
 Set `mouse_passthrough` in `config.json` to let applications receive the mouse when they request it instead:
 
@@ -111,7 +114,15 @@ Set `mouse_passthrough` in `config.json` to let applications receive the mouse w
 { "mouse_passthrough": true }
 ```
 
-With passthrough enabled, the application mouse mode is mirrored until it exits or scrollback opens. If the terminal does not support alternate scroll, use the keyboard to navigate scrollback.
+With passthrough enabled, the application mouse mode is mirrored until it exits or scrollback opens.
+
+Scrollback normally reads the wheel as the arrow keys the terminal's alternate scroll sends. A terminal without alternate scroll — many phone SSH clients, and some desktop ones — sends nothing there, leaving scrollback scrollable by keyboard only. Press `m` in Config, or set `scrollback_mouse`, to have romty keep the mouse in scrollback instead:
+
+```json
+{ "scrollback_mouse": true }
+```
+
+The wheel then scrolls scrollback on any terminal that reports the mouse, at the cost of the plain click-drag selection scrollback otherwise offers; the bypass modifier still selects.
 
 ## Destructive actions and config
 
