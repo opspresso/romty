@@ -2161,9 +2161,21 @@ func (m dashboard) navigationHidden() bool {
 	if max(m.width, 40) >= narrowLayoutWidth {
 		return false
 	}
-	// The file view has its own two panes and does not follow m.focus, so the
-	// left width it is given belongs to its file tree, not to the workspace.
-	return m.focus == terminalPane && m.terminal != nil && !m.gitDiff.active
+	return m.focus == terminalPane && m.terminal != nil
+}
+
+// gitDiffLayout is the file view's own split. The file view has two panes of
+// its own, so the narrow layout does not apply to it, and it is kept out of
+// dimensions rather than folded into it: the terminal is not on screen while
+// the view is open, and sizing the PTY to a split it never appears in made a
+// full-screen guest reflow on the way in and again on the way out.
+func (m dashboard) gitDiffLayout() layout {
+	width := max(m.width, 40)
+	view := m.dimensions()
+	view.leftWidth = m.paneWidth()
+	view.separator = separatorWidth
+	view.rightWidth = max(width-view.leftWidth-separatorWidth, 17)
+	return view
 }
 
 func (m dashboard) dimensions() layout {
@@ -2233,8 +2245,12 @@ func (m dashboard) mouseMode() tea.MouseMode {
 	return tea.MouseModeCellMotion
 }
 
+// guestOwnsMouse reports whether passthrough has handed the mouse to the guest.
+// Scrollback is romty's own view of output the guest has already printed, so
+// the guest does not own the mouse there however the passthrough is set.
 func (m dashboard) guestOwnsMouse() bool {
-	return m.mousePassthrough && m.terminal != nil && m.terminal.guestMouseMode() != tea.MouseModeNone
+	return m.mousePassthrough && !m.scrollback &&
+		m.terminal != nil && m.terminal.guestMouseMode() != tea.MouseModeNone
 }
 
 func (m dashboard) render() string {
@@ -2246,7 +2262,8 @@ func (m dashboard) render() string {
 	var lines []string
 	switch {
 	case m.gitDiff.active:
-		lines = m.renderGitDiffPanes(view.leftWidth, view.rightWidth, view.bodyHeight)
+		diff := m.gitDiffLayout()
+		lines = m.renderGitDiffPanes(diff.leftWidth, diff.rightWidth, diff.bodyHeight)
 	case m.scrollback || m.navigationHidden():
 		// The narrow layout lays out the way scrollback does, because a pane
 		// that is hidden is not a pane to leave empty beside a divider.

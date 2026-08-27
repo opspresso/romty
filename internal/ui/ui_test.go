@@ -1554,6 +1554,30 @@ func TestDashboardKeepsTheMouseInScrollbackWhenAsked(t *testing.T) {
 	}
 }
 
+// Scrollback is romty's own view of output the guest has already printed, so
+// passthrough must not take the wheel there and scroll the guest instead of the
+// history the user opened.
+func TestDashboardScrollsHistoryNotTheGuestWithBothMouseOptions(t *testing.T) {
+	value := scrolledDashboard(t, 200)
+	value.scrollbackMouse = true
+	value.mousePassthrough = true
+	value.terminal.writeOutput([]byte("\x1b[?1003h\x1b[?1006h"))
+
+	updated, _ := value.Update(key(tea.KeyF6, ""))
+	value = updated.(dashboard)
+	if !value.scrollback {
+		t.Fatal("F6 did not open scrollback")
+	}
+	sent := value.terminal.stream.(*memoryStream).String()
+
+	updated, _ = value.Update(tea.MouseWheelMsg{X: 40, Y: terminalTop + 2, Button: tea.MouseWheelUp})
+	value = updated.(dashboard)
+	if value.scrollOffset != wheelLines {
+		t.Fatalf("scroll offset = %d, want the wheel to move the history", value.scrollOffset)
+	}
+	waitForGuestSilence(t, value.terminal, sent)
+}
+
 func TestDashboardTogglesScrollbackMouseFromConfig(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, model.Snapshot{})
 	updated, _ := value.Update(key(tea.KeyF3, ""))
@@ -1814,25 +1838,30 @@ func TestDashboardResizesThePTYWhenTheWorkspacePaneHides(t *testing.T) {
 	}
 }
 
-// The file view has two panes of its own and does not follow m.focus, so the
-// left width it is given belongs to its file tree rather than the workspace.
+// The file view has two panes of its own, so the narrow layout does not apply
+// to it — and the terminal it would widen is not on screen, so opening the view
+// must not resize the PTY and make a full-screen guest reflow for a split it
+// never appears in.
 func TestDashboardKeepsTheFileViewSplitOnANarrowScreen(t *testing.T) {
 	value := narrowDashboard(t, 60)
+	before, _ := value.terminalSize()
+
 	value.gitDiff = gitDiffView{
 		active:    true,
 		target:    model.Workspace{Name: "alpha", Path: "/projects/alpha"},
 		files:     []gitChangedFile{{Path: "file.go", WorkTreeStatus: 'M'}},
 		fileIndex: 0,
 	}
-	if value.navigationHidden() {
-		t.Fatal("the file view lost its left pane to the narrow layout")
-	}
-	if view := value.dimensions(); view.leftWidth == 0 || view.separator != separatorWidth {
+	if view := value.gitDiffLayout(); view.leftWidth == 0 || view.separator != separatorWidth {
 		t.Fatalf("file view layout = (left %d, separator %d), want the split",
 			view.leftWidth, view.separator)
 	}
 	if rendered := ansi.Strip(value.render()); !strings.Contains(rendered, "file.go") {
 		t.Fatalf("file view is not drawn:\n%s", rendered)
+	}
+	if after, _ := value.terminalSize(); after != before {
+		t.Fatalf("PTY width under the file view = %d, want the %d it had at %d columns",
+			after, before, value.width)
 	}
 }
 
