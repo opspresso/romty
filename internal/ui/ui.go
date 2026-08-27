@@ -2559,15 +2559,18 @@ func (m dashboard) renderModal(width, height int) []string {
 		return modalBox(m.styles, modalWidth, "Agent hooks", lines...)
 	}
 	if m.modal == configModal {
-		// Six lines and its borders are what the shortest screen romty lays out
-		// for can hold without the box losing its bottom edge.
+		// One setting per group: its name and value in the body colour, the
+		// keys that move it muted underneath, and a blank line between the
+		// groups. Four lines of one weight read as one paragraph, and the
+		// second setting looked like a third line of the first. Five lines and
+		// its borders also fit the shortest screen romty lays out for, which a
+		// box padded top and bottom no longer did.
 		return modalBox(m.styles, modalWidth, "Config",
-			"",
 			m.styles.modalStrong.Render(fmt.Sprintf("Left pane width: %d", m.paneWidth())),
-			m.styles.modalBody.Render("Use ←/→ or [/] to adjust"),
-			m.styles.modalStrong.Render("Scrollback mouse: "+onOff(m.scrollbackMouse)),
-			m.styles.modalBody.Render("Press m to toggle"),
+			m.styles.empty.Render("←/→ or [/] to adjust"),
 			"",
+			m.styles.modalStrong.Render("Scrollback mouse: "+onOff(m.scrollbackMouse)),
+			m.styles.empty.Render("m to toggle"),
 		)
 	}
 	return modalBox(m.styles, modalWidth, "About",

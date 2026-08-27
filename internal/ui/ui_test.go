@@ -1578,6 +1578,44 @@ func TestDashboardScrollsHistoryNotTheGuestWithBothMouseOptions(t *testing.T) {
 	waitForGuestSilence(t, value.terminal, sent)
 }
 
+// Two settings of one weight read as one paragraph, and the second one looked
+// like a third line of the first. Each setting is its own group: a name and
+// value, the keys that move it under them, and a blank line between.
+func TestDashboardGroupsEachConfigSettingWithItsKeys(t *testing.T) {
+	value := newDashboard(&fakeBackend{}, model.Snapshot{})
+	value.width, value.height = 100, 24
+	value.modal = configModal
+
+	lines := plainRows(value.renderModal(72, 22))
+	var body []string
+	for _, line := range lines[1 : len(lines)-1] {
+		body = append(body, strings.TrimSpace(strings.Trim(line, "│")))
+	}
+	want := []string{
+		fmt.Sprintf("Left pane width: %d", value.paneWidth()),
+		"←/→ or [/] to adjust",
+		"",
+		"Scrollback mouse: off",
+		"m to toggle",
+	}
+	if !slices.Equal(body, want) {
+		t.Fatalf("config modal body = %q, want each setting grouped with its keys %q", body, want)
+	}
+
+	// The hint is subordinate to the setting it belongs to, not another line of
+	// the same weight.
+	rendered := strings.Join(value.renderModal(72, 22), "\n")
+	if !strings.Contains(rendered, value.styles.empty.Render("m to toggle")) {
+		t.Fatalf("the key hint is not muted:\n%s", rendered)
+	}
+
+	// The shortest screen romty lays out for still holds the whole box.
+	value.height = 10
+	if short := ansi.Strip(value.render()); !strings.Contains(short, "╰") {
+		t.Fatalf("config modal lost its bottom edge at height %d:\n%s", value.height, short)
+	}
+}
+
 func TestDashboardTogglesScrollbackMouseFromConfig(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, model.Snapshot{})
 	updated, _ := value.Update(key(tea.KeyF3, ""))
