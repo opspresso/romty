@@ -287,10 +287,10 @@ func TestDashboardSelectsWorkspaceAndCreatesTerminal(t *testing.T) {
 	if !strings.Contains(rendered, "projects") || !strings.Contains(rendered, "embedded terminal") {
 		t.Fatalf("rendered dashboard does not contain both panes:\n%s", rendered)
 	}
-	updated, _ = value.Update(tea.KeyPressMsg(tea.Key{Code: '\\', Mod: tea.ModCtrl}))
+	updated, _ = value.Update(controlSlashKey())
 	value = updated.(dashboard)
 	if value.focus != leftPane || value.terminal == nil {
-		t.Fatalf("Ctrl+\\ focus = %v, terminal = %v", value.focus, value.terminal)
+		t.Fatalf("Ctrl+/ focus = %v, terminal = %v", value.focus, value.terminal)
 	}
 }
 
@@ -360,10 +360,10 @@ func TestDashboardReloadsWorkspacesWhenReturningFromTerminal(t *testing.T) {
 	value.selectedPath = root.Path
 	value.terminal = terminal
 
-	updated, refreshCommand := value.Update(tea.KeyPressMsg(tea.Key{Code: '\\', Mod: tea.ModCtrl}))
+	updated, refreshCommand := value.Update(controlSlashKey())
 	value = updated.(dashboard)
 	if value.focus != leftPane || refreshCommand == nil {
-		t.Fatalf("Ctrl+\\ result = (focus %v, command %v)", value.focus, refreshCommand)
+		t.Fatalf("Ctrl+/ result = (focus %v, command %v)", value.focus, refreshCommand)
 	}
 	updated, _ = value.Update(refreshCommand())
 	value = updated.(dashboard)
@@ -791,7 +791,7 @@ func TestDashboardSupportsIMEIndependentShortcuts(t *testing.T) {
 	value.width = 120
 	if rendered := value.render(); !shortcutOrder(rendered, "F1", "F2", "F3", "F4", "F5", "F6") {
 		t.Fatalf("terminal shortcuts are not in F1-F6 order:\n%s", rendered)
-	} else if !strings.Contains(rendered, value.styles.shortcutKey.Render(" Ctrl+\\ ")) {
+	} else if !strings.Contains(rendered, value.styles.shortcutKey.Render(" Ctrl+/ ")) {
 		// Assert on a key the fixed status row does not also carry, or the
 		// check passes with the contextual rail deleted outright.
 		t.Fatalf("terminal status bar does not contain navigation shortcut:\n%s", rendered)
@@ -1455,6 +1455,130 @@ func TestDashboardRendersCopyModeFullWidth(t *testing.T) {
 	}
 }
 
+// An application that owns the screen has a history of its own and romty has
+// none to offer, so the wheel is its business. Without this the wheel did
+// nothing at all inside vim, less, or an agent, and said nothing either.
+func TestDashboardGivesTheWheelToAGuestThatOwnsTheScreen(t *testing.T) {
+	t.Run("a guest that asked for the mouse", func(t *testing.T) {
+		value := scrolledDashboard(t, 200)
+		leftWidth := value.dimensions().leftWidth
+		// The alternate screen and a mouse request, the way Claude Code and
+		// htop start.
+		value.terminal.writeOutput([]byte("\x1b[?1049h\x1b[?1003h\x1b[?1006h"))
+
+		updated, _ := value.Update(tea.MouseWheelMsg{
+			X: leftWidth + separatorWidth + 4, Y: terminalTop + 2, Button: tea.MouseWheelUp,
+		})
+		value = updated.(dashboard)
+		if value.scrollback {
+			t.Fatal("the wheel opened scrollback on the alternate screen")
+		}
+		waitForGuest(t, value.terminal.stream.(*memoryStream), "\x1b[<64;5;3")
+	})
+
+	t.Run("a guest that did not", func(t *testing.T) {
+		value := scrolledDashboard(t, 200)
+		leftWidth := value.dimensions().leftWidth
+		// less and man own the screen without ever asking for the mouse, and a
+		// terminal gives them the cursor keys of alternate scroll instead.
+		value.terminal.writeOutput([]byte("\x1b[?1049h"))
+
+		updated, _ := value.Update(tea.MouseWheelMsg{
+			X: leftWidth + separatorWidth + 4, Y: terminalTop + 2, Button: tea.MouseWheelUp,
+		})
+		value = updated.(dashboard)
+		if value.scrollback {
+			t.Fatal("the wheel opened scrollback on the alternate screen")
+		}
+		waitForGuest(t, value.terminal.stream.(*memoryStream), "\x1b[A\x1b[A\x1b[A")
+
+		value.Update(tea.MouseWheelMsg{
+			X: leftWidth + separatorWidth + 4, Y: terminalTop + 2, Button: tea.MouseWheelDown,
+		})
+		waitForGuest(t, value.terminal.stream.(*memoryStream), "\x1b[B\x1b[B\x1b[B")
+	})
+}
+
+// Silence is what a wheel that the host never reports looks like, so the one
+// state where romty has nothing to scroll has to say so instead.
+func TestDashboardSaysWhyTheWheelHasNothingToScroll(t *testing.T) {
+	value := newDashboard(&fakeBackend{}, model.Snapshot{})
+	value.width, value.height = 120, 30
+	view := value.dimensions()
+	value.terminal = newEmbeddedTerminal("tab-1", newMemoryStream(""), view.rightWidth, view.terminalHeight)
+	t.Cleanup(value.closeTerminal)
+	value.focus = terminalPane
+
+	updated, _ := value.Update(tea.MouseWheelMsg{
+		X: view.leftWidth + separatorWidth + 4, Y: terminalTop + 2, Button: tea.MouseWheelUp,
+	})
+	value = updated.(dashboard)
+	if value.scrollback {
+		t.Fatal("scrollback opened with no history to show")
+	}
+	if !value.noticeMessage || !strings.Contains(value.errorMessage, "scrolled off") {
+		t.Fatalf("status bar = (notice %v, %q), want the reason the wheel did nothing",
+			value.noticeMessage, value.errorMessage)
+	}
+}
+
+// A terminal with no alternate scroll sends nothing once romty hands the mouse
+// back, which leaves scrollback unscrollable on a phone and on some desktop
+// terminals. Keeping the mouse is the trade the option makes.
+func TestDashboardKeepsTheMouseInScrollbackWhenAsked(t *testing.T) {
+	value := scrolledDashboard(t, 200)
+	value.scrollbackMouse = true
+
+	updated, command := value.Update(key(tea.KeyF6, ""))
+	value = updated.(dashboard)
+	if !value.scrollback {
+		t.Fatal("F6 did not open scrollback")
+	}
+	if view := value.View(); view.MouseMode != tea.MouseModeCellMotion {
+		t.Fatalf("scrollback mouse mode = %v, want romty to keep the wheel", view.MouseMode)
+	}
+	if sequences := rawSequences(command); slices.Contains(sequences, ansi.SetMode(altScrollMode)) {
+		t.Fatalf("sequences = %q, want no alternate scroll while romty holds the mouse", sequences)
+	}
+
+	updated, _ = value.Update(tea.MouseWheelMsg{X: 40, Y: terminalTop + 2, Button: tea.MouseWheelUp})
+	value = updated.(dashboard)
+	if value.scrollOffset != wheelLines {
+		t.Fatalf("scroll offset = %d, want one notch of history", value.scrollOffset)
+	}
+
+	// Off again, the host gets the mouse back for its own drag selection.
+	value.scrollbackMouse = false
+	if view := value.View(); view.MouseMode != tea.MouseModeNone {
+		t.Fatalf("scrollback mouse mode = %v, want the mouse returned to the host", view.MouseMode)
+	}
+}
+
+func TestDashboardTogglesScrollbackMouseFromConfig(t *testing.T) {
+	value := newDashboard(&fakeBackend{}, model.Snapshot{})
+	updated, _ := value.Update(key(tea.KeyF3, ""))
+	value = updated.(dashboard)
+	if value.modal != configModal {
+		t.Fatalf("F3 modal = %v, want config", value.modal)
+	}
+
+	updated, command := value.Update(key('m', "m"))
+	value = updated.(dashboard)
+	if !value.scrollbackMouse || command == nil {
+		t.Fatalf("m = (scrollback mouse %v, command %v), want the setting on and saved",
+			value.scrollbackMouse, command)
+	}
+	if rendered := ansi.Strip(value.render()); !strings.Contains(rendered, "Scrollback mouse: on") {
+		t.Fatalf("config modal does not report the setting:\n%s", rendered)
+	}
+
+	updated, _ = value.Update(key('m', "m"))
+	value = updated.(dashboard)
+	if value.scrollbackMouse {
+		t.Fatal("m did not turn the setting back off")
+	}
+}
+
 func TestDashboardKeepsMouseWithTheHostUnlessPassthroughIsOn(t *testing.T) {
 	value := scrolledDashboard(t, 200)
 	// A guest that wants the mouse, the way Claude Code and htop do.
@@ -1546,18 +1670,18 @@ func TestDashboardFocusesTerminalWhenLeavingScrollback(t *testing.T) {
 	}
 }
 
-// F7 and Ctrl+\ both move between panes in one key. Keeping both bindings
-// matters on systems where a desktop environment holds one of them globally.
+// F7 and Ctrl+/ both move between panes in one key. Keeping both bindings
+// matters on systems where a desktop environment holds one of them globally,
+// and Ctrl+/ arrives under two names because only a terminal that speaks the
+// Kitty keyboard protocol reports the key that was pressed rather than 0x1F.
 func TestDashboardSwitchesPanesWithOneKey(t *testing.T) {
 	for _, binding := range []struct {
 		name string
 		key  tea.KeyPressMsg
 	}{
 		{name: "F7", key: key(tea.KeyF7, "")},
-		{name: "Ctrl+\\", key: controlBackslashKey()},
-		{name: "Ctrl+\\ with an alternate layout", key: tea.KeyPressMsg(tea.Key{
-			Code: '₩', BaseCode: '\\', Mod: tea.ModCtrl,
-		})},
+		{name: "Ctrl+/", key: controlSlashKey()},
+		{name: "Ctrl+/ as 0x1F", key: controlUnderscoreKey()},
 	} {
 		t.Run(binding.name, func(t *testing.T) {
 			value := scrolledDashboard(t, 200)
@@ -1588,6 +1712,127 @@ func TestDashboardSwitchesPanesWithOneKey(t *testing.T) {
 	if value.scrollback || value.focus != leftPane {
 		t.Fatalf("F7 in scrollback = (scrollback %v, focus %v), want the workspace pane",
 			value.scrollback, value.focus)
+	}
+}
+
+// narrowDashboard is a phone-sized dashboard with one workspace in the tree and
+// a terminal open on it, so a render can be searched for the tree by name.
+func narrowDashboard(t *testing.T, width int) dashboard {
+	t.Helper()
+	workspace := model.Workspace{ID: "workspace-1", RootID: "root-1", Name: "alpha", Path: "/projects/alpha"}
+	snapshot := model.Snapshot{Roots: []model.RootView{{
+		Root:        model.Root{ID: "root-1", Name: "projects", Path: "/projects"},
+		Directories: []model.WorkspaceView{{Workspace: workspace}},
+	}}}
+	value := newDashboard(&fakeBackend{snapshot: snapshot, workspace: workspace}, snapshot)
+	value.width, value.height = width, 24
+	value.selectedWorkspaceID = workspace.ID
+	value.selectedPath = workspace.Path
+	value.focus = terminalPane
+	view := value.dimensions()
+	value.terminal = newEmbeddedTerminal("tab-1", newMemoryStream(""), view.rightWidth, view.terminalHeight)
+	// The dashboard is settled rather than mid-transition, so the PTY has
+	// already been told whichever width this layout gives it.
+	value.terminalFullWidth = value.navigationHidden()
+	t.Cleanup(value.closeTerminal)
+	return value
+}
+
+// A phone's SSH client is around 40 to 60 columns, where the workspace pane and
+// its separator take half the screen from the terminal the keyboard is in.
+func TestDashboardHidesWorkspacePaneOnANarrowScreen(t *testing.T) {
+	value := narrowDashboard(t, 60)
+	view := value.dimensions()
+	if view.leftWidth != 0 || view.separator != 0 || view.rightWidth != 60 {
+		t.Fatalf("narrow layout = (left %d, separator %d, right %d), want the terminal alone at 60",
+			view.leftWidth, view.separator, view.rightWidth)
+	}
+	if originX, _ := view.terminalOrigin(); originX != 0 {
+		t.Fatalf("terminal origin x = %d, want the first column", originX)
+	}
+	if rendered := ansi.Strip(value.render()); strings.Contains(rendered, "alpha") {
+		t.Fatalf("workspace tree is still drawn:\n%s", rendered)
+	}
+
+	updated, _ := value.Update(controlSlashKey())
+	value = updated.(dashboard)
+	if value.focus != leftPane {
+		t.Fatalf("Ctrl+/ focus = %v, want the workspace pane", value.focus)
+	}
+	if rendered := ansi.Strip(value.render()); !strings.Contains(rendered, "alpha") {
+		t.Fatalf("Ctrl+/ did not bring the workspace tree back:\n%s", rendered)
+	}
+}
+
+// Above the threshold the split is worth its width, so a desktop keeps the
+// layout it had and its PTY is never resized by a focus change.
+func TestDashboardKeepsWorkspacePaneOnAWideScreen(t *testing.T) {
+	value := narrowDashboard(t, 120)
+	if value.navigationHidden() {
+		t.Fatal("a 120 column screen hid the workspace pane")
+	}
+	updated, _ := value.Update(key(tea.KeyF7, ""))
+	value = updated.(dashboard)
+	updated, _ = value.Update(key(tea.KeyF7, ""))
+	value = updated.(dashboard)
+	if view := value.dimensions(); view.leftWidth == 0 || view.separator != separatorWidth {
+		t.Fatalf("wide layout after two toggles = (left %d, separator %d), want the split",
+			view.leftWidth, view.separator)
+	}
+	if rendered := ansi.Strip(value.render()); !strings.Contains(rendered, "alpha") {
+		t.Fatalf("workspace tree is missing from a wide screen:\n%s", rendered)
+	}
+}
+
+// A shell wraps its output to the width it was told, so hiding the pane has to
+// reach the PTY the way dragging the window does.
+func TestDashboardResizesThePTYWhenTheWorkspacePaneHides(t *testing.T) {
+	value := narrowDashboard(t, 60)
+	backend := value.backend.(*fakeBackend)
+
+	updated, command := value.Update(controlSlashKey())
+	value = updated.(dashboard)
+	if command == nil {
+		t.Fatal("hiding the workspace pane did not ask the daemon to resize the PTY")
+	}
+	commandMessages(command)
+	wantColumns, wantRows := value.terminalSize()
+	if backend.createdColumns != wantColumns || backend.createdRows != wantRows {
+		t.Fatalf("PTY size with the pane shown = %dx%d, want %dx%d",
+			backend.createdColumns, backend.createdRows, wantColumns, wantRows)
+	}
+
+	updated, command = value.Update(controlSlashKey())
+	value = updated.(dashboard)
+	if command == nil {
+		t.Fatal("showing the workspace pane did not ask the daemon to resize the PTY")
+	}
+	commandMessages(command)
+	if wantColumns, _ = value.terminalSize(); backend.createdColumns != wantColumns {
+		t.Fatalf("PTY columns with the pane hidden = %d, want the whole screen %d",
+			backend.createdColumns, wantColumns)
+	}
+}
+
+// The file view has two panes of its own and does not follow m.focus, so the
+// left width it is given belongs to its file tree rather than the workspace.
+func TestDashboardKeepsTheFileViewSplitOnANarrowScreen(t *testing.T) {
+	value := narrowDashboard(t, 60)
+	value.gitDiff = gitDiffView{
+		active:    true,
+		target:    model.Workspace{Name: "alpha", Path: "/projects/alpha"},
+		files:     []gitChangedFile{{Path: "file.go", WorkTreeStatus: 'M'}},
+		fileIndex: 0,
+	}
+	if value.navigationHidden() {
+		t.Fatal("the file view lost its left pane to the narrow layout")
+	}
+	if view := value.dimensions(); view.leftWidth == 0 || view.separator != separatorWidth {
+		t.Fatalf("file view layout = (left %d, separator %d), want the split",
+			view.leftWidth, view.separator)
+	}
+	if rendered := ansi.Strip(value.render()); !strings.Contains(rendered, "file.go") {
+		t.Fatalf("file view is not drawn:\n%s", rendered)
 	}
 }
 
@@ -2767,17 +3012,17 @@ func TestDashboardCapturesLiveMouseWheelAndUsesKeyboardFocus(t *testing.T) {
 		t.Fatalf("mouse focus mode is still advertised:\n%s", rendered)
 	}
 
-	updated, _ := value.Update(tea.KeyPressMsg(tea.Key{Code: '\\', Mod: tea.ModCtrl}))
+	updated, _ := value.Update(controlSlashKey())
 	value = updated.(dashboard)
 	if value.focus != leftPane {
-		t.Fatalf("Ctrl+\\ focus = %v, want workspace pane", value.focus)
+		t.Fatalf("Ctrl+/ focus = %v, want workspace pane", value.focus)
 	}
 	separator := value.styles.dividerActive.Render("◀") + value.styles.divider.Render("│") + " "
 	if rendered := value.render(); !strings.Contains(rendered, separator) {
 		t.Fatalf("workspace focus is not visible:\n%s", rendered)
 	}
 	if view := value.View(); view.MouseMode != tea.MouseModeCellMotion {
-		t.Fatalf("mouse mode after Ctrl+\\ = %v, want cell motion", view.MouseMode)
+		t.Fatalf("mouse mode after Ctrl+/ = %v, want cell motion", view.MouseMode)
 	}
 }
 
@@ -3843,8 +4088,8 @@ func TestDashboardShowsCompleteShortcutReferenceInHelpModal(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, model.Snapshot{})
 	value.width = 100
 	value.height = 80
-	if entries := value.helpEntries(); len(entries) != 36 {
-		t.Fatalf("help entries = %d, want 6 sections and 29 shortcuts", len(entries))
+	if entries := value.helpEntries(); len(entries) != 37 {
+		t.Fatalf("help entries = %d, want 6 sections and 30 shortcuts", len(entries))
 	}
 
 	updated, command := value.Update(key('?', "?"))
@@ -3879,7 +4124,7 @@ func TestDashboardShowsCompleteShortcutReferenceInHelpModal(t *testing.T) {
 		{keys: []string{"F4", "Ctrl+C"}, description: "Quit"},
 		{keys: []string{"F5"}, description: "Refresh workspaces/files"},
 		{keys: []string{"F6", "Ctrl+Shift+\\"}, description: "Toggle scrollback"},
-		{keys: []string{"F7", "Ctrl+\\"}, description: "Toggle pane focus"},
+		{keys: []string{"F7", "Ctrl+/"}, description: "Toggle pane focus"},
 		{keys: []string{"F8"}, description: "Remove selection"},
 		{keys: []string{"F9"}, description: "Stop daemon"},
 		{keys: []string{"i"}, description: "About"},
@@ -3902,6 +4147,7 @@ func TestDashboardShowsCompleteShortcutReferenceInHelpModal(t *testing.T) {
 		{keys: []string{"/"}, description: "Type a picker path"},
 		{keys: []string{"Backspace"}, description: "Erase path character"},
 		{keys: []string{"←/→", "[/]"}, description: "Adjust pane width"},
+		{keys: []string{"m"}, description: "Toggle scrollback mouse"},
 	}
 	for _, shortcut := range shortcuts {
 		if !helpContainsShortcut(plainLines, shortcut.description, shortcut.keys...) {
@@ -4075,8 +4321,21 @@ func key(code rune, text string) tea.KeyPressMsg {
 	return tea.KeyPressMsg(tea.Key{Code: code, Text: text})
 }
 
+// controlBackslashKey is no longer a romty binding, so it stands for any key
+// the terminal pane forwards to the shell untouched.
 func controlBackslashKey() tea.KeyPressMsg {
 	return tea.KeyPressMsg(tea.Key{Code: '\\', Mod: tea.ModCtrl})
+}
+
+// controlSlashKey is Ctrl+/ as a terminal that speaks the Kitty keyboard
+// protocol reports it, and controlUnderscoreKey is the same press from every
+// other terminal, which sends 0x1F and is decoded as Ctrl+_.
+func controlSlashKey() tea.KeyPressMsg {
+	return tea.KeyPressMsg(tea.Key{Code: '/', Mod: tea.ModCtrl})
+}
+
+func controlUnderscoreKey() tea.KeyPressMsg {
+	return tea.KeyPressMsg(tea.Key{Code: '_', Mod: tea.ModCtrl})
 }
 
 func scrollbackToggleKey() tea.KeyPressMsg {

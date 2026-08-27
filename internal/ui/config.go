@@ -18,7 +18,11 @@ type Config struct {
 	LeftWidth int `json:"left_width,omitempty"`
 	// MousePassthrough hands the mouse to applications that ask for it, at the
 	// cost of the host terminal's drag selection while they run.
-	MousePassthrough  bool   `json:"mouse_passthrough,omitempty"`
+	MousePassthrough bool `json:"mouse_passthrough,omitempty"`
+	// ScrollbackMouse keeps the mouse in scrollback rather than returning it to
+	// the host. Scrolling then works on a terminal with no alternate scroll, at
+	// the cost of the drag selection scrollback otherwise offers.
+	ScrollbackMouse   bool   `json:"scrollback_mouse,omitempty"`
 	GitDiffView       string `json:"git_diff_view,omitempty"`
 	LastWorkspacePath string `json:"last_workspace_path,omitempty"`
 	LastTabID         string `json:"last_tab_id,omitempty"`
@@ -37,6 +41,7 @@ func (c *Config) UnmarshalJSON(data []byte) error {
 	}
 	delete(fields, "left_width")
 	delete(fields, "mouse_passthrough")
+	delete(fields, "scrollback_mouse")
 	delete(fields, "git_diff_view")
 	delete(fields, "last_workspace_path")
 	delete(fields, "last_tab_id")

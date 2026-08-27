@@ -183,7 +183,7 @@
 
 <span class="path">›</span> <span class="caret"></span></pre>
           </div>
-          <div class="shortcut-rail"><span></span><div><kbd> Ctrl+\ </kbd> navigation</div></div>
+          <div class="shortcut-rail"><span></span><div><kbd> Ctrl+/ </kbd> navigation</div></div>
           <div class="statusbar">
             <span><kbd> F1 </kbd> help</span>
             <span><kbd> F2 </kbd> add root</span>
@@ -277,8 +277,8 @@
           <h3>Scroll from the live screen</h3>
           <p>
             The wheel enters terminal history without a mode switch, while typing returns to
-            the live shell without dropping the first key. Applications that request the mouse
-            can still have it through passthrough.
+            the live shell without dropping the first key. A full-screen application scrolls
+            itself, and a terminal without alternate scroll can keep the wheel in history too.
           </p>
         </div>
 
@@ -353,7 +353,7 @@
             <div class="key-row"><span class="caps"><kbd>F4</kbd><kbd>Ctrl+C</kbd></span><span>Close the TUI and leave sessions running</span></div>
             <div class="key-row"><span class="caps"><kbd>F5</kbd></span><span>Refresh workspaces and Git state, or reload file view</span></div>
             <div class="key-row"><span class="caps"><kbd>F6</kbd><kbd>Ctrl+Shift+\</kbd></span><span>Enter or leave scrollback</span></div>
-            <div class="key-row"><span class="caps"><kbd>F7</kbd><kbd>Ctrl+\</kbd></span><span>Toggle pane focus</span></div>
+            <div class="key-row"><span class="caps"><kbd>F7</kbd><kbd>Ctrl+/</kbd></span><span>Toggle pane focus</span></div>
           </div>
         </section>
 
@@ -386,7 +386,7 @@
             <div class="key-row"><span class="caps"><kbd>PgUp/PgDn</kbd><kbd>Ctrl+B/F</kbd></span><span>Move one page</span></div>
             <div class="key-row"><span class="caps"><kbd>Home/End</kbd><kbd>g/G</kbd></span><span>Move to the first or last item or line</span></div>
             <div class="key-row"><span class="caps"><kbd>Shift+PgUp/PgDn</kbd></span><span>Enter scrollback or move one page</span></div>
-            <div class="key-row"><span class="caps"><kbd>Wheel</kbd></span><span>Scroll Help, history, or a file diff</span></div>
+            <div class="key-row"><span class="caps"><kbd>Wheel</kbd></span><span>Scroll Help, history, a file diff, or the terminal</span></div>
           </div>
         </section>
 
@@ -406,6 +406,7 @@
             <div class="key-row"><span class="caps"><kbd>/</kbd></span><span>Type a path in the root picker</span></div>
             <div class="key-row"><span class="caps"><kbd>Backspace</kbd></span><span>Erase a path character</span></div>
             <div class="key-row"><span class="caps"><kbd>←/→</kbd><kbd>[/]</kbd></span><span>Resize the workspace pane in Config</span></div>
+            <div class="key-row"><span class="caps"><kbd>m</kbd></span><span>Toggle the scrollback mouse in Config</span></div>
           </div>
         </section>
       </div>
