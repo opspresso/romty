@@ -1030,13 +1030,18 @@ func (m dashboard) translateMouse(mouse tea.Mouse) (uv.Mouse, bool) {
 	return translated, true
 }
 
-// isFocusToggle reports the two encodings of Ctrl+/. A terminal that speaks the
-// Kitty keyboard protocol names the key it was given; every other one sends
-// 0x1F, which is decoded as Ctrl+_ because that is the other key the byte
-// stands for. A phone's SSH client is in the second group, and it is the one
-// the narrow layout exists for, so both have to reach the toggle.
+// isFocusToggle reports the keys that move between the panes. Ctrl+/ is the one
+// romty advertises, and it arrives under two names: a terminal that speaks the
+// Kitty keyboard protocol reports the key that was pressed, while every other
+// one sends 0x1F, which decodes as Ctrl+_ because that is the other key the
+// byte stands for. A phone's SSH client is in the second group, and it is the
+// one the narrow layout exists for, so both have to reach the toggle.
+//
+// Ctrl+\ is kept unadvertised. It is what romty bound before Ctrl+/ and what
+// hands already reach for; taking it away bought nothing, so it stays out of
+// help and the status bar rather than out of the binding.
 func isFocusToggle(key string) bool {
-	return key == "ctrl+/" || key == "ctrl+_"
+	return key == "ctrl+/" || key == "ctrl+_" || key == "ctrl+\\"
 }
 
 // toggleFocus moves between the panes in one key. Both F7 and Ctrl+/ use it so

@@ -1706,6 +1706,13 @@ func TestDashboardSwitchesPanesWithOneKey(t *testing.T) {
 		{name: "F7", key: key(tea.KeyF7, "")},
 		{name: "Ctrl+/", key: controlSlashKey()},
 		{name: "Ctrl+/ as 0x1F", key: controlUnderscoreKey()},
+		// Ctrl+\ is what romty bound before Ctrl+/ and is kept for the hands
+		// that learned it, including on a layout that reports the physical key
+		// separately from the character it types.
+		{name: "Ctrl+\\", key: controlBackslashKey()},
+		{name: "Ctrl+\\ with an alternate layout", key: tea.KeyPressMsg(tea.Key{
+			Code: '₩', BaseCode: '\\', Mod: tea.ModCtrl,
+		})},
 	} {
 		t.Run(binding.name, func(t *testing.T) {
 			value := scrolledDashboard(t, 200)
@@ -1736,6 +1743,17 @@ func TestDashboardSwitchesPanesWithOneKey(t *testing.T) {
 	if value.scrollback || value.focus != leftPane {
 		t.Fatalf("F7 in scrollback = (scrollback %v, focus %v), want the workspace pane",
 			value.scrollback, value.focus)
+	}
+
+	// Ctrl+/ is the one romty teaches. Ctrl+\ answers the same toggle without
+	// taking a line of help or a keycap on the status bar for itself.
+	value = scrolledDashboard(t, 200)
+	keycap := value.styles.shortcutKey.Render(" Ctrl+\\ ")
+	if help := strings.Join(value.helpEntries(), "\n"); strings.Contains(help, keycap) {
+		t.Fatalf("help advertises the hidden Ctrl+\\ alias:\n%s", ansi.Strip(help))
+	}
+	if rendered := value.render(); strings.Contains(rendered, keycap) {
+		t.Fatalf("status bar advertises the hidden Ctrl+\\ alias:\n%s", ansi.Strip(rendered))
 	}
 }
 
@@ -4350,8 +4368,6 @@ func key(code rune, text string) tea.KeyPressMsg {
 	return tea.KeyPressMsg(tea.Key{Code: code, Text: text})
 }
 
-// controlBackslashKey is no longer a romty binding, so it stands for any key
-// the terminal pane forwards to the shell untouched.
 func controlBackslashKey() tea.KeyPressMsg {
 	return tea.KeyPressMsg(tea.Key{Code: '\\', Mod: tea.ModCtrl})
 }
