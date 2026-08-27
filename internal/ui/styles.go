@@ -99,9 +99,13 @@ func newUIStyles(hasDarkBackground bool) *uiStyles {
 		noticeLabel:         lipgloss.NewStyle().Foreground(text).Background(surface).Bold(true),
 		noticeText:          lipgloss.NewStyle().Foreground(muted),
 		modalBorder:         lipgloss.NewStyle().Foreground(accent),
-		modalTitle:          lipgloss.NewStyle().Foreground(accent).Bold(true),
-		modalBody:           lipgloss.NewStyle().Foreground(text),
-		modalStrong:         lipgloss.NewStyle().Foreground(text).Bold(true),
-		empty:               lipgloss.NewStyle().Foreground(muted),
+		// The title sits on the border, so accent bold on accent left it to a
+		// weight difference to be seen by and the top of every box read as one
+		// unbroken line. It is a label, and romty already draws labels as a
+		// chip: the status bar's PROMPT, the selected tab, the selected row.
+		modalTitle:  lipgloss.NewStyle().Foreground(accentText).Background(accentSurface).Bold(true),
+		modalBody:   lipgloss.NewStyle().Foreground(text),
+		modalStrong: lipgloss.NewStyle().Foreground(text).Bold(true),
+		empty:       lipgloss.NewStyle().Foreground(muted),
 	}
 }
