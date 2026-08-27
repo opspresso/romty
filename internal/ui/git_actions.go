@@ -226,15 +226,19 @@ func (m dashboard) renderGitActionsModal(width, height int) []string {
 	}
 	if !m.gitActionComplete {
 		lines := []string{target, ""}
+		// The same highlighted bar the root picker draws. A bold row behind a
+		// chevron was the whole of the selection here, which is the least
+		// visible cursor romty has for the list whose rows push and delete.
+		contentWidth := max(width-6, 0)
 		for index, action := range gitActionChoices {
 			prefix := "  "
 			style := m.styles.modalBody
 			if index == m.gitActionIndex {
-				prefix = "› "
-				style = m.styles.modalStrong
+				prefix = "▌ "
+				style = m.styles.navigationSelected
 			}
-			label := pad(action.label(), 8)
-			lines = append(lines, style.Render(prefix+label+action.description()))
+			label := prefix + pad(action.label(), 8) + action.description()
+			lines = append(lines, style.Render(pad(truncate(label, contentWidth), contentWidth)))
 		}
 		return modalBox(m.styles, width, "Git actions", lines...)
 	}

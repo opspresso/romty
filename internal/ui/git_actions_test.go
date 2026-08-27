@@ -253,3 +253,22 @@ func TestExecuteGitStatusAction(t *testing.T) {
 func gitActionsKey() tea.KeyPressMsg {
 	return tea.KeyPressMsg(tea.Key{Code: 'g', ShiftedCode: 'G', Mod: tea.ModCtrl | tea.ModShift})
 }
+
+// The Git action list is where Push and Pull live, so its cursor is the same
+// highlighted bar the root picker draws rather than a bold row behind a chevron.
+func TestDashboardHighlightsTheSelectedGitAction(t *testing.T) {
+	value := newDashboard(&fakeBackend{}, model.Snapshot{})
+	value.modal = gitActionsModal
+	value.gitActionTarget = model.Workspace{Name: "alpha", Path: "/projects/alpha"}
+	value.gitActionIndex = 1
+
+	rendered := strings.Join(value.renderModal(100, 30), "\n")
+	selected := value.styles.navigationSelected.Render(pad("▌ "+pad("Fetch", 8)+"Update remote refs", 66))
+	if !strings.Contains(rendered, selected) {
+		t.Fatalf("the selected Git action does not carry the picker's bar:\n%s", rendered)
+	}
+	unselected := value.styles.modalBody.Render(pad("  "+pad("Status", 8)+"Show changed files", 66))
+	if !strings.Contains(rendered, unselected) {
+		t.Fatalf("an unselected Git action is not drawn as a plain row:\n%s", rendered)
+	}
+}

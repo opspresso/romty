@@ -2508,36 +2508,34 @@ func (m dashboard) renderModal(width, height int) []string {
 	if m.modal == removeSelectionModal {
 		if m.removeTarget.isRoot {
 			return modalBox(m.styles, modalWidth, "Forget root",
-				"",
 				m.styles.modalStrong.Render("Forget "+displayText(m.removeTarget.root.Name)+"?"),
+				m.styles.empty.Render(displayText(m.removeTarget.root.Path)),
 				"",
 				m.styles.modalBody.Render("The directory stays on disk."),
 				m.styles.errorText.Render("Its running shells will be terminated."),
-				"",
 			)
 		}
+		// What is about to be deleted comes first, its path under it as the
+		// context it is, and the consequences below the break. The path used to
+		// trail the two red lines in the body colour, where it read as a third
+		// consequence rather than as the thing being named.
 		return modalBox(m.styles, modalWidth, "Delete workspace",
-			"",
 			m.styles.modalStrong.Render("Delete "+displayText(m.removeTarget.workspace.Name)+"?"),
+			m.styles.empty.Render(displayText(m.removeTarget.workspace.Path)),
 			"",
 			m.styles.errorText.Render("This permanently deletes all contents."),
 			m.styles.errorText.Render("Its running shells will be terminated."),
-			m.styles.modalBody.Render(displayText(m.removeTarget.workspace.Path)),
-			"",
 		)
 	}
 	if m.modal == shutdownModal {
 		return modalBox(m.styles, modalWidth, "Stop daemon",
-			"",
 			m.styles.modalStrong.Render("Stop daemon and all running terminal sessions?"),
 			"",
 			m.styles.errorText.Render("Running shells will be terminated."),
-			"",
 		)
 	}
 	if m.modal == hookInstallModal {
 		lines := []string{
-			"",
 			m.styles.modalStrong.Render("Install or update agent status hooks?"),
 			"",
 		}
@@ -2555,7 +2553,7 @@ func (m dashboard) renderModal(width, height int) []string {
 			}
 			lines = append(lines, m.styles.modalBody.Render(status.Provider.DisplayName()+": "+action))
 		}
-		lines = append(lines, "", m.styles.modalBody.Render("Existing settings and other hooks are preserved."), "")
+		lines = append(lines, "", m.styles.empty.Render("Existing settings and other hooks are preserved."))
 		return modalBox(m.styles, modalWidth, "Agent hooks", lines...)
 	}
 	if m.modal == configModal {
@@ -2574,10 +2572,8 @@ func (m dashboard) renderModal(width, height int) []string {
 		)
 	}
 	return modalBox(m.styles, modalWidth, "About",
-		"",
 		m.styles.modalStrong.Render("romty")+"  "+m.styles.empty.Render(version.String()),
 		m.styles.modalBody.Render(tagline),
-		"",
 	)
 }
 

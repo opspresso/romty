@@ -1578,6 +1578,51 @@ func TestDashboardScrollsHistoryNotTheGuestWithBothMouseOptions(t *testing.T) {
 	waitForGuestSilence(t, value.terminal, sent)
 }
 
+// The title sits on the border, so accent bold on accent left the top of every
+// box reading as one unbroken line. A chip is how romty draws every other label.
+func TestDashboardDrawsModalTitlesAsChips(t *testing.T) {
+	for _, dark := range []bool{true, false} {
+		styles := newUIStyles(dark)
+		if styles.modalTitle.GetBackground() == styles.modalBorder.GetBackground() {
+			t.Fatalf("dark=%v: the modal title has only its weight to be seen against the border",
+				dark)
+		}
+		if styles.modalTitle.GetForeground() == styles.modalBorder.GetForeground() {
+			t.Fatalf("dark=%v: the modal title is the border's own colour", dark)
+		}
+	}
+}
+
+// What is about to be deleted is named first and its path is the context under
+// it. The path used to trail the two red warnings in the body colour, where it
+// read as a third consequence rather than as the thing being named.
+func TestDashboardNamesTheDeleteTargetBeforeItsConsequences(t *testing.T) {
+	value := newDashboard(&fakeBackend{}, model.Snapshot{})
+	value.width, value.height = 100, 30
+	value.modal = removeSelectionModal
+	value.removeTarget = navItem{workspace: model.Workspace{Name: "romty", Path: "/w/romty"}}
+
+	lines := plainRows(value.renderModal(72, 28))
+	var body []string
+	for _, line := range lines[1 : len(lines)-1] {
+		body = append(body, strings.TrimSpace(strings.Trim(line, "│")))
+	}
+	want := []string{
+		"Delete romty?",
+		"/w/romty",
+		"",
+		"This permanently deletes all contents.",
+		"Its running shells will be terminated.",
+	}
+	if !slices.Equal(body, want) {
+		t.Fatalf("delete modal body = %q, want the target named before its consequences %q", body, want)
+	}
+	rendered := strings.Join(value.renderModal(72, 28), "\n")
+	if !strings.Contains(rendered, value.styles.empty.Render("/w/romty")) {
+		t.Fatalf("the path is not muted against the name above it:\n%s", rendered)
+	}
+}
+
 // Two settings of one weight read as one paragraph, and the second one looked
 // like a third line of the first. Each setting is its own group: a name and
 // value, the keys that move it under them, and a blank line between.
