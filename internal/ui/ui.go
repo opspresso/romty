@@ -728,20 +728,10 @@ func (m dashboard) handleKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.inputMode {
 		return m.handleInput(message)
 	}
-	if m.shutdownPending {
-		// The daemon is already stopping; only quitting the TUI still applies.
-		if message.String() == "f4" {
-			return m.quit()
-		}
-		return m, nil
-	}
-	if m.hookInstallPending {
-		if message.String() == "f4" {
-			return m.quit()
-		}
-		return m, nil
-	}
-	if m.gitActionPending {
+	// A shutdown already asked for, a Git command already running, an installer
+	// already writing: the request is out and no key can take it back, so the
+	// only one that still applies is the one that leaves romty.
+	if m.shutdownPending || m.gitActionPending || m.hookInstallPending {
 		if message.String() == "f4" {
 			return m.quit()
 		}
