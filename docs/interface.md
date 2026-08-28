@@ -104,7 +104,7 @@ The `+` key is not a shortcut. Select the `+` tab with `←`/`→` and press `En
 
 Pane focus and scrollback toggles are reversible. In the terminal pane only Global and Switch shortcuts are captured. Other keyboard and paste input, including `F8`, `F9`, and ordinary `Ctrl` combinations, is forwarded to the PTY.
 
-The dashboard chrome is mouse-aware. Click a root or workspace to select and open it, click a terminal tab or `+` to activate it, and use the wheel over the workspace tree to move its cursor without opening anything. Drag the vertical divider to resize the workspace pane; the terminal resizes live and the final width is saved when the button is released.
+The dashboard chrome is mouse-aware. Click a root or workspace to select and open it, click a terminal tab or `+` to activate it, and use the wheel over the workspace tree to scroll its viewport without moving the cursor or keyboard focus. Arrow-key cursor movement scrolls the viewport only when the selected row would otherwise leave it. Drag the vertical divider to resize the workspace pane; the terminal resizes live and the final width is saved when the button is released.
 
 Mouse targets identify themselves before activation. Workspace, tab, picker, Git, Config, and dialog-action targets gain a muted background on hover, while the draggable divider changes to the accent color. Keyboard selection keeps the stronger accent treatment and is never replaced by hover.
 
