@@ -522,6 +522,39 @@ func (t *embeddedTerminal) renderViewport(offset int) []string {
 	return lines
 }
 
+// searchLines lists the lines a query appears on, oldest first, as absolute
+// line numbers: the retained history and then the live screen, which is the
+// coordinate renderViewport scrolls in.
+//
+// Matching is on the rendered text with its styling removed, so a phrase split
+// by a colour change still matches what the user sees.
+func (t *embeddedTerminal) searchLines(query string) []int {
+	if query == "" {
+		return nil
+	}
+	needle := strings.ToLower(query)
+	matches := make([]int, 0)
+	// scrollbackLen, not the buffer's own length: an application that owns the
+	// screen has no history to scroll, and the viewport agrees.
+	historyLen := t.scrollbackLen()
+	history := t.emulator.Scrollback()
+	for index := range historyLen {
+		if lineMatches(history.Line(index).Render(), needle) {
+			matches = append(matches, index)
+		}
+	}
+	for index, line := range t.render() {
+		if lineMatches(line, needle) {
+			matches = append(matches, historyLen+index)
+		}
+	}
+	return matches
+}
+
+func lineMatches(line, needle string) bool {
+	return strings.Contains(strings.ToLower(ansi.Strip(line)), needle)
+}
+
 func (t *embeddedTerminal) cursorPosition() uv.Position {
 	return t.emulator.CursorPosition()
 }

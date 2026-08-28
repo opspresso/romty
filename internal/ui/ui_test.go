@@ -4732,6 +4732,119 @@ func TestDashboardOpensHelpFromTheTerminalPane(t *testing.T) {
 // copy of the reference that quietly fell behind it.
 // The counters are the agent's own; romty reports them and estimates nothing,
 // so a tab with none shows none.
+func TestDashboardFindsAndWalksScrollbackMatches(t *testing.T) {
+	value := scrolledDashboard(t, 200)
+	updated, _ := value.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyPgUp, Mod: tea.ModShift}))
+	value = updated.(dashboard)
+	if !value.scrollback {
+		t.Fatal("Shift+PgUp did not enter scrollback")
+	}
+
+	value = typeSearch(t, value, "line-004")
+	if len(value.searchMatches) != 1 {
+		t.Fatalf("matches = %v, want the one line-004", value.searchMatches)
+	}
+	if !strings.Contains(plainStatus(value), "line-004 1/1") {
+		t.Fatalf("status = %q, want the match counted", plainStatus(value))
+	}
+	// The match is on screen at the offset the search scrolled to.
+	if !scrollbackShows(value, "line-004") {
+		t.Fatalf("viewport does not show the match:\n%s", strings.Join(plainRows(value.terminal.renderViewport(value.scrollOffset)), "\n"))
+	}
+
+	// A query on many lines starts at the newest and walks towards the oldest.
+	value = typeSearch(t, value, "line-01")
+	if len(value.searchMatches) != 10 {
+		t.Fatalf("matches = %d, want the ten line-01x rows", len(value.searchMatches))
+	}
+	if !scrollbackShows(value, "line-019") {
+		t.Fatal("search did not start at the newest match")
+	}
+	updated, _ = value.Update(key('n', "n"))
+	value = updated.(dashboard)
+	if !scrollbackShows(value, "line-018") {
+		t.Fatal("n did not step towards older output")
+	}
+	updated, _ = value.Update(tea.KeyPressMsg(tea.Key{Code: 'n', ShiftedCode: 'N', Text: "N", Mod: tea.ModShift}))
+	value = updated.(dashboard)
+	if !scrollbackShows(value, "line-019") {
+		t.Fatal("N did not step back towards newer output")
+	}
+}
+
+func TestDashboardSaysWhenScrollbackHasNoMatch(t *testing.T) {
+	value := scrolledDashboard(t, 200)
+	updated, _ := value.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyPgUp, Mod: tea.ModShift}))
+	value = updated.(dashboard)
+
+	value = typeSearch(t, value, "nothing-here")
+	if len(value.searchMatches) != 0 {
+		t.Fatalf("matches = %v, want none", value.searchMatches)
+	}
+	if value.errorMessage == "" || !value.noticeMessage {
+		t.Fatalf("status = (%q, notice %v), want a note that nothing matched",
+			value.errorMessage, value.noticeMessage)
+	}
+	// Without matches n is not a search key, so it goes back to being what any
+	// other key is in scrollback: leave, and send it to the shell.
+	updated, _ = value.Update(key('n', "n"))
+	if updated.(dashboard).scrollback {
+		t.Fatal("n with no matches did not leave scrollback")
+	}
+}
+
+// Leaving scrollback forgets the search, so reopening it does not land on a
+// stale match from output that has since scrolled away.
+func TestDashboardForgetsTheSearchOnLeavingScrollback(t *testing.T) {
+	value := scrolledDashboard(t, 200)
+	updated, _ := value.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyPgUp, Mod: tea.ModShift}))
+	value = typeSearch(t, updated.(dashboard), "line-004")
+
+	updated, _ = value.Update(key(tea.KeyEscape, ""))
+	value = updated.(dashboard)
+	if value.scrollback || value.searchMode || value.searchQuery != "" || len(value.searchMatches) != 0 {
+		t.Fatalf("after leaving = (scrollback %v, mode %v, query %q, matches %v), want the search forgotten",
+			value.scrollback, value.searchMode, value.searchQuery, value.searchMatches)
+	}
+}
+
+// typeSearch opens the find prompt, types a query one key at a time, and
+// confirms it.
+func typeSearch(t *testing.T, value dashboard, query string) dashboard {
+	t.Helper()
+	updated, _ := value.Update(key('/', "/"))
+	value = updated.(dashboard)
+	if !value.searchMode {
+		t.Fatal("/ did not open the find prompt")
+	}
+	for _, letter := range query {
+		updated, _ = value.Update(key(letter, string(letter)))
+		value = updated.(dashboard)
+	}
+	if value.searchQuery != query {
+		t.Fatalf("typed query = %q, want %q", value.searchQuery, query)
+	}
+	updated, _ = value.Update(key(tea.KeyEnter, ""))
+	value = updated.(dashboard)
+	if value.searchMode {
+		t.Fatal("Enter did not close the find prompt")
+	}
+	return value
+}
+
+func scrollbackShows(value dashboard, text string) bool {
+	for _, line := range plainRows(value.terminal.renderViewport(value.scrollOffset)) {
+		if strings.Contains(line, text) {
+			return true
+		}
+	}
+	return false
+}
+
+func plainStatus(value dashboard) string {
+	return ansi.Strip(strings.Join(value.renderStatus(value.width, value.dimensions().bodyHeight), "\n"))
+}
+
 func TestDashboardShowsTheOpenAgentLedgerInTheRail(t *testing.T) {
 	root := model.Root{ID: "root-1", Name: "projects", Path: "/projects"}
 	alpha := model.Workspace{ID: "workspace-1", RootID: root.ID, Name: "alpha", Path: "/projects/alpha"}

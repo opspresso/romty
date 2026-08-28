@@ -88,9 +88,10 @@ Press `Ctrl`+`Shift`+`F` to toggle the file view for the same contextual workspa
 |---|---|
 | `Enter` | Open, run, return, submit, or confirm in the workspace, picker, Git views, and prompts |
 | `Esc` | Close a modal or file view, cancel a prompt, or leave scrollback |
-| `/` | Type a path in the root picker |
 | `Backspace` | Erase a path character |
 | `←`/`→` or `[`/`]` | Resize the workspace pane in Config |
+| `/` | Find in scrollback, or type a path in the root picker |
+| `n`/`N` | Move to the next or previous scrollback match |
 | `m` | Toggle the scrollback mouse in Config |
 | `d`/`b` | Toggle the done and waiting sounds in Config |
 | `s` | Play the done sound in Config |
@@ -116,6 +117,8 @@ romty discovers direct child directories only. Press `F5` after a command adds o
 ## Scrollback and mouse
 
 romty keeps 10,000 scrollback lines for each terminal. Scrollback fills the width so native terminal selection copies output without the workspace tree. New output does not move a historical view. `Shift`+`PgUp`/`PgDn` and the mouse wheel continue browsing history; other terminal input, including paste, returns to the live screen and is forwarded without dropping the first input.
+
+Press `/` in scrollback to find text in the retained output. The query is applied when `Enter` confirms it, matching without regard to case and ignoring the colours around a phrase. The view moves to the newest match first, and `n` and `N` walk towards older and newer matches, wrapping at both ends. The status bar carries the query and the position among the matches. Leaving scrollback forgets the search.
 
 Full-screen applications such as `vim`, `less`, and Claude Code use an alternate screen with no romty history. In that mode `Shift`+`PgUp`/`PgDn` is forwarded as plain `PgUp`/`PgDn` so the application can page itself, and the wheel goes to the application as well: as mouse reports when it asked for the mouse, and otherwise as three cursor keys per notch, which is what a terminal sends for alternate scroll. This does not depend on `mouse_passthrough`.
 
