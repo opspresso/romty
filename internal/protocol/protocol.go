@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 
 	"github.com/opspresso/romty/internal/model"
 )
@@ -185,12 +186,7 @@ func CapabilitiesForVersion(version int) []string {
 }
 
 func HasCapability(capabilities []string, target string) bool {
-	for _, capability := range capabilities {
-		if capability == target {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(capabilities, target)
 }
 
 func Write(w io.Writer, value any) error {

@@ -232,20 +232,22 @@ func (s *Server) handleAttach(connection net.Conn, request protocol.Request) {
 		_ = replyFor(connection, request, protocol.Response{Error: "running terminal session not found"})
 		return
 	}
+	// The reply announces the exact history that follows it, so the client can
+	// consume that off-screen and treat everything after as live output. A
+	// client from before the boundary reads the two as one stream, so it is
+	// acknowledged first and the history simply follows.
+	ready := func(replayBytes int, columns, rows uint16) error {
+		return replyFor(connection, request, protocol.Response{
+			ReplayBytes: replayBytes, ReplayColumns: columns, ReplayRows: rows,
+		})
+	}
 	if !protocol.HasCapability(requestCapabilities(request), protocol.CapabilityReplayBoundary) {
 		if err := replyFor(connection, request, protocol.Response{}); err != nil {
 			return
 		}
-		if err := value.attachClientReady(connection, request.ClientID, func(int, uint16, uint16) error { return nil }); err != nil {
-			s.logger.Printf("attach to tab %s ended: %v", request.TabID, err)
-		}
-		return
+		ready = func(int, uint16, uint16) error { return nil }
 	}
-	if err := value.attachClientReady(connection, request.ClientID, func(replayBytes int, columns, rows uint16) error {
-		return replyFor(connection, request, protocol.Response{
-			ReplayBytes: replayBytes, ReplayColumns: columns, ReplayRows: rows,
-		})
-	}); err != nil {
+	if err := value.attachClientReady(connection, request.ClientID, ready); err != nil {
 		s.logger.Printf("attach to tab %s ended: %v", request.TabID, err)
 	}
 }
