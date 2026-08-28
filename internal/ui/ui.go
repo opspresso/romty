@@ -3007,8 +3007,11 @@ func (m dashboard) withModalActions(lines []string) []string {
 			m.hover.kind == hoverModalAction && m.hover.index == index))
 	}
 	actionLine := truncate(strings.Join(segments, "  "), max(width-6, 0))
-	footer := []string{modalContentLine(m.styles, width, ""), modalContentLine(m.styles, width, actionLine)}
-	return append(append(lines[:len(lines)-1], footer...), lines[len(lines)-1])
+	boxed := make([]string, 0, len(lines)+2)
+	boxed = append(boxed, lines[:len(lines)-1]...)
+	boxed = append(boxed, modalContentLine(m.styles, width, ""))
+	boxed = append(boxed, modalContentLine(m.styles, width, actionLine))
+	return append(boxed, lines[len(lines)-1])
 }
 
 func (m dashboard) modalActionHits(width, height int) []modalActionHit {
