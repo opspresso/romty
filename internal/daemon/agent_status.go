@@ -1,7 +1,6 @@
 package daemon
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/opspresso/romty/internal/model"
@@ -17,16 +16,8 @@ func (s *Server) recordAgentEvent(tabID string, event *protocol.AgentEvent) prot
 	if tabID == "" || event == nil {
 		return protocol.Response{Error: "tab and agent event are required"}
 	}
-	if event.Agent != model.AgentClaude && event.Agent != model.AgentCodex {
-		return protocol.Response{Error: fmt.Sprintf("unsupported agent %q", event.Agent)}
-	}
-	for _, metadata := range []string{
-		event.SessionID, event.HookEvent, event.ToolName,
-		event.NotificationType, event.PermissionMode,
-	} {
-		if len(metadata) > 512 {
-			return protocol.Response{Error: "agent event metadata is too long"}
-		}
+	if err := event.Validate(); err != nil {
+		return protocol.Response{Error: err.Error()}
 	}
 
 	phase, terminal, recognized := phaseForAgentEvent(*event)
