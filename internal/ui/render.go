@@ -551,8 +551,8 @@ func renderTabBarWithHover(styles *uiStyles, tabs []model.Tab, active, hover, cl
 			railStyle = styles.dividerActive
 		}
 		if index < len(tabs) && index == closeHover {
-			body := strings.TrimSuffix(label, "× ")
-			tabsLine.WriteString(style.Render(body) + styles.interactiveHover.Render("× "))
+			tabsLine.WriteString(style.Render(strings.TrimSuffix(label, "× ")))
+			tabsLine.WriteString(styles.interactiveHover.Render("× "))
 		} else {
 			tabsLine.WriteString(style.Render(label))
 		}

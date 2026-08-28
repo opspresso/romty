@@ -389,11 +389,6 @@ func tabHitAtX(tabs []model.Tab, x int) (tabHit, bool) {
 	return tabHit{}, false
 }
 
-func tabIndexAtX(tabs []model.Tab, x int) (int, bool) {
-	hit, ok := tabHitAtX(tabs, x)
-	return hit.index, ok
-}
-
 // mouseMode asks for pointer motion wherever romty draws hoverable controls.
 // Copy mode still gives the mouse back to the host for native selection. A
 // guest application that asked for the mouse receives events only when the
