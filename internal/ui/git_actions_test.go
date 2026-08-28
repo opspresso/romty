@@ -160,7 +160,7 @@ func TestDashboardHoldsGitActionModalWhileCommandRuns(t *testing.T) {
 	for _, message := range []tea.KeyPressMsg{key(tea.KeyEscape, ""), key(tea.KeyF1, "")} {
 		updated, command := value.Update(message)
 		value = updated.(dashboard)
-		if command != nil || value.modal != gitActionsModal || value.result.Quit || cancelled {
+		if value.modal != gitActionsModal || value.result.Quit || cancelled {
 			t.Fatalf("%q during Git action = (command %v, modal %v, quit %t, cancelled %t)",
 				message.String(), command, value.modal, value.result.Quit, cancelled)
 		}

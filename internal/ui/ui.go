@@ -44,7 +44,6 @@ const (
 	initialReattachBackoff  = 250 * time.Millisecond
 	maximumReattachBackoff  = 2 * time.Second
 	agentRefreshInterval    = 2 * time.Second
-	agentAnimationInterval  = 120 * time.Millisecond
 	gitRefreshInterval      = 10 * time.Second
 	gitFetchInterval        = 5 * time.Minute
 	// healthyAttachInterval is how long a terminal has to stay attached before
@@ -57,6 +56,10 @@ const (
 // now is a variable so tests need not wait out healthyAttachInterval, the way
 // the daemon's request timeout is one so they need not wait out a handshake.
 var now = time.Now
+
+// agentAnimationInterval is a variable so tests can execute batched animation
+// commands without sleeping between frames.
+var agentAnimationInterval = 120 * time.Millisecond
 
 var agentAnimationFrames = [...]string{"◐", "◓", "◑", "◒"}
 
@@ -135,6 +138,17 @@ type navItem struct {
 type shortcut struct {
 	key         string
 	description string
+}
+
+type modalAction struct {
+	shortcut
+	code rune
+}
+
+type modalActionHit struct {
+	action      modalAction
+	left, right int
+	row         int
 }
 
 type dashboard struct {
@@ -358,7 +372,7 @@ func newDashboardWithConfig(backend Backend, initial model.Snapshot, configPath 
 	value.ensureWorkspaceCursor()
 	value.restoreSelection()
 	value.agentAnimationActive = value.hasAnimatedAgent()
-	value.agentAnimationPending = value.agentAnimationActive
+	value.agentAnimationPending = value.agentAnimationActive || value.hasPendingActivity()
 	return value
 }
 
@@ -406,7 +420,7 @@ func (m dashboard) syncTerminalSize(command tea.Cmd) (dashboard, tea.Cmd) {
 }
 
 func (m dashboard) syncAgentAnimation(command tea.Cmd) (dashboard, tea.Cmd) {
-	if m.agentAnimationActive && !m.agentAnimationPending {
+	if (m.agentAnimationActive || m.hasPendingActivity()) && !m.agentAnimationPending {
 		m.agentAnimationPending = true
 		command = tea.Batch(command, animateAgentMarker())
 	}
@@ -453,15 +467,18 @@ func (m dashboard) update(message tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyPressMsg:
 		return m.handleKey(message)
 	case tea.MouseClickMsg, tea.MouseReleaseMsg, tea.MouseWheelMsg, tea.MouseMotionMsg:
-		if m.modal == helpModal {
-			return m.handleHelpMouse(message.(tea.MouseMsg))
-		}
-		if m.gitDiff.active {
-			return m.handleGitDiffMouse(message.(tea.MouseMsg))
-		}
 		mouse := message.(tea.MouseMsg)
 		if m.modal != noModal {
+			if updated, command, handled := m.handleModalMouse(mouse); handled {
+				return updated, command
+			}
+			if m.modal == helpModal {
+				return m.handleHelpMouse(mouse)
+			}
 			return m, nil
+		}
+		if m.gitDiff.active {
+			return m.handleGitDiffMouse(mouse)
 		}
 		if updated, command, handled := m.handleDashboardMouse(mouse); handled {
 			return updated, command
@@ -525,7 +542,7 @@ func (m dashboard) update(message tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.refreshAgents()
 	case agentAnimationMsg:
 		m.agentAnimationPending = false
-		if m.agentAnimationActive {
+		if m.agentAnimationActive || m.hasPendingActivity() {
 			m.agentAnimationFrame = (m.agentAnimationFrame + 1) % len(agentAnimationFrames)
 		}
 		return m, nil
@@ -1165,6 +1182,21 @@ func (m dashboard) handleHelpMouse(message tea.MouseMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m dashboard) handleModalMouse(message tea.MouseMsg) (tea.Model, tea.Cmd, bool) {
+	click, ok := message.(tea.MouseClickMsg)
+	if !ok || click.Button != tea.MouseLeft {
+		return m, nil, false
+	}
+	mouse := click.Mouse()
+	for _, hit := range m.modalActionHits(max(m.width, 40), m.dimensions().bodyHeight) {
+		if mouse.Y == hit.row && mouse.X >= hit.left && mouse.X < hit.right {
+			updated, command := m.handleKey(tea.KeyPressMsg(tea.Key{Code: hit.action.code}))
+			return updated, command, true
+		}
+	}
+	return m, nil, false
+}
+
 func (m dashboard) handleDashboardMouse(message tea.MouseMsg) (tea.Model, tea.Cmd, bool) {
 	mouse := message.Mouse()
 	view := m.dimensions()
@@ -1640,6 +1672,11 @@ func animatedAgentPhase(phase model.AgentPhase) bool {
 	default:
 		return false
 	}
+}
+
+func (m dashboard) hasPendingActivity() bool {
+	return m.tabPending || m.restorePending || m.gitActionPending || m.shutdownPending ||
+		m.hookInstallPending || m.modal == browseModal && m.browse.loading
 }
 
 func (m dashboard) readGitStatus(forceFetch, reschedule bool) tea.Cmd {
@@ -2445,6 +2482,8 @@ func (m dashboard) renderStatus(width, bodyHeight int) []string {
 			label, text, title = m.styles.noticeLabel, m.styles.noticeText, " NOTE "
 		}
 		status = truncate(label.Render(title)+" "+text.Render(displayText(m.errorMessage)), width)
+	case m.tabPending || m.restorePending:
+		status = m.renderActivityStatus("OPENING", "preparing terminal", width)
 	case m.modal == helpModal:
 		shortcuts := []shortcut{{key: "Esc", description: "close"}}
 		if m.maximumHelpOffset(bodyHeight) > 0 {
@@ -2460,10 +2499,7 @@ func (m dashboard) renderStatus(width, bodyHeight int) []string {
 			shortcut{key: "Esc", description: "close"},
 		)
 	case m.modal == gitActionsModal && m.gitActionPending:
-		status = truncate(
-			m.styles.promptLabel.Render(" RUNNING ")+" "+m.styles.shortcutDescription.Render(m.gitAction.label()+" in "+displayText(m.gitActionTarget.Name)),
-			width,
-		)
+		status = m.renderActivityStatus("RUNNING", m.gitAction.label()+" in "+displayText(m.gitActionTarget.Name), width)
 	case m.modal == gitActionsModal && m.gitActionComplete:
 		shortcuts := []shortcut{
 			{key: "Enter", description: "actions"},
@@ -2481,10 +2517,9 @@ func (m dashboard) renderStatus(width, bodyHeight int) []string {
 		)
 	case m.modal == shutdownModal && m.shutdownPending:
 		// The request is already out; no key can take it back.
-		status = truncate(
-			m.styles.promptLabel.Render(" STOPPING ")+" "+m.styles.shortcutDescription.Render("waiting for the daemon to stop"),
-			width,
-		)
+		status = m.renderActivityStatus("STOPPING", "waiting for the daemon to stop", width)
+	case m.modal == browseModal && m.browse.loading:
+		status = m.renderActivityStatus("READING", displayText(m.browse.path), width)
 	case m.modal == browseModal:
 		status = renderShortcuts(m.styles, width,
 			shortcut{key: "↑/↓", description: "select"},
@@ -2509,10 +2544,7 @@ func (m dashboard) renderStatus(width, bodyHeight int) []string {
 			shortcut{key: "Esc", description: "cancel"},
 		)
 	case m.modal == hookInstallModal && m.hookInstallPending:
-		status = truncate(
-			m.styles.promptLabel.Render(" INSTALLING ")+" "+m.styles.shortcutDescription.Render("updating agent status hooks"),
-			width,
-		)
+		status = m.renderActivityStatus("INSTALLING", "updating agent status hooks", width)
 	case m.modal == hookInstallModal:
 		status = renderShortcuts(m.styles, width,
 			shortcut{key: "Enter", description: "install hooks"},
@@ -2569,6 +2601,12 @@ func (m dashboard) renderStatus(width, bodyHeight int) []string {
 	return []string{rail, status}
 }
 
+func (m dashboard) renderActivityStatus(title, description string, width int) string {
+	frame := agentAnimationFrames[m.agentAnimationFrame%len(agentAnimationFrames)]
+	label := m.styles.promptLabel.Render(" " + frame + " " + title + " ")
+	return truncate(label+" "+m.styles.shortcutDescription.Render(description), width)
+}
+
 // scrollbackPosition reports how far back the viewport sits in the history.
 func (m dashboard) scrollbackPosition() string {
 	if m.terminal == nil {
@@ -2614,32 +2652,32 @@ func (m dashboard) renderModal(width, height int) []string {
 	}
 	if m.modal == removeSelectionModal {
 		if m.removeTarget.isRoot {
-			return modalBox(m.styles, modalWidth, "Forget root",
+			return m.withModalActions(modalBox(m.styles, modalWidth, "Forget root",
 				m.styles.modalStrong.Render("Forget "+displayText(m.removeTarget.root.Name)+"?"),
 				m.styles.empty.Render(displayText(m.removeTarget.root.Path)),
 				"",
 				m.styles.modalBody.Render("The directory stays on disk."),
 				m.styles.errorText.Render("Its running shells will be terminated."),
-			)
+			))
 		}
 		// What is about to be deleted comes first, its path under it as the
 		// context it is, and the consequences below the break. The path used to
 		// trail the two red lines in the body colour, where it read as a third
 		// consequence rather than as the thing being named.
-		return modalBox(m.styles, modalWidth, "Delete workspace",
+		return m.withModalActions(modalBox(m.styles, modalWidth, "Delete workspace",
 			m.styles.modalStrong.Render("Delete "+displayText(m.removeTarget.workspace.Name)+"?"),
 			m.styles.empty.Render(displayText(m.removeTarget.workspace.Path)),
 			"",
 			m.styles.errorText.Render("This permanently deletes all contents."),
 			m.styles.errorText.Render("Its running shells will be terminated."),
-		)
+		))
 	}
 	if m.modal == shutdownModal {
-		return modalBox(m.styles, modalWidth, "Stop daemon",
+		return m.withModalActions(modalBox(m.styles, modalWidth, "Stop daemon",
 			m.styles.modalStrong.Render("Stop daemon and all running terminal sessions?"),
 			"",
 			m.styles.errorText.Render("Running shells will be terminated."),
-		)
+		))
 	}
 	if m.modal == hookInstallModal {
 		lines := []string{
@@ -2661,7 +2699,7 @@ func (m dashboard) renderModal(width, height int) []string {
 			lines = append(lines, m.styles.modalBody.Render(status.Provider.DisplayName()+": "+action))
 		}
 		lines = append(lines, "", m.styles.empty.Render("Existing settings and other hooks are preserved."))
-		return modalBox(m.styles, modalWidth, "Agent hooks", lines...)
+		return m.withModalActions(modalBox(m.styles, modalWidth, "Agent hooks", lines...))
 	}
 	if m.modal == configModal {
 		// One setting per group: its name and value in the body colour, the
@@ -2682,6 +2720,71 @@ func (m dashboard) renderModal(width, height int) []string {
 		m.styles.modalStrong.Render("romty")+"  "+m.styles.empty.Render(version.String()),
 		m.styles.modalBody.Render(tagline),
 	)
+}
+
+func (m dashboard) modalActions() []modalAction {
+	switch m.modal {
+	case removeSelectionModal:
+		description := "forget root"
+		if !m.removeTarget.isRoot {
+			description = "delete workspace"
+		}
+		return []modalAction{
+			{shortcut: shortcut{key: "Enter", description: description}, code: tea.KeyEnter},
+			{shortcut: shortcut{key: "Esc", description: "cancel"}, code: tea.KeyEscape},
+		}
+	case shutdownModal:
+		if m.shutdownPending {
+			return nil
+		}
+		return []modalAction{
+			{shortcut: shortcut{key: "Enter", description: "stop daemon"}, code: tea.KeyEnter},
+			{shortcut: shortcut{key: "Esc", description: "cancel"}, code: tea.KeyEscape},
+		}
+	case hookInstallModal:
+		if m.hookInstallPending {
+			return nil
+		}
+		return []modalAction{
+			{shortcut: shortcut{key: "Enter", description: "install hooks"}, code: tea.KeyEnter},
+			{shortcut: shortcut{key: "Esc", description: "skip"}, code: tea.KeyEscape},
+		}
+	}
+	return nil
+}
+
+func (m dashboard) withModalActions(lines []string) []string {
+	actions := m.modalActions()
+	if len(actions) == 0 || len(lines) < 2 {
+		return lines
+	}
+	width := lipgloss.Width(lines[0])
+	shortcuts := make([]shortcut, 0, len(actions))
+	for _, action := range actions {
+		shortcuts = append(shortcuts, action.shortcut)
+	}
+	actionLine := renderShortcuts(m.styles, max(width-6, 0), shortcuts...)
+	footer := []string{modalContentLine(m.styles, width, ""), modalContentLine(m.styles, width, actionLine)}
+	return append(append(lines[:len(lines)-1], footer...), lines[len(lines)-1])
+}
+
+func (m dashboard) modalActionHits(width, height int) []modalActionHit {
+	actions := m.modalActions()
+	if len(actions) == 0 {
+		return nil
+	}
+	lines := m.renderModal(width, height)
+	modalWidth := lipgloss.Width(lines[0])
+	left := max((width-modalWidth)/2, 0) + 3
+	row := max((height-len(lines))/2, 0) + len(lines) - 2
+	hits := make([]modalActionHit, 0, len(actions))
+	for _, action := range actions {
+		segment := renderShortcuts(m.styles, modalWidth, action.shortcut)
+		segmentWidth := lipgloss.Width(segment)
+		hits = append(hits, modalActionHit{action: action, left: left, right: left + segmentWidth, row: row})
+		left += segmentWidth + 2
+	}
+	return hits
 }
 
 func (m dashboard) helpEntries() []string {
@@ -2773,12 +2876,16 @@ func modalBox(styles *uiStyles, width int, title string, values ...string) []str
 			styles.modalTitle.Render(title)+
 			styles.modalBorder.Render(strings.Repeat("─", topFill)+"╮"),
 	)
-	contentWidth := max(interior-4, 0)
 	for _, value := range values {
-		content := pad(truncate(value, contentWidth), contentWidth)
-		lines = append(lines, styles.modalBorder.Render("│")+"  "+content+"  "+styles.modalBorder.Render("│"))
+		lines = append(lines, modalContentLine(styles, width, value))
 	}
 	return append(lines, styles.modalBorder.Render("╰"+strings.Repeat("─", interior)+"╯"))
+}
+
+func modalContentLine(styles *uiStyles, width int, value string) string {
+	contentWidth := max(width-6, 0)
+	content := pad(truncate(value, contentWidth), contentWidth)
+	return styles.modalBorder.Render("│") + "  " + content + "  " + styles.modalBorder.Render("│")
 }
 
 // paneSeparators returns the divider for the first body row, which carries the

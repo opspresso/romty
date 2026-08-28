@@ -42,10 +42,7 @@ func load(t *testing.T, value dashboard, command tea.Cmd) dashboard {
 	if command == nil {
 		t.Fatal("directory read command = nil")
 	}
-	message, ok := command().(browserMsg)
-	if !ok {
-		t.Fatalf("command returned %T, want a directory read", message)
-	}
+	message := commandMessage[browserMsg](t, command)
 	updated, _ := value.Update(message)
 	return updated.(dashboard)
 }

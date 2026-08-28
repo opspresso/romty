@@ -258,7 +258,8 @@ func (m dashboard) renderBrowseModal(width, height int) []string {
 	case m.browse.failure != "":
 		lines = append(lines, m.styles.errorText.Render(displayText(m.browse.failure)))
 	case m.browse.loading:
-		lines = append(lines, m.styles.empty.Render("Reading…"))
+		frame := agentAnimationFrames[m.agentAnimationFrame%len(agentAnimationFrames)]
+		lines = append(lines, m.styles.empty.Render(frame+" Reading…"))
 	default:
 		rows := m.browse.rows()
 		start := 0

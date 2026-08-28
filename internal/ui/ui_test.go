@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"image/color"
 	"io"
+	"os"
 	"path/filepath"
 	"reflect"
 	"slices"
@@ -22,6 +23,11 @@ import (
 	"github.com/opspresso/romty/internal/model"
 	"github.com/opspresso/romty/internal/version"
 )
+
+func TestMain(m *testing.M) {
+	agentAnimationInterval = 0
+	os.Exit(m.Run())
+}
 
 type fakeBackend struct {
 	snapshot               model.Snapshot
@@ -246,7 +252,7 @@ func TestDashboardSelectsWorkspaceAndCreatesTerminal(t *testing.T) {
 	if command == nil {
 		t.Fatal("select workspace command = nil")
 	}
-	updated, command = value.Update(command())
+	updated, command = value.Update(commandMessage[workspaceMsg](t, command))
 	value = updated.(dashboard)
 	if value.selectedWorkspaceID != workspace.ID || value.focus != leftPane {
 		t.Fatalf("selected workspace = %q, focus = %v", value.selectedWorkspaceID, value.focus)
@@ -254,12 +260,12 @@ func TestDashboardSelectsWorkspaceAndCreatesTerminal(t *testing.T) {
 	if command == nil {
 		t.Fatal("workspace without tabs did not create a terminal")
 	}
-	updated, openCommand := value.Update(command())
+	updated, openCommand := value.Update(commandMessage[tabMsg](t, command))
 	value = updated.(dashboard)
 	if openCommand == nil {
 		t.Fatal("created tab did not open an embedded terminal")
 	}
-	updated, readCommand := value.Update(openCommand())
+	updated, readCommand := value.Update(commandMessage[terminalOpenedMsg](t, openCommand))
 	value = updated.(dashboard)
 	defer value.closeTerminal()
 	if value.terminal == nil || value.focus != terminalPane || readCommand == nil {
@@ -318,17 +324,17 @@ func TestDashboardSelectsRootAndCreatesTerminal(t *testing.T) {
 	if selectCommand == nil {
 		t.Fatal("root selection command = nil")
 	}
-	updated, createCommand := value.Update(selectCommand())
+	updated, createCommand := value.Update(commandMessage[workspaceMsg](t, selectCommand))
 	value = updated.(dashboard)
 	if createCommand == nil || backend.ensuredRootID != root.ID || backend.ensuredPath != root.Path {
 		t.Fatalf("root selection = (command %v, root %q, path %q)", createCommand, backend.ensuredRootID, backend.ensuredPath)
 	}
-	updated, openCommand := value.Update(createCommand())
+	updated, openCommand := value.Update(commandMessage[tabMsg](t, createCommand))
 	value = updated.(dashboard)
 	if openCommand == nil || backend.createCount != 1 {
 		t.Fatalf("root tab creation = (command %v, count %d)", openCommand, backend.createCount)
 	}
-	updated, readCommand := value.Update(openCommand())
+	updated, readCommand := value.Update(commandMessage[terminalOpenedMsg](t, openCommand))
 	value = updated.(dashboard)
 	defer value.closeTerminal()
 	if value.terminal == nil || value.terminal.id != tab.ID || readCommand == nil {
@@ -500,7 +506,7 @@ func TestDashboardCreatesOnlyOneTabWhileASelectionIsPending(t *testing.T) {
 	if create == nil {
 		t.Fatal("newest selection did not create a tab command")
 	}
-	updated, _ = value.Update(create())
+	updated, _ = value.Update(commandMessage[tabMsg](t, create))
 	value = updated.(dashboard)
 	if backend.createCount != 1 || value.tabPending {
 		t.Fatalf("tab creation = (calls %d, pending %t), want (1, false)", backend.createCount, value.tabPending)
@@ -528,13 +534,13 @@ func TestDashboardCreatesTabWithCtrlShiftT(t *testing.T) {
 	if createCommand == nil || !value.tabPending {
 		t.Fatalf("Ctrl+Shift+T = (command %v, pending %t), want tab creation", createCommand, value.tabPending)
 	}
-	updated, openCommand := value.Update(createCommand())
+	updated, openCommand := value.Update(commandMessage[tabMsg](t, createCommand))
 	value = updated.(dashboard)
 	if openCommand == nil || backend.createCount != 1 || value.tabPending {
 		t.Fatalf("created tab = (command %v, calls %d, pending %t), want one tab ready to open",
 			openCommand, backend.createCount, value.tabPending)
 	}
-	updated, readCommand := value.Update(openCommand())
+	updated, readCommand := value.Update(commandMessage[terminalOpenedMsg](t, openCommand))
 	value = updated.(dashboard)
 	if readCommand == nil || value.terminal == nil || value.terminal.id != created.ID {
 		t.Fatalf("opened terminal = (command %v, terminal %v), want %q", readCommand, value.terminal, created.ID)
@@ -568,12 +574,12 @@ func TestDashboardCreatesTabForWorkspaceCursorWithCtrlShiftT(t *testing.T) {
 	if selectCommand == nil {
 		t.Fatal("Ctrl+Shift+T on the workspace cursor produced no selection command")
 	}
-	updated, createCommand := value.Update(selectCommand())
+	updated, createCommand := value.Update(commandMessage[workspaceMsg](t, selectCommand))
 	value = updated.(dashboard)
 	if createCommand == nil || backend.ensuredPath != bravo.Path {
 		t.Fatalf("selected workspace = (command %v, path %q), want %q", createCommand, backend.ensuredPath, bravo.Path)
 	}
-	updated, openCommand := value.Update(createCommand())
+	updated, openCommand := value.Update(commandMessage[tabMsg](t, createCommand))
 	value = updated.(dashboard)
 	if openCommand == nil || backend.createCount != 1 || value.selectedWorkspaceID != bravo.ID {
 		t.Fatalf("created tab = (command %v, calls %d, workspace %q), want one in %q",
@@ -602,8 +608,11 @@ func TestDashboardIgnoresCtrlShiftTWhileTabCreationCannotStart(t *testing.T) {
 
 			updated, command := value.Update(newTabKey())
 			value = updated.(dashboard)
-			if command != nil {
-				t.Fatalf("Ctrl+Shift+T produced command %v", command)
+			for _, message := range commandMessages(command) {
+				switch message.(type) {
+				case workspaceMsg, tabMsg:
+					t.Fatalf("Ctrl+Shift+T produced a workspace or tab command")
+				}
 			}
 		})
 	}
@@ -963,10 +972,86 @@ func TestDashboardConfirmsDaemonShutdown(t *testing.T) {
 		t.Fatalf("status bar does not report the pending shutdown:\n%s", rendered)
 	}
 
-	updated, quitCommand := value.Update(command())
+	updated, quitCommand := value.Update(commandMessage[daemonStoppedMsg](t, command))
 	value = updated.(dashboard)
 	if backend.shutdownCount != 1 || !value.result.Quit || quitCommand == nil || value.terminal != nil {
 		t.Fatalf("shutdown result = (count %d, quit %v, command %v, terminal %v)", backend.shutdownCount, value.result.Quit, quitCommand, value.terminal)
+	}
+}
+
+func TestDashboardConfirmationActionsAreClickable(t *testing.T) {
+	value := newDashboard(&fakeBackend{}, model.Snapshot{})
+	value.width, value.height = 100, 24
+	updated, _ := value.Update(key(tea.KeyF9, ""))
+	value = updated.(dashboard)
+
+	plain := ansi.Strip(value.render())
+	for _, label := range []string{"stop daemon", "cancel"} {
+		if !strings.Contains(plain, label) {
+			t.Fatalf("confirmation dialog has no clickable %q action:\n%s", label, plain)
+		}
+	}
+	hits := value.modalActionHits(value.width, value.dimensions().bodyHeight)
+	if len(hits) != 2 {
+		t.Fatalf("modal action hits = %#v, want confirm and cancel", hits)
+	}
+	confirm := hits[0]
+	updated, command := value.Update(tea.MouseClickMsg{
+		X: (confirm.left + confirm.right) / 2, Y: confirm.row, Button: tea.MouseLeft,
+	})
+	value = updated.(dashboard)
+	if !value.shutdownPending || command == nil {
+		t.Fatalf("confirm click = (pending %v, command %v)", value.shutdownPending, command)
+	}
+
+	value = newDashboard(&fakeBackend{}, model.Snapshot{})
+	value.width, value.height = 100, 24
+	updated, _ = value.Update(key(tea.KeyF9, ""))
+	value = updated.(dashboard)
+	hits = value.modalActionHits(value.width, value.dimensions().bodyHeight)
+	cancel := hits[1]
+	updated, command = value.Update(tea.MouseClickMsg{
+		X: (cancel.left + cancel.right) / 2, Y: cancel.row, Button: tea.MouseLeft,
+	})
+	value = updated.(dashboard)
+	if value.modal != noModal || command != nil {
+		t.Fatalf("cancel click = (modal %v, command %v)", value.modal, command)
+	}
+}
+
+func TestDashboardAnimatesVisiblePendingWork(t *testing.T) {
+	value := newDashboard(&fakeBackend{}, model.Snapshot{})
+	value.tabPending = true
+
+	updated, command := value.Update(struct{}{})
+	value = updated.(dashboard)
+	if !value.agentAnimationPending || command == nil {
+		t.Fatalf("pending tab animation = (scheduled %v, command %v)", value.agentAnimationPending, command)
+	}
+	status := ansi.Strip(value.renderStatus(100, value.dimensions().bodyHeight)[1])
+	if !strings.Contains(status, "OPENING") || !strings.Contains(status, agentAnimationFrames[0]) {
+		t.Fatalf("pending tab status = %q", status)
+	}
+
+	updated, _ = value.Update(agentAnimationMsg{})
+	value = updated.(dashboard)
+	if value.agentAnimationFrame != 1 || !value.agentAnimationPending {
+		t.Fatalf("pending animation = (frame %d, scheduled %v)", value.agentAnimationFrame, value.agentAnimationPending)
+	}
+}
+
+func TestDashboardAnimatesDirectoryReads(t *testing.T) {
+	value := newDashboard(&fakeBackend{}, model.Snapshot{})
+	value.modal = browseModal
+	value.browse = browser{path: "/projects", loading: true}
+	updated, command := value.Update(struct{}{})
+	value = updated.(dashboard)
+	if command == nil || !value.agentAnimationPending {
+		t.Fatal("directory read did not schedule its activity indicator")
+	}
+	plain := ansi.Strip(strings.Join(value.renderBrowseModal(80, 20), "\n"))
+	if !strings.Contains(plain, agentAnimationFrames[0]+" Reading") {
+		t.Fatalf("directory activity = %q", plain)
 	}
 }
 
@@ -1007,7 +1092,7 @@ func TestDashboardConfirmsAgentHookInstallation(t *testing.T) {
 		t.Fatalf("pending status = %q", status)
 	}
 
-	updated, extra := value.Update(command())
+	updated, extra := value.Update(commandMessage[hooksInstalledMsg](t, command))
 	value = updated.(dashboard)
 	if extra != nil || value.modal != noModal || value.hookInstallPending {
 		t.Fatalf("install result = (extra %v, modal %v, pending %v)", extra, value.modal, value.hookInstallPending)
@@ -1338,6 +1423,18 @@ func commandMessages(command tea.Cmd) []tea.Msg {
 		messages = append(messages, commandMessages(batched)...)
 	}
 	return messages
+}
+
+func commandMessage[T any](t *testing.T, command tea.Cmd) T {
+	t.Helper()
+	for _, message := range commandMessages(command) {
+		if typed, ok := message.(T); ok {
+			return typed
+		}
+	}
+	var zero T
+	t.Fatalf("command has no %T message", zero)
+	return zero
 }
 
 func TestDashboardEntersScrollbackFromEveryBinding(t *testing.T) {
@@ -1699,7 +1796,7 @@ func TestDashboardNamesTheDeleteTargetBeforeItsConsequences(t *testing.T) {
 		"This permanently deletes all contents.",
 		"Its running shells will be terminated.",
 	}
-	if !slices.Equal(body, want) {
+	if len(body) < len(want) || !slices.Equal(body[:len(want)], want) {
 		t.Fatalf("delete modal body = %q, want the target named before its consequences %q", body, want)
 	}
 	rendered := strings.Join(value.renderModal(72, 28), "\n")
@@ -3621,12 +3718,12 @@ func TestDashboardSelectsPlusAndCreatesTabOnEnter(t *testing.T) {
 	if selectCommand == nil {
 		t.Fatal("Enter on + did not select the workspace")
 	}
-	updated, createCommand := value.Update(selectCommand())
+	updated, createCommand := value.Update(commandMessage[workspaceMsg](t, selectCommand))
 	value = updated.(dashboard)
 	if createCommand == nil {
 		t.Fatal("Enter on + did not produce a create command")
 	}
-	createdMessage := createCommand()
+	createdMessage := commandMessage[tabMsg](t, createCommand)
 	if backend.createCount != 1 || backend.openedTab != "" {
 		t.Fatalf("Enter on + created %d tabs and opened %q", backend.createCount, backend.openedTab)
 	}
