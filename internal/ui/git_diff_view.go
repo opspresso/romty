@@ -360,11 +360,18 @@ func (m dashboard) renderGitDiffTreeRow(row gitDiffTreeRow, width int) string {
 }
 
 func (m dashboard) gitChangedFileStyle(file gitChangedFile) lipgloss.Style {
-	status := string([]byte{file.IndexStatus, file.WorkTreeStatus})
+	return m.gitStatusStyle(file.IndexStatus, file.WorkTreeStatus)
+}
+
+// gitStatusStyle is what a porcelain status code is drawn in: gone is red,
+// new is green, changed is amber. The file view and the Git status result read
+// the same two letters, and green had better mean the same thing in both.
+func (m dashboard) gitStatusStyle(index, workTree byte) lipgloss.Style {
+	status := string([]byte{index, workTree})
 	switch {
 	case strings.Contains(status, "U"), status == "AA", status == "DD", strings.Contains(status, "D"):
 		return m.styles.diffRemoved
-	case status == "??", file.IndexStatus == 'A':
+	case status == "??", index == 'A':
 		return m.styles.diffAdded
 	default:
 		return m.styles.gitStatus

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/opspresso/romty/internal/display"
 )
@@ -286,14 +287,97 @@ func (m dashboard) renderGitActionsModal(width, height int) []string {
 	}
 	lines := []string{target, ""}
 	for index, line := range result[offset:end] {
-		style := m.styles.modalBody
-		if strings.HasPrefix(line, "Error: ") {
-			style = m.styles.errorText
-		}
-		if m.hover.kind == hoverGitResult && m.hover.index == index+gitActionHeaderRows {
-			style = m.styles.hovered(style)
-		}
-		lines = append(lines, style.Render(line))
+		hovered := m.hover.kind == hoverGitResult && m.hover.index == index+gitActionHeaderRows
+		lines = append(lines, m.renderGitOutputLine(line, hovered))
 	}
 	return modalBox(m.styles, width, title, lines...)
+}
+
+// renderGitOutputLine colours what git printed. A status line carries its two
+// letters in the first columns and a diffstat a run of + and -, and those are
+// what the eye is looking for; as one flat block of text they had to be read
+// rather than glanced at.
+//
+// Hovering tints the row without taking its colours away, the way the file
+// view marks the file it has open.
+func (m dashboard) renderGitOutputLine(line string, hovered bool) string {
+	paint := func(style lipgloss.Style, value string) string {
+		if hovered {
+			style = style.Background(m.styles.interactiveHover.GetBackground())
+		}
+		return style.Render(value)
+	}
+	switch {
+	case strings.HasPrefix(line, "Error: "):
+		return paint(m.styles.errorText, line)
+	case strings.HasPrefix(line, "## "):
+		// The branch header `git status --branch` prints, with its divergence
+		// in brackets: `## main...origin/main [ahead 1]`.
+		branch, divergence, found := strings.Cut(line, " [")
+		rendered := paint(m.styles.gitBranch, branch)
+		if found {
+			rendered += paint(m.styles.gitStatus, " ["+divergence)
+		}
+		return rendered
+	case isGitStatusLine(line):
+		return paint(m.gitStatusStyle(line[0], line[1]), line[:2]) + paint(m.styles.modalBody, line[2:])
+	}
+	if at := gitDiffstatMarks(line); at >= 0 {
+		return paint(m.styles.modalBody, line[:at]) + m.paintDiffstatMarks(line[at:], hovered)
+	}
+	return paint(m.styles.modalBody, line)
+}
+
+// isGitStatusLine reports whether a line is one porcelain short-format record:
+// two status letters and a space before the path.
+func isGitStatusLine(line string) bool {
+	if len(line) < 4 || line[2] != ' ' {
+		return false
+	}
+	return isGitStatusCode(line[0]) && isGitStatusCode(line[1]) && line[:2] != "  "
+}
+
+func isGitStatusCode(value byte) bool {
+	return strings.IndexByte(" MADRCU?!T", value) >= 0
+}
+
+// gitDiffstatMarks reports where a diffstat line's run of + and - begins, or
+// -1 when the line is not one. The shape is `path | 12 ++++----`, which is
+// what pull and push print for every file they moved.
+func gitDiffstatMarks(line string) int {
+	bar := strings.LastIndex(line, "|")
+	if bar < 0 {
+		return -1
+	}
+	at := -1
+	for index := bar + 1; index < len(line); index++ {
+		switch line[index] {
+		case '+', '-':
+			if at < 0 {
+				at = index
+			}
+		case ' ', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9':
+			if at >= 0 {
+				return -1
+			}
+		default:
+			return -1
+		}
+	}
+	return at
+}
+
+func (m dashboard) paintDiffstatMarks(marks string, hovered bool) string {
+	var result strings.Builder
+	for _, mark := range marks {
+		style := m.styles.diffRemoved
+		if mark == '+' {
+			style = m.styles.diffAdded
+		}
+		if hovered {
+			style = style.Background(m.styles.interactiveHover.GetBackground())
+		}
+		result.WriteString(style.Render(string(mark)))
+	}
+	return result.String()
 }

@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/opspresso/romty/internal/model"
@@ -319,5 +320,85 @@ func TestDashboardHighlightsTheSelectedGitAction(t *testing.T) {
 	unselected := value.styles.modalBody.Render(pad("  "+pad("Status", 8)+"Show changed files", 66))
 	if !strings.Contains(rendered, unselected) {
 		t.Fatalf("an unselected Git action is not drawn as a plain row:\n%s", rendered)
+	}
+}
+
+// The result of a Git action is a block of text the eye has to find structure
+// in. Status codes and a diffstat's + and - are that structure, and drawn flat
+// they had to be read rather than glanced at.
+func TestGitActionResultIsColoured(t *testing.T) {
+	value := newDashboard(&fakeBackend{}, model.Snapshot{})
+	value.width, value.height = 100, 24
+	value.modal = gitActionsModal
+	value.gitActionTarget = model.Workspace{Name: "alpha", Path: "/projects/alpha"}
+	value.gitActionComplete = true
+
+	for _, probe := range []struct {
+		name    string
+		line    string
+		segment string
+		style   func(*uiStyles) lipgloss.Style
+	}{
+		{
+			name: "a branch header", line: "## main...origin/main",
+			segment: "## main...origin/main",
+			style:   func(s *uiStyles) lipgloss.Style { return s.gitBranch },
+		},
+		{
+			name: "an untracked file", line: "?? new.go",
+			segment: "??",
+			style:   func(s *uiStyles) lipgloss.Style { return s.diffAdded },
+		},
+		{
+			name: "a deleted file", line: " D gone.go",
+			segment: " D",
+			style:   func(s *uiStyles) lipgloss.Style { return s.diffRemoved },
+		},
+		{
+			name: "a modified file", line: " M main.go",
+			segment: " M",
+			style:   func(s *uiStyles) lipgloss.Style { return s.gitStatus },
+		},
+	} {
+		t.Run(probe.name, func(t *testing.T) {
+			value.gitActionOutput = probe.line
+			rendered := strings.Join(value.renderModal(value.width, value.dimensions().bodyHeight), "\n")
+			if want := probe.style(value.styles).Render(probe.segment); !strings.Contains(rendered, want) {
+				t.Fatalf("%q is not drawn in its own colour:\n%s", probe.segment, rendered)
+			}
+		})
+	}
+
+	// A diffstat's marks are split so additions and removals do not share one
+	// colour, which is the only thing the run actually says.
+	value.gitActionOutput = " main.go | 3 ++-"
+	rendered := strings.Join(value.renderModal(value.width, value.dimensions().bodyHeight), "\n")
+	if !strings.Contains(rendered, value.styles.diffAdded.Render("+")) {
+		t.Fatalf("diffstat additions are not green:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, value.styles.diffRemoved.Render("-")) {
+		t.Fatalf("diffstat removals are not red:\n%s", rendered)
+	}
+	// The path before the bar is not part of the run.
+	if strings.Contains(rendered, value.styles.diffAdded.Render("main.go")) {
+		t.Fatalf("the path was coloured as a diffstat mark:\n%s", rendered)
+	}
+}
+
+func TestGitDiffstatMarksFindsOnlyTheRun(t *testing.T) {
+	for _, probe := range []struct {
+		line string
+		want int
+	}{
+		{line: " main.go | 3 ++-", want: 13},
+		{line: " main.go | 3 +++", want: 13},
+		{line: " main.go | 0", want: -1},
+		{line: " 1 file changed, 1 insertion(+)", want: -1},
+		{line: "Fast-forward", want: -1},
+		{line: "## main...origin/main", want: -1},
+	} {
+		if got := gitDiffstatMarks(probe.line); got != probe.want {
+			t.Errorf("gitDiffstatMarks(%q) = %d, want %d", probe.line, got, probe.want)
+		}
 	}
 }
