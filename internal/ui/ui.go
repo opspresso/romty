@@ -152,6 +152,25 @@ type modalActionHit struct {
 	row         int
 }
 
+type hoverKind int
+
+const (
+	hoverNone hoverKind = iota
+	hoverNavigation
+	hoverTab
+	hoverDivider
+	hoverModalAction
+	hoverBrowseRow
+	hoverGitAction
+	hoverGitResult
+	hoverConfigRow
+)
+
+type hoverTarget struct {
+	kind  hoverKind
+	index int
+}
+
 type dashboard struct {
 	backend Backend
 	state   model.Snapshot
@@ -223,6 +242,7 @@ type dashboard struct {
 	config            Config
 	leftWidth         int
 	navigationResize  bool
+	hover             hoverTarget
 	mousePassthrough  bool
 	scrollbackMouse   bool
 	soundOnDone       bool
@@ -481,6 +501,7 @@ func (m dashboard) update(message tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleKey(message)
 	case tea.MouseClickMsg, tea.MouseReleaseMsg, tea.MouseWheelMsg, tea.MouseMotionMsg:
 		mouse := message.(tea.MouseMsg)
+		m.hover = m.hoverTargetAt(mouse.Mouse())
 		if m.modal != noModal {
 			if updated, command, handled := m.handleModalMouse(mouse); handled {
 				return updated, command
@@ -1237,6 +1258,63 @@ func (m dashboard) handleModalMouse(message tea.MouseMsg) (tea.Model, tea.Cmd, b
 		}
 	}
 	return m, nil, false
+}
+
+func (m dashboard) hoverTargetAt(mouse tea.Mouse) hoverTarget {
+	width := max(m.width, 40)
+	height := m.dimensions().bodyHeight
+	if m.modal != noModal {
+		for index, hit := range m.modalActionHits(width, height) {
+			if mouse.Y == hit.row && mouse.X >= hit.left && mouse.X < hit.right {
+				return hoverTarget{kind: hoverModalAction, index: index}
+			}
+		}
+		row, inside := m.modalContentRow(mouse, width, height)
+		if !inside {
+			return hoverTarget{}
+		}
+		switch m.modal {
+		case browseModal:
+			if index, ok := m.browseIndexAtContentRow(row); ok {
+				return hoverTarget{kind: hoverBrowseRow, index: index}
+			}
+		case gitActionsModal:
+			if m.gitActionComplete && row >= 2 {
+				return hoverTarget{kind: hoverGitResult, index: row}
+			}
+			if !m.gitActionPending && row >= 2 && row < 2+len(gitActionChoices) {
+				return hoverTarget{kind: hoverGitAction, index: row - 2}
+			}
+		case configModal:
+			if row >= 0 && row < 5 {
+				return hoverTarget{kind: hoverConfigRow, index: row}
+			}
+		}
+		return hoverTarget{}
+	}
+
+	view := m.dimensions()
+	if view.separator > 0 && mouse.Y < view.bodyHeight &&
+		mouse.X >= view.leftWidth && mouse.X < view.leftWidth+view.separator {
+		return hoverTarget{kind: hoverDivider}
+	}
+	if mouse.X < view.leftWidth && mouse.Y < view.bodyHeight {
+		if index, ok := m.navigationIndexAtRow(mouse.Y, view.bodyHeight); ok {
+			return hoverTarget{kind: hoverNavigation, index: index}
+		}
+		return hoverTarget{}
+	}
+	if mouse.Y == 0 && mouse.X >= view.leftWidth+view.separator {
+		localX := mouse.X - view.leftWidth - view.separator
+		tabs := m.selectedTabs()
+		if m.focus == leftPane {
+			tabs = m.navigationTabs()
+		}
+		if index, ok := tabIndexAtX(tabs, localX); ok {
+			return hoverTarget{kind: hoverTab, index: index}
+		}
+	}
+	return hoverTarget{}
 }
 
 func (m dashboard) handleConfigMouse(message tea.MouseMsg) (tea.Model, tea.Cmd, bool) {
@@ -2861,17 +2939,24 @@ func (m dashboard) renderModal(width, height int) []string {
 	}
 	if m.modal == configModal {
 		return modalBox(m.styles, modalWidth, "Config",
-			m.styles.modalStrong.Render(fmt.Sprintf("Left pane: %d", m.paneWidth()))+"  "+m.styles.empty.Render("←/→"),
-			m.styles.modalStrong.Render("Scrollback mouse: "+onOff(m.scrollbackMouse))+"  "+m.styles.empty.Render("m"),
-			m.styles.modalStrong.Render("Sound on done: "+onOff(m.soundOnDone))+"  "+m.styles.empty.Render("d"),
-			m.styles.modalStrong.Render("Sound on waiting: "+onOff(m.soundOnWaiting))+"  "+m.styles.empty.Render("b"),
-			m.styles.modalStrong.Render("Test sound")+"  "+m.styles.empty.Render("s"),
+			m.renderConfigRow(modalWidth, 0, fmt.Sprintf("Left pane: %d", m.paneWidth()), "←/→"),
+			m.renderConfigRow(modalWidth, 1, "Scrollback mouse: "+onOff(m.scrollbackMouse), "m"),
+			m.renderConfigRow(modalWidth, 2, "Sound on done: "+onOff(m.soundOnDone), "d"),
+			m.renderConfigRow(modalWidth, 3, "Sound on waiting: "+onOff(m.soundOnWaiting), "b"),
+			m.renderConfigRow(modalWidth, 4, "Test sound", "s"),
 		)
 	}
 	return modalBox(m.styles, modalWidth, "About",
 		m.styles.modalStrong.Render("romty")+"  "+m.styles.empty.Render(version.String()),
 		m.styles.modalBody.Render(tagline),
 	)
+}
+
+func (m dashboard) renderConfigRow(width, index int, label, key string) string {
+	if m.hover.kind == hoverConfigRow && m.hover.index == index {
+		return m.styles.interactiveHover.Render(pad(label+"  "+key, max(width-6, 0)))
+	}
+	return m.styles.modalStrong.Render(label) + "  " + m.styles.empty.Render(key)
 }
 
 func (m dashboard) modalActions() []modalAction {
@@ -2911,11 +2996,12 @@ func (m dashboard) withModalActions(lines []string) []string {
 		return lines
 	}
 	width := lipgloss.Width(lines[0])
-	shortcuts := make([]shortcut, 0, len(actions))
-	for _, action := range actions {
-		shortcuts = append(shortcuts, action.shortcut)
+	segments := make([]string, 0, len(actions))
+	for index, action := range actions {
+		segments = append(segments, m.renderModalAction(action,
+			m.hover.kind == hoverModalAction && m.hover.index == index))
 	}
-	actionLine := renderShortcuts(m.styles, max(width-6, 0), shortcuts...)
+	actionLine := truncate(strings.Join(segments, "  "), max(width-6, 0))
 	footer := []string{modalContentLine(m.styles, width, ""), modalContentLine(m.styles, width, actionLine)}
 	return append(append(lines[:len(lines)-1], footer...), lines[len(lines)-1])
 }
@@ -2931,12 +3017,19 @@ func (m dashboard) modalActionHits(width, height int) []modalActionHit {
 	row := max((height-len(lines))/2, 0) + len(lines) - 2
 	hits := make([]modalActionHit, 0, len(actions))
 	for _, action := range actions {
-		segment := renderShortcuts(m.styles, modalWidth, action.shortcut)
+		segment := m.renderModalAction(action, false)
 		segmentWidth := lipgloss.Width(segment)
 		hits = append(hits, modalActionHit{action: action, left: left, right: left + segmentWidth, row: row})
 		left += segmentWidth + 2
 	}
 	return hits
+}
+
+func (m dashboard) renderModalAction(action modalAction, hovered bool) string {
+	if hovered {
+		return m.styles.interactiveHover.Render(" " + action.key + "  " + action.description)
+	}
+	return renderShortcuts(m.styles, 1<<16, action.shortcut)
 }
 
 func (m dashboard) helpEntries() []string {
@@ -3043,7 +3136,11 @@ func modalContentLine(styles *uiStyles, width int, value string) string {
 // paneSeparators returns the divider for the first body row, which carries the
 // focus arrow, and the one shared by every remaining row.
 func (m dashboard) paneSeparators() (string, string) {
-	divider := m.styles.divider.Render("│")
+	dividerStyle := m.styles.divider
+	if m.navigationResize || m.hover.kind == hoverDivider {
+		dividerStyle = m.styles.dividerActive
+	}
+	divider := dividerStyle.Render("│")
 	if m.focus == leftPane {
 		return m.styles.dividerActive.Render("◀") + divider + " ", " " + divider + " "
 	}
@@ -3140,6 +3237,9 @@ func (m dashboard) renderNavigationItem(item navItem, index, width int) []string
 	}
 	if isSelected {
 		style = m.styles.navigationSelected
+	} else if m.hover.kind == hoverNavigation && m.hover.index == index {
+		style = style.Foreground(m.styles.interactiveHover.GetForeground()).
+			Background(m.styles.interactiveHover.GetBackground())
 	}
 	markers := openTabMarkers(m.styles, style, item.tabs, m.agentAnimationFrame)
 	var nameLine string
@@ -3211,7 +3311,11 @@ func (m dashboard) renderTerminal(width int) []string {
 	if m.focus == leftPane {
 		tabs = m.navigationTabs()
 	}
-	lines := renderTabBar(m.styles, tabs, m.tabIndex, width)
+	hover := -1
+	if m.hover.kind == hoverTab {
+		hover = m.hover.index
+	}
+	lines := renderTabBarWithHover(m.styles, tabs, m.tabIndex, hover, width)
 	if m.terminal != nil {
 		return append(lines, m.terminal.renderViewport(m.scrollOffset)...)
 	}
@@ -3225,6 +3329,10 @@ func (m dashboard) renderTerminal(width int) []string {
 }
 
 func renderTabBar(styles *uiStyles, tabs []model.Tab, active, width int) []string {
+	return renderTabBarWithHover(styles, tabs, active, -1, width)
+}
+
+func renderTabBarWithHover(styles *uiStyles, tabs []model.Tab, active, hover, width int) []string {
 	labels := make([]string, 0, len(tabs)+1)
 	for _, tab := range tabs {
 		labels = append(labels, " "+displayText(tab.Name)+" ")
@@ -3245,6 +3353,9 @@ func renderTabBar(styles *uiStyles, tabs []model.Tab, active, width int) []strin
 			style = styles.tabSelected
 			railStyle = styles.tabRailSelected
 			railCharacter = "━"
+		} else if index == hover {
+			style = styles.interactiveHover
+			railStyle = styles.dividerActive
 		}
 		tabsLine.WriteString(style.Render(label))
 		railLine.WriteString(railStyle.Render(strings.Repeat(railCharacter, lipgloss.Width(label))))

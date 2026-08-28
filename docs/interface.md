@@ -100,6 +100,8 @@ Pane focus and scrollback toggles are reversible. In the terminal pane only Glob
 
 The dashboard chrome is mouse-aware. Click a root or workspace to select and open it, click a terminal tab or `+` to activate it, and use the wheel over the workspace tree to move its cursor without opening anything. Drag the vertical divider to resize the workspace pane; the terminal resizes live and the final width is saved when the button is released.
 
+Mouse targets identify themselves before activation. Workspace, tab, picker, Git, Config, and dialog-action targets gain a muted background on hover, while the draggable divider changes to the accent color. Keyboard selection keeps the stronger accent treatment and is never replaced by hover.
+
 Confirmation dialogs render their Enter and Esc actions inside the box and accept clicks on those actions. Longer operations such as opening a terminal, reading a directory, running a Git action, stopping the daemon, or installing hooks show a moving one-cell activity marker; the marker stops scheduling frames when no visible work or agent animation remains.
 
 Modal content is pointer-aware as well. Click a directory in the root picker to open it, click a Git action to run it, and use the wheel over a completed Git result to read longer output. Config rows toggle when clicked; use the wheel over the pane-width row for one-column adjustments.

@@ -932,6 +932,64 @@ func TestDashboardClaimsTheMouseWithoutAnOpenTerminal(t *testing.T) {
 	}
 }
 
+func TestDashboardHighlightsMouseTargetsOnHover(t *testing.T) {
+	workspace := model.Workspace{ID: "workspace-1", RootID: "root-1", Name: "alpha", Path: "/projects/alpha"}
+	tab := model.Tab{ID: "tab-1", WorkspaceID: workspace.ID, Name: "1", Running: true}
+	snapshot := model.Snapshot{Roots: []model.RootView{{
+		Root:        model.Root{ID: "root-1", Name: "projects", Path: "/projects"},
+		Directories: []model.WorkspaceView{{Workspace: workspace, Tabs: []model.Tab{tab}}},
+	}}}
+	value := newDashboard(&fakeBackend{}, snapshot)
+	value.width, value.height = 120, 30
+	value.setNavigation(1)
+
+	before := value.render()
+	updated, _ := value.Update(tea.MouseMotionMsg{X: 2, Y: 2})
+	value = updated.(dashboard)
+	if value.hover.kind != hoverNavigation || value.hover.index != 0 || value.render() == before {
+		t.Fatalf("navigation hover = %#v", value.hover)
+	}
+
+	seam := value.dimensions().leftWidth + 1
+	before = value.render()
+	updated, _ = value.Update(tea.MouseMotionMsg{X: seam, Y: 5})
+	value = updated.(dashboard)
+	if value.hover.kind != hoverDivider || value.render() == before {
+		t.Fatalf("divider hover = %#v", value.hover)
+	}
+
+	origin := value.dimensions().leftWidth + value.dimensions().separator
+	before = value.render()
+	updated, _ = value.Update(tea.MouseMotionMsg{X: origin + 5, Y: 0})
+	value = updated.(dashboard)
+	if value.hover.kind != hoverTab || value.hover.index != 1 || value.render() == before {
+		t.Fatalf("tab hover = %#v", value.hover)
+	}
+}
+
+func TestDashboardHighlightsDialogMouseTargets(t *testing.T) {
+	value := newDashboard(&fakeBackend{}, model.Snapshot{})
+	value.width, value.height = 100, 24
+	updated, _ := value.Update(key(tea.KeyF9, ""))
+	value = updated.(dashboard)
+	hit := value.modalActionHits(value.width, value.dimensions().bodyHeight)[0]
+	before := value.render()
+	updated, _ = value.Update(tea.MouseMotionMsg{X: hit.left, Y: hit.row})
+	value = updated.(dashboard)
+	if value.hover.kind != hoverModalAction || value.hover.index != 0 || value.render() == before {
+		t.Fatalf("modal action hover = %#v", value.hover)
+	}
+
+	value.modal = configModal
+	left, top := value.modalContentOrigin(value.width, value.dimensions().bodyHeight)
+	before = value.render()
+	updated, _ = value.Update(tea.MouseMotionMsg{X: left + 2, Y: top + 2})
+	value = updated.(dashboard)
+	if value.hover.kind != hoverConfigRow || value.hover.index != 2 || value.render() == before {
+		t.Fatalf("config hover = %#v", value.hover)
+	}
+}
+
 func TestDashboardConfirmsDaemonShutdown(t *testing.T) {
 	backend := &fakeBackend{}
 	terminal := newEmbeddedTerminal("tab-1", newMemoryStream(""), 40, 10)

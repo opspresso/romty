@@ -173,6 +173,31 @@ func TestDashboardClicksAndScrollsGitActions(t *testing.T) {
 	}
 }
 
+func TestDashboardHighlightsHoveredGitActionAndResult(t *testing.T) {
+	value := newDashboard(&fakeBackend{}, model.Snapshot{})
+	value.width, value.height = 100, 12
+	value.modal = gitActionsModal
+	value.gitActionTarget = model.Workspace{Name: "alpha", Path: "/projects/alpha"}
+	left, top := value.modalContentOrigin(value.width, value.dimensions().bodyHeight)
+	before := value.render()
+
+	updated, _ := value.Update(tea.MouseMotionMsg{X: left + 2, Y: top + 4})
+	value = updated.(dashboard)
+	if value.hover.kind != hoverGitAction || value.hover.index != 2 || value.render() == before {
+		t.Fatalf("Git action hover = %#v", value.hover)
+	}
+
+	value.gitActionComplete = true
+	value.gitActionOutput = "one\ntwo\nthree\nfour\nfive\nsix"
+	left, top = value.modalContentOrigin(value.width, value.dimensions().bodyHeight)
+	before = value.render()
+	updated, _ = value.Update(tea.MouseMotionMsg{X: left + 2, Y: top + 3})
+	value = updated.(dashboard)
+	if value.hover.kind != hoverGitResult || value.hover.index != 3 || value.render() == before {
+		t.Fatalf("Git result hover = %#v", value.hover)
+	}
+}
+
 func TestDashboardHoldsGitActionModalWhileCommandRuns(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, model.Snapshot{})
 	value.modal = gitActionsModal

@@ -234,13 +234,8 @@ func (m dashboard) handleBrowseMouse(message tea.MouseMsg) (tea.Model, tea.Cmd, 
 	if !ok || click.Button != tea.MouseLeft || row < 2 || m.browse.loading || m.browse.failure != "" {
 		return m, nil, false
 	}
-	capacity := max(modalCapacity(m.dimensions().bodyHeight)-2, 1)
-	start := 0
-	if rows := m.browse.rows(); rows > capacity {
-		start = min(max(m.browse.cursor-capacity/2, 0), rows-capacity)
-	}
-	index := start + row - 2
-	if index < 0 || index >= m.browse.rows() {
+	index, ok := m.browseIndexAtContentRow(row)
+	if !ok {
 		return m, nil, true
 	}
 	m.browse.cursor = index
@@ -250,6 +245,19 @@ func (m dashboard) handleBrowseMouse(message tea.MouseMsg) (tea.Model, tea.Cmd, 
 	}
 	updated, command := m.openBrowseSelection()
 	return updated, command, true
+}
+
+func (m dashboard) browseIndexAtContentRow(row int) (int, bool) {
+	if row < 2 || m.browse.loading || m.browse.failure != "" {
+		return 0, false
+	}
+	capacity := max(modalCapacity(m.dimensions().bodyHeight)-2, 1)
+	start := 0
+	if rows := m.browse.rows(); rows > capacity {
+		start = min(max(m.browse.cursor-capacity/2, 0), rows-capacity)
+	}
+	index := start + row - 2
+	return index, index >= 0 && index < m.browse.rows()
 }
 
 func (m dashboard) openBrowseSelection() (tea.Model, tea.Cmd) {
@@ -328,6 +336,8 @@ func (m dashboard) renderBrowseRow(index, width int) string {
 	if index == m.browse.cursor {
 		style = m.styles.navigationSelected
 		indicator = "▌ "
+	} else if m.hover.kind == hoverBrowseRow && m.hover.index == index {
+		style = m.styles.interactiveHover
 	}
 	label := pad(truncate(indicator+name, max(width-2, 1)), max(width-2, 0)) + marker
 	return style.Render(truncate(label, width))

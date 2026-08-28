@@ -264,6 +264,8 @@ func (m dashboard) renderGitActionsModal(width, height int) []string {
 			if index == m.gitActionIndex {
 				prefix = "▌ "
 				style = m.styles.navigationSelected
+			} else if m.hover.kind == hoverGitAction && m.hover.index == index {
+				style = m.styles.interactiveHover
 			}
 			label := prefix + pad(action.label(), 8) + action.description()
 			lines = append(lines, style.Render(pad(truncate(label, contentWidth), contentWidth)))
@@ -280,10 +282,14 @@ func (m dashboard) renderGitActionsModal(width, height int) []string {
 		title += fmt.Sprintf(" %d-%d/%d", offset+1, end, len(result))
 	}
 	lines := []string{target, ""}
-	for _, line := range result[offset:end] {
+	for index, line := range result[offset:end] {
 		style := m.styles.modalBody
 		if strings.HasPrefix(line, "Error: ") {
 			style = m.styles.errorText
+		}
+		if m.hover.kind == hoverGitResult && m.hover.index == index+2 {
+			style = style.Foreground(m.styles.interactiveHover.GetForeground()).
+				Background(m.styles.interactiveHover.GetBackground())
 		}
 		lines = append(lines, style.Render(line))
 	}

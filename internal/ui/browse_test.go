@@ -97,6 +97,20 @@ func TestBrowsePickerOpensClickedDirectory(t *testing.T) {
 	}
 }
 
+func TestBrowsePickerHighlightsHoveredDirectory(t *testing.T) {
+	home := t.TempDir()
+	makeDirectories(t, home, "alpha", "beta")
+	value := browsing(t, &fakeBackend{}, home)
+	left, top := value.modalContentOrigin(value.width, value.dimensions().bodyHeight)
+	before := value.render()
+
+	updated, _ := value.Update(tea.MouseMotionMsg{X: left + 2, Y: top + 4})
+	value = updated.(dashboard)
+	if value.hover.kind != hoverBrowseRow || value.hover.index != 2 || value.render() == before {
+		t.Fatalf("browse hover = %#v", value.hover)
+	}
+}
+
 func TestBrowsePickerReplacesControlCharactersInNames(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, model.Snapshot{})
 	value.width = 120
