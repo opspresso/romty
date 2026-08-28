@@ -15,6 +15,7 @@ import (
 
 	"github.com/opspresso/romty/internal/agenthooks"
 	"github.com/opspresso/romty/internal/model"
+	"github.com/opspresso/romty/internal/sound"
 	"github.com/opspresso/romty/internal/version"
 )
 
@@ -256,6 +257,10 @@ type agentSnapshotMsg struct {
 
 type agentAnimationMsg struct{}
 
+type soundPlayedMsg struct {
+	kind sound.Kind
+}
+
 type gitStatusMsg struct {
 	value      map[string]gitState
 	fetchedAt  time.Time
@@ -329,6 +334,7 @@ type reopenTerminalMsg struct {
 }
 
 var installHookProviders = agenthooks.Install
+var playSound = sound.Play
 
 func Run(backend Backend, initial model.Snapshot, configPath string, hookStatuses []agenthooks.Status) (Result, error) {
 	config, err := loadConfig(configPath)
@@ -544,14 +550,17 @@ func (m dashboard) update(message tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case agentSnapshotMsg:
 		if message.err == nil {
-			ring := m.agentSoundReady && m.shouldSoundForAgentTransitions(message.value)
+			kind, ring := m.soundForAgentTransitions(message.value)
+			ring = m.agentSoundReady && ring
 			m.updateAgents(message.value)
 			m.agentSoundReady = true
 			if ring {
-				return m, tea.Batch(m.refreshAgents(), soundAlert())
+				return m, tea.Batch(m.refreshAgents(), soundAlert(kind))
 			}
 		}
 		return m, m.refreshAgents()
+	case soundPlayedMsg:
+		return m, nil
 	case agentAnimationMsg:
 		m.agentAnimationPending = false
 		if m.agentAnimationActive || m.hasPendingActivity() {
@@ -951,7 +960,7 @@ func (m dashboard) handleModalKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 		case "b":
 			return m.toggleSoundOnWaiting()
 		case "s":
-			return m, soundAlert()
+			return m, soundAlert(sound.Done)
 		}
 	}
 	return m, nil
@@ -1260,7 +1269,7 @@ func (m dashboard) handleConfigMouse(message tea.MouseMsg) (tea.Model, tea.Cmd, 
 		updated, command := m.toggleSoundOnWaiting()
 		return updated, command, true
 	case 4:
-		return m, soundAlert(), true
+		return m, soundAlert(sound.Done), true
 	}
 	return m, nil, true
 }
@@ -1423,8 +1432,11 @@ func (m dashboard) toggleSoundOnWaiting() (tea.Model, tea.Cmd) {
 	return m, m.saveConfig()
 }
 
-func soundAlert() tea.Cmd {
-	return tea.Raw("\a")
+func soundAlert(kind sound.Kind) tea.Cmd {
+	return func() tea.Msg {
+		_ = playSound(kind)
+		return soundPlayedMsg{kind: kind}
+	}
 }
 
 func (m dashboard) saveConfig() tea.Cmd {
@@ -1754,33 +1766,36 @@ func (m *dashboard) updateAgents(statuses map[string]model.AgentStatus) {
 	m.agentAnimationActive = m.hasAnimatedAgent()
 }
 
-func (m dashboard) shouldSoundForAgentTransitions(statuses map[string]model.AgentStatus) bool {
-	changed := func(tab model.Tab) bool {
+func (m dashboard) soundForAgentTransitions(statuses map[string]model.AgentStatus) (sound.Kind, bool) {
+	changed := func(tab model.Tab) (sound.Kind, bool) {
 		status, ok := statuses[tab.ID]
 		if !ok || status.Agent != model.AgentClaude && status.Agent != model.AgentCodex {
-			return false
+			return "", false
 		}
 		if m.soundOnDone && animatedAgentPhase(tab.AgentPhase) &&
 			(status.Phase == model.AgentPhaseIdle || status.Phase == model.AgentPhaseError) {
-			return true
+			return sound.Done, true
 		}
-		return m.soundOnWaiting && !waitingAgentPhase(tab.AgentPhase) && waitingAgentPhase(status.Phase)
+		if m.soundOnWaiting && !waitingAgentPhase(tab.AgentPhase) && waitingAgentPhase(status.Phase) {
+			return sound.Waiting, true
+		}
+		return "", false
 	}
 	for _, root := range m.state.Roots {
 		for _, tab := range root.Tabs {
-			if changed(tab) {
-				return true
+			if kind, ok := changed(tab); ok {
+				return kind, true
 			}
 		}
 		for _, workspace := range root.Directories {
 			for _, tab := range workspace.Tabs {
-				if changed(tab) {
-					return true
+				if kind, ok := changed(tab); ok {
+					return kind, true
 				}
 			}
 		}
 	}
-	return false
+	return "", false
 }
 
 func waitingAgentPhase(phase model.AgentPhase) bool {

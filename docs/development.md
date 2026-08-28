@@ -27,6 +27,14 @@ Run an isolated development instance without using normal romty state:
 ROMTY_HOME=/tmp/romty-dev go run ./cmd/romty
 ```
 
+## Sound assets
+
+The original notification recordings are `internal/sound/assets/done.flac` and `waiting.flac`. Runtime playback embeds their PCM WAV derivatives from the same directory so macOS and common Linux audio tools can play them without an in-process decoder. Regenerate a derivative without changing the original:
+
+```sh
+ffmpeg -y -i internal/sound/assets/waiting.flac -c:a pcm_s16le -ar 44100 -ac 1 internal/sound/assets/waiting.wav
+```
+
 ## Protocol compatibility
 
 Keep field meanings and stream framing stable within a protocol revision. Additive actions and optional JSON fields do not require a new revision. Advertise independently usable behavior as a capability and ignore unknown fields and capabilities.

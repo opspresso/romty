@@ -21,12 +21,14 @@ import (
 
 	"github.com/opspresso/romty/internal/agenthooks"
 	"github.com/opspresso/romty/internal/model"
+	"github.com/opspresso/romty/internal/sound"
 	"github.com/opspresso/romty/internal/version"
 )
 
 func TestMain(m *testing.M) {
 	agentAnimationInterval = 0
 	agentRefreshInterval = 0
+	playSound = func(sound.Kind) error { return nil }
 	os.Exit(m.Run())
 }
 
@@ -1438,6 +1440,15 @@ func commandMessage[T any](t *testing.T, command tea.Cmd) T {
 	return zero
 }
 
+func playedSound(command tea.Cmd) (sound.Kind, bool) {
+	for _, message := range commandMessages(command) {
+		if played, ok := message.(soundPlayedMsg); ok {
+			return played.kind, true
+		}
+	}
+	return "", false
+}
+
 func TestDashboardEntersScrollbackFromEveryBinding(t *testing.T) {
 	page := scrolledDashboard(t, 200).scrollbackPage()
 
@@ -1880,10 +1891,10 @@ func TestDashboardConfiguresAndTestsSoundAlerts(t *testing.T) {
 			value.soundOnDone, value.soundOnWaiting, saveDone, saveWaiting)
 	}
 
-	updated, sound := value.Update(key('s', "s"))
+	updated, soundCommand := value.Update(key('s', "s"))
 	value = updated.(dashboard)
-	if sequences := rawSequences(sound); !slices.Equal(sequences, []string{"\a"}) {
-		t.Fatalf("test sound sequences = %q, want BEL", sequences)
+	if played := commandMessage[soundPlayedMsg](t, soundCommand); played.kind != sound.Done {
+		t.Fatalf("test sound = %q, want done", played.kind)
 	}
 }
 
@@ -1899,10 +1910,10 @@ func TestDashboardClicksConfigControls(t *testing.T) {
 	if !value.soundOnDone || save == nil {
 		t.Fatalf("done sound click = (enabled %v, save %v)", value.soundOnDone, save)
 	}
-	updated, sound := value.Update(tea.MouseClickMsg{X: left + 2, Y: top + 4, Button: tea.MouseLeft})
+	updated, soundCommand := value.Update(tea.MouseClickMsg{X: left + 2, Y: top + 4, Button: tea.MouseLeft})
 	value = updated.(dashboard)
-	if sequences := rawSequences(sound); !slices.Equal(sequences, []string{"\a"}) {
-		t.Fatalf("test sound click sequences = %q", sequences)
+	if played := commandMessage[soundPlayedMsg](t, soundCommand); played.kind != sound.Done {
+		t.Fatalf("test sound click = %q, want done", played.kind)
 	}
 }
 
@@ -1921,20 +1932,20 @@ func TestDashboardSoundsOnceForAgentTransitions(t *testing.T) {
 	idle := map[string]model.AgentStatus{"tab-1": {Agent: model.AgentCodex, Phase: model.AgentPhaseIdle}}
 	updated, command := value.Update(agentSnapshotMsg{value: idle})
 	value = updated.(dashboard)
-	if sequences := rawSequences(command); !slices.Contains(sequences, "\a") {
-		t.Fatalf("done transition sequences = %q, want BEL", sequences)
+	if kind, ok := playedSound(command); !ok || kind != sound.Done {
+		t.Fatalf("done transition sound = (%q, %v)", kind, ok)
 	}
 	updated, command = value.Update(agentSnapshotMsg{value: idle})
 	value = updated.(dashboard)
-	if sequences := rawSequences(command); slices.Contains(sequences, "\a") {
-		t.Fatalf("stable idle transition rang again: %q", sequences)
+	if kind, ok := playedSound(command); ok {
+		t.Fatalf("stable idle transition played %q again", kind)
 	}
 
 	waiting := map[string]model.AgentStatus{"tab-1": {Agent: model.AgentCodex, Phase: model.AgentPhaseWaitingApproval}}
 	updated, command = value.Update(agentSnapshotMsg{value: waiting})
 	value = updated.(dashboard)
-	if sequences := rawSequences(command); !slices.Contains(sequences, "\a") {
-		t.Fatalf("waiting transition sequences = %q, want BEL", sequences)
+	if kind, ok := playedSound(command); !ok || kind != sound.Waiting {
+		t.Fatalf("waiting transition sound = (%q, %v)", kind, ok)
 	}
 }
 
@@ -1946,8 +1957,8 @@ func TestDashboardDoesNotSoundOnTheFirstAgentSnapshot(t *testing.T) {
 	if !value.agentSoundReady {
 		t.Fatal("first successful agent snapshot did not arm later sounds")
 	}
-	if sequences := rawSequences(command); slices.Contains(sequences, "\a") {
-		t.Fatalf("first agent snapshot rang: %q", sequences)
+	if kind, ok := playedSound(command); ok {
+		t.Fatalf("first agent snapshot played %q", kind)
 	}
 }
 
