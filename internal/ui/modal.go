@@ -338,7 +338,8 @@ func (g modalGeometry) contentRow(mouse tea.Mouse) (int, bool) {
 	if len(g.lines) < 2 {
 		return 0, false
 	}
-	row := mouse.Y - g.top - 1
+	_, top := g.contentOrigin()
+	row := mouse.Y - top
 	inside := mouse.X >= g.left+1 && mouse.X < g.left+g.width-1 &&
 		row >= 0 && row < len(g.lines)-2
 	return row, inside
