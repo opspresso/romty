@@ -60,6 +60,21 @@ type layout struct {
 	terminalHeight int
 }
 
+// screenWidth is the width every layout measurement starts from. Below the
+// floor the arithmetic that divides the screen between the panes starts
+// producing negative widths, so nothing measures the host's report directly.
+// It was spelled out at ten call sites, the floor unnamed in all of them.
+func (m dashboard) screenWidth() int {
+	return max(m.width, minimumScreenWidth)
+}
+
+// bodySize is the screen the modals and the pointer handlers work in: that
+// width, and the height left once the shortcut rail and the status bar have
+// taken their rows.
+func (m dashboard) bodySize() (int, int) {
+	return m.screenWidth(), m.dimensions().bodyHeight
+}
+
 // terminalOrigin is where the terminal's own first cell lands on screen, which
 // the cursor and mouse translation both need. Deriving it here keeps it tied
 // to the separator and tab bar rather than repeated as a literal.
@@ -71,7 +86,7 @@ func (l layout) terminalOrigin() (int, int) {
 // narrow layout is currently showing it. Config reads and adjusts this one,
 // because a hidden pane still has a width to come back to.
 func (m dashboard) paneWidth() int {
-	width := max(m.width, 40)
+	width := m.screenWidth()
 	leftWidth := m.leftWidth
 	if leftWidth == 0 {
 		leftWidth = min(max(width/4, minimumLeftWidth), 28)
@@ -84,7 +99,7 @@ func (m dashboard) paneWidth() int {
 // half of what the terminal could be, so focus takes it away and Ctrl+/ or F7
 // brings it back.
 func (m dashboard) navigationHidden() bool {
-	if max(m.width, 40) >= narrowLayoutWidth {
+	if m.screenWidth() >= narrowLayoutWidth {
 		return false
 	}
 	return m.focus == terminalPane && m.terminal != nil
@@ -96,7 +111,7 @@ func (m dashboard) navigationHidden() bool {
 // the view is open, and sizing the PTY to a split it never appears in made a
 // full-screen guest reflow on the way in and again on the way out.
 func (m dashboard) gitDiffLayout() layout {
-	width := max(m.width, 40)
+	width := m.screenWidth()
 	view := m.dimensions()
 	view.leftWidth = m.paneWidth()
 	view.separator = separatorWidth
@@ -105,7 +120,7 @@ func (m dashboard) gitDiffLayout() layout {
 }
 
 func (m dashboard) dimensions() layout {
-	width := max(m.width, 40)
+	width := m.screenWidth()
 	height := max(m.height, 10)
 	leftWidth, separator := m.paneWidth(), separatorWidth
 	if m.navigationHidden() {
@@ -143,7 +158,7 @@ func (m dashboard) View() tea.View {
 
 func (m dashboard) render() string {
 	view := m.dimensions()
-	width := max(m.width, 40)
+	width := m.screenWidth()
 	// Scrollback replaces the split rather than drawing over it, so the panes
 	// it hides are not built at all: rendering both meant every frame drew the
 	// workspace tree and a second terminal viewport it then threw away.

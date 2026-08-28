@@ -357,7 +357,7 @@ func (m dashboard) overlayWorkspaceActions(base []string, width, height int) []s
 
 func (m dashboard) handleWorkspaceActionsMouse(message tea.MouseMsg) (tea.Model, tea.Cmd, bool) {
 	mouse := message.Mouse()
-	width, height := max(m.width, 40), m.dimensions().bodyHeight
+	width, height := m.bodySize()
 	if wheel, ok := message.(tea.MouseWheelMsg); ok {
 		popup, x, y := m.workspaceActionPopup(width, height)
 		popupWidth := 0

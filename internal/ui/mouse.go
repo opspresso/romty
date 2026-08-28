@@ -140,7 +140,7 @@ func (m dashboard) handleModalMouse(message tea.MouseMsg) (tea.Model, tea.Cmd, b
 		return m, nil, false
 	}
 	mouse := click.Mouse()
-	for _, hit := range m.modalActionHits(m.modalGeometry(max(m.width, 40), m.dimensions().bodyHeight)) {
+	for _, hit := range m.modalActionHits(m.modalGeometry(m.bodySize())) {
 		if mouse.Y == hit.row && mouse.X >= hit.left && mouse.X < hit.right {
 			updated, command := m.handleKey(tea.KeyPressMsg(tea.Key{Code: hit.action.code}))
 			return updated, command, true
@@ -150,8 +150,7 @@ func (m dashboard) handleModalMouse(message tea.MouseMsg) (tea.Model, tea.Cmd, b
 }
 
 func (m dashboard) hoverTargetAt(mouse tea.Mouse) hoverTarget {
-	width := max(m.width, 40)
-	height := m.dimensions().bodyHeight
+	width, height := m.bodySize()
 	if m.modal == workspaceActionsModal {
 		if index, ok := m.workspaceActionIndexAtMouse(mouse, width, height); ok {
 			return hoverTarget{kind: hoverWorkspaceAction, index: index}
@@ -244,7 +243,7 @@ func (m dashboard) handleConfigMouse(message tea.MouseMsg) (tea.Model, tea.Cmd, 
 // modalContentRowAt answers the same question for the modal that is open now,
 // at the size the body is now, which is what every mouse handler wants.
 func (m dashboard) modalContentRowAt(mouse tea.Mouse) (int, bool) {
-	return m.modalGeometry(max(m.width, 40), m.dimensions().bodyHeight).contentRow(mouse)
+	return m.modalGeometry(m.bodySize()).contentRow(mouse)
 }
 
 func (m dashboard) handleDashboardMouse(message tea.MouseMsg) (tea.Model, tea.Cmd, bool) {

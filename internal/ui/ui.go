@@ -41,6 +41,9 @@ const (
 	// take half the screen and leave the terminal unusable. Above this the
 	// split is worth its width, so the layout does not move under a desktop.
 	narrowLayoutWidth = 80
+	// minimumScreenWidth is the narrowest screen romty lays out for; see
+	// screenWidth.
+	minimumScreenWidth = 40
 
 	maximumReattachAttempts = 3
 	initialReattachBackoff  = 250 * time.Millisecond
@@ -900,7 +903,7 @@ func (m dashboard) adjustLeftWidth(delta int) (tea.Model, tea.Cmd) {
 }
 
 func (m *dashboard) setLeftWidth(width int) {
-	maximum := min(maximumLeftWidth, max(m.width, 40)-20)
+	maximum := min(maximumLeftWidth, m.screenWidth()-20)
 	m.leftWidth = min(max(width, minimumLeftWidth), maximum)
 }
 
