@@ -57,8 +57,8 @@ func TestSessionAgentsMatchTabsByForegroundProcessGroup(t *testing.T) {
 	})
 
 	sessions := map[string]*session{
-		"tab-1": {pty: claudePTY},
-		"tab-2": {pty: codexPTY},
+		"tab-1": newSessionForTest(claudePTY),
+		"tab-2": newSessionForTest(codexPTY),
 	}
 	want := map[string]model.Agent{
 		"tab-1": model.AgentClaude,

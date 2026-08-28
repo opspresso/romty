@@ -79,6 +79,86 @@ func TestAgentStatusRequiresARunningTab(t *testing.T) {
 	}
 }
 
+// A hook is the agent's own account of itself, so it wins over anything read
+// back off the screen. Where no hook has spoken, the screen is all romty has.
+func TestAgentStatusInfersAPhaseOnlyWhereNoHookHasSpoken(t *testing.T) {
+	hooked, unhooked := new(os.File), new(os.File)
+	titled := new(os.File)
+	previousGroup := foregroundProcessGroup
+	previousList := runProcessList
+	foregroundProcessGroup = func(terminal *os.File) (int, error) {
+		switch terminal {
+		case hooked:
+			return 101, nil
+		case unhooked:
+			return 102, nil
+		default:
+			return 103, nil
+		}
+	}
+	runProcessList = func(context.Context) ([]byte, error) {
+		return []byte("101 claude\n102 claude\n103 codex\n"), nil
+	}
+	t.Cleanup(func() {
+		foregroundProcessGroup = previousGroup
+		runProcessList = previousList
+	})
+
+	hookedSession := newSessionForTest(hooked)
+	// The same approval prompt is on both screens.
+	hookedSession.history.append([]byte("Bash(git push)\r\n  Do you want to proceed?\r\n"))
+	unhookedSession := newSessionForTest(unhooked)
+	unhookedSession.history.append([]byte("Bash(git push)\r\n  Do you want to proceed?\r\n"))
+	titledSession := newSessionForTest(titled)
+	titledSession.guest.observe([]byte("\x1b]2;codex — Action required\x07"))
+
+	server := &Server{
+		sessions: map[string]*session{
+			"tab-1": hookedSession,
+			"tab-2": unhookedSession,
+			"tab-3": titledSession,
+		},
+		agentStatuses: map[string]agentRuntime{
+			"tab-1": {AgentStatus: model.AgentStatus{Agent: model.AgentClaude, Phase: model.AgentPhaseIdle}},
+		},
+	}
+	want := map[string]model.AgentStatus{
+		// The hook says idle even though the screen still shows the prompt it
+		// answered.
+		"tab-1": {Agent: model.AgentClaude, Phase: model.AgentPhaseIdle},
+		"tab-2": {Agent: model.AgentClaude, Phase: model.AgentPhaseWaitingApproval},
+		"tab-3": {Agent: model.AgentCodex, Phase: model.AgentPhaseWaitingApproval},
+	}
+	if got := server.agentStatusesSnapshot(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("agentStatusesSnapshot() = %#v, want %#v", got, want)
+	}
+}
+
+// A tab whose agent has drawn nothing recognisable keeps the unknown phase
+// rather than being guessed into a state it is not in.
+func TestAgentStatusLeavesAnUnreadableScreenUnknown(t *testing.T) {
+	terminal := new(os.File)
+	previousGroup := foregroundProcessGroup
+	previousList := runProcessList
+	foregroundProcessGroup = func(*os.File) (int, error) { return 101, nil }
+	runProcessList = func(context.Context) ([]byte, error) { return []byte("101 claude\n"), nil }
+	t.Cleanup(func() {
+		foregroundProcessGroup = previousGroup
+		runProcessList = previousList
+	})
+
+	value := newSessionForTest(terminal)
+	value.history.append([]byte("go: downloading github.com/example/module v1.2.3\r\n"))
+	server := &Server{
+		sessions:      map[string]*session{"tab-1": value},
+		agentStatuses: map[string]agentRuntime{},
+	}
+	want := map[string]model.AgentStatus{"tab-1": {Agent: model.AgentClaude, Phase: model.AgentPhaseUnknown}}
+	if got := server.agentStatusesSnapshot(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("agentStatusesSnapshot() = %#v, want %#v", got, want)
+	}
+}
+
 func TestAgentStatusUsesForegroundProcessAsPresenceAuthority(t *testing.T) {
 	claudePTY := new(os.File)
 	previousGroup := foregroundProcessGroup
@@ -92,8 +172,8 @@ func TestAgentStatusUsesForegroundProcessAsPresenceAuthority(t *testing.T) {
 
 	server := &Server{
 		sessions: map[string]*session{
-			"tab-1": {pty: claudePTY},
-			"tab-2": {pty: new(os.File)},
+			"tab-1": newSessionForTest(claudePTY),
+			"tab-2": newSessionForTest(new(os.File)),
 		},
 		agentStatuses: map[string]agentRuntime{
 			"tab-1": {AgentStatus: model.AgentStatus{Agent: model.AgentClaude, Phase: model.AgentPhaseWaitingInput}},

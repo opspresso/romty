@@ -225,7 +225,7 @@ func TestModeTrackerOutlivesTheRecording(t *testing.T) {
 	maxHistoryBytes = 1024
 	t.Cleanup(func() { maxHistoryBytes = previous })
 
-	value := newSessionForTest()
+	value := newSessionForTest(nil)
 	value.guest.observe([]byte("\x1b[?2004h\x1b="))
 	value.history.append([]byte("\x1b[?2004h\x1b="))
 	// Enough output to push the mode out of the recording entirely.

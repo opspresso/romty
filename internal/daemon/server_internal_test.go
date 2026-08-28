@@ -19,9 +19,13 @@ import (
 	"github.com/opspresso/romty/internal/protocol"
 )
 
-// newSessionForTest builds the parts of a session that do not need a PTY.
-func newSessionForTest() *session {
+// newSessionForTest builds the parts of a session that do not need a live PTY.
+// Every test session goes through it so none is left half-built: the daemon
+// reads a session's guest tracker and recording whether or not the test that
+// made it cared about either.
+func newSessionForTest(terminal *os.File) *session {
 	return &session{
+		pty:     terminal,
 		guest:   newGuestTracker(),
 		clients: make(map[net.Conn]*attachment),
 	}
@@ -270,7 +274,7 @@ func waitForConnections(t *testing.T, server *Server, want int, message string) 
 }
 
 func TestAttachLimitRejectsOnlyExcessTerminalClients(t *testing.T) {
-	value := newSessionForTest()
+	value := newSessionForTest(nil)
 	server := &Server{
 		sessions:    map[string]*session{"tab-1": value},
 		logger:      log.New(io.Discard, "", 0),
@@ -338,7 +342,7 @@ func TestAttachDoesNotStallTheSessionForOtherClients(t *testing.T) {
 	defer slow.Close()
 	defer unread.Close()
 
-	value := newSessionForTest()
+	value := newSessionForTest(nil)
 	value.history.append(bytes.Repeat([]byte("history\r\n"), 4096))
 
 	attached := make(chan error, 1)
@@ -372,7 +376,7 @@ func TestSlowLiveClientDoesNotStallAnotherClient(t *testing.T) {
 	maxLiveClientQueueBytes = 64
 	t.Cleanup(func() { maxLiveClientQueueBytes = previous })
 
-	value := newSessionForTest()
+	value := newSessionForTest(nil)
 	slow, unread := net.Pipe()
 	healthy, reader := net.Pipe()
 	t.Cleanup(func() {
@@ -422,7 +426,7 @@ func TestForegroundClientOwnsTerminalSize(t *testing.T) {
 	second, secondPeer := net.Pipe()
 	defer firstPeer.Close()
 	defer secondPeer.Close()
-	value := newSessionForTest()
+	value := newSessionForTest(nil)
 	value.pty = terminal
 	value.clients[first] = &attachment{clientID: "first", columns: 80, rows: 24, activity: 1}
 	value.clients[second] = &attachment{clientID: "second", columns: 120, rows: 40, activity: 2}
@@ -462,7 +466,7 @@ func TestAttachAnnouncesTheInitialReplayBoundary(t *testing.T) {
 	client, daemonSide := net.Pipe()
 	defer daemonSide.Close()
 
-	value := newSessionForTest()
+	value := newSessionForTest(nil)
 	value.history.append([]byte("before\x1b[6nafter"))
 
 	announced := make(chan int, 1)
@@ -494,7 +498,7 @@ func TestAttachKeepsLegacyReplayOnTheTerminalStream(t *testing.T) {
 	client, daemonSide := net.Pipe()
 	defer daemonSide.Close()
 
-	value := newSessionForTest()
+	value := newSessionForTest(nil)
 	value.history.append([]byte("legacy history"))
 	server := &Server{
 		sessions: map[string]*session{"tab-1": value},
@@ -534,7 +538,7 @@ func TestAttachInfersCapabilitiesForAPreNegotiationClient(t *testing.T) {
 	client, daemonSide := net.Pipe()
 	defer daemonSide.Close()
 
-	value := newSessionForTest()
+	value := newSessionForTest(nil)
 	value.columns, value.rows = 90, 25
 	value.history.append([]byte("version five history"))
 	server := &Server{
@@ -579,7 +583,7 @@ func TestAttachHandsOffToLiveOutputInOrder(t *testing.T) {
 	client, daemonSide := net.Pipe()
 	defer daemonSide.Close()
 
-	value := newSessionForTest()
+	value := newSessionForTest(nil)
 	value.history.append(bytes.Repeat([]byte("RECORDED"), 8192))
 
 	attached := make(chan error, 1)
@@ -762,7 +766,7 @@ func TestAttachSurvivesAClientThatReadsSteadilyButSlowly(t *testing.T) {
 	client, daemonSide := net.Pipe()
 	defer daemonSide.Close()
 
-	value := newSessionForTest()
+	value := newSessionForTest(nil)
 	value.history.append(bytes.Repeat([]byte("R"), maxHistoryBytes))
 
 	attached := make(chan error, 1)
@@ -795,7 +799,7 @@ func TestAttachCopiesTheRecordingItReplays(t *testing.T) {
 	client, daemonSide := net.Pipe()
 	defer daemonSide.Close()
 
-	value := newSessionForTest()
+	value := newSessionForTest(nil)
 	value.history.append(bytes.Repeat([]byte("O"), maxHistoryBytes))
 
 	attached := make(chan error, 1)
@@ -911,7 +915,7 @@ func TestAttachRestoresModesTheRecordingNoLongerHolds(t *testing.T) {
 	maxHistoryBytes = 2048
 	t.Cleanup(func() { maxHistoryBytes = previous })
 
-	value := newSessionForTest()
+	value := newSessionForTest(nil)
 	value.broadcast([]byte("\x1b[?2004h\x1b[?1h"))
 	// Enough output to push those modes out of the recording entirely.
 	value.broadcast([]byte(strings.Repeat("x", maxHistoryBytes*2)))

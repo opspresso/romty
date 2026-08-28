@@ -385,6 +385,15 @@ func (s *session) mostRecentClient() net.Conn {
 	return selected
 }
 
+// recentOutput is the end of the recording together with the window title the
+// guest last set: the two things a phase can be read back from when no hook
+// has reported one.
+func (s *session) recentOutput(count int) ([]byte, string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.history.tail(count), s.guest.title
+}
+
 func (s *session) write(data []byte) error {
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()

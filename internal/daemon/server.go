@@ -952,8 +952,15 @@ func (s *Server) agentStatusesSnapshot() map[string]model.AgentStatus {
 	for tabID, session := range s.sessions {
 		sessions[tabID] = session
 	}
+	reported := make(map[string]model.Agent, len(s.agentStatuses))
+	for tabID, runtime := range s.agentStatuses {
+		reported[tabID] = runtime.Agent
+	}
 	s.mu.Unlock()
+
 	agents := sessionAgents(sessions)
+	inferred := inferPhases(sessions, agents, reported)
+
 	result := make(map[string]model.AgentStatus, len(agents))
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -962,12 +969,42 @@ func (s *Server) agentStatusesSnapshot() map[string]model.AgentStatus {
 			continue
 		}
 		status := model.AgentStatus{Agent: agent, Phase: model.AgentPhaseUnknown}
-		if runtime, ok := s.agentStatuses[tabID]; ok && runtime.Agent == agent {
+		switch runtime, ok := s.agentStatuses[tabID]; {
+		case ok && runtime.Agent == agent:
 			status.Phase = runtime.Phase
+		default:
+			if phase, ok := inferred[tabID]; ok {
+				status.Phase = phase
+			}
 		}
 		result[tabID] = status
 	}
 	return result
+}
+
+// inferPhases reads a phase back from what each agent drew, for the tabs no
+// hook has reported. A hook is the agent's own account of itself and always
+// wins, so the guess is neither made nor paid for where one has spoken.
+func inferPhases(
+	sessions map[string]*session,
+	agents map[string]model.Agent,
+	reported map[string]model.Agent,
+) map[string]model.AgentPhase {
+	phases := make(map[string]model.AgentPhase)
+	for tabID, agent := range agents {
+		if reported[tabID] == agent {
+			continue
+		}
+		value, ok := sessions[tabID]
+		if !ok {
+			continue
+		}
+		output, title := value.recentOutput(phaseHintBytes)
+		if phase, ok := inferAgentPhase(output, title); ok {
+			phases[tabID] = phase
+		}
+	}
+	return phases
 }
 
 func canonicalDirectory(path string) (string, error) {

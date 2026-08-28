@@ -52,16 +52,10 @@ func TestSessionDrainsPTYBeforeReportingExit(t *testing.T) {
 		t.Fatalf("Start() error = %v", err)
 	}
 	exited := make(chan struct{})
-	value := &session{
-		pty:      reader,
-		command:  command,
-		readDone: make(chan struct{}),
-		onExit: func() {
-			close(exited)
-		},
-		guest:   newGuestTracker(),
-		clients: make(map[net.Conn]*attachment),
-	}
+	value := newSessionForTest(reader)
+	value.command = command
+	value.readDone = make(chan struct{})
+	value.onExit = func() { close(exited) }
 	go value.read()
 	go value.wait()
 
@@ -107,16 +101,15 @@ func TestSessionReportsExitBeforeClosingClients(t *testing.T) {
 			close(releaseExit)
 		}
 	}()
-	value := &session{
-		command:  command,
-		readDone: readDone,
-		exitDone: exitDone,
-		onExit: func() {
-			close(exitStarted)
-			<-releaseExit
-		},
-		clients: map[net.Conn]*attachment{serverConnection: {live: true}},
+	value := newSessionForTest(nil)
+	value.command = command
+	value.readDone = readDone
+	value.exitDone = exitDone
+	value.onExit = func() {
+		close(exitStarted)
+		<-releaseExit
 	}
+	value.clients = map[net.Conn]*attachment{serverConnection: {live: true}}
 	go value.wait()
 
 	select {
