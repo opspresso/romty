@@ -313,6 +313,8 @@ func (s *Server) snapshot() model.Snapshot {
 		status := statuses[value.Tabs[index].ID]
 		value.Tabs[index].Agent = status.Agent
 		value.Tabs[index].AgentPhase = status.Phase
+		value.Tabs[index].AgentContextTokens = status.ContextTokens
+		value.Tabs[index].AgentCostUSD = status.CostUSD
 	}
 
 	result := model.Snapshot{Revision: revision, Roots: make([]model.RootView, 0, len(value.Roots))}

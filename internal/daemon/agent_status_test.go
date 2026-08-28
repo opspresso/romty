@@ -182,7 +182,8 @@ func TestAgentStatusReportsTheLedgerOnlyForAHookedSession(t *testing.T) {
 		},
 		usage: usage.NewReader(),
 	}
-	server.value.Workspaces = []model.Workspace{{ID: "workspace-1", Path: workspace}}
+	server.value.Roots = []model.Root{{ID: "root-1", Path: workspace}}
+	server.value.Workspaces = []model.Workspace{{ID: "workspace-1", RootID: "root-1", Path: workspace}}
 	server.value.Tabs = []model.Tab{
 		{ID: "tab-1", WorkspaceID: "workspace-1"},
 		{ID: "tab-2", WorkspaceID: "workspace-1"},
@@ -198,6 +199,16 @@ func TestAgentStatusReportsTheLedgerOnlyForAHookedSession(t *testing.T) {
 	}
 	if got := server.agentStatusesSnapshot(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("agentStatusesSnapshot() = %#v, want %#v", got, want)
+	}
+
+	snapshot := server.snapshot()
+	if len(snapshot.Roots) != 1 || len(snapshot.Roots[0].Tabs) != 2 {
+		t.Fatalf("snapshot tabs = %#v, want the two root tabs", snapshot.Roots)
+	}
+	got := snapshot.Roots[0].Tabs[0]
+	if got.AgentContextTokens != 2+1288+342813 || got.AgentCostUSD != 1.25 {
+		t.Fatalf("snapshot ledger = (%d, %v), want (%d, 1.25)",
+			got.AgentContextTokens, got.AgentCostUSD, 2+1288+342813)
 	}
 }
 
