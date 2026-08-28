@@ -62,6 +62,14 @@ func (m dashboard) toggleGitDiffView() (tea.Model, tea.Cmd) {
 		m.setError(gitError, "selected workspace is not a Git repository")
 		return m, nil
 	}
+	return m.openGitDiffView(target)
+}
+
+func (m dashboard) openGitDiffView(target navItem) (tea.Model, tea.Cmd) {
+	if !target.hasGit {
+		m.setError(gitError, "selected workspace is not a Git repository")
+		return m, nil
+	}
 	m.stopScrollback()
 	m.gitDiff = gitDiffView{
 		active: true, target: target.workspace, request: m.gitDiff.request,

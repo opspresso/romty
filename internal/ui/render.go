@@ -157,7 +157,9 @@ func (m dashboard) render() string {
 	default:
 		lines = m.renderPanes(view.leftWidth, view.rightWidth, view.bodyHeight)
 	}
-	if m.modal != noModal {
+	if m.modal == workspaceActionsModal {
+		lines = m.overlayWorkspaceActions(lines, width, view.bodyHeight)
+	} else if m.modal != noModal {
 		lines = m.overlayModal(width, view.bodyHeight)
 	}
 	lines = append(lines, m.renderStatus(width, view.bodyHeight)...)
@@ -221,6 +223,8 @@ func (m dashboard) renderStatus(width, bodyHeight int) []string {
 		status = truncate(label.Render(title)+" "+text.Render(displayText(m.errorMessage)), width)
 	case m.tabPending || m.restorePending:
 		status = m.renderActivityStatus("OPENING", "preparing terminal", width)
+	case m.tabClosePending != "":
+		status = m.renderActivityStatus("CLOSING", "terminating terminal", width)
 	case m.modal == helpModal:
 		shortcuts := []shortcut{{key: "Esc", description: "close"}}
 		if m.maximumHelpOffset(bodyHeight) > 0 {
@@ -236,6 +240,12 @@ func (m dashboard) renderStatus(width, bodyHeight int) []string {
 			shortcut{key: "d/b", description: "sounds"},
 			shortcut{key: "s", description: "test"},
 			shortcut{key: "Esc", description: "close"},
+		)
+	case m.modal == workspaceActionsModal:
+		status = renderShortcuts(m.styles, width,
+			shortcut{key: "↑/↓", description: "select"},
+			shortcut{key: "Enter", description: "run"},
+			shortcut{key: "Esc", description: "cancel"},
 		)
 	case m.modal == gitActionsModal && m.gitActionPending:
 		status = m.renderActivityStatus("RUNNING", m.gitAction.label()+" in "+displayText(m.gitActionTarget.Name), width)
@@ -492,10 +502,13 @@ func (m dashboard) renderTerminal(width int) []string {
 		tabs = m.navigationTabs()
 	}
 	hover := -1
+	closeHover := -1
 	if m.hover.kind == hoverTab {
 		hover = m.hover.index
+	} else if m.hover.kind == hoverTabClose {
+		closeHover = m.hover.index
 	}
-	lines := renderTabBarWithHover(m.styles, tabs, m.tabIndex, hover, width)
+	lines := renderTabBarWithHover(m.styles, tabs, m.tabIndex, hover, closeHover, width)
 	if m.terminal != nil {
 		return append(lines, m.terminal.renderViewport(m.scrollOffset)...)
 	}
@@ -509,15 +522,15 @@ func (m dashboard) renderTerminal(width int) []string {
 }
 
 func renderTabBar(styles *uiStyles, tabs []model.Tab, active, width int) []string {
-	return renderTabBarWithHover(styles, tabs, active, -1, width)
+	return renderTabBarWithHover(styles, tabs, active, -1, -1, width)
 }
 
-func renderTabBarWithHover(styles *uiStyles, tabs []model.Tab, active, hover, width int) []string {
+func renderTabBarWithHover(styles *uiStyles, tabs []model.Tab, active, hover, closeHover, width int) []string {
 	labels := make([]string, 0, len(tabs)+1)
 	for _, tab := range tabs {
-		labels = append(labels, " "+displayText(tab.Name)+" ")
+		labels = append(labels, "  "+displayText(tab.Name)+"  × ")
 	}
-	labels = append(labels, " + ")
+	labels = append(labels, "  +  ")
 
 	var tabsLine strings.Builder
 	var railLine strings.Builder
@@ -537,7 +550,12 @@ func renderTabBarWithHover(styles *uiStyles, tabs []model.Tab, active, hover, wi
 			style = styles.interactiveHover
 			railStyle = styles.dividerActive
 		}
-		tabsLine.WriteString(style.Render(label))
+		if index < len(tabs) && index == closeHover {
+			body := strings.TrimSuffix(label, "× ")
+			tabsLine.WriteString(style.Render(body) + styles.interactiveHover.Render("× "))
+		} else {
+			tabsLine.WriteString(style.Render(label))
+		}
 		railLine.WriteString(railStyle.Render(strings.Repeat(railCharacter, lipgloss.Width(label))))
 	}
 	remaining := width - lipgloss.Width(railLine.String())

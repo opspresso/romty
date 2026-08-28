@@ -40,6 +40,7 @@ type fakeBackend struct {
 	createdColumns         uint16
 	createdRows            uint16
 	createCount            int
+	closedTabID            string
 	addedPath              string
 	removedRootID          string
 	removedWorkspaceRootID string
@@ -206,6 +207,32 @@ func (f *fakeBackend) CreateTab(workspaceID string, columns, rows uint16) (model
 		}
 	}
 	return f.createdTab, nil
+}
+
+func (f *fakeBackend) CloseTab(tabID string) (model.Snapshot, error) {
+	f.closedTabID = tabID
+	if err := f.failure("CloseTab"); err != nil {
+		return model.Snapshot{}, err
+	}
+	for rootIndex := range f.snapshot.Roots {
+		root := &f.snapshot.Roots[rootIndex]
+		root.Tabs = removeTabForTest(root.Tabs, tabID)
+		for directoryIndex := range root.Directories {
+			directory := &root.Directories[directoryIndex]
+			directory.Tabs = removeTabForTest(directory.Tabs, tabID)
+		}
+	}
+	return f.snapshot, nil
+}
+
+func removeTabForTest(tabs []model.Tab, tabID string) []model.Tab {
+	result := make([]model.Tab, 0, len(tabs))
+	for _, tab := range tabs {
+		if tab.ID != tabID {
+			result = append(result, tab)
+		}
+	}
+	return result
 }
 
 func (f *fakeBackend) OpenTerminal(tabID string) (io.ReadWriteCloser, []byte, error) {
@@ -871,7 +898,7 @@ func TestDashboardMouseSelectsWorkspaceAndTab(t *testing.T) {
 	value.selectedPath = workspace.Path
 	value.focus = terminalPane
 	rightX := value.dimensions().leftWidth + value.dimensions().separator
-	updated, command = value.Update(tea.MouseClickMsg{X: rightX + 5, Y: 0, Button: tea.MouseLeft})
+	updated, command = value.Update(tea.MouseClickMsg{X: rightX + 9, Y: 0, Button: tea.MouseLeft})
 	value = updated.(dashboard)
 	if value.tabIndex != 1 || command == nil {
 		t.Fatalf("tab click = (index %d, command %v), want second tab opened", value.tabIndex, command)
@@ -999,7 +1026,14 @@ func TestDashboardHighlightsMouseTargetsOnHover(t *testing.T) {
 
 	origin := value.dimensions().leftWidth + value.dimensions().separator
 	before = value.render()
-	updated, _ = value.Update(tea.MouseMotionMsg{X: origin + 5, Y: 0})
+	updated, _ = value.Update(tea.MouseMotionMsg{X: origin + tabCloseLocalX([]model.Tab{tab}, 0), Y: 0})
+	value = updated.(dashboard)
+	if value.hover.kind != hoverTabClose || value.hover.index != 0 || value.render() == before {
+		t.Fatalf("tab close hover = %#v", value.hover)
+	}
+
+	before = value.render()
+	updated, _ = value.Update(tea.MouseMotionMsg{X: origin + 9, Y: 0})
 	value = updated.(dashboard)
 	if value.hover.kind != hoverTab || value.hover.index != 1 || value.render() == before {
 		t.Fatalf("tab hover = %#v", value.hover)
@@ -2780,8 +2814,13 @@ func TestDashboardShowsAndRemovesAnUnreadableRoot(t *testing.T) {
 	value.setNavigation(0)
 	updated, command := value.Update(key(tea.KeyF8, ""))
 	value = updated.(dashboard)
+	if value.modal != workspaceActionsModal || command != nil {
+		t.Fatalf("F8 = (modal %v, command %v), want workspace actions", value.modal, command)
+	}
+	updated, command = value.Update(key(tea.KeyEnter, ""))
+	value = updated.(dashboard)
 	if value.modal != removeSelectionModal || command != nil {
-		t.Fatalf("F8 = (modal %v, command %v), want a confirmation first", value.modal, command)
+		t.Fatalf("Forget root = (modal %v, command %v), want a confirmation", value.modal, command)
 	}
 	body := ansi.Strip(strings.Join(value.renderModal(value.width, value.dimensions().bodyHeight), "\n"))
 	if !strings.Contains(body, "gone") || !strings.Contains(body, "directory stays on disk") ||
@@ -2909,8 +2948,8 @@ func TestDashboardLeavesTheHighFunctionKeysToTheShell(t *testing.T) {
 	value.focus = leftPane
 	updated, _ := value.Update(key(tea.KeyF8, ""))
 	value = updated.(dashboard)
-	if value.modal != removeSelectionModal {
-		t.Fatalf("F8 in the workspace = modal %v, want the removal confirmation", value.modal)
+	if value.modal != workspaceActionsModal {
+		t.Fatalf("F8 in the workspace = modal %v, want workspace actions", value.modal)
 	}
 	updated, _ = value.Update(key(tea.KeyEscape, ""))
 	value = updated.(dashboard)
@@ -2928,10 +2967,10 @@ func TestDashboardCancelsRemovingARoot(t *testing.T) {
 	backend := &fakeBackend{snapshot: snapshot}
 	value := newDashboard(backend, snapshot)
 
-	updated, _ := value.Update(key(tea.KeyF8, ""))
+	updated, _ := value.confirmRemoveSelection()
 	value = updated.(dashboard)
 	if value.modal != removeSelectionModal {
-		t.Fatalf("F8 modal = %v, want the confirmation", value.modal)
+		t.Fatalf("remove modal = %v, want the confirmation", value.modal)
 	}
 	updated, command := value.Update(key(tea.KeyEscape, ""))
 	value = updated.(dashboard)
@@ -2943,19 +2982,19 @@ func TestDashboardCancelsRemovingARoot(t *testing.T) {
 	}
 }
 
-// F8 removes the root the cursor is on, not the first one in the tree.
+// Removal applies to the root the cursor is on, not the first one in the tree.
 func TestDashboardRemovesTheSelectedRoot(t *testing.T) {
 	snapshot := twoRootSnapshot()
 	backend := &fakeBackend{snapshot: snapshot}
 	value := newDashboard(backend, snapshot)
 	value.setNavigation(1)
 
-	updated, _ := value.Update(key(tea.KeyF8, ""))
+	updated, _ := value.confirmRemoveSelection()
 	value = updated.(dashboard)
 	updated, command := value.Update(key(tea.KeyEnter, ""))
 	value = updated.(dashboard)
 	if command == nil {
-		t.Fatal("F8 then Enter produced no removal command")
+		t.Fatal("confirmation then Enter produced no removal command")
 	}
 	value.Update(command())
 	if backend.removedRootID != "root-2" {
@@ -2974,10 +3013,10 @@ func TestDashboardDeletesTheSelectedWorkspace(t *testing.T) {
 	value.width, value.height = 120, 40
 	value.setNavigation(1)
 
-	updated, command := value.Update(key(tea.KeyF8, ""))
+	updated, command := value.confirmRemoveSelection()
 	value = updated.(dashboard)
 	if command != nil || value.modal != removeSelectionModal {
-		t.Fatalf("F8 = (command %v, modal %v), want a confirmation", command, value.modal)
+		t.Fatalf("remove = (command %v, modal %v), want a confirmation", command, value.modal)
 	}
 	body := ansi.Strip(strings.Join(value.renderModal(value.width, value.dimensions().bodyHeight), "\n"))
 	if !strings.Contains(body, "Delete alpha?") || !strings.Contains(body, "permanently deletes all contents") ||
@@ -3025,7 +3064,7 @@ func TestDashboardDeletesTheWorkspaceTheConfirmationNamed(t *testing.T) {
 		t.Fatalf("the cursor starts on root %q, want root-1", item.root.ID)
 	}
 
-	updated, _ := value.Update(key(tea.KeyF8, ""))
+	updated, _ := value.confirmRemoveSelection()
 	value = updated.(dashboard)
 
 	// alpha is deleted on disk, so the row the cursor remembered is gone and
@@ -3057,7 +3096,7 @@ func TestDashboardForgetsTheRootTheConfirmationNamed(t *testing.T) {
 	backend := &fakeBackend{snapshot: snapshot}
 	value := newDashboard(backend, snapshot)
 
-	updated, _ := value.Update(key(tea.KeyF8, ""))
+	updated, _ := value.confirmRemoveSelection()
 	value = updated.(dashboard)
 	updated, _ = value.Update(snapshotMsg{value: model.Snapshot{Roots: snapshot.Roots[1:]}})
 	value = updated.(dashboard)
@@ -3591,7 +3630,7 @@ func TestDashboardMovesWorkspaceAndTabCursorBeforeConfirming(t *testing.T) {
 	if command != nil || value.navIndex != 2 || value.terminal.id != firstTab.ID {
 		t.Fatalf("workspace cursor move = (command %v, index %d, terminal %q)", command, value.navIndex, value.terminal.id)
 	}
-	if rendered := value.render(); !strings.Contains(rendered, value.styles.tabSelected.Render(" two ")) {
+	if rendered := value.render(); !strings.Contains(rendered, value.styles.tabSelected.Render("  two  × ")) {
 		t.Fatalf("candidate workspace tabs are not visible:\n%s", rendered)
 	}
 
@@ -4065,7 +4104,7 @@ func TestDashboardSelectsPlusAndCreatesTabOnEnter(t *testing.T) {
 	if command != nil || value.tabIndex != len(tabs) {
 		t.Fatalf("left from first tab = (command %v, index %d), want + index %d", command, value.tabIndex, len(tabs))
 	}
-	if rendered := value.render(); !strings.Contains(rendered, value.styles.tabSelected.Render(" + ")) {
+	if rendered := value.render(); !strings.Contains(rendered, value.styles.tabSelected.Render("  +  ")) {
 		t.Fatalf("+ cursor is not visible:\n%s", rendered)
 	}
 
@@ -4138,7 +4177,7 @@ func TestDashboardHighlightsNavigationAndShowsOpenTabs(t *testing.T) {
 	if strings.Contains(plain, "2 exited") {
 		t.Fatalf("exited tab was included in terminal tabs:\n%s", rendered)
 	}
-	if !strings.Contains(rendered, value.styles.tabSelected.Render(" 1 ")) || !strings.Contains(rendered, value.styles.tab.Render(" 3 ")) {
+	if !strings.Contains(rendered, value.styles.tabSelected.Render("  1  × ")) || !strings.Contains(rendered, value.styles.tab.Render("  3  × ")) {
 		t.Fatalf("terminal tabs are not styled as active and inactive tabs:\n%s", rendered)
 	}
 	status := value.styles.shortcutKey.Render(" F2 ") + " " + value.styles.shortcutDescription.Render("add root")

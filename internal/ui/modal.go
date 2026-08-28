@@ -41,12 +41,19 @@ func (m dashboard) handleModalKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 	switch m.modal {
 	case browseModal:
 		return m.handleBrowseKey(message)
+	case workspaceActionsModal:
+		return m.handleWorkspaceActionKey(message)
 	case gitActionsModal:
 		if m.gitActionComplete {
 			page := max(modalCapacity(m.dimensions().bodyHeight)-3, 1)
 			switch message.String() {
 			case "enter":
-				return m.resetGitActionResult(), nil
+				m = m.resetGitActionResult()
+				if m.gitActionReturn == workspaceActionsModal {
+					m.modal = workspaceActionsModal
+					m.gitActionReturn = noModal
+				}
+				return m, nil
 			case "up", "k":
 				return m.scrollGitAction(-1)
 			case "down", "j":

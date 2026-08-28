@@ -93,6 +93,8 @@ func checkClientCapability(request protocol.Request) error {
 		required = protocol.CapabilityAgentStatus
 	case protocol.ActionRemoveWorkspace:
 		required = protocol.CapabilityRemoveWorkspace
+	case protocol.ActionCloseTab:
+		required = protocol.CapabilityCloseTab
 	}
 	if required == "" || protocol.HasCapability(requestCapabilities(request), required) {
 		return nil
@@ -176,6 +178,8 @@ func (s *Server) dispatch(request protocol.Request) protocol.Response {
 		return s.ensureWorkspace(request.RootID, request.Path)
 	case protocol.ActionCreateTab:
 		return s.createTab(request)
+	case protocol.ActionCloseTab:
+		return s.closeTab(request.TabID)
 	case protocol.ActionResize:
 		return s.resize(request.TabID, request.ClientID, request.Columns, request.Rows)
 	default:
@@ -190,7 +194,7 @@ func (s *Server) beginRequest(action string) (func(), bool) {
 		return nil, false
 	}
 	switch action {
-	case protocol.ActionCreateTab, protocol.ActionResize:
+	case protocol.ActionCreateTab, protocol.ActionCloseTab, protocol.ActionResize:
 		s.mutations.Add(1)
 		return s.mutations.Done, true
 	default:

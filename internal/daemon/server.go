@@ -283,6 +283,20 @@ func (s *Server) sessionExited(tabID string) {
 	}
 }
 
+func (s *Server) closeTab(tabID string) protocol.Response {
+	if tabID == "" {
+		return protocol.Response{Error: "tab is required"}
+	}
+	s.mu.Lock()
+	value, ok := s.sessions[tabID]
+	s.mu.Unlock()
+	if !ok {
+		return protocol.Response{Error: "running terminal session not found"}
+	}
+	value.close()
+	return s.snapshotResponse()
+}
+
 func (s *Server) agents() map[string]model.Agent {
 	statuses := s.agentStatusesSnapshot()
 	result := make(map[string]model.Agent, len(statuses))

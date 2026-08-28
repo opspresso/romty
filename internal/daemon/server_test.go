@@ -455,6 +455,56 @@ func waitForTabCount(t *testing.T, backend *client.Client, workspaceID string, c
 	t.Fatalf("workspace %q tab count did not become %d", workspaceID, count)
 }
 
+func TestCloseTabTerminatesOnlyTheSelectedSession(t *testing.T) {
+	socket, cancel, done := serveForTest(t)
+	t.Cleanup(func() {
+		cancel()
+		if err := <-done; err != nil {
+			t.Errorf("Serve() error = %v", err)
+		}
+	})
+	root := t.TempDir()
+	workspacePath := filepath.Join(root, "alpha")
+	if err := os.Mkdir(workspacePath, 0o755); err != nil {
+		t.Fatalf("Mkdir() error = %v", err)
+	}
+	backend := client.New(socket)
+	testutil.WaitForDaemon(t, backend)
+	snapshot, err := backend.AddRoot(root)
+	if err != nil {
+		t.Fatalf("AddRoot() error = %v", err)
+	}
+	workspace, err := backend.EnsureWorkspace(snapshot.Roots[0].Root.ID, workspacePath)
+	if err != nil {
+		t.Fatalf("EnsureWorkspace() error = %v", err)
+	}
+	first, err := backend.CreateTab(workspace.ID, 80, 24)
+	if err != nil {
+		t.Fatalf("CreateTab() first error = %v", err)
+	}
+	second, err := backend.CreateTab(workspace.ID, 80, 24)
+	if err != nil {
+		t.Fatalf("CreateTab() second error = %v", err)
+	}
+
+	snapshot, err = backend.CloseTab(first.ID)
+	if err != nil {
+		t.Fatalf("CloseTab() error = %v", err)
+	}
+	if len(snapshot.Roots[0].Directories) != 1 || len(snapshot.Roots[0].Directories[0].Tabs) != 1 ||
+		snapshot.Roots[0].Directories[0].Tabs[0].ID != second.ID {
+		t.Fatalf("tabs after close = %#v, want only %q", snapshot.Roots[0].Directories, second.ID)
+	}
+	if _, _, err := backend.OpenTerminal(first.ID); err == nil {
+		t.Fatal("closed tab still accepts terminal attachments")
+	}
+	stream, _, err := backend.OpenTerminal(second.ID)
+	if err != nil {
+		t.Fatalf("OpenTerminal() remaining tab error = %v", err)
+	}
+	stream.Close()
+}
+
 func waitForRootDirectoryCount(t *testing.T, backend *client.Client, count int) model.Snapshot {
 	t.Helper()
 	deadline := time.Now().Add(3 * time.Second)
@@ -990,7 +1040,7 @@ func TestServerRefusesAClientOutsideItsProtocolRange(t *testing.T) {
 	if response.Error == "" {
 		t.Fatal("snapshot from a mismatched client was accepted")
 	}
-	for _, want := range []string{"protocol", "selected 6", protocol.Remedy} {
+	for _, want := range []string{"protocol", fmt.Sprintf("selected %d", protocol.Version+1), protocol.Remedy} {
 		if !strings.Contains(response.Error, want) {
 			t.Fatalf("error = %q, want it to mention %q", response.Error, want)
 		}
@@ -1047,6 +1097,7 @@ func TestServerRefusesAnActionTheSelectedProtocolPredates(t *testing.T) {
 		{action: "agents", version: 1, capability: protocol.CapabilityAgents},
 		{action: "remove_workspace", version: 3, capability: protocol.CapabilityRemoveWorkspace},
 		{action: "agent_statuses", version: 4, capability: protocol.CapabilityAgentStatus},
+		{action: "close_tab", version: 5, capability: protocol.CapabilityCloseTab},
 	} {
 		response := speakRaw(t, socket, map[string]any{
 			"action":       testCase.action,

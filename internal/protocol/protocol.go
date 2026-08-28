@@ -14,7 +14,7 @@ import (
 // speak. Ping advertises the range so peers choose the highest overlap instead
 // of requiring the same build on both sides.
 const (
-	Version        = 5
+	Version        = 6
 	MinimumVersion = 1
 )
 
@@ -24,6 +24,7 @@ const (
 	CapabilityRemoveWorkspace  = "remove_workspace"
 	CapabilityReplayBoundary   = "replay_boundary"
 	CapabilityAgentStatus      = "agent_status"
+	CapabilityCloseTab         = "close_tab"
 )
 
 var capabilities = []struct {
@@ -35,6 +36,7 @@ var capabilities = []struct {
 	{name: CapabilityRemoveWorkspace, since: 4},
 	{name: CapabilityReplayBoundary, since: 5},
 	{name: CapabilityAgentStatus, since: 5},
+	{name: CapabilityCloseTab, since: 6},
 }
 
 const (
@@ -48,6 +50,7 @@ const (
 	ActionRemoveWorkspace = "remove_workspace"
 	ActionEnsureWorkspace = "ensure_workspace"
 	ActionCreateTab       = "create_tab"
+	ActionCloseTab        = "close_tab"
 	ActionAttach          = "attach"
 	ActionResize          = "resize"
 	ActionShutdown        = "shutdown"
