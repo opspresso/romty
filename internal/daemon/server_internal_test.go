@@ -234,23 +234,14 @@ func TestServeLimitsActiveConnectionsAndRecoversCapacity(t *testing.T) {
 		}
 		time.Sleep(time.Millisecond)
 	}
-	for len(server.connections) != 0 {
-		if time.Now().After(deadline) {
-			t.Fatal("startup probe did not release capacity")
-		}
-		time.Sleep(time.Millisecond)
-	}
+	waitForConnections(t, server, 0, "startup probe did not release capacity")
+
 	silent, err := net.Dial("unix", socket)
 	if err != nil {
 		t.Fatalf("Dial() silent error = %v", err)
 	}
 	defer silent.Close()
-	for len(server.connections) != 1 {
-		if time.Now().After(deadline) {
-			t.Fatal("silent connection never occupied capacity")
-		}
-		time.Sleep(time.Millisecond)
-	}
+	waitForConnections(t, server, 1, "silent connection never occupied capacity")
 
 	rejected, err := net.Dial("unix", socket)
 	if err != nil {
@@ -263,9 +254,18 @@ func TestServeLimitsActiveConnectionsAndRecoversCapacity(t *testing.T) {
 	rejected.Close()
 
 	silent.Close()
-	for len(server.connections) != 0 {
+	waitForConnections(t, server, 0, "closed connection did not release capacity")
+}
+
+// waitForConnections gives every wait its own budget. One deadline shared by
+// the whole test is spent by whichever step the runner happened to be slow at,
+// and the step after it fails for a capacity change that had not happened yet.
+func waitForConnections(t *testing.T, server *Server, want int, message string) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for len(server.connections) != want {
 		if time.Now().After(deadline) {
-			t.Fatal("closed connection did not release capacity")
+			t.Fatalf("%s: %d active, want %d", message, len(server.connections), want)
 		}
 		time.Sleep(time.Millisecond)
 	}
