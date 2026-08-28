@@ -22,7 +22,7 @@ import (
 // newSessionForTest builds the parts of a session that do not need a PTY.
 func newSessionForTest() *session {
 	return &session{
-		modes:   newModeTracker(),
+		guest:   newGuestTracker(),
 		clients: make(map[net.Conn]*attachment),
 	}
 }

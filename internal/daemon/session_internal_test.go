@@ -59,7 +59,7 @@ func TestSessionDrainsPTYBeforeReportingExit(t *testing.T) {
 		onExit: func() {
 			close(exited)
 		},
-		modes:   newModeTracker(),
+		guest:   newGuestTracker(),
 		clients: make(map[net.Conn]*attachment),
 	}
 	go value.read()

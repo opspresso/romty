@@ -51,7 +51,7 @@ type session struct {
 	history recording
 	// modes survives the recording being trimmed, so a mode the guest set
 	// long ago is still restored to a reattaching client.
-	modes      *modeTracker
+	guest      *guestTracker
 	clients    map[net.Conn]*attachment
 	foreground net.Conn
 	activity   uint64
@@ -110,7 +110,7 @@ func startSession(id, directory, shell string, environment []string, columns, ro
 		onExit:   onExit,
 		readDone: make(chan struct{}),
 		exitDone: make(chan struct{}),
-		modes:    newModeTracker(),
+		guest:    newGuestTracker(),
 		clients:  make(map[net.Conn]*attachment),
 	}
 	go value.read()
@@ -171,7 +171,7 @@ func (s *session) wait() {
 
 func (s *session) broadcast(data []byte) {
 	s.mu.Lock()
-	s.modes.observe(data)
+	s.guest.observe(data)
 	s.history.append(data)
 	stalled := make([]net.Conn, 0)
 	for connection, attached := range s.clients {
@@ -234,7 +234,7 @@ func (s *session) attachClientReady(
 	// Copied, not aliased: the recording is a ring written in place, so a
 	// slice into it would be rewritten under the replay's feet.
 	recorded := s.history.bytes()
-	modes := s.modes.restore()
+	modes := s.guest.restore()
 	replayColumns, replayRows := s.columns, s.rows
 	s.activity++
 	attached := &attachment{
