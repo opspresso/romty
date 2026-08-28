@@ -222,23 +222,21 @@ func TestServeLimitsActiveConnectionsAndRecoversCapacity(t *testing.T) {
 	go func() { done <- server.Serve(ctx) }()
 	defer func() { cancel(); <-done }()
 
+	// The connection that proves the daemon is listening is the one that holds
+	// capacity. A separate probe would share the listen backlog with it, and
+	// the accept loop could spend the only slot on that probe — already closed,
+	// so it frees the slot again — and reject this one outright.
 	deadline := time.Now().Add(3 * time.Second)
+	var silent net.Conn
 	for {
-		probe, err := net.Dial("unix", socket)
+		silent, err = net.Dial("unix", socket)
 		if err == nil {
-			probe.Close()
 			break
 		}
 		if time.Now().After(deadline) {
 			t.Fatalf("could not reach daemon: %v", err)
 		}
 		time.Sleep(time.Millisecond)
-	}
-	waitForConnections(t, server, 0, "startup probe did not release capacity")
-
-	silent, err := net.Dial("unix", socket)
-	if err != nil {
-		t.Fatalf("Dial() silent error = %v", err)
 	}
 	defer silent.Close()
 	waitForConnections(t, server, 1, "silent connection never occupied capacity")
