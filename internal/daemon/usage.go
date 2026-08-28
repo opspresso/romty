@@ -1,9 +1,7 @@
 package daemon
 
 import (
-	"os"
-	"path/filepath"
-
+	"github.com/opspresso/romty/internal/agenthooks"
 	"github.com/opspresso/romty/internal/model"
 	"github.com/opspresso/romty/internal/usage"
 )
@@ -16,19 +14,15 @@ import (
 // one romty cannot tell which of a directory's transcripts belongs to which
 // tab, and naming the wrong one would show a number from another conversation.
 
-var userHomeDirectory = os.UserHomeDir
-
-// claudeConfigDirectory is where Claude Code keeps its transcripts, honouring
-// the same override the hook installer does.
+// claudeConfigDirectory is where Claude Code keeps its transcripts. The hook
+// installer already knows how to find a provider's directory, including the
+// environment variable that overrides it, so it is asked rather than copied.
 func claudeConfigDirectory() string {
-	if override := os.Getenv("CLAUDE_CONFIG_DIR"); override != "" {
-		return override
-	}
-	home, err := userHomeDirectory()
+	directory, err := agenthooks.ConfigDirectory(agenthooks.ProviderClaude)
 	if err != nil {
 		return ""
 	}
-	return filepath.Join(home, ".claude")
+	return directory
 }
 
 // sessionUsage reads the agent ledger for each tab whose hook reported a

@@ -253,3 +253,45 @@ func useReleaseBuild(t *testing.T) {
 	version.Value = "0.15.0"
 	t.Cleanup(func() { version.Value = original })
 }
+
+// The daemon reads a provider's transcripts out of the same directory the hook
+// settings live in. Two answers to "where is it" is two things to keep in step.
+func TestConfigDirectoryFollowsTheProviderOverride(t *testing.T) {
+	t.Setenv("CLAUDE_CONFIG_DIR", "/somewhere/else")
+	directory, err := ConfigDirectory(ProviderClaude)
+	if err != nil {
+		t.Fatalf("ConfigDirectory() error = %v", err)
+	}
+	if directory != "/somewhere/else" {
+		t.Fatalf("ConfigDirectory() = %q, want the override", directory)
+	}
+
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	previous := userHomeDirectory
+	userHomeDirectory = func() (string, error) { return "/home/example", nil }
+	t.Cleanup(func() { userHomeDirectory = previous })
+	directory, err = ConfigDirectory(ProviderClaude)
+	if err != nil {
+		t.Fatalf("ConfigDirectory() error = %v", err)
+	}
+	if directory != "/home/example/.claude" {
+		t.Fatalf("ConfigDirectory() = %q, want the default under home", directory)
+	}
+
+	// The settings file it installs sits inside the directory it reports.
+	value, ok := findDefinition(ProviderClaude)
+	if !ok {
+		t.Fatal("no definition for Claude Code")
+	}
+	path, err := configurationPath(value)
+	if err != nil {
+		t.Fatalf("configurationPath() error = %v", err)
+	}
+	if filepath.Dir(path) != directory {
+		t.Fatalf("settings path %q is not inside %q", path, directory)
+	}
+
+	if _, err := ConfigDirectory("nonsense"); err == nil {
+		t.Error("ConfigDirectory accepted a provider romty does not have")
+	}
+}
