@@ -520,10 +520,7 @@ func (m dashboard) renderNavigationItem(item navItem, index, width int) []string
 }
 
 func (m dashboard) renderTerminal(width int) []string {
-	tabs := m.selectedTabs()
-	if m.focus == leftPane {
-		tabs = m.navigationTabs()
-	}
+	tabs := m.visibleTabs()
 	hover := -1
 	closeHover := -1
 	if m.hover.kind == hoverTab {
