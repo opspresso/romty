@@ -816,6 +816,14 @@ func (m dashboard) quit() (tea.Model, tea.Cmd) {
 	return m, tea.Quit
 }
 
+// What the status bar says about a workspace that cannot answer the request
+// made of it. Each is raised from more than one place, and a sentence a user
+// reads twice should read the same both times.
+const (
+	notAGitRepository = "selected workspace is not a Git repository"
+	noRunningTerminal = "selected workspace has no running terminal"
+)
+
 // setError takes the status bar for one source; clearError gives it up only if
 // that source still holds it.
 func (m *dashboard) setError(source errorSource, message string) {

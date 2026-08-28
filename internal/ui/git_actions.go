@@ -107,7 +107,7 @@ func (m dashboard) openGitActions() (tea.Model, tea.Cmd) {
 	}
 	target, ok := m.gitActionWorkspace()
 	if !ok || !target.hasGit {
-		m.setError(gitError, "selected workspace is not a Git repository")
+		m.setError(gitError, notAGitRepository)
 		return m, nil
 	}
 	m.modal = gitActionsModal

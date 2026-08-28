@@ -225,7 +225,7 @@ func (m dashboard) runWorkspaceAction(action workspaceAction) (tea.Model, tea.Cm
 		tabs := runningTabs(target.tabs)
 		if len(tabs) == 0 {
 			m.modal = noModal
-			m.setNotice(terminalError, "selected workspace has no running terminal")
+			m.setNotice(terminalError, noRunningTerminal)
 			return m, nil
 		}
 		m.tabIndex = min(m.tabIndex, len(tabs)-1)
@@ -239,7 +239,7 @@ func (m dashboard) runWorkspaceAction(action workspaceAction) (tea.Model, tea.Cm
 		tabs := runningTabs(target.tabs)
 		if m.tabIndex >= len(tabs) {
 			m.modal = noModal
-			m.setNotice(terminalError, "selected workspace has no running terminal")
+			m.setNotice(terminalError, noRunningTerminal)
 			return m, nil
 		}
 		return m.confirmCloseTab(tabs[m.tabIndex], m.tabIndex)
@@ -281,7 +281,7 @@ func (m dashboard) startWorkspaceGitAction(action workspaceAction, target navIte
 	gitAction, ok := gitActionByWorkspaceAction[action]
 	if !ok || !target.hasGit {
 		m.modal = noModal
-		m.setError(gitError, "selected workspace is not a Git repository")
+		m.setError(gitError, notAGitRepository)
 		return m, nil
 	}
 	m.modal = gitActionsModal
