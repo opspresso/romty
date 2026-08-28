@@ -41,6 +41,12 @@ const (
 	// take half the screen and leave the terminal unusable. Above this the
 	// split is worth its width, so the layout does not move under a desktop.
 	narrowLayoutWidth = 80
+	// minimumModalWidth and the two caps bound a modal box. The box shrinks to
+	// its content between them, so a question of one sentence is one sentence
+	// wide; the caps keep a long path or a wide diff off the screen edges.
+	minimumModalWidth     = 32
+	maximumModalWidth     = 72
+	maximumWideModalWidth = 80
 	// minimumScreenWidth is the narrowest screen romty lays out for; see
 	// screenWidth.
 	minimumScreenWidth = 40

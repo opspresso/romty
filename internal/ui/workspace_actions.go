@@ -9,7 +9,6 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
-	"github.com/charmbracelet/x/ansi"
 )
 
 type workspaceAction int
@@ -342,17 +341,7 @@ func (m dashboard) workspaceActionPopup(width, height int) (lines []string, x, y
 
 func (m dashboard) overlayWorkspaceActions(base []string, width, height int) []string {
 	popup, x, y := m.workspaceActionPopup(width, height)
-	result := append([]string(nil), base...)
-	for index, popupLine := range popup {
-		row := y + index
-		if row < 0 || row >= len(result) || row >= height {
-			continue
-		}
-		line := pad(truncate(result[row], width), width)
-		popupWidth := lipgloss.Width(popupLine)
-		result[row] = ansi.Cut(line, 0, x) + popupLine + ansi.Cut(line, x+popupWidth, width)
-	}
-	return result
+	return overlayBox(base, popup, x, y, width, height)
 }
 
 func (m dashboard) handleWorkspaceActionsMouse(message tea.MouseMsg) (tea.Model, tea.Cmd, bool) {

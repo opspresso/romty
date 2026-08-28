@@ -4747,7 +4747,11 @@ func TestDashboardKeepsNavigationCursorVisible(t *testing.T) {
 	}
 }
 
-func TestDashboardCentersModalOverCoveredDashboard(t *testing.T) {
+// A modal is a box on top of romty, not a screen romty replaces itself with.
+// Blanking the body meant opening Config took the workspace tree and the
+// terminal away to show five settings, and laying the box out at the cap meant
+// covering most of the screen to say one sentence.
+func TestDashboardCentersModalOverTheDashboardItLeavesShowing(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, model.Snapshot{})
 	value.width = 100
 	value.height = 30
@@ -4758,29 +4762,47 @@ func TestDashboardCentersModalOverCoveredDashboard(t *testing.T) {
 		t.Fatalf("modal = %v, want about", value.modal)
 	}
 	rendered := value.render()
-	if !strings.Contains(rendered, "About") || !strings.Contains(rendered, "Persistent terminal workspace manager") {
+	if !strings.Contains(rendered, "About") || !strings.Contains(rendered, tagline) {
 		t.Fatalf("about modal is missing:\n%s", rendered)
 	}
-	if strings.Contains(rendered, value.styles.paneTitleActive.Render(" romty ")) {
-		t.Fatalf("dashboard remains visible behind the modal:\n%s", rendered)
+	if !strings.Contains(rendered, value.styles.paneTitleActive.Render(" romty ")) {
+		t.Fatalf("the dashboard behind the modal was blanked:\n%s", rendered)
 	}
-	modalLines := value.renderModal(value.width, value.dimensions().bodyHeight)
-	if width := lipgloss.Width(modalLines[0]); width != 72 {
-		t.Fatalf("about modal width = %d, want 72", width)
-	}
+
 	bodyHeight := value.dimensions().bodyHeight
+	modalLines := value.renderModal(value.width, bodyHeight)
+	boxWidth := lipgloss.Width(modalLines[0])
+	if boxWidth >= value.width {
+		t.Fatalf("about modal width = %d, want less than the %d column screen", boxWidth, value.width)
+	}
+	if boxWidth < lipgloss.Width(tagline)+6 {
+		t.Fatalf("about modal width = %d, too narrow for its longest line", boxWidth)
+	}
+
 	body := strings.Split(ansi.Strip(rendered), "\n")[:bodyHeight]
 	top := (bodyHeight - len(modalLines)) / 2
-	if left := strings.Index(body[top], "╭"); left != 14 {
-		t.Fatalf("about modal left edge = %d, want 14:\n%s", left, ansi.Strip(rendered))
+	wantLeft := (value.width - boxWidth) / 2
+	// By column, not by byte: the workspace pane the box now sits on top of
+	// draws box-drawing runes of its own.
+	at := strings.Index(body[top], "╭")
+	if at < 0 {
+		t.Fatalf("about modal has no top-left corner on its first row:\n%s", ansi.Strip(rendered))
 	}
+	if left := lipgloss.Width(body[top][:at]); left != wantLeft {
+		t.Fatalf("about modal left edge = %d, want %d:\n%s", left, wantLeft, ansi.Strip(rendered))
+	}
+	// The rows the box does not reach still carry the pane divider, which is
+	// what says the dashboard is behind it rather than gone.
+	divider := 0
 	for row := range body {
-		if row >= top && row < top+len(modalLines) {
-			continue
+		if row < top || row >= top+len(modalLines) {
+			if strings.Contains(body[row], "│") {
+				divider++
+			}
 		}
-		if strings.TrimSpace(body[row]) != "" {
-			t.Fatalf("modal backdrop row %d is not blank:\n%s", row, ansi.Strip(rendered))
-		}
+	}
+	if divider == 0 {
+		t.Fatalf("no dashboard row survived beside the modal:\n%s", ansi.Strip(rendered))
 	}
 	// About is where a user reads which romty they are running, so it names
 	// the build rather than leaving a bug report to guess at it.
@@ -4790,7 +4812,7 @@ func TestDashboardCentersModalOverCoveredDashboard(t *testing.T) {
 
 	updated, _ = value.Update(key(tea.KeyEscape, ""))
 	value = updated.(dashboard)
-	if value.modal != noModal || strings.Contains(value.render(), "Persistent terminal workspace manager") {
+	if value.modal != noModal || strings.Contains(value.render(), tagline) {
 		t.Fatalf("about modal did not close:\n%s", value.render())
 	}
 }

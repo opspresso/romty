@@ -177,7 +177,7 @@ func (m dashboard) render() string {
 	if m.modal == workspaceActionsModal {
 		lines = m.overlayWorkspaceActions(lines, width, view.bodyHeight)
 	} else if m.modal != noModal {
-		lines = m.overlayModal(width, view.bodyHeight)
+		lines = m.overlayModal(lines, width, view.bodyHeight)
 	}
 	lines = append(lines, m.renderStatus(width, view.bodyHeight)...)
 	return strings.Join(lines, "\n")

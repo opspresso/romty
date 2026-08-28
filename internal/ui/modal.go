@@ -8,6 +8,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/opspresso/romty/internal/agenthooks"
 	"github.com/opspresso/romty/internal/display"
@@ -130,44 +131,56 @@ func (m dashboard) handleModalKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 	return m, nil
 }
 
-// overlayModal replaces the body with a blank backdrop before centering the
-// modal, so workspace and terminal content cannot show around it.
-func (m dashboard) overlayModal(width, height int) []string {
-	modalLines := m.renderModal(width, height)
-	lines := make([]string, height)
-	for row := range lines {
-		lines[row] = strings.Repeat(" ", width)
+// overlayModal draws the modal over what is already on screen. It used to
+// blank the whole body first, which meant opening Config took the workspace
+// tree and the terminal away to show five settings — and left the user with no
+// sight of what they were about to change. The box interior is opaque, so
+// laying it on top is enough for it to read as something in front.
+func (m dashboard) overlayModal(base []string, width, height int) []string {
+	box := m.renderModal(width, height)
+	if len(box) == 0 {
+		return base
 	}
-	top := max((height-len(modalLines))/2, 0)
-	for index, line := range modalLines {
-		row := top + index
-		if row >= len(lines) {
-			break
+	left := max((width-lipgloss.Width(box[0]))/2, 0)
+	top := max((height-len(box))/2, 0)
+	return overlayBox(base, box, left, top, width, height)
+}
+
+// overlayBox pastes a box over what is already drawn, leaving the rest of each
+// row showing. Both the modals and the workspace action palette want exactly
+// this, and each had written its own copy of the cut-and-splice.
+func overlayBox(base, box []string, x, y, width, height int) []string {
+	result := append([]string(nil), base...)
+	for index, boxLine := range box {
+		row := y + index
+		if row < 0 || row >= len(result) || row >= height {
+			continue
 		}
-		lineWidth := lipgloss.Width(line)
-		left := max((width-lineWidth)/2, 0)
-		right := max(width-left-lineWidth, 0)
-		lines[row] = strings.Repeat(" ", left) + line + strings.Repeat(" ", right)
+		line := pad(truncate(result[row], width), width)
+		boxWidth := lipgloss.Width(boxLine)
+		result[row] = ansi.Cut(line, 0, x) + boxLine + ansi.Cut(line, x+boxWidth, width)
 	}
-	return lines
+	return result
 }
 
 func (m dashboard) renderModal(width, height int) []string {
-	modalWidth := min(max(width-4, 32), 72)
+	// modalWidth is the cap the box may grow to, not the width it takes.
+	modalWidth := min(max(width-4, minimumModalWidth), maximumModalWidth)
+	wide := min(max(width-4, minimumModalWidth), maximumWideModalWidth)
 	if m.modal == helpModal {
-		modalWidth = min(max(width-4, 32), 80)
-		return m.renderHelpModal(modalWidth, height)
+		// Help and the picker are wide by nature — a key column and a
+		// description, a path — so they take the wider cap outright.
+		return m.renderHelpModal(wide, height)
 	}
 	if m.modal == browseModal {
-		// Paths are long, so the picker gets the wider box help uses.
-		return m.renderBrowseModal(min(max(width-4, 32), 80), height)
+		return m.renderBrowseModal(wide, height)
 	}
 	if m.modal == gitActionsModal {
 		return m.renderGitActionsModal(modalWidth, height)
 	}
 	if m.modal == removeSelectionModal {
 		if m.removeTarget.isRoot {
-			return m.withModalActions(modalBox(m.styles, modalWidth, "Forget root",
+			return m.withModalActions(modalBoxFit(m.styles, modalWidth, "Forget root",
 				m.styles.modalStrong.Render("Forget "+display.Text(m.removeTarget.root.Name)+"?"),
 				m.styles.empty.Render(display.Text(m.removeTarget.root.Path)),
 				"",
@@ -179,7 +192,7 @@ func (m dashboard) renderModal(width, height int) []string {
 		// context it is, and the consequences below the break. The path used to
 		// trail the two red lines in the body colour, where it read as a third
 		// consequence rather than as the thing being named.
-		return m.withModalActions(modalBox(m.styles, modalWidth, "Delete workspace",
+		return m.withModalActions(modalBoxFit(m.styles, modalWidth, "Delete workspace",
 			m.styles.modalStrong.Render("Delete "+display.Text(m.removeTarget.workspace.Name)+"?"),
 			m.styles.empty.Render(display.Text(m.removeTarget.workspace.Path)),
 			"",
@@ -188,14 +201,14 @@ func (m dashboard) renderModal(width, height int) []string {
 		))
 	}
 	if m.modal == closeTabModal {
-		return m.withModalActions(modalBox(m.styles, modalWidth, "Close tab",
+		return m.withModalActions(modalBoxFit(m.styles, modalWidth, "Close tab",
 			m.styles.modalStrong.Render("Close "+display.Text(m.closeTabTarget.Name)+"?"),
 			"",
 			m.styles.errorText.Render("Its running shell will be terminated."),
 		))
 	}
 	if m.modal == shutdownModal {
-		return m.withModalActions(modalBox(m.styles, modalWidth, "Stop daemon",
+		return m.withModalActions(modalBoxFit(m.styles, modalWidth, "Stop daemon",
 			m.styles.modalStrong.Render("Stop daemon and all running terminal sessions?"),
 			"",
 			m.styles.errorText.Render("Running shells will be terminated."),
@@ -221,7 +234,7 @@ func (m dashboard) renderModal(width, height int) []string {
 			lines = append(lines, m.styles.modalBody.Render(status.Provider.DisplayName()+": "+action))
 		}
 		lines = append(lines, "", m.styles.empty.Render("Existing settings and other hooks are preserved."))
-		return m.withModalActions(modalBox(m.styles, modalWidth, "Agent hooks", lines...))
+		return m.withModalActions(modalBoxFit(m.styles, modalWidth, "Agent hooks", lines...))
 	}
 	if m.modal == configModal {
 		rows := configRows()
@@ -231,7 +244,7 @@ func (m dashboard) renderModal(width, height int) []string {
 		}
 		return modalBox(m.styles, modalWidth, "Config", lines...)
 	}
-	return modalBox(m.styles, modalWidth, "About",
+	return modalBoxFit(m.styles, modalWidth, "About",
 		m.styles.modalStrong.Render("romty")+"  "+m.styles.empty.Render(version.String()),
 		m.styles.modalBody.Render(tagline),
 	)
@@ -373,6 +386,21 @@ func (m dashboard) renderModalAction(action modalAction, hovered bool) string {
 // losing its top and bottom borders.
 func modalCapacity(height int) int {
 	return max(height-2, 1)
+}
+
+// modalBoxFit draws the box at the width its content needs, up to a cap. A
+// confirmation of four short lines used to be laid out at the cap itself,
+// which covered most of the screen to ask one question — and, now that the
+// modal no longer blanks what is behind it, covered it for no reason at all.
+func modalBoxFit(styles *uiStyles, maximum int, title string, values ...string) []string {
+	content := 0
+	for _, value := range values {
+		content = max(content, lipgloss.Width(value))
+	}
+	// Six columns for the border and the two spaces of padding on each side,
+	// and enough for the title to sit on the top border with a corner beside it.
+	width := max(content+6, lipgloss.Width(title)+5)
+	return modalBox(styles, min(max(width, minimumModalWidth), maximum), title, values...)
 }
 
 func modalBox(styles *uiStyles, width int, title string, values ...string) []string {
