@@ -3,6 +3,8 @@ package ui
 import (
 	"encoding/json"
 	"fmt"
+	"reflect"
+	"strings"
 
 	"github.com/opspresso/romty/internal/jsonfile"
 )
@@ -31,6 +33,25 @@ type Config struct {
 	unknownFields     map[string]json.RawMessage
 }
 
+// knownConfigFields are the JSON names Config declares, read from its own tags
+// rather than listed a second time. A field added to the struct but forgotten
+// in a hand-kept list would be filed as unknown, and MarshalJSON would then
+// restore the old value of anything omitempty had just dropped — turning a
+// setting off would silently turn it back on.
+var knownConfigFields = configFieldNames()
+
+func configFieldNames() map[string]struct{} {
+	names := make(map[string]struct{})
+	value := reflect.TypeFor[Config]()
+	for index := range value.NumField() {
+		name, _, _ := strings.Cut(value.Field(index).Tag.Get("json"), ",")
+		if name != "" && name != "-" {
+			names[name] = struct{}{}
+		}
+	}
+	return names
+}
+
 func (c *Config) UnmarshalJSON(data []byte) error {
 	type configValue Config
 	var value configValue
@@ -41,14 +62,9 @@ func (c *Config) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &fields); err != nil {
 		return err
 	}
-	delete(fields, "left_width")
-	delete(fields, "mouse_passthrough")
-	delete(fields, "scrollback_mouse")
-	delete(fields, "sound_on_done")
-	delete(fields, "sound_on_waiting")
-	delete(fields, "git_diff_view")
-	delete(fields, "last_workspace_path")
-	delete(fields, "last_tab_id")
+	for name := range knownConfigFields {
+		delete(fields, name)
+	}
 	*c = Config(value)
 	c.unknownFields = fields
 	return nil

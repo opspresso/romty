@@ -139,3 +139,44 @@ func TestAdjustingOneSettingKeepsTheRest(t *testing.T) {
 		t.Fatal("adjusting the pane width changed an unknown setting")
 	}
 }
+
+// The known-field list is read from the struct's own tags. A hand-kept copy
+// falls behind, and a field missing from it is filed as unknown — so turning
+// that setting off would drop it from the document under omitempty and then
+// restore the old value from the copy.
+func TestConfigKnowsEveryFieldItDeclares(t *testing.T) {
+	document := []byte(`{"left_width":24,"mouse_passthrough":true,"scrollback_mouse":true,` +
+		`"sound_on_done":true,"sound_on_waiting":true,"git_diff_view":"split",` +
+		`"last_workspace_path":"/w","last_tab_id":"tab-1","custom":{"kept":true}}`)
+	var value Config
+	if err := json.Unmarshal(document, &value); err != nil {
+		t.Fatalf("Unmarshal() error = %v", err)
+	}
+	if len(value.unknownFields) != 1 {
+		t.Fatalf("unknown fields = %v, want only the custom one", value.unknownFields)
+	}
+	if _, ok := value.unknownFields["custom"]; !ok {
+		t.Fatalf("unknown fields = %v, want the custom one kept", value.unknownFields)
+	}
+
+	// Turning every boolean off must leave them off, not restore them from the
+	// copy of the document they were read from.
+	value.MousePassthrough, value.ScrollbackMouse = false, false
+	value.SoundOnDone, value.SoundOnWaiting = false, false
+	data, err := json.Marshal(value)
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+	var written map[string]json.RawMessage
+	if err := json.Unmarshal(data, &written); err != nil {
+		t.Fatalf("Unmarshal() error = %v", err)
+	}
+	for _, name := range []string{"mouse_passthrough", "scrollback_mouse", "sound_on_done", "sound_on_waiting"} {
+		if _, present := written[name]; present {
+			t.Errorf("%s is still in the document after being turned off: %s", name, data)
+		}
+	}
+	if _, present := written["custom"]; !present {
+		t.Errorf("custom field was not preserved: %s", data)
+	}
+}
