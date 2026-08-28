@@ -461,6 +461,41 @@ func TestDashboardGitDiffViewOwnsInputAndKeepsHelpModalUsable(t *testing.T) {
 	}
 }
 
+// Scrollback is a view of the terminal, and the file view is what is on screen
+// instead of it. F6 is the file view's own layout toggle, but a modal drawn
+// over the view routes the function keys back to their global meanings — and
+// F6 there used to open a scrollback nothing drew, which the user then fell
+// into on closing the file view.
+func TestDashboardRefusesScrollbackWhileTheFileViewIsOpen(t *testing.T) {
+	terminal := newEmbeddedTerminal("tab-1", newMemoryStream(""), 40, 10)
+	defer terminal.close()
+	for range 40 {
+		terminal.writeOutput([]byte("history line\r\n"))
+	}
+	if terminal.scrollbackLen() == 0 {
+		t.Fatal("the terminal has no history for scrollback to show")
+	}
+	value := newDashboard(&fakeBackend{}, model.Snapshot{})
+	value.width, value.height = 120, 40
+	value.focus = terminalPane
+	value.terminal = terminal
+	value.gitDiff = gitDiffView{active: true, target: model.Workspace{Name: "alpha", Path: "/projects/alpha"}}
+
+	updated, _ := value.Update(key(tea.KeyF1, ""))
+	value = updated.(dashboard)
+	updated, _ = value.Update(key(tea.KeyF6, ""))
+	value = updated.(dashboard)
+	if value.scrollback {
+		t.Fatal("F6 over the file view opened a scrollback nothing draws")
+	}
+	if !value.gitDiff.active {
+		t.Fatal("F6 over the file view closed it")
+	}
+	if value.errorMessage == "" {
+		t.Fatal("F6 over the file view said nothing about why scrollback did not open")
+	}
+}
+
 func gitDiffViewKey() tea.KeyPressMsg {
 	return tea.KeyPressMsg(tea.Key{Code: 'f', ShiftedCode: 'F', Mod: tea.ModCtrl | tea.ModShift})
 }
