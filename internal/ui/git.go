@@ -19,6 +19,26 @@ const (
 	gitStatusWorkers  = 4
 )
 
+// gitReadEnvironment and gitRemoteEnvironment are what romty adds to the
+// environment of the git it runs. A read must not take the index lock a user's
+// own git may be holding, and anything that reaches a remote must not stop on a
+// credential prompt: it would be waiting on a terminal romty never shows.
+//
+// Which of the two a command wants is the only thing that varies between the
+// five places romty runs git, and it was the one thing spelled out at each of
+// them rather than named.
+var (
+	gitReadEnvironment   = []string{"GIT_OPTIONAL_LOCKS=0"}
+	gitRemoteEnvironment = []string{"GIT_TERMINAL_PROMPT=0", "GCM_INTERACTIVE=Never"}
+)
+
+// gitCommand builds a git invocation inside a repository, bounded by ctx.
+func gitCommand(ctx context.Context, path string, environment []string, arguments ...string) *exec.Cmd {
+	command := exec.CommandContext(ctx, "git", append([]string{"-C", path}, arguments...)...)
+	command.Env = append(os.Environ(), environment...)
+	return command
+}
+
 type gitState struct {
 	Branch     string
 	Revision   string
@@ -38,9 +58,8 @@ func readGitState(path string, fetch bool) (gitState, bool) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), gitCommandTimeout)
 	defer cancel()
-	command := exec.CommandContext(ctx, "git", "-C", path, "status", "--porcelain=v2", "--branch", "--untracked-files=normal")
-	command.Env = append(os.Environ(), "GIT_OPTIONAL_LOCKS=0")
-	output, err := command.Output()
+	output, err := gitCommand(ctx, path, gitReadEnvironment,
+		"status", "--porcelain=v2", "--branch", "--untracked-files=normal").Output()
 	if err != nil {
 		return gitState{}, false
 	}
@@ -78,9 +97,8 @@ func parseGitState(output string) gitState {
 func fetchGit(path string) {
 	ctx, cancel := context.WithTimeout(context.Background(), gitFetchTimeout)
 	defer cancel()
-	command := exec.CommandContext(ctx, "git", "-C", path, "fetch", "--quiet", "--no-tags", "--no-write-fetch-head")
-	command.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GCM_INTERACTIVE=Never")
-	_ = command.Run()
+	_ = gitCommand(ctx, path, gitRemoteEnvironment,
+		"fetch", "--quiet", "--no-tags", "--no-write-fetch-head").Run()
 }
 
 func gitStates(paths []string, fetch bool) map[string]gitState {

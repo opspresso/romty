@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"os/exec"
 	"sort"
 	"strings"
@@ -23,9 +22,8 @@ type gitChangedFile struct {
 func readGitChangedFiles(path string) ([]gitChangedFile, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), gitDiffTimeout)
 	defer cancel()
-	command := exec.CommandContext(ctx, "git", "-C", path, "status", "--porcelain=v1", "-z", "--untracked-files=all")
-	command.Env = append(os.Environ(), "GIT_OPTIONAL_LOCKS=0")
-	output, err := command.Output()
+	output, err := gitCommand(ctx, path, gitReadEnvironment,
+		"status", "--porcelain=v1", "-z", "--untracked-files=all").Output()
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		return nil, fmt.Errorf("read changed files timed out after %s", gitDiffTimeout)
 	}
@@ -111,9 +109,7 @@ func readGitFileDiff(path string, file gitChangedFile) (string, error) {
 func runGitDiff(path string, allowDifferenceExit bool, arguments ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), gitDiffTimeout)
 	defer cancel()
-	command := exec.CommandContext(ctx, "git", append([]string{"-C", path}, arguments...)...)
-	command.Env = append(os.Environ(), "GIT_OPTIONAL_LOCKS=0")
-	output, err := command.CombinedOutput()
+	output, err := gitCommand(ctx, path, gitReadEnvironment, arguments...).CombinedOutput()
 	value := strings.TrimRight(string(output), "\n")
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		return value, fmt.Errorf("git diff timed out after %s", gitDiffTimeout)

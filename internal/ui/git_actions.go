@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
-	"os/exec"
 	"strings"
 	"time"
 
@@ -93,9 +91,7 @@ func executeGitActionContext(parent context.Context, path string, action gitActi
 	}
 	ctx, cancel := context.WithTimeout(parent, gitActionTimeout)
 	defer cancel()
-	command := exec.CommandContext(ctx, "git", append([]string{"-C", path}, arguments...)...)
-	command.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GCM_INTERACTIVE=Never")
-	output, err := command.CombinedOutput()
+	output, err := gitCommand(ctx, path, gitRemoteEnvironment, arguments...).CombinedOutput()
 	value := strings.TrimSpace(string(output))
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		return value, fmt.Errorf("%s timed out after %s", action.label(), gitActionTimeout)
