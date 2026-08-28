@@ -232,7 +232,7 @@ func (m dashboard) handleGitActionsMouse(message tea.MouseMsg) (tea.Model, tea.C
 	if !ok || click.Button != tea.MouseLeft || m.gitActionPending || m.gitActionComplete {
 		return m, nil, false
 	}
-	index := row - 2
+	index := row - gitActionHeaderRows
 	if index < 0 || index >= len(gitActionChoices) {
 		return m, nil, true
 	}
@@ -240,6 +240,10 @@ func (m dashboard) handleGitActionsMouse(message tea.MouseMsg) (tea.Model, tea.C
 	updated, command := m.startGitAction()
 	return updated, command, true
 }
+
+// gitActionHeaderRows are the target name and the blank line the modal draws
+// above its list, which is what separates a content row from an action index.
+const gitActionHeaderRows = 2
 
 func (m dashboard) renderGitActionsModal(width, height int) []string {
 	target := m.styles.modalStrong.Render(displayText(m.gitActionTarget.Name)) +
@@ -287,7 +291,7 @@ func (m dashboard) renderGitActionsModal(width, height int) []string {
 		if strings.HasPrefix(line, "Error: ") {
 			style = m.styles.errorText
 		}
-		if m.hover.kind == hoverGitResult && m.hover.index == index+2 {
+		if m.hover.kind == hoverGitResult && m.hover.index == index+gitActionHeaderRows {
 			style = m.styles.hovered(style)
 		}
 		lines = append(lines, style.Render(line))
