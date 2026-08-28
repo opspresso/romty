@@ -136,7 +136,9 @@ func (m dashboard) handleModalKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 		case "end", "G":
 			m.moveConfig(len(configRows()))
 			return m, nil
-		case "enter", " ":
+		// Bubble Tea names the space bar "space"; a case of " " is a branch
+		// nothing reaches, so Space did nothing at all.
+		case "enter", "space":
 			if updated, command, ok := m.runConfigRow(m.configIndex); ok {
 				return updated, command
 			}

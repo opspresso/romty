@@ -277,6 +277,14 @@ func TestConfigWalksAndTogglesWithTheCursor(t *testing.T) {
 		t.Fatalf("the mark is not on the second setting:\n%s", strings.Join(drawn, "\n"))
 	}
 
+	// Space runs the row too. Bubble Tea reports the space bar as "space", not
+	// as the literal " " a key case would otherwise be written with.
+	updated, _ = value.Update(key(tea.KeySpace, " "))
+	value = updated.(dashboard)
+	if value.scrollbackMouse {
+		t.Fatal("Space did not run the setting the cursor is on")
+	}
+
 	// End reaches the last setting and Enter runs that one instead.
 	updated, _ = value.Update(key(tea.KeyEnd, ""))
 	value = updated.(dashboard)
@@ -285,7 +293,7 @@ func TestConfigWalksAndTogglesWithTheCursor(t *testing.T) {
 	}
 	updated, _ = value.Update(key(tea.KeyEnter, ""))
 	value = updated.(dashboard)
-	if !value.scrollbackMouse {
+	if value.scrollbackMouse {
 		t.Fatal("Enter on the last setting toggled a different one")
 	}
 }

@@ -6,6 +6,7 @@ package daemon
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -168,6 +169,15 @@ func removableWorkspacePath(root model.Root, path string) (string, error) {
 		return "", fmt.Errorf("workspace root changed since it was registered")
 	}
 	info, err := os.Lstat(workspacePath)
+	if errors.Is(err, os.ErrNotExist) {
+		// Nothing on disk to delete, but the record is still romty's to
+		// forget. Refusing here is what could trap a workspace for good: a
+		// removal whose directory went but whose state could not be written
+		// rolls the record back, and every retry then died on this check with
+		// "no such file or directory" — leaving a workspace in the tree that
+		// named nothing and that no action could remove.
+		return workspacePath, nil
+	}
 	if err != nil {
 		return "", fmt.Errorf("inspect workspace: %w", err)
 	}
