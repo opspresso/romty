@@ -194,7 +194,9 @@ func (m dashboard) renderModal(width, height int) []string {
 		return m.renderBrowseModal(wide, height)
 	}
 	if m.modal == gitActionsModal {
-		return m.renderGitActionsModal(modalWidth, height)
+		// Command output is the one modal content romty does not write, so it
+		// gets the wider ceiling to grow into.
+		return m.renderGitActionsModal(wide, height)
 	}
 	if m.modal == removeSelectionModal {
 		if m.removeTarget.isRoot {

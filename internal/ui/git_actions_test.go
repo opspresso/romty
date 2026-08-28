@@ -312,14 +312,24 @@ func TestDashboardHighlightsTheSelectedGitAction(t *testing.T) {
 	value.gitActionTarget = model.Workspace{Name: "alpha", Path: "/projects/alpha"}
 	value.gitActionIndex = 1
 
-	rendered := strings.Join(value.renderModal(100, 30), "\n")
-	selected := value.styles.navigationSelected.Render(pad("▌ "+pad("Fetch", 8)+"Update remote refs", 66))
+	lines := value.renderModal(100, 30)
+	rendered := strings.Join(lines, "\n")
+	// The box fits its content, so the row width is read back from what was
+	// drawn rather than pinned to the old fixed width.
+	width := lipgloss.Width(lines[0]) - 6
+	selected := value.styles.navigationSelected.Render(
+		pad("▌ "+pad("Fetch", gitActionLabelWidth)+"Update remote refs", width))
 	if !strings.Contains(rendered, selected) {
 		t.Fatalf("the selected Git action does not carry the picker's bar:\n%s", rendered)
 	}
-	unselected := value.styles.modalBody.Render(pad("  "+pad("Status", 8)+"Show changed files", 66))
+	unselected := value.styles.modalBody.Render(
+		pad("  "+pad("Status", gitActionLabelWidth)+"Show changed files", width))
 	if !strings.Contains(rendered, unselected) {
 		t.Fatalf("an unselected Git action is not drawn as a plain row:\n%s", rendered)
+	}
+	// The box is only as wide as the rows need, not as wide as the cap.
+	if boxWidth := lipgloss.Width(lines[0]); boxWidth >= 72 {
+		t.Fatalf("Git actions box width = %d, want it fitted to its rows", boxWidth)
 	}
 }
 

@@ -245,11 +245,11 @@ func (m dashboard) handleGitActionsMouse(message tea.MouseMsg) (tea.Model, tea.C
 // above its list, which is what separates a content row from an action index.
 const gitActionHeaderRows = 2
 
-func (m dashboard) renderGitActionsModal(width, height int) []string {
+func (m dashboard) renderGitActionsModal(maximum, height int) []string {
 	target := m.styles.modalStrong.Render(display.Text(m.gitActionTarget.Name)) +
 		m.styles.empty.Render("  "+display.Text(m.gitActionTarget.Path))
 	if m.gitActionPending {
-		return modalBox(m.styles, width, "Git · "+m.gitAction.label(),
+		return modalBoxFit(m.styles, maximum, "Git · "+m.gitAction.label(),
 			target,
 			"",
 			m.styles.modalBody.Render("Running…"),
@@ -257,12 +257,18 @@ func (m dashboard) renderGitActionsModal(width, height int) []string {
 		)
 	}
 	if !m.gitActionComplete {
-		lines := []string{target, ""}
 		// The same highlighted bar the root picker draws. A bold row behind a
 		// chevron was the whole of the selection here, which is the least
 		// visible cursor romty has for the list whose rows push and delete.
-		contentWidth := max(width-6, 0)
+		labels := make([]string, len(gitActionChoices))
+		contentWidth := lipgloss.Width(target)
 		for index, action := range gitActionChoices {
+			labels[index] = pad(action.label(), gitActionLabelWidth) + action.description()
+			contentWidth = max(contentWidth, lipgloss.Width(labels[index])+2)
+		}
+		contentWidth = min(contentWidth, max(maximum-6, 0))
+		lines := []string{target, ""}
+		for index, label := range labels {
 			prefix := "  "
 			style := m.styles.modalBody
 			if index == m.gitActionIndex {
@@ -271,10 +277,9 @@ func (m dashboard) renderGitActionsModal(width, height int) []string {
 			} else if m.hover.kind == hoverGitAction && m.hover.index == index {
 				style = m.styles.interactiveHover
 			}
-			label := prefix + pad(action.label(), 8) + action.description()
-			lines = append(lines, style.Render(pad(truncate(label, contentWidth), contentWidth)))
+			lines = append(lines, style.Render(pad(truncate(prefix+label, contentWidth), contentWidth)))
 		}
-		return modalBox(m.styles, width, "Git actions", lines...)
+		return modalBoxFit(m.styles, maximum, "Git actions", lines...)
 	}
 
 	result := m.gitActionResultLines()
@@ -290,8 +295,11 @@ func (m dashboard) renderGitActionsModal(width, height int) []string {
 		hovered := m.hover.kind == hoverGitResult && m.hover.index == index+gitActionHeaderRows
 		lines = append(lines, m.renderGitOutputLine(line, hovered))
 	}
-	return modalBox(m.styles, width, title, lines...)
+	return modalBoxFit(m.styles, maximum, title, lines...)
 }
+
+// gitActionLabelWidth is the column the action descriptions line up in.
+const gitActionLabelWidth = 8
 
 // renderGitOutputLine colours what git printed. A status line carries its two
 // letters in the first columns and a diffstat a run of + and -, and those are
