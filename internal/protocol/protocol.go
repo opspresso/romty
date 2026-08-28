@@ -80,8 +80,11 @@ type Request struct {
 	RootID       string   `json:"root_id,omitempty"`
 	WorkspaceID  string   `json:"workspace_id,omitempty"`
 	TabID        string   `json:"tab_id,omitempty"`
-	Columns      uint16   `json:"columns,omitempty"`
-	Rows         uint16   `json:"rows,omitempty"`
+	// ClientID connects an attachment to its out-of-band resize requests.
+	// Empty keeps the global-resize behavior of clients that predate the field.
+	ClientID string `json:"client_id,omitempty"`
+	Columns  uint16 `json:"columns,omitempty"`
+	Rows     uint16 `json:"rows,omitempty"`
 	// Environment is the client's environment, sent with create_tab. The
 	// daemon may have been started days ago from a different shell, so its
 	// own environment is not the one the user is working in.
@@ -119,7 +122,9 @@ type Response struct {
 	Tab           *model.Tab                   `json:"tab,omitempty"`
 	// ReplayBytes is the exact initial terminal history that follows an attach
 	// response. Anything after it is live output.
-	ReplayBytes int `json:"replay_bytes,omitempty"`
+	ReplayBytes   int    `json:"replay_bytes,omitempty"`
+	ReplayColumns uint16 `json:"replay_columns,omitempty"`
+	ReplayRows    uint16 `json:"replay_rows,omitempty"`
 }
 
 // SelectVersion returns the highest revision both peers support.

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"image/color"
 	"io"
+	"os"
 	"path/filepath"
 	"reflect"
 	"slices"
@@ -20,8 +21,16 @@ import (
 
 	"github.com/opspresso/romty/internal/agenthooks"
 	"github.com/opspresso/romty/internal/model"
+	"github.com/opspresso/romty/internal/sound"
 	"github.com/opspresso/romty/internal/version"
 )
+
+func TestMain(m *testing.M) {
+	agentAnimationInterval = 0
+	agentRefreshInterval = 0
+	playSound = func(sound.Kind) error { return nil }
+	os.Exit(m.Run())
+}
 
 type fakeBackend struct {
 	snapshot               model.Snapshot
@@ -246,7 +255,7 @@ func TestDashboardSelectsWorkspaceAndCreatesTerminal(t *testing.T) {
 	if command == nil {
 		t.Fatal("select workspace command = nil")
 	}
-	updated, command = value.Update(command())
+	updated, command = value.Update(commandMessage[workspaceMsg](t, command))
 	value = updated.(dashboard)
 	if value.selectedWorkspaceID != workspace.ID || value.focus != leftPane {
 		t.Fatalf("selected workspace = %q, focus = %v", value.selectedWorkspaceID, value.focus)
@@ -254,12 +263,12 @@ func TestDashboardSelectsWorkspaceAndCreatesTerminal(t *testing.T) {
 	if command == nil {
 		t.Fatal("workspace without tabs did not create a terminal")
 	}
-	updated, openCommand := value.Update(command())
+	updated, openCommand := value.Update(commandMessage[tabMsg](t, command))
 	value = updated.(dashboard)
 	if openCommand == nil {
 		t.Fatal("created tab did not open an embedded terminal")
 	}
-	updated, readCommand := value.Update(openCommand())
+	updated, readCommand := value.Update(commandMessage[terminalOpenedMsg](t, openCommand))
 	value = updated.(dashboard)
 	defer value.closeTerminal()
 	if value.terminal == nil || value.focus != terminalPane || readCommand == nil {
@@ -318,17 +327,17 @@ func TestDashboardSelectsRootAndCreatesTerminal(t *testing.T) {
 	if selectCommand == nil {
 		t.Fatal("root selection command = nil")
 	}
-	updated, createCommand := value.Update(selectCommand())
+	updated, createCommand := value.Update(commandMessage[workspaceMsg](t, selectCommand))
 	value = updated.(dashboard)
 	if createCommand == nil || backend.ensuredRootID != root.ID || backend.ensuredPath != root.Path {
 		t.Fatalf("root selection = (command %v, root %q, path %q)", createCommand, backend.ensuredRootID, backend.ensuredPath)
 	}
-	updated, openCommand := value.Update(createCommand())
+	updated, openCommand := value.Update(commandMessage[tabMsg](t, createCommand))
 	value = updated.(dashboard)
 	if openCommand == nil || backend.createCount != 1 {
 		t.Fatalf("root tab creation = (command %v, count %d)", openCommand, backend.createCount)
 	}
-	updated, readCommand := value.Update(openCommand())
+	updated, readCommand := value.Update(commandMessage[terminalOpenedMsg](t, openCommand))
 	value = updated.(dashboard)
 	defer value.closeTerminal()
 	if value.terminal == nil || value.terminal.id != tab.ID || readCommand == nil {
@@ -500,7 +509,7 @@ func TestDashboardCreatesOnlyOneTabWhileASelectionIsPending(t *testing.T) {
 	if create == nil {
 		t.Fatal("newest selection did not create a tab command")
 	}
-	updated, _ = value.Update(create())
+	updated, _ = value.Update(commandMessage[tabMsg](t, create))
 	value = updated.(dashboard)
 	if backend.createCount != 1 || value.tabPending {
 		t.Fatalf("tab creation = (calls %d, pending %t), want (1, false)", backend.createCount, value.tabPending)
@@ -528,13 +537,13 @@ func TestDashboardCreatesTabWithCtrlShiftT(t *testing.T) {
 	if createCommand == nil || !value.tabPending {
 		t.Fatalf("Ctrl+Shift+T = (command %v, pending %t), want tab creation", createCommand, value.tabPending)
 	}
-	updated, openCommand := value.Update(createCommand())
+	updated, openCommand := value.Update(commandMessage[tabMsg](t, createCommand))
 	value = updated.(dashboard)
 	if openCommand == nil || backend.createCount != 1 || value.tabPending {
 		t.Fatalf("created tab = (command %v, calls %d, pending %t), want one tab ready to open",
 			openCommand, backend.createCount, value.tabPending)
 	}
-	updated, readCommand := value.Update(openCommand())
+	updated, readCommand := value.Update(commandMessage[terminalOpenedMsg](t, openCommand))
 	value = updated.(dashboard)
 	if readCommand == nil || value.terminal == nil || value.terminal.id != created.ID {
 		t.Fatalf("opened terminal = (command %v, terminal %v), want %q", readCommand, value.terminal, created.ID)
@@ -568,12 +577,12 @@ func TestDashboardCreatesTabForWorkspaceCursorWithCtrlShiftT(t *testing.T) {
 	if selectCommand == nil {
 		t.Fatal("Ctrl+Shift+T on the workspace cursor produced no selection command")
 	}
-	updated, createCommand := value.Update(selectCommand())
+	updated, createCommand := value.Update(commandMessage[workspaceMsg](t, selectCommand))
 	value = updated.(dashboard)
 	if createCommand == nil || backend.ensuredPath != bravo.Path {
 		t.Fatalf("selected workspace = (command %v, path %q), want %q", createCommand, backend.ensuredPath, bravo.Path)
 	}
-	updated, openCommand := value.Update(createCommand())
+	updated, openCommand := value.Update(commandMessage[tabMsg](t, createCommand))
 	value = updated.(dashboard)
 	if openCommand == nil || backend.createCount != 1 || value.selectedWorkspaceID != bravo.ID {
 		t.Fatalf("created tab = (command %v, calls %d, workspace %q), want one in %q",
@@ -602,8 +611,11 @@ func TestDashboardIgnoresCtrlShiftTWhileTabCreationCannotStart(t *testing.T) {
 
 			updated, command := value.Update(newTabKey())
 			value = updated.(dashboard)
-			if command != nil {
-				t.Fatalf("Ctrl+Shift+T produced command %v", command)
+			for _, message := range commandMessages(command) {
+				switch message.(type) {
+				case workspaceMsg, tabMsg:
+					t.Fatalf("Ctrl+Shift+T produced a workspace or tab command")
+				}
 			}
 		})
 	}
@@ -835,6 +847,161 @@ func TestDashboardSupportsIMEIndependentShortcuts(t *testing.T) {
 	}
 }
 
+func TestDashboardMouseSelectsWorkspaceAndTab(t *testing.T) {
+	workspace := model.Workspace{ID: "workspace-1", RootID: "root-1", Name: "alpha", Path: "/projects/alpha"}
+	tabs := []model.Tab{
+		{ID: "tab-1", WorkspaceID: workspace.ID, Name: "1", Running: true},
+		{ID: "tab-2", WorkspaceID: workspace.ID, Name: "2", Running: true},
+	}
+	snapshot := model.Snapshot{Roots: []model.RootView{{
+		Root:        model.Root{ID: "root-1", Name: "projects", Path: "/projects"},
+		Directories: []model.WorkspaceView{{Workspace: workspace, Tabs: tabs}},
+	}}}
+	backend := &fakeBackend{snapshot: snapshot, workspace: workspace}
+	value := newDashboard(backend, snapshot)
+	value.width, value.height = 120, 30
+
+	updated, command := value.Update(tea.MouseClickMsg{X: 2, Y: 3, Button: tea.MouseLeft})
+	value = updated.(dashboard)
+	if value.navIndex != 1 || value.cursorPath != workspace.Path || command == nil {
+		t.Fatalf("workspace click = (index %d, path %q, command %v)", value.navIndex, value.cursorPath, command)
+	}
+
+	value.selectedWorkspaceID = workspace.ID
+	value.selectedPath = workspace.Path
+	value.focus = terminalPane
+	rightX := value.dimensions().leftWidth + value.dimensions().separator
+	updated, command = value.Update(tea.MouseClickMsg{X: rightX + 5, Y: 0, Button: tea.MouseLeft})
+	value = updated.(dashboard)
+	if value.tabIndex != 1 || command == nil {
+		t.Fatalf("tab click = (index %d, command %v), want second tab opened", value.tabIndex, command)
+	}
+}
+
+func TestDashboardMouseWheelMovesOnlyTheWorkspaceCursor(t *testing.T) {
+	value := newDashboard(&fakeBackend{}, twoRootSnapshot())
+	value.width, value.height = 120, 30
+
+	updated, command := value.Update(tea.MouseWheelMsg{X: 2, Y: 3, Button: tea.MouseWheelDown})
+	value = updated.(dashboard)
+	if value.navIndex != 1 || value.cursorPath != "/second" || command != nil {
+		t.Fatalf("workspace wheel = (index %d, path %q, command %v)", value.navIndex, value.cursorPath, command)
+	}
+}
+
+func TestDashboardDragsAndPersistsTheWorkspaceDivider(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	value := newDashboardWithConfig(&fakeBackend{}, model.Snapshot{}, path, Config{LeftWidth: 24})
+	value.width, value.height = 120, 30
+	seam := value.dimensions().leftWidth + 1
+
+	updated, command := value.Update(tea.MouseClickMsg{X: seam, Y: 5, Button: tea.MouseLeft})
+	value = updated.(dashboard)
+	if !value.navigationResize || command != nil {
+		t.Fatalf("divider press = (dragging %v, command %v)", value.navigationResize, command)
+	}
+
+	updated, _ = value.Update(tea.MouseMotionMsg{X: 35, Y: 5, Button: tea.MouseLeft})
+	value = updated.(dashboard)
+	if value.paneWidth() != 34 {
+		t.Fatalf("divider drag width = %d, want 34", value.paneWidth())
+	}
+
+	updated, command = value.Update(tea.MouseReleaseMsg{X: 35, Y: 5, Button: tea.MouseLeft})
+	value = updated.(dashboard)
+	if value.navigationResize || command == nil {
+		t.Fatalf("divider release = (dragging %v, command %v)", value.navigationResize, command)
+	}
+	message := command()
+	if saved, ok := message.(configSavedMsg); !ok || saved.err != nil {
+		t.Fatalf("save result = %#v", message)
+	}
+	config, err := loadConfig(path)
+	if err != nil {
+		t.Fatalf("loadConfig() error = %v", err)
+	}
+	if config.LeftWidth != 34 {
+		t.Fatalf("saved width = %d, want 34", config.LeftWidth)
+	}
+}
+
+func TestDashboardClaimsTheMouseWithoutAnOpenTerminal(t *testing.T) {
+	value := newDashboard(&fakeBackend{}, model.Snapshot{})
+	if got := value.View().MouseMode; got != tea.MouseModeAllMotion {
+		t.Fatalf("mouse mode = %v, want dashboard clicks enabled", got)
+	}
+}
+
+func TestDashboardHighlightsMouseTargetsOnHover(t *testing.T) {
+	workspace := model.Workspace{ID: "workspace-1", RootID: "root-1", Name: "alpha", Path: "/projects/alpha"}
+	tab := model.Tab{ID: "tab-1", WorkspaceID: workspace.ID, Name: "1", Running: true}
+	snapshot := model.Snapshot{Roots: []model.RootView{{
+		Root:        model.Root{ID: "root-1", Name: "projects", Path: "/projects"},
+		Directories: []model.WorkspaceView{{Workspace: workspace, Tabs: []model.Tab{tab}}},
+	}}}
+	value := newDashboard(&fakeBackend{}, snapshot)
+	value.width, value.height = 120, 30
+	value.setNavigation(1)
+	_, defaultDivider := value.paneSeparators()
+
+	before := value.render()
+	updated, _ := value.Update(tea.MouseMotionMsg{X: 2, Y: 2})
+	value = updated.(dashboard)
+	if value.hover.kind != hoverNavigation || value.hover.index != 0 || value.render() == before {
+		t.Fatalf("navigation hover = %#v", value.hover)
+	}
+
+	seam := value.dimensions().leftWidth + 1
+	before = value.render()
+	updated, _ = value.Update(tea.MouseMotionMsg{X: seam, Y: 5})
+	value = updated.(dashboard)
+	if value.hover.kind != hoverDivider || value.render() == before {
+		t.Fatalf("divider hover = %#v", value.hover)
+	}
+	if _, hoveredDivider := value.paneSeparators(); hoveredDivider == defaultDivider {
+		t.Fatal("divider hover kept its default color")
+	}
+	updated, _ = value.Update(tea.MouseMotionMsg{X: seam + 10, Y: 5})
+	value = updated.(dashboard)
+	if value.hover.kind != hoverNone {
+		t.Fatalf("mouse out hover = %#v, want none", value.hover)
+	}
+	if _, divider := value.paneSeparators(); divider != defaultDivider {
+		t.Fatal("divider did not return to its default color after mouse out")
+	}
+
+	origin := value.dimensions().leftWidth + value.dimensions().separator
+	before = value.render()
+	updated, _ = value.Update(tea.MouseMotionMsg{X: origin + 5, Y: 0})
+	value = updated.(dashboard)
+	if value.hover.kind != hoverTab || value.hover.index != 1 || value.render() == before {
+		t.Fatalf("tab hover = %#v", value.hover)
+	}
+}
+
+func TestDashboardHighlightsDialogMouseTargets(t *testing.T) {
+	value := newDashboard(&fakeBackend{}, model.Snapshot{})
+	value.width, value.height = 100, 24
+	updated, _ := value.Update(key(tea.KeyF9, ""))
+	value = updated.(dashboard)
+	hit := value.modalActionHits(value.width, value.dimensions().bodyHeight)[0]
+	before := value.render()
+	updated, _ = value.Update(tea.MouseMotionMsg{X: hit.left, Y: hit.row})
+	value = updated.(dashboard)
+	if value.hover.kind != hoverModalAction || value.hover.index != 0 || value.render() == before {
+		t.Fatalf("modal action hover = %#v", value.hover)
+	}
+
+	value.modal = configModal
+	left, top := value.modalContentOrigin(value.width, value.dimensions().bodyHeight)
+	before = value.render()
+	updated, _ = value.Update(tea.MouseMotionMsg{X: left + 2, Y: top + 2})
+	value = updated.(dashboard)
+	if value.hover.kind != hoverConfigRow || value.hover.index != 2 || value.render() == before {
+		t.Fatalf("config hover = %#v", value.hover)
+	}
+}
+
 func TestDashboardConfirmsDaemonShutdown(t *testing.T) {
 	backend := &fakeBackend{}
 	terminal := newEmbeddedTerminal("tab-1", newMemoryStream(""), 40, 10)
@@ -878,10 +1045,86 @@ func TestDashboardConfirmsDaemonShutdown(t *testing.T) {
 		t.Fatalf("status bar does not report the pending shutdown:\n%s", rendered)
 	}
 
-	updated, quitCommand := value.Update(command())
+	updated, quitCommand := value.Update(commandMessage[daemonStoppedMsg](t, command))
 	value = updated.(dashboard)
 	if backend.shutdownCount != 1 || !value.result.Quit || quitCommand == nil || value.terminal != nil {
 		t.Fatalf("shutdown result = (count %d, quit %v, command %v, terminal %v)", backend.shutdownCount, value.result.Quit, quitCommand, value.terminal)
+	}
+}
+
+func TestDashboardConfirmationActionsAreClickable(t *testing.T) {
+	value := newDashboard(&fakeBackend{}, model.Snapshot{})
+	value.width, value.height = 100, 24
+	updated, _ := value.Update(key(tea.KeyF9, ""))
+	value = updated.(dashboard)
+
+	plain := ansi.Strip(value.render())
+	for _, label := range []string{"stop daemon", "cancel"} {
+		if !strings.Contains(plain, label) {
+			t.Fatalf("confirmation dialog has no clickable %q action:\n%s", label, plain)
+		}
+	}
+	hits := value.modalActionHits(value.width, value.dimensions().bodyHeight)
+	if len(hits) != 2 {
+		t.Fatalf("modal action hits = %#v, want confirm and cancel", hits)
+	}
+	confirm := hits[0]
+	updated, command := value.Update(tea.MouseClickMsg{
+		X: (confirm.left + confirm.right) / 2, Y: confirm.row, Button: tea.MouseLeft,
+	})
+	value = updated.(dashboard)
+	if !value.shutdownPending || command == nil {
+		t.Fatalf("confirm click = (pending %v, command %v)", value.shutdownPending, command)
+	}
+
+	value = newDashboard(&fakeBackend{}, model.Snapshot{})
+	value.width, value.height = 100, 24
+	updated, _ = value.Update(key(tea.KeyF9, ""))
+	value = updated.(dashboard)
+	hits = value.modalActionHits(value.width, value.dimensions().bodyHeight)
+	cancel := hits[1]
+	updated, command = value.Update(tea.MouseClickMsg{
+		X: (cancel.left + cancel.right) / 2, Y: cancel.row, Button: tea.MouseLeft,
+	})
+	value = updated.(dashboard)
+	if value.modal != noModal || command != nil {
+		t.Fatalf("cancel click = (modal %v, command %v)", value.modal, command)
+	}
+}
+
+func TestDashboardAnimatesVisiblePendingWork(t *testing.T) {
+	value := newDashboard(&fakeBackend{}, model.Snapshot{})
+	value.tabPending = true
+
+	updated, command := value.Update(struct{}{})
+	value = updated.(dashboard)
+	if !value.agentAnimationPending || command == nil {
+		t.Fatalf("pending tab animation = (scheduled %v, command %v)", value.agentAnimationPending, command)
+	}
+	status := ansi.Strip(value.renderStatus(100, value.dimensions().bodyHeight)[1])
+	if !strings.Contains(status, "OPENING") || !strings.Contains(status, agentAnimationFrames[0]) {
+		t.Fatalf("pending tab status = %q", status)
+	}
+
+	updated, _ = value.Update(agentAnimationMsg{})
+	value = updated.(dashboard)
+	if value.agentAnimationFrame != 1 || !value.agentAnimationPending {
+		t.Fatalf("pending animation = (frame %d, scheduled %v)", value.agentAnimationFrame, value.agentAnimationPending)
+	}
+}
+
+func TestDashboardAnimatesDirectoryReads(t *testing.T) {
+	value := newDashboard(&fakeBackend{}, model.Snapshot{})
+	value.modal = browseModal
+	value.browse = browser{path: "/projects", loading: true}
+	updated, command := value.Update(struct{}{})
+	value = updated.(dashboard)
+	if command == nil || !value.agentAnimationPending {
+		t.Fatal("directory read did not schedule its activity indicator")
+	}
+	plain := ansi.Strip(strings.Join(value.renderBrowseModal(80, 20), "\n"))
+	if !strings.Contains(plain, agentAnimationFrames[0]+" Reading") {
+		t.Fatalf("directory activity = %q", plain)
 	}
 }
 
@@ -922,7 +1165,7 @@ func TestDashboardConfirmsAgentHookInstallation(t *testing.T) {
 		t.Fatalf("pending status = %q", status)
 	}
 
-	updated, extra := value.Update(command())
+	updated, extra := value.Update(commandMessage[hooksInstalledMsg](t, command))
 	value = updated.(dashboard)
 	if extra != nil || value.modal != noModal || value.hookInstallPending {
 		t.Fatalf("install result = (extra %v, modal %v, pending %v)", extra, value.modal, value.hookInstallPending)
@@ -1085,8 +1328,8 @@ func TestDashboardScrollsTerminalHistory(t *testing.T) {
 	history := value.terminal.scrollbackLen()
 
 	// The live screen captures the wheel so it can enter scrollback directly.
-	if value.View().MouseMode != tea.MouseModeCellMotion {
-		t.Fatalf("mouse mode outside scrollback = %v, want cell motion", value.View().MouseMode)
+	if value.View().MouseMode != tea.MouseModeAllMotion {
+		t.Fatalf("mouse mode outside scrollback = %v, want all motion", value.View().MouseMode)
 	}
 	live := plainRows(value.terminal.renderViewport(0))
 
@@ -1148,7 +1391,7 @@ func TestDashboardScrollsTerminalHistory(t *testing.T) {
 
 	updated, command = value.Update(key(tea.KeyEscape, ""))
 	value = updated.(dashboard)
-	if value.scrollback || value.scrollOffset != 0 || value.View().MouseMode != tea.MouseModeCellMotion {
+	if value.scrollback || value.scrollOffset != 0 || value.View().MouseMode != tea.MouseModeAllMotion {
 		t.Fatalf("Esc = (scrollback %v, offset %d, mouse %v), want live wheel capture restored",
 			value.scrollback, value.scrollOffset, value.View().MouseMode)
 	}
@@ -1253,6 +1496,27 @@ func commandMessages(command tea.Cmd) []tea.Msg {
 		messages = append(messages, commandMessages(batched)...)
 	}
 	return messages
+}
+
+func commandMessage[T any](t *testing.T, command tea.Cmd) T {
+	t.Helper()
+	for _, message := range commandMessages(command) {
+		if typed, ok := message.(T); ok {
+			return typed
+		}
+	}
+	var zero T
+	t.Fatalf("command has no %T message", zero)
+	return zero
+}
+
+func playedSound(command tea.Cmd) (sound.Kind, bool) {
+	for _, message := range commandMessages(command) {
+		if played, ok := message.(soundPlayedMsg); ok {
+			return played.kind, true
+		}
+	}
+	return "", false
 }
 
 func TestDashboardEntersScrollbackFromEveryBinding(t *testing.T) {
@@ -1614,7 +1878,7 @@ func TestDashboardNamesTheDeleteTargetBeforeItsConsequences(t *testing.T) {
 		"This permanently deletes all contents.",
 		"Its running shells will be terminated.",
 	}
-	if !slices.Equal(body, want) {
+	if len(body) < len(want) || !slices.Equal(body[:len(want)], want) {
 		t.Fatalf("delete modal body = %q, want the target named before its consequences %q", body, want)
 	}
 	rendered := strings.Join(value.renderModal(72, 28), "\n")
@@ -1623,10 +1887,7 @@ func TestDashboardNamesTheDeleteTargetBeforeItsConsequences(t *testing.T) {
 	}
 }
 
-// Two settings of one weight read as one paragraph, and the second one looked
-// like a third line of the first. Each setting is its own group: a name and
-// value, the keys that move it under them, and a blank line between.
-func TestDashboardGroupsEachConfigSettingWithItsKeys(t *testing.T) {
+func TestDashboardKeepsConfigControlsCompact(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, model.Snapshot{})
 	value.width, value.height = 100, 24
 	value.modal = configModal
@@ -1637,20 +1898,20 @@ func TestDashboardGroupsEachConfigSettingWithItsKeys(t *testing.T) {
 		body = append(body, strings.TrimSpace(strings.Trim(line, "│")))
 	}
 	want := []string{
-		fmt.Sprintf("Left pane width: %d", value.paneWidth()),
-		"←/→ or [/] to adjust",
-		"",
-		"Scrollback mouse: off",
-		"m to toggle",
+		fmt.Sprintf("Left pane: %d  ←/→", value.paneWidth()),
+		"Scrollback mouse: off  m",
+		"Sound on done: off  d",
+		"Sound on waiting: off  b",
+		"Test sound  s",
 	}
 	if !slices.Equal(body, want) {
 		t.Fatalf("config modal body = %q, want each setting grouped with its keys %q", body, want)
 	}
 
-	// The hint is subordinate to the setting it belongs to, not another line of
-	// the same weight.
+	// Keys stay subordinate to the settings while sharing their row, so every
+	// control still fits on the shortest supported screen.
 	rendered := strings.Join(value.renderModal(72, 22), "\n")
-	if !strings.Contains(rendered, value.styles.empty.Render("m to toggle")) {
+	if !strings.Contains(rendered, value.styles.empty.Render("s")) {
 		t.Fatalf("the key hint is not muted:\n%s", rendered)
 	}
 
@@ -1686,6 +1947,122 @@ func TestDashboardTogglesScrollbackMouseFromConfig(t *testing.T) {
 	}
 }
 
+func TestDashboardConfiguresAndTestsSoundAlerts(t *testing.T) {
+	value := newDashboard(&fakeBackend{}, model.Snapshot{})
+	updated, _ := value.Update(key(tea.KeyF3, ""))
+	value = updated.(dashboard)
+
+	updated, saveDone := value.Update(key('d', "d"))
+	value = updated.(dashboard)
+	updated, saveWaiting := value.Update(key('b', "b"))
+	value = updated.(dashboard)
+	if !value.soundOnDone || !value.soundOnWaiting || saveDone == nil || saveWaiting == nil {
+		t.Fatalf("sound toggles = (done %v, waiting %v, saves %v/%v)",
+			value.soundOnDone, value.soundOnWaiting, saveDone, saveWaiting)
+	}
+
+	updated, soundCommand := value.Update(key('s', "s"))
+	value = updated.(dashboard)
+	if played := commandMessage[soundPlayedMsg](t, soundCommand); played.kind != sound.Done {
+		t.Fatalf("test sound = %q, want done", played.kind)
+	}
+}
+
+func TestDashboardClicksConfigControls(t *testing.T) {
+	value := newDashboard(&fakeBackend{}, model.Snapshot{})
+	value.width, value.height = 100, 24
+	updated, _ := value.Update(key(tea.KeyF3, ""))
+	value = updated.(dashboard)
+	left, top := value.modalContentOrigin(value.width, value.dimensions().bodyHeight)
+
+	updated, save := value.Update(tea.MouseClickMsg{X: left + 2, Y: top + 2, Button: tea.MouseLeft})
+	value = updated.(dashboard)
+	if !value.soundOnDone || save == nil {
+		t.Fatalf("done sound click = (enabled %v, save %v)", value.soundOnDone, save)
+	}
+	updated, soundCommand := value.Update(tea.MouseClickMsg{X: left + 2, Y: top + 4, Button: tea.MouseLeft})
+	value = updated.(dashboard)
+	if played := commandMessage[soundPlayedMsg](t, soundCommand); played.kind != sound.Done {
+		t.Fatalf("test sound click = %q, want done", played.kind)
+	}
+}
+
+func TestDashboardSoundsOnceForAgentTransitions(t *testing.T) {
+	workspace := model.Workspace{ID: "workspace-1", RootID: "root-1", Name: "alpha", Path: "/alpha"}
+	tab := model.Tab{
+		ID: "tab-1", WorkspaceID: workspace.ID, Name: "1", Running: true,
+		Agent: model.AgentCodex, AgentPhase: model.AgentPhaseWorking,
+	}
+	value := newDashboardWithConfig(&fakeBackend{}, model.Snapshot{Roots: []model.RootView{{
+		Root:        model.Root{ID: "root-1", Name: "root", Path: "/"},
+		Directories: []model.WorkspaceView{{Workspace: workspace, Tabs: []model.Tab{tab}}},
+	}}}, "", Config{SoundOnDone: true, SoundOnWaiting: true})
+	value.agentSoundReady = true
+
+	idle := map[string]model.AgentStatus{"tab-1": {Agent: model.AgentCodex, Phase: model.AgentPhaseIdle}}
+	updated, command := value.Update(agentSnapshotMsg{value: idle})
+	value = updated.(dashboard)
+	if kind, ok := playedSound(command); !ok || kind != sound.Done {
+		t.Fatalf("done transition sound = (%q, %v)", kind, ok)
+	}
+	updated, command = value.Update(agentSnapshotMsg{value: idle})
+	value = updated.(dashboard)
+	if kind, ok := playedSound(command); ok {
+		t.Fatalf("stable idle transition played %q again", kind)
+	}
+
+	waiting := map[string]model.AgentStatus{"tab-1": {Agent: model.AgentCodex, Phase: model.AgentPhaseWaitingApproval}}
+	updated, command = value.Update(agentSnapshotMsg{value: waiting})
+	value = updated.(dashboard)
+	if kind, ok := playedSound(command); !ok || kind != sound.Waiting {
+		t.Fatalf("waiting transition sound = (%q, %v)", kind, ok)
+	}
+}
+
+func TestDashboardDoesNotSoundOnTheFirstAgentSnapshot(t *testing.T) {
+	value := newDashboardWithConfig(&fakeBackend{}, model.Snapshot{}, "", Config{SoundOnWaiting: true})
+	waiting := map[string]model.AgentStatus{"tab-1": {Agent: model.AgentCodex, Phase: model.AgentPhaseWaitingInput}}
+	updated, command := value.Update(agentSnapshotMsg{value: waiting})
+	value = updated.(dashboard)
+	if !value.agentSoundReady {
+		t.Fatal("first successful agent snapshot did not arm later sounds")
+	}
+	if kind, ok := playedSound(command); ok {
+		t.Fatalf("first agent snapshot played %q", kind)
+	}
+}
+
+// romty asks the host for all motion so it can draw its own hover highlights.
+// A guest that asked only for clicks must not be handed those extra reports.
+func TestDashboardWithholdsUnrequestedMotionFromTheGuest(t *testing.T) {
+	value := scrolledDashboard(t, 200)
+	// ?1000h is click tracking: button press and release, no motion.
+	value.terminal.writeOutput([]byte("\x1b[?1000h\x1b[?1006h"))
+	value.mousePassthrough = true
+	if value.terminal.guestMouseMode() != tea.MouseModeCellMotion {
+		t.Fatalf("guest mouse mode = %v, want click tracking", value.terminal.guestMouseMode())
+	}
+	if !value.guestOwnsMouse() {
+		t.Fatal("passthrough did not hand the mouse to the guest")
+	}
+
+	x, y := value.dimensions().leftWidth+3+4, terminalTop+2
+	value.Update(tea.MouseMotionMsg{X: x, Y: y})
+	sent := waitForGuestSilence(t, value.terminal, "")
+
+	// The buttons the guest did ask for still reach it.
+	value.Update(tea.MouseClickMsg{X: x, Y: y, Button: tea.MouseLeft})
+	sent += "\x1b[<0;5;3M"
+	waitForGuest(t, value.terminal.stream.(*memoryStream), sent)
+
+	// ?1002h is button-event tracking: motion, but only while a button is held.
+	value.terminal.writeOutput([]byte("\x1b[?1002h"))
+	value.Update(tea.MouseMotionMsg{X: x, Y: y})
+	sent = waitForGuestSilence(t, value.terminal, sent)
+	value.Update(tea.MouseMotionMsg{X: x, Y: y, Button: tea.MouseLeft})
+	waitForGuest(t, value.terminal.stream.(*memoryStream), sent+"\x1b[<32;5;3M")
+}
+
 func TestDashboardKeepsMouseWithTheHostUnlessPassthroughIsOn(t *testing.T) {
 	value := scrolledDashboard(t, 200)
 	// A guest that wants the mouse, the way Claude Code and htop do.
@@ -1694,7 +2071,7 @@ func TestDashboardKeepsMouseWithTheHostUnlessPassthroughIsOn(t *testing.T) {
 	if value.terminal.guestMouseMode() != tea.MouseModeAllMotion {
 		t.Fatalf("guest mouse mode = %v, want all motion", value.terminal.guestMouseMode())
 	}
-	if value.View().MouseMode != tea.MouseModeCellMotion {
+	if value.View().MouseMode != tea.MouseModeAllMotion {
 		t.Fatalf("mouse mode = %v, want romty to capture the live wheel", value.View().MouseMode)
 	}
 	updated, _ := value.Update(tea.MouseWheelMsg{X: 40, Y: 6, Button: tea.MouseWheelUp})
@@ -3055,8 +3432,8 @@ func TestDashboardRefusesScrollbackWithoutTerminal(t *testing.T) {
 			t.Fatalf("%q entered scrollback with no terminal open", message.String())
 		}
 	}
-	if value.View().MouseMode != tea.MouseModeNone {
-		t.Fatalf("mouse mode = %v, want none", value.View().MouseMode)
+	if value.View().MouseMode != tea.MouseModeAllMotion {
+		t.Fatalf("mouse mode = %v, want dashboard clicks enabled", value.View().MouseMode)
 	}
 }
 
@@ -3135,8 +3512,8 @@ func TestDashboardCapturesLiveMouseWheelAndUsesKeyboardFocus(t *testing.T) {
 	value.terminal = terminal
 	value.focus = terminalPane
 
-	if view := value.View(); view.MouseMode != tea.MouseModeCellMotion {
-		t.Fatalf("initial mouse mode = %v, want cell motion", view.MouseMode)
+	if view := value.View(); view.MouseMode != tea.MouseModeAllMotion {
+		t.Fatalf("initial mouse mode = %v, want all motion", view.MouseMode)
 	}
 	if rendered := value.render(); strings.Contains(rendered, "Ctrl+G") || strings.Contains(rendered, "mouse focus") {
 		t.Fatalf("mouse focus mode is still advertised:\n%s", rendered)
@@ -3151,8 +3528,8 @@ func TestDashboardCapturesLiveMouseWheelAndUsesKeyboardFocus(t *testing.T) {
 	if rendered := value.render(); !strings.Contains(rendered, separator) {
 		t.Fatalf("workspace focus is not visible:\n%s", rendered)
 	}
-	if view := value.View(); view.MouseMode != tea.MouseModeCellMotion {
-		t.Fatalf("mouse mode after Ctrl+/ = %v, want cell motion", view.MouseMode)
+	if view := value.View(); view.MouseMode != tea.MouseModeAllMotion {
+		t.Fatalf("mouse mode after Ctrl+/ = %v, want all motion", view.MouseMode)
 	}
 }
 
@@ -3536,12 +3913,12 @@ func TestDashboardSelectsPlusAndCreatesTabOnEnter(t *testing.T) {
 	if selectCommand == nil {
 		t.Fatal("Enter on + did not select the workspace")
 	}
-	updated, createCommand := value.Update(selectCommand())
+	updated, createCommand := value.Update(commandMessage[workspaceMsg](t, selectCommand))
 	value = updated.(dashboard)
 	if createCommand == nil {
 		t.Fatal("Enter on + did not produce a create command")
 	}
-	createdMessage := createCommand()
+	createdMessage := commandMessage[tabMsg](t, createCommand)
 	if backend.createCount != 1 || backend.openedTab != "" {
 		t.Fatalf("Enter on + created %d tabs and opened %q", backend.createCount, backend.openedTab)
 	}
@@ -4218,8 +4595,8 @@ func TestDashboardShowsCompleteShortcutReferenceInHelpModal(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, model.Snapshot{})
 	value.width = 100
 	value.height = 80
-	if entries := value.helpEntries(); len(entries) != 37 {
-		t.Fatalf("help entries = %d, want 6 sections and 30 shortcuts", len(entries))
+	if entries := value.helpEntries(); len(entries) != 41 {
+		t.Fatalf("help entries = %d, want 7 sections and 33 shortcuts", len(entries))
 	}
 
 	updated, command := value.Update(key('?', "?"))
@@ -4354,8 +4731,8 @@ func TestDashboardScrollsHelpModalWithMouseWheel(t *testing.T) {
 	updated, _ := value.Update(key('?', "?"))
 	value = updated.(dashboard)
 
-	if value.View().MouseMode != tea.MouseModeCellMotion {
-		t.Fatalf("help mouse mode = %v, want cell motion", value.View().MouseMode)
+	if value.View().MouseMode != tea.MouseModeAllMotion {
+		t.Fatalf("help mouse mode = %v, want all motion", value.View().MouseMode)
 	}
 	if rendered := ansi.Strip(value.render()); !strings.Contains(rendered, "↑/↓/Wheel") {
 		t.Fatalf("help status does not advertise wheel scrolling:\n%s", rendered)
@@ -4373,8 +4750,8 @@ func TestDashboardScrollsHelpModalWithMouseWheel(t *testing.T) {
 
 	updated, _ = value.Update(key(tea.KeyEscape, ""))
 	value = updated.(dashboard)
-	if value.View().MouseMode != tea.MouseModeNone {
-		t.Fatalf("mouse mode after closing help = %v, want none", value.View().MouseMode)
+	if value.View().MouseMode != tea.MouseModeAllMotion {
+		t.Fatalf("mouse mode after closing help = %v, want dashboard clicks enabled", value.View().MouseMode)
 	}
 }
 
@@ -4436,7 +4813,7 @@ func TestDashboardAdjustsAndPersistsLeftPaneWidth(t *testing.T) {
 	if err != nil {
 		t.Fatalf("loadConfig() error = %v", err)
 	}
-	if loaded.LeftWidth != 29 || !strings.Contains(value.render(), "Left pane width: 29") {
+	if loaded.LeftWidth != 29 || !strings.Contains(value.render(), "Left pane: 29") {
 		t.Fatalf("persisted config = %#v\n%s", loaded, value.render())
 	}
 

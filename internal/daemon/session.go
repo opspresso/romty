@@ -25,6 +25,12 @@ const resetScreen = "\x1b[2J\x1b[H"
 // daemon's request timeout is one.
 var replayTimeout = 2 * time.Second
 
+// maxLiveClientQueueBytes is a variable so tests can overflow one client
+// without making another client consume a megabyte of output.
+var maxLiveClientQueueBytes = 1 << 20
+
+const maxLiveClientQueueChunks = 64
+
 // replayChunkBytes is how much of the recording goes out between deadline
 // resets: small enough that a client reading steadily keeps resetting the
 // clock, large enough not to turn a replay into thousands of writes.
@@ -33,6 +39,8 @@ const replayChunkBytes = 64 << 10
 type session struct {
 	id       string
 	pty      *os.File
+	columns  uint16
+	rows     uint16
 	command  *exec.Cmd
 	onExit   func()
 	readDone chan struct{}
@@ -43,17 +51,26 @@ type session struct {
 	history recording
 	// modes survives the recording being trimmed, so a mode the guest set
 	// long ago is still restored to a reattaching client.
-	modes   *modeTracker
-	clients map[net.Conn]*attachment
-	closed  bool
+	modes      *modeTracker
+	clients    map[net.Conn]*attachment
+	foreground net.Conn
+	activity   uint64
+	closed     bool
 }
 
 // attachment tracks one attached client. A client is not live until it has
 // been sent the recorded history; output that arrives before then is queued so
 // it reaches the client after the recording rather than interleaved with it.
 type attachment struct {
-	pending []byte
-	live    bool
+	clientID    string
+	pending     []byte
+	output      chan []byte
+	done        chan struct{}
+	queuedBytes int
+	columns     uint16
+	rows        uint16
+	activity    uint64
+	live        bool
 }
 
 func startSession(id, directory, shell string, environment []string, columns, rows uint16, onExit func()) (*session, error) {
@@ -87,6 +104,8 @@ func startSession(id, directory, shell string, environment []string, columns, ro
 	value := &session{
 		id:       id,
 		pty:      terminal,
+		columns:  columns,
+		rows:     rows,
 		command:  command,
 		onExit:   onExit,
 		readDone: make(chan struct{}),
@@ -137,6 +156,9 @@ func (s *session) wait() {
 	s.closed = true
 	clients := make([]net.Conn, 0, len(s.clients))
 	for connection := range s.clients {
+		if s.clients[connection].done != nil {
+			close(s.clients[connection].done)
+		}
 		clients = append(clients, connection)
 	}
 	s.clients = make(map[net.Conn]*attachment)
@@ -151,11 +173,20 @@ func (s *session) broadcast(data []byte) {
 	s.mu.Lock()
 	s.modes.observe(data)
 	s.history.append(data)
-	live := make([]net.Conn, 0, len(s.clients))
 	stalled := make([]net.Conn, 0)
 	for connection, attached := range s.clients {
 		if attached.live {
-			live = append(live, connection)
+			if attached.queuedBytes+len(data) > maxLiveClientQueueBytes {
+				stalled = append(stalled, connection)
+				continue
+			}
+			chunk := append([]byte(nil), data...)
+			select {
+			case attached.output <- chunk:
+				attached.queuedBytes += len(chunk)
+			default:
+				stalled = append(stalled, connection)
+			}
 			continue
 		}
 		// Still being sent the recording. Queue rather than interleave, and
@@ -167,26 +198,29 @@ func (s *session) broadcast(data []byte) {
 	}
 	s.mu.Unlock()
 
-	for _, connection := range live {
-		_ = connection.SetWriteDeadline(time.Now().Add(500 * time.Millisecond))
-		if _, err := connection.Write(data); err != nil {
-			s.detach(connection)
-		}
-		_ = connection.SetWriteDeadline(time.Time{})
-	}
 	for _, connection := range stalled {
 		s.detach(connection)
 	}
 }
 
 func (s *session) attach(connection net.Conn) error {
-	return s.attachReady(connection, func(int) error { return nil })
+	return s.attachClientReady(connection, "", func(int, uint16, uint16) error { return nil })
 }
 
 // attachReady announces the exact initial replay before writing it. The
 // client can consume that history off-screen, then treat everything after the
 // boundary as live output.
 func (s *session) attachReady(connection net.Conn, ready func(int) error) error {
+	return s.attachClientReady(connection, "", func(replayBytes int, _, _ uint16) error {
+		return ready(replayBytes)
+	})
+}
+
+func (s *session) attachClientReady(
+	connection net.Conn,
+	clientID string,
+	ready func(int, uint16, uint16) error,
+) error {
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()
@@ -201,12 +235,23 @@ func (s *session) attachReady(connection net.Conn, ready func(int) error) error 
 	// slice into it would be rewritten under the replay's feet.
 	recorded := s.history.bytes()
 	modes := s.modes.restore()
-	attached := &attachment{}
+	replayColumns, replayRows := s.columns, s.rows
+	s.activity++
+	attached := &attachment{
+		clientID: clientID,
+		output:   make(chan []byte, maxLiveClientQueueChunks),
+		done:     make(chan struct{}),
+		activity: s.activity,
+	}
 	s.clients[connection] = attached
+	if s.foreground == nil {
+		s.foreground = connection
+	}
 	s.mu.Unlock()
+	go s.writeClient(connection, attached)
 
 	recorded = stripQueries(recorded)
-	if err := ready(len(resetScreen) + len(modes) + len(recorded)); err != nil {
+	if err := ready(len(resetScreen)+len(modes)+len(recorded), replayColumns, replayRows); err != nil {
 		s.detach(connection)
 		return err
 	}
@@ -219,7 +264,7 @@ func (s *session) attachReady(connection net.Conn, ready func(int) error) error 
 	for {
 		count, err := connection.Read(buffer)
 		if count > 0 {
-			if writeErr := s.write(buffer[:count]); writeErr != nil {
+			if writeErr := s.writeFrom(connection, buffer[:count]); writeErr != nil {
 				s.detach(connection)
 				return writeErr
 			}
@@ -227,6 +272,26 @@ func (s *session) attachReady(connection net.Conn, ready func(int) error) error 
 		if err != nil {
 			s.detach(connection)
 			return nil
+		}
+	}
+}
+
+func (s *session) writeClient(connection net.Conn, attached *attachment) {
+	for {
+		select {
+		case data := <-attached.output:
+			_ = connection.SetWriteDeadline(time.Now().Add(500 * time.Millisecond))
+			_, err := connection.Write(data)
+			_ = connection.SetWriteDeadline(time.Time{})
+			s.mu.Lock()
+			attached.queuedBytes -= len(data)
+			s.mu.Unlock()
+			if err != nil {
+				s.detach(connection)
+				return
+			}
+		case <-attached.done:
+			return
 		}
 	}
 }
@@ -288,10 +353,36 @@ func writeReplay(connection net.Conn, data []byte) error {
 }
 
 func (s *session) detach(connection net.Conn) {
+	s.writeMu.Lock()
 	s.mu.Lock()
-	delete(s.clients, connection)
+	attached, ok := s.clients[connection]
+	if ok {
+		delete(s.clients, connection)
+		if attached.done != nil {
+			close(attached.done)
+		}
+		if s.foreground == connection {
+			s.foreground = s.mostRecentClient()
+			if next := s.clients[s.foreground]; next != nil && next.columns > 0 && next.rows > 0 {
+				_ = s.applySize(next.columns, next.rows)
+			}
+		}
+	}
 	s.mu.Unlock()
+	s.writeMu.Unlock()
 	connection.Close()
+}
+
+func (s *session) mostRecentClient() net.Conn {
+	var selected net.Conn
+	var activity uint64
+	for connection, attached := range s.clients {
+		if selected == nil || attached.activity > activity {
+			selected = connection
+			activity = attached.activity
+		}
+	}
+	return selected
 }
 
 func (s *session) write(data []byte) error {
@@ -303,18 +394,75 @@ func (s *session) write(data []byte) error {
 	return nil
 }
 
+func (s *session) writeFrom(connection net.Conn, data []byte) error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	s.mu.Lock()
+	attached, ok := s.clients[connection]
+	if !ok {
+		s.mu.Unlock()
+		return fmt.Errorf("terminal attachment has closed")
+	}
+	if attached.clientID != "" {
+		s.activity++
+		attached.activity = s.activity
+		if s.foreground != connection {
+			s.foreground = connection
+			if attached.columns > 0 && attached.rows > 0 {
+				if err := s.applySize(attached.columns, attached.rows); err != nil {
+					s.mu.Unlock()
+					return err
+				}
+			}
+		}
+	}
+	s.mu.Unlock()
+	if _, err := s.pty.Write(data); err != nil {
+		return fmt.Errorf("write terminal input: %w", err)
+	}
+	return nil
+}
+
 func (s *session) resize(columns, rows uint16) error {
+	return s.resizeFor("", columns, rows)
+}
+
+func (s *session) resizeFor(clientID string, columns, rows uint16) error {
 	if columns == 0 || rows == 0 {
 		return fmt.Errorf("terminal size must be greater than zero")
 	}
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed {
 		return fmt.Errorf("terminal session has exited")
 	}
+	if clientID != "" {
+		for connection, attached := range s.clients {
+			if attached.clientID != clientID {
+				continue
+			}
+			attached.columns = columns
+			attached.rows = rows
+			if s.foreground != connection {
+				return nil
+			}
+			return s.applySize(columns, rows)
+		}
+		return fmt.Errorf("terminal attachment not found")
+	}
+	return s.applySize(columns, rows)
+}
+
+func (s *session) applySize(columns, rows uint16) error {
+	if s.columns == columns && s.rows == rows {
+		return nil
+	}
 	if err := pty.Setsize(s.pty, &pty.Winsize{Cols: columns, Rows: rows}); err != nil {
 		return fmt.Errorf("resize terminal: %w", err)
 	}
+	s.columns, s.rows = columns, rows
 	return nil
 }
 

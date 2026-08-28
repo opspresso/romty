@@ -1,6 +1,7 @@
 package client
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -9,6 +10,9 @@ import (
 
 	"github.com/opspresso/romty/internal/paths"
 )
+
+// maxDaemonLogBytes is a variable so rotation tests need not create a multi-megabyte file.
+var maxDaemonLogBytes int64 = 3 << 20
 
 func EnsureDaemon(runtime paths.Paths, executable string) error {
 	if err := runtime.Ensure(); err != nil {
@@ -62,29 +66,51 @@ func EnsureDaemon(runtime paths.Paths, executable string) error {
 }
 
 func openDaemonLog(path string) (*os.File, error) {
+	file, info, err := openPrivateLog(path)
+	if err != nil {
+		return nil, err
+	}
+	if info.Size() < maxDaemonLogBytes {
+		return file, nil
+	}
+	if err := file.Close(); err != nil {
+		return nil, err
+	}
+	archive := path + ".1"
+	if err := os.Remove(archive); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return nil, fmt.Errorf("remove archived daemon log: %w", err)
+	}
+	if err := os.Rename(path, archive); err != nil {
+		return nil, fmt.Errorf("archive daemon log: %w", err)
+	}
+	file, _, err = openPrivateLog(path)
+	return file, err
+}
+
+func openPrivateLog(path string) (*os.File, os.FileInfo, error) {
 	fd, err := syscall.Open(path, syscall.O_CREAT|syscall.O_APPEND|syscall.O_WRONLY|
 		syscall.O_CLOEXEC|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0o600)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	file := os.NewFile(uintptr(fd), path)
 	info, err := file.Stat()
 	if err != nil {
 		file.Close()
-		return nil, err
+		return nil, nil, err
 	}
 	stat, ok := info.Sys().(*syscall.Stat_t)
 	if !info.Mode().IsRegular() || !ok || stat.Uid != uint32(os.Geteuid()) || stat.Nlink != 1 {
 		file.Close()
-		return nil, fmt.Errorf("daemon log must be a regular file owned only by the current user")
+		return nil, nil, fmt.Errorf("daemon log must be a regular file owned only by the current user")
 	}
 	if err := file.Chmod(0o600); err != nil {
 		file.Close()
-		return nil, err
+		return nil, nil, err
 	}
 	if err := syscall.SetNonblock(fd, false); err != nil {
 		file.Close()
-		return nil, err
+		return nil, nil, err
 	}
-	return file, nil
+	return file, info, nil
 }

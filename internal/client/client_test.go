@@ -253,6 +253,95 @@ func TestEnsureDaemonDoesNotFollowALogSymlink(t *testing.T) {
 	}
 }
 
+func TestOpenDaemonLogRotatesAtTheSizeLimit(t *testing.T) {
+	directory := shortTempDir(t)
+	path := filepath.Join(directory, "daemon.log")
+	if err := os.WriteFile(path, []byte("full"), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	previous := maxDaemonLogBytes
+	maxDaemonLogBytes = 4
+	t.Cleanup(func() { maxDaemonLogBytes = previous })
+
+	file, err := openDaemonLog(path)
+	if err != nil {
+		t.Fatalf("openDaemonLog() error = %v", err)
+	}
+	if _, err := file.WriteString("new"); err != nil {
+		t.Fatalf("WriteString() error = %v", err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	archive, err := os.ReadFile(path + ".1")
+	if err != nil {
+		t.Fatalf("ReadFile() archive error = %v", err)
+	}
+	if string(archive) != "full" {
+		t.Fatalf("archive = %q, want %q", archive, "full")
+	}
+	current, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile() current error = %v", err)
+	}
+	if string(current) != "new" {
+		t.Fatalf("current log = %q, want %q", current, "new")
+	}
+}
+
+func TestOpenDaemonLogKeepsOneArchive(t *testing.T) {
+	directory := shortTempDir(t)
+	path := filepath.Join(directory, "daemon.log")
+	if err := os.WriteFile(path, []byte("current"), 0o600); err != nil {
+		t.Fatalf("WriteFile() current error = %v", err)
+	}
+	if err := os.WriteFile(path+".1", []byte("old"), 0o600); err != nil {
+		t.Fatalf("WriteFile() archive error = %v", err)
+	}
+	previous := maxDaemonLogBytes
+	maxDaemonLogBytes = 1
+	t.Cleanup(func() { maxDaemonLogBytes = previous })
+
+	file, err := openDaemonLog(path)
+	if err != nil {
+		t.Fatalf("openDaemonLog() error = %v", err)
+	}
+	file.Close()
+
+	archive, err := os.ReadFile(path + ".1")
+	if err != nil {
+		t.Fatalf("ReadFile() archive error = %v", err)
+	}
+	if string(archive) != "current" {
+		t.Fatalf("archive = %q, want %q", archive, "current")
+	}
+}
+
+func TestOpenDaemonLogRejectsAHardLink(t *testing.T) {
+	directory := shortTempDir(t)
+	target := filepath.Join(directory, "target")
+	if err := os.WriteFile(target, []byte("unchanged"), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	path := filepath.Join(directory, "daemon.log")
+	if err := os.Link(target, path); err != nil {
+		t.Fatalf("Link() error = %v", err)
+	}
+
+	if file, err := openDaemonLog(path); err == nil {
+		file.Close()
+		t.Fatal("openDaemonLog() accepted a multiply linked file")
+	}
+	contents, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	if string(contents) != "unchanged" {
+		t.Fatalf("hard link target = %q, want unchanged", contents)
+	}
+}
+
 // runtimeFor points a romty home at an existing socket.
 func runtimeFor(socket string) paths.Paths {
 	directory := filepath.Dir(socket)
@@ -343,8 +432,10 @@ func TestOpenTerminalSeparatesReplayFromLiveOutput(t *testing.T) {
 			return
 		}
 		if err := protocol.Write(connection, protocol.Response{
-			Version:     protocol.Version,
-			ReplayBytes: len(replay),
+			Version:       protocol.Version,
+			ReplayBytes:   len(replay),
+			ReplayColumns: 100,
+			ReplayRows:    30,
 		}); err != nil {
 			return
 		}
@@ -362,12 +453,76 @@ func TestOpenTerminalSeparatesReplayFromLiveOutput(t *testing.T) {
 	if !bytes.Equal(restored, replay) {
 		t.Fatalf("replay length = %d, want %d", len(restored), len(replay))
 	}
+	if sized, ok := stream.(interface{ ReplaySize() (uint16, uint16) }); !ok {
+		t.Fatal("terminal stream does not expose its replay size")
+	} else if columns, rows := sized.ReplaySize(); columns != 100 || rows != 30 {
+		t.Fatalf("replay size = %dx%d, want 100x30", columns, rows)
+	}
 	gotLive := make([]byte, len(live))
 	if _, err := io.ReadFull(stream, gotLive); err != nil {
 		t.Fatalf("ReadFull() live output error = %v", err)
 	}
 	if !bytes.Equal(gotLive, live) {
 		t.Fatalf("live output = %q, want %q", gotLive, live)
+	}
+}
+
+func TestTerminalRequestsShareAClientIdentity(t *testing.T) {
+	socket := filepath.Join(shortTempDir(t), "daemon.sock")
+	listener, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatalf("Listen() error = %v", err)
+	}
+	if err := os.Chmod(socket, 0o600); err != nil {
+		t.Fatalf("Chmod() socket error = %v", err)
+	}
+	defer listener.Close()
+
+	requests := make(chan protocol.Request, 2)
+	go func() {
+		if err := answerNegotiation(listener, protocol.Version, protocol.MinimumVersion); err != nil {
+			return
+		}
+		attachment, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		defer attachment.Close()
+		var attach protocol.Request
+		if err := protocol.Read(bufio.NewReader(attachment), &attach); err != nil {
+			return
+		}
+		requests <- attach
+		if err := protocol.Write(attachment, protocol.Response{Version: protocol.Version}); err != nil {
+			return
+		}
+
+		connection, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		defer connection.Close()
+		var resize protocol.Request
+		if err := protocol.Read(bufio.NewReader(connection), &resize); err != nil {
+			return
+		}
+		requests <- resize
+		_ = protocol.Write(connection, protocol.Response{Version: protocol.Version})
+	}()
+
+	backend := New(socket)
+	stream, _, err := backend.OpenTerminal("tab-1")
+	if err != nil {
+		t.Fatalf("OpenTerminal() error = %v", err)
+	}
+	defer stream.Close()
+	if err := backend.Resize("tab-1", 120, 40); err != nil {
+		t.Fatalf("Resize() error = %v", err)
+	}
+	attach := <-requests
+	resize := <-requests
+	if attach.ClientID == "" || resize.ClientID != attach.ClientID {
+		t.Fatalf("client IDs = attach %q, resize %q", attach.ClientID, resize.ClientID)
 	}
 }
 

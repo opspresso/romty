@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -35,9 +36,12 @@ var (
 
 type Client struct {
 	socket     string
+	id         string
 	protocolMu sync.Mutex
 	protocol   *negotiatedProtocol
 }
+
+var nextClientID atomic.Uint64
 
 type negotiatedProtocol struct {
 	selectedVersion int
@@ -46,17 +50,23 @@ type negotiatedProtocol struct {
 
 type terminalStream struct {
 	net.Conn
-	reader *bufio.Reader
+	reader        *bufio.Reader
+	replayColumns uint16
+	replayRows    uint16
 }
 
 func (s *terminalStream) Read(data []byte) (int, error) {
 	return s.reader.Read(data)
 }
 
+func (s *terminalStream) ReplaySize() (uint16, uint16) {
+	return s.replayColumns, s.replayRows
+}
+
 var _ io.ReadWriteCloser = (*terminalStream)(nil)
 
 func New(socket string) *Client {
-	return &Client{socket: socket}
+	return &Client{socket: socket, id: fmt.Sprintf("%d-%d", os.Getpid(), nextClientID.Add(1))}
 }
 
 func (c *Client) Ping() error {
@@ -236,10 +246,11 @@ func (c *Client) CreateTab(workspaceID string, columns, rows uint16) (model.Tab,
 
 func (c *Client) Resize(tabID string, columns, rows uint16) error {
 	_, err := c.call(protocol.Request{
-		Action:  protocol.ActionResize,
-		TabID:   tabID,
-		Columns: columns,
-		Rows:    rows,
+		Action:   protocol.ActionResize,
+		TabID:    tabID,
+		ClientID: c.id,
+		Columns:  columns,
+		Rows:     rows,
 	})
 	return err
 }
@@ -310,17 +321,17 @@ func (c *Client) OpenAttach(tabID string) (net.Conn, *bufio.Reader, error) {
 	return connection, reader, err
 }
 
-func (c *Client) openAttach(tabID string) (net.Conn, *bufio.Reader, int, error) {
+func (c *Client) openAttach(tabID string) (net.Conn, *bufio.Reader, protocol.Response, error) {
 	negotiated, err := c.negotiateProtocol()
 	if err != nil {
-		return nil, nil, 0, err
+		return nil, nil, protocol.Response{}, err
 	}
 	if err := validateDaemonSocket(c.socket); err != nil {
-		return nil, nil, 0, err
+		return nil, nil, protocol.Response{}, err
 	}
 	connection, err := net.DialTimeout("unix", c.socket, dialTimeout)
 	if err != nil {
-		return nil, nil, 0, fmt.Errorf("connect to daemon: %w", err)
+		return nil, nil, protocol.Response{}, fmt.Errorf("connect to daemon: %w", err)
 	}
 	// Bound the handshake alone. A daemon that accepts the connection and then
 	// says nothing — stopped, wedged, or another program holding the socket
@@ -329,40 +340,43 @@ func (c *Client) openAttach(tabID string) (net.Conn, *bufio.Reader, int, error) 
 	// nothing on the status bar to say why.
 	if err := connection.SetDeadline(time.Now().Add(handshakeTimeout)); err != nil {
 		connection.Close()
-		return nil, nil, 0, fmt.Errorf("set daemon deadline: %w", err)
+		return nil, nil, protocol.Response{}, fmt.Errorf("set daemon deadline: %w", err)
 	}
-	if err := sendRequest(connection, protocol.Request{Action: protocol.ActionAttach, TabID: tabID},
+	if err := sendRequest(connection, protocol.Request{
+		Action: protocol.ActionAttach, TabID: tabID, ClientID: c.id,
+	},
 		negotiated.selectedVersion, negotiated.capabilities); err != nil {
 		connection.Close()
-		return nil, nil, 0, err
+		return nil, nil, protocol.Response{}, err
 	}
 
 	reader := bufio.NewReader(connection)
 	var response protocol.Response
 	if err := protocol.Read(reader, &response); err != nil {
 		connection.Close()
-		return nil, nil, 0, err
+		return nil, nil, protocol.Response{}, err
 	}
 	// The response must stay on the revision chosen before raw terminal bytes
 	// begin; once the stream starts there is no framed reply left to correct it.
 	if err := checkResponse(protocol.ActionAttach, response, negotiated.selectedVersion); err != nil {
 		connection.Close()
-		return nil, nil, 0, err
+		return nil, nil, protocol.Response{}, err
 	}
 	// The handshake is done; what follows is a terminal that stays open for as
 	// long as the user keeps it, and wants no deadline at all.
 	if err := connection.SetDeadline(time.Time{}); err != nil {
 		connection.Close()
-		return nil, nil, 0, fmt.Errorf("clear daemon deadline: %w", err)
+		return nil, nil, protocol.Response{}, fmt.Errorf("clear daemon deadline: %w", err)
 	}
-	return connection, reader, response.ReplayBytes, nil
+	return connection, reader, response, nil
 }
 
 func (c *Client) OpenTerminal(tabID string) (io.ReadWriteCloser, []byte, error) {
-	connection, reader, replayBytes, err := c.openAttach(tabID)
+	connection, reader, response, err := c.openAttach(tabID)
 	if err != nil {
 		return nil, nil, err
 	}
+	replayBytes := response.ReplayBytes
 	if replayBytes < 0 || replayBytes > protocol.MaxReplayBytes {
 		connection.Close()
 		return nil, nil, fmt.Errorf("terminal replay size %d is outside 0..%d", replayBytes, protocol.MaxReplayBytes)
@@ -372,7 +386,10 @@ func (c *Client) OpenTerminal(tabID string) (io.ReadWriteCloser, []byte, error) 
 		connection.Close()
 		return nil, nil, fmt.Errorf("restore terminal history: %w", err)
 	}
-	return &terminalStream{Conn: connection, reader: reader}, replay, nil
+	return &terminalStream{
+		Conn: connection, reader: reader,
+		replayColumns: response.ReplayColumns, replayRows: response.ReplayRows,
+	}, replay, nil
 }
 
 func readReplay(connection net.Conn, reader io.Reader, replay []byte) error {

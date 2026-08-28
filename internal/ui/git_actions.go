@@ -213,6 +213,34 @@ func (m dashboard) scrollGitAction(delta int) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m dashboard) handleGitActionsMouse(message tea.MouseMsg) (tea.Model, tea.Cmd, bool) {
+	row, inside := m.modalContentRow(message.Mouse(), max(m.width, 40), m.dimensions().bodyHeight)
+	if !inside {
+		return m, nil, false
+	}
+	if wheel, ok := message.(tea.MouseWheelMsg); ok && m.gitActionComplete {
+		switch wheel.Button {
+		case tea.MouseWheelUp:
+			updated, command := m.scrollGitAction(-3)
+			return updated, command, true
+		case tea.MouseWheelDown:
+			updated, command := m.scrollGitAction(3)
+			return updated, command, true
+		}
+	}
+	click, ok := message.(tea.MouseClickMsg)
+	if !ok || click.Button != tea.MouseLeft || m.gitActionPending || m.gitActionComplete {
+		return m, nil, false
+	}
+	index := row - 2
+	if index < 0 || index >= len(gitActionChoices) {
+		return m, nil, true
+	}
+	m.gitActionIndex = index
+	updated, command := m.startGitAction()
+	return updated, command, true
+}
+
 func (m dashboard) renderGitActionsModal(width, height int) []string {
 	target := m.styles.modalStrong.Render(displayText(m.gitActionTarget.Name)) +
 		m.styles.empty.Render("  "+displayText(m.gitActionTarget.Path))
@@ -236,6 +264,8 @@ func (m dashboard) renderGitActionsModal(width, height int) []string {
 			if index == m.gitActionIndex {
 				prefix = "▌ "
 				style = m.styles.navigationSelected
+			} else if m.hover.kind == hoverGitAction && m.hover.index == index {
+				style = m.styles.interactiveHover
 			}
 			label := prefix + pad(action.label(), 8) + action.description()
 			lines = append(lines, style.Render(pad(truncate(label, contentWidth), contentWidth)))
@@ -252,10 +282,14 @@ func (m dashboard) renderGitActionsModal(width, height int) []string {
 		title += fmt.Sprintf(" %d-%d/%d", offset+1, end, len(result))
 	}
 	lines := []string{target, ""}
-	for _, line := range result[offset:end] {
+	for index, line := range result[offset:end] {
 		style := m.styles.modalBody
 		if strings.HasPrefix(line, "Error: ") {
 			style = m.styles.errorText
+		}
+		if m.hover.kind == hoverGitResult && m.hover.index == index+2 {
+			style = style.Foreground(m.styles.interactiveHover.GetForeground()).
+				Background(m.styles.interactiveHover.GetBackground())
 		}
 		lines = append(lines, style.Render(line))
 	}

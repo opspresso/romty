@@ -1137,6 +1137,11 @@ func TestAttachSendsTheProtocolVersion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("OpenTerminal() error = %v", err)
 	}
+	if sized, ok := stream.(interface{ ReplaySize() (uint16, uint16) }); !ok {
+		t.Fatal("terminal stream has no replay size")
+	} else if columns, rows := sized.ReplaySize(); columns != 80 || rows != 24 {
+		t.Fatalf("replay size = %dx%d, want 80x24", columns, rows)
+	}
 	stream.Close()
 }
 

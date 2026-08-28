@@ -23,9 +23,11 @@ The TUI communicates with a detached local daemon over a Unix socket. The daemon
 
 New terminals use the environment and `$SHELL` of the romty client that creates them. They do not inherit the potentially older environment of the detached daemon.
 
-Each session retains up to 8 MiB of terminal output. Terminal modes are tracked separately so a replay remains usable after older output is trimmed. Completed terminal queries are omitted from a replay to prevent an unsolicited response from reaching the shell command line.
+Each session retains up to 8 MiB of terminal output. Terminal modes are tracked separately so a replay remains usable after older output is trimmed. Completed terminal queries are omitted from a replay to prevent an unsolicited response from reaching the shell command line. Reconnect replay starts at the PTY dimensions that produced the latest output, then resizes the local emulator to the current pane; width-sensitive shell redraws therefore keep the wrapping and erase behavior they had when recorded.
 
 A dropped terminal connection reconnects automatically with backoff. Press `Enter` on a disconnected tab to retry after automatic attempts stop. When a shell exits, its tab is removed. If the daemon or operating system stops, roots and workspace metadata remain but stale PTY tabs are discarded.
+
+More than one TUI can attach to the same terminal. Every client receives output, while the client that most recently sent input owns the PTY size. Resizing a background TUI does not disturb the active terminal; sending input promotes that client and applies its viewport first. If an attached client stops reading and exhausts its bounded output queue, only that client is disconnected.
 
 romty refuses to start inside one of its own terminal sessions.
 
@@ -39,7 +41,8 @@ romty stores data in a `romty` directory under the user configuration directory:
 | `config.json` | TUI settings such as the last workspace and tab, workspace pane width, mouse passthrough, and diff layout |
 | `daemon.sock` | Local client-daemon Unix socket |
 | `daemon.sock.lock` | Lock held by the running daemon |
-| `daemon.log` | Detached daemon output and failures |
+| `daemon.log` | Detached daemon output and failures; archived before daemon startup after reaching 3 MiB |
+| `daemon.log.1` | Previous daemon log, with one archive retained |
 
 Set `ROMTY_HOME` to use an isolated location:
 

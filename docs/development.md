@@ -15,6 +15,8 @@ test -z "$(gofmt -s -l .)"
 go vet ./...
 go test -race ./...
 go build ./...
+go install golang.org/x/vuln/cmd/govulncheck@v1.7.0
+govulncheck ./...
 ```
 
 The race detector is required because each terminal session coordinates several goroutines around one emulator.
@@ -23,6 +25,14 @@ Run an isolated development instance without using normal romty state:
 
 ```sh
 ROMTY_HOME=/tmp/romty-dev go run ./cmd/romty
+```
+
+## Sound assets
+
+The original notification recordings are `internal/sound/assets/done.mp3` and `waiting.mp3`. Runtime playback embeds their PCM WAV derivatives from the same directory so macOS and common Linux audio tools can play them without an in-process decoder. Regenerate a derivative without changing the original:
+
+```sh
+ffmpeg -y -i internal/sound/assets/waiting.mp3 -c:a pcm_s16le -ar 44100 -ac 1 internal/sound/assets/waiting.wav
 ```
 
 ## Protocol compatibility

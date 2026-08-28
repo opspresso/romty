@@ -42,10 +42,7 @@ func load(t *testing.T, value dashboard, command tea.Cmd) dashboard {
 	if command == nil {
 		t.Fatal("directory read command = nil")
 	}
-	message, ok := command().(browserMsg)
-	if !ok {
-		t.Fatalf("command returned %T, want a directory read", message)
-	}
+	message := commandMessage[browserMsg](t, command)
 	updated, _ := value.Update(message)
 	return updated.(dashboard)
 }
@@ -83,6 +80,34 @@ func TestBrowsePickerListsDirectoriesOnly(t *testing.T) {
 	}
 	if strings.Contains(rendered, "notes.txt") || strings.Contains(rendered, ".hidden") {
 		t.Fatalf("the picker shows a file or a dot-directory:\n%s", rendered)
+	}
+}
+
+func TestBrowsePickerOpensClickedDirectory(t *testing.T) {
+	home := t.TempDir()
+	makeDirectories(t, home, "alpha", "beta")
+	value := browsing(t, &fakeBackend{}, home)
+	left, top := value.modalContentOrigin(value.width, value.dimensions().bodyHeight)
+
+	updated, command := value.Update(tea.MouseClickMsg{X: left + 2, Y: top + 4, Button: tea.MouseLeft})
+	value = updated.(dashboard)
+	if command == nil || value.browse.path != filepath.Join(home, "beta") || !value.browse.loading {
+		t.Fatalf("clicked directory = (path %q, loading %v, command %v)",
+			value.browse.path, value.browse.loading, command)
+	}
+}
+
+func TestBrowsePickerHighlightsHoveredDirectory(t *testing.T) {
+	home := t.TempDir()
+	makeDirectories(t, home, "alpha", "beta")
+	value := browsing(t, &fakeBackend{}, home)
+	left, top := value.modalContentOrigin(value.width, value.dimensions().bodyHeight)
+	before := value.render()
+
+	updated, _ := value.Update(tea.MouseMotionMsg{X: left + 2, Y: top + 4})
+	value = updated.(dashboard)
+	if value.hover.kind != hoverBrowseRow || value.hover.index != 2 || value.render() == before {
+		t.Fatalf("browse hover = %#v", value.hover)
 	}
 }
 

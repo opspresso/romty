@@ -17,6 +17,8 @@ func TestConfigRoundTrip(t *testing.T) {
 	want := Config{
 		LeftWidth:         24,
 		GitDiffView:       "split",
+		SoundOnDone:       true,
+		SoundOnWaiting:    true,
 		LastWorkspacePath: "/projects/romty",
 		LastTabID:         "tab-2",
 	}
@@ -30,7 +32,7 @@ func TestConfigRoundTrip(t *testing.T) {
 	}
 	if got.LeftWidth != want.LeftWidth || got.MousePassthrough != want.MousePassthrough ||
 		got.GitDiffView != want.GitDiffView || got.LastWorkspacePath != want.LastWorkspacePath ||
-		got.LastTabID != want.LastTabID {
+		got.LastTabID != want.LastTabID || !got.SoundOnDone || !got.SoundOnWaiting {
 		t.Fatalf("loadConfig() = %#v, want %#v", got, want)
 	}
 	info, err := os.Stat(path)
@@ -64,7 +66,7 @@ func TestConfigMissingFileUsesResponsiveWidth(t *testing.T) {
 // pane width — and an older romty would erase what a newer one had written.
 func TestAdjustingOneSettingKeepsTheRest(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
-	if err := os.WriteFile(path, []byte(`{"left_width":24,"mouse_passthrough":true,"git_diff_view":"split","future":{"enabled":true}}`+"\n"), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte(`{"left_width":24,"mouse_passthrough":true,"sound_on_done":true,"git_diff_view":"split","future":{"enabled":true}}`+"\n"), 0o600); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 	loaded, err := loadConfig(path)
@@ -96,6 +98,9 @@ func TestAdjustingOneSettingKeepsTheRest(t *testing.T) {
 	}
 	if written.GitDiffView != "split" {
 		t.Fatalf("adjusting the pane width changed git_diff_view to %q", written.GitDiffView)
+	}
+	if !written.SoundOnDone {
+		t.Fatal("adjusting the pane width erased sound_on_done")
 	}
 
 	// The other way round: the mouse setting persists and leaves the width be.

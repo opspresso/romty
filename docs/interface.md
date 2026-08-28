@@ -98,6 +98,14 @@ The `+` key is not a shortcut. Select the `+` tab with `←`/`→` and press `En
 
 Pane focus and scrollback toggles are reversible. In the terminal pane only Global and Switch shortcuts are captured. Other keyboard and paste input, including `F8`, `F9`, and ordinary `Ctrl` combinations, is forwarded to the PTY.
 
+The dashboard chrome is mouse-aware. Click a root or workspace to select and open it, click a terminal tab or `+` to activate it, and use the wheel over the workspace tree to move its cursor without opening anything. Drag the vertical divider to resize the workspace pane; the terminal resizes live and the final width is saved when the button is released.
+
+Mouse targets identify themselves before activation. Workspace, tab, picker, Git, Config, and dialog-action targets gain a muted background on hover, while the draggable divider changes to the accent color. Keyboard selection keeps the stronger accent treatment and is never replaced by hover.
+
+Confirmation dialogs render their Enter and Esc actions inside the box and accept clicks on those actions. Longer operations such as opening a terminal, reading a directory, running a Git action, stopping the daemon, or installing hooks show a moving one-cell activity marker; the marker stops scheduling frames when no visible work or agent animation remains.
+
+Modal content is pointer-aware as well. Click a directory in the root picker to open it, click a Git action to run it, and use the wheel over a completed Git result to read longer output. Config rows toggle when clicked; use the wheel over the pane-width row for one-column adjustments.
+
 romty discovers direct child directories only. Press `F5` after a command adds or removes a child. An unreadable root is marked `✗` and listed without workspaces; other roots remain usable.
 
 ## Scrollback and mouse
@@ -131,3 +139,5 @@ The wheel then scrolls scrollback on any terminal that reports the mouse, at the
 `F9` asks before stopping the daemon because this terminates every running shell. Once confirmed, shutdown cannot be cancelled.
 
 The last opened workspace and terminal tab, workspace pane width, and inline or split diff layout are saved automatically in `config.json`. Reopening romty reconnects to that tab when it is still running; a removed workspace or stopped tab falls back to the workspace list. The pane width is constrained to 18 through 40 columns and may shrink further when the terminal is narrow.
+
+Sound alerts are off by default. Open Config with `F3`, press `d` to toggle the embedded done sound when an agent finishes active work, `b` to toggle the embedded waiting sound when an agent begins waiting for input or approval, and `s` to test the done sound. A stable state does not play repeatedly, and the first agent snapshot after startup stays silent. Playback uses the first supported audio tool on the host running romty, so an SSH session plays on the remote host rather than the connecting device; a host without a supported player remains silent.

@@ -214,6 +214,52 @@ func (m dashboard) handleBrowseKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd)
 	return m, nil
 }
 
+func (m dashboard) handleBrowseMouse(message tea.MouseMsg) (tea.Model, tea.Cmd, bool) {
+	row, inside := m.modalContentRow(message.Mouse(), max(m.width, 40), m.dimensions().bodyHeight)
+	if !inside {
+		return m, nil, false
+	}
+	if wheel, ok := message.(tea.MouseWheelMsg); ok {
+		switch wheel.Button {
+		case tea.MouseWheelUp:
+			m.browse.moveCursor(-3)
+		case tea.MouseWheelDown:
+			m.browse.moveCursor(3)
+		default:
+			return m, nil, false
+		}
+		return m, nil, true
+	}
+	click, ok := message.(tea.MouseClickMsg)
+	if !ok || click.Button != tea.MouseLeft || row < 2 || m.browse.loading || m.browse.failure != "" {
+		return m, nil, false
+	}
+	index, ok := m.browseIndexAtContentRow(row)
+	if !ok {
+		return m, nil, true
+	}
+	m.browse.cursor = index
+	if index == 0 {
+		updated, command := m.addBrowseSelection()
+		return updated, command, true
+	}
+	updated, command := m.openBrowseSelection()
+	return updated, command, true
+}
+
+func (m dashboard) browseIndexAtContentRow(row int) (int, bool) {
+	if row < 2 || m.browse.loading || m.browse.failure != "" {
+		return 0, false
+	}
+	capacity := max(modalCapacity(m.dimensions().bodyHeight)-2, 1)
+	start := 0
+	if rows := m.browse.rows(); rows > capacity {
+		start = min(max(m.browse.cursor-capacity/2, 0), rows-capacity)
+	}
+	index := start + row - 2
+	return index, index >= 0 && index < m.browse.rows()
+}
+
 func (m dashboard) openBrowseSelection() (tea.Model, tea.Cmd) {
 	path, inside := m.browse.selected()
 	if !inside {
@@ -258,7 +304,8 @@ func (m dashboard) renderBrowseModal(width, height int) []string {
 	case m.browse.failure != "":
 		lines = append(lines, m.styles.errorText.Render(displayText(m.browse.failure)))
 	case m.browse.loading:
-		lines = append(lines, m.styles.empty.Render("Reading…"))
+		frame := agentAnimationFrames[m.agentAnimationFrame%len(agentAnimationFrames)]
+		lines = append(lines, m.styles.empty.Render(frame+" Reading…"))
 	default:
 		rows := m.browse.rows()
 		start := 0
@@ -289,6 +336,8 @@ func (m dashboard) renderBrowseRow(index, width int) string {
 	if index == m.browse.cursor {
 		style = m.styles.navigationSelected
 		indicator = "▌ "
+	} else if m.hover.kind == hoverBrowseRow && m.hover.index == index {
+		style = m.styles.interactiveHover
 	}
 	label := pad(truncate(indicator+name, max(width-2, 1)), max(width-2, 0)) + marker
 	return style.Render(truncate(label, width))

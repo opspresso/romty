@@ -15,6 +15,7 @@ import (
 
 	"github.com/opspresso/romty/internal/agenthooks"
 	"github.com/opspresso/romty/internal/model"
+	"github.com/opspresso/romty/internal/sound"
 	"github.com/opspresso/romty/internal/version"
 )
 
@@ -43,8 +44,6 @@ const (
 	maximumReattachAttempts = 3
 	initialReattachBackoff  = 250 * time.Millisecond
 	maximumReattachBackoff  = 2 * time.Second
-	agentRefreshInterval    = 2 * time.Second
-	agentAnimationInterval  = 120 * time.Millisecond
 	gitRefreshInterval      = 10 * time.Second
 	gitFetchInterval        = 5 * time.Minute
 	// healthyAttachInterval is how long a terminal has to stay attached before
@@ -57,6 +56,11 @@ const (
 // now is a variable so tests need not wait out healthyAttachInterval, the way
 // the daemon's request timeout is one so they need not wait out a handshake.
 var now = time.Now
+
+// agentAnimationInterval is a variable so tests can execute batched animation
+// commands without sleeping between frames.
+var agentAnimationInterval = 120 * time.Millisecond
+var agentRefreshInterval = 2 * time.Second
 
 var agentAnimationFrames = [...]string{"◐", "◓", "◑", "◒"}
 
@@ -137,6 +141,36 @@ type shortcut struct {
 	description string
 }
 
+type modalAction struct {
+	shortcut
+	code rune
+}
+
+type modalActionHit struct {
+	action      modalAction
+	left, right int
+	row         int
+}
+
+type hoverKind int
+
+const (
+	hoverNone hoverKind = iota
+	hoverNavigation
+	hoverTab
+	hoverDivider
+	hoverModalAction
+	hoverBrowseRow
+	hoverGitAction
+	hoverGitResult
+	hoverConfigRow
+)
+
+type hoverTarget struct {
+	kind  hoverKind
+	index int
+}
+
 type dashboard struct {
 	backend Backend
 	state   model.Snapshot
@@ -207,8 +241,13 @@ type dashboard struct {
 	// reconstructing it from fields.
 	config            Config
 	leftWidth         int
+	navigationResize  bool
+	hover             hoverTarget
 	mousePassthrough  bool
 	scrollbackMouse   bool
+	soundOnDone       bool
+	soundOnWaiting    bool
+	agentSoundReady   bool
 	gitStates         map[string]gitState
 	gitFetchedAt      time.Time
 	gitActionTarget   model.Workspace
@@ -237,6 +276,10 @@ type agentSnapshotMsg struct {
 }
 
 type agentAnimationMsg struct{}
+
+type soundPlayedMsg struct {
+	kind sound.Kind
+}
 
 type gitStatusMsg struct {
 	value      map[string]gitState
@@ -272,6 +315,8 @@ type terminalOpenedMsg struct {
 type configSavedMsg struct {
 	leftWidth         int
 	scrollbackMouse   bool
+	soundOnDone       bool
+	soundOnWaiting    bool
 	gitDiffView       string
 	lastWorkspacePath string
 	lastTabID         string
@@ -309,6 +354,7 @@ type reopenTerminalMsg struct {
 }
 
 var installHookProviders = agenthooks.Install
+var playSound = sound.Play
 
 func Run(backend Backend, initial model.Snapshot, configPath string, hookStatuses []agenthooks.Status) (Result, error) {
 	config, err := loadConfig(configPath)
@@ -350,6 +396,8 @@ func newDashboardWithConfig(backend Backend, initial model.Snapshot, configPath 
 		leftWidth:        config.LeftWidth,
 		mousePassthrough: config.MousePassthrough,
 		scrollbackMouse:  config.ScrollbackMouse,
+		soundOnDone:      config.SoundOnDone,
+		soundOnWaiting:   config.SoundOnWaiting,
 		gitDiffSplit:     config.GitDiffView == gitDiffViewSplit,
 		styles:           newUIStyles(true),
 		gitFetchedAt:     now(),
@@ -357,7 +405,7 @@ func newDashboardWithConfig(backend Backend, initial model.Snapshot, configPath 
 	value.ensureWorkspaceCursor()
 	value.restoreSelection()
 	value.agentAnimationActive = value.hasAnimatedAgent()
-	value.agentAnimationPending = value.agentAnimationActive
+	value.agentAnimationPending = value.agentAnimationActive || value.hasPendingActivity()
 	return value
 }
 
@@ -405,7 +453,7 @@ func (m dashboard) syncTerminalSize(command tea.Cmd) (dashboard, tea.Cmd) {
 }
 
 func (m dashboard) syncAgentAnimation(command tea.Cmd) (dashboard, tea.Cmd) {
-	if m.agentAnimationActive && !m.agentAnimationPending {
+	if (m.agentAnimationActive || m.hasPendingActivity()) && !m.agentAnimationPending {
 		m.agentAnimationPending = true
 		command = tea.Batch(command, animateAgentMarker())
 	}
@@ -452,13 +500,23 @@ func (m dashboard) update(message tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyPressMsg:
 		return m.handleKey(message)
 	case tea.MouseClickMsg, tea.MouseReleaseMsg, tea.MouseWheelMsg, tea.MouseMotionMsg:
-		if m.modal == helpModal {
-			return m.handleHelpMouse(message.(tea.MouseMsg))
+		mouse := message.(tea.MouseMsg)
+		m.hover = m.hoverTargetAt(mouse.Mouse())
+		if m.modal != noModal {
+			if updated, command, handled := m.handleModalMouse(mouse); handled {
+				return updated, command
+			}
+			if m.modal == helpModal {
+				return m.handleHelpMouse(mouse)
+			}
+			return m, nil
 		}
 		if m.gitDiff.active {
-			return m.handleGitDiffMouse(message.(tea.MouseMsg))
+			return m.handleGitDiffMouse(mouse)
 		}
-		mouse := message.(tea.MouseMsg)
+		if updated, command, handled := m.handleDashboardMouse(mouse); handled {
+			return updated, command
+		}
 		if wheel, ok := message.(tea.MouseWheelMsg); ok && !m.guestOwnsMouse() {
 			return m.handleTerminalWheel(wheel)
 		}
@@ -513,12 +571,20 @@ func (m dashboard) update(message tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case agentSnapshotMsg:
 		if message.err == nil {
+			kind, ring := m.soundForAgentTransitions(message.value)
+			ring = m.agentSoundReady && ring
 			m.updateAgents(message.value)
+			m.agentSoundReady = true
+			if ring {
+				return m, tea.Batch(m.refreshAgents(), soundAlert(kind))
+			}
 		}
 		return m, m.refreshAgents()
+	case soundPlayedMsg:
+		return m, nil
 	case agentAnimationMsg:
 		m.agentAnimationPending = false
-		if m.agentAnimationActive {
+		if m.agentAnimationActive || m.hasPendingActivity() {
 			m.agentAnimationFrame = (m.agentAnimationFrame + 1) % len(agentAnimationFrames)
 		}
 		return m, nil
@@ -560,6 +626,7 @@ func (m dashboard) update(message tea.Msg) (tea.Model, tea.Cmd) {
 		selectionChanged := message.lastWorkspacePath != m.rememberedWorkspacePath ||
 			message.lastTabID != m.rememberedTabID
 		if message.leftWidth != m.leftWidth || message.scrollbackMouse != m.scrollbackMouse ||
+			message.soundOnDone != m.soundOnDone || message.soundOnWaiting != m.soundOnWaiting ||
 			viewChanged || selectionChanged {
 			// The width moved while this one was being written, so it is
 			// already out of date. A later save answers whatever this one said.
@@ -909,6 +976,12 @@ func (m dashboard) handleModalKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 			return m.adjustLeftWidth(1)
 		case "m":
 			return m.toggleScrollbackMouse()
+		case "d":
+			return m.toggleSoundOnDone()
+		case "b":
+			return m.toggleSoundOnWaiting()
+		case "s":
+			return m, soundAlert(sound.Done)
 		}
 	}
 	return m, nil
@@ -956,6 +1029,9 @@ func (m dashboard) forwardMouse(message tea.MouseMsg) (tea.Model, tea.Cmd) {
 	case tea.MouseWheelMsg:
 		m.terminal.sendMouse(uv.MouseWheelEvent(mouse))
 	case tea.MouseMotionMsg:
+		if !m.terminal.guestWantsMotion(mouse.Button != uv.MouseNone) {
+			return m, nil
+		}
 		m.terminal.sendMouse(uv.MouseMotionEvent(mouse))
 	}
 	return m, nil
@@ -1158,6 +1234,250 @@ func (m dashboard) handleHelpMouse(message tea.MouseMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m dashboard) handleModalMouse(message tea.MouseMsg) (tea.Model, tea.Cmd, bool) {
+	switch m.modal {
+	case browseModal:
+		if updated, command, handled := m.handleBrowseMouse(message); handled {
+			return updated, command, true
+		}
+	case gitActionsModal:
+		if updated, command, handled := m.handleGitActionsMouse(message); handled {
+			return updated, command, true
+		}
+	case configModal:
+		if updated, command, handled := m.handleConfigMouse(message); handled {
+			return updated, command, true
+		}
+	}
+	click, ok := message.(tea.MouseClickMsg)
+	if !ok || click.Button != tea.MouseLeft {
+		return m, nil, false
+	}
+	mouse := click.Mouse()
+	for _, hit := range m.modalActionHits(max(m.width, 40), m.dimensions().bodyHeight) {
+		if mouse.Y == hit.row && mouse.X >= hit.left && mouse.X < hit.right {
+			updated, command := m.handleKey(tea.KeyPressMsg(tea.Key{Code: hit.action.code}))
+			return updated, command, true
+		}
+	}
+	return m, nil, false
+}
+
+func (m dashboard) hoverTargetAt(mouse tea.Mouse) hoverTarget {
+	width := max(m.width, 40)
+	height := m.dimensions().bodyHeight
+	if m.modal != noModal {
+		for index, hit := range m.modalActionHits(width, height) {
+			if mouse.Y == hit.row && mouse.X >= hit.left && mouse.X < hit.right {
+				return hoverTarget{kind: hoverModalAction, index: index}
+			}
+		}
+		row, inside := m.modalContentRow(mouse, width, height)
+		if !inside {
+			return hoverTarget{}
+		}
+		switch m.modal {
+		case browseModal:
+			if index, ok := m.browseIndexAtContentRow(row); ok {
+				return hoverTarget{kind: hoverBrowseRow, index: index}
+			}
+		case gitActionsModal:
+			if m.gitActionComplete && row >= 2 {
+				return hoverTarget{kind: hoverGitResult, index: row}
+			}
+			if !m.gitActionPending && row >= 2 && row < 2+len(gitActionChoices) {
+				return hoverTarget{kind: hoverGitAction, index: row - 2}
+			}
+		case configModal:
+			if row >= 0 && row < 5 {
+				return hoverTarget{kind: hoverConfigRow, index: row}
+			}
+		}
+		return hoverTarget{}
+	}
+
+	view := m.dimensions()
+	if view.separator > 0 && mouse.Y < view.bodyHeight &&
+		mouse.X >= view.leftWidth && mouse.X < view.leftWidth+view.separator {
+		return hoverTarget{kind: hoverDivider}
+	}
+	if mouse.X < view.leftWidth && mouse.Y < view.bodyHeight {
+		if index, ok := m.navigationIndexAtRow(mouse.Y, view.bodyHeight); ok {
+			return hoverTarget{kind: hoverNavigation, index: index}
+		}
+		return hoverTarget{}
+	}
+	if mouse.Y == 0 && mouse.X >= view.leftWidth+view.separator {
+		localX := mouse.X - view.leftWidth - view.separator
+		tabs := m.selectedTabs()
+		if m.focus == leftPane {
+			tabs = m.navigationTabs()
+		}
+		if index, ok := tabIndexAtX(tabs, localX); ok {
+			return hoverTarget{kind: hoverTab, index: index}
+		}
+	}
+	return hoverTarget{}
+}
+
+func (m dashboard) handleConfigMouse(message tea.MouseMsg) (tea.Model, tea.Cmd, bool) {
+	row, inside := m.modalContentRow(message.Mouse(), max(m.width, 40), m.dimensions().bodyHeight)
+	if !inside {
+		return m, nil, false
+	}
+	if wheel, ok := message.(tea.MouseWheelMsg); ok && row == 0 {
+		switch wheel.Button {
+		case tea.MouseWheelUp:
+			updated, command := m.adjustLeftWidth(1)
+			return updated, command, true
+		case tea.MouseWheelDown:
+			updated, command := m.adjustLeftWidth(-1)
+			return updated, command, true
+		}
+	}
+	click, ok := message.(tea.MouseClickMsg)
+	if !ok || click.Button != tea.MouseLeft {
+		return m, nil, false
+	}
+	switch row {
+	case 1:
+		updated, command := m.toggleScrollbackMouse()
+		return updated, command, true
+	case 2:
+		updated, command := m.toggleSoundOnDone()
+		return updated, command, true
+	case 3:
+		updated, command := m.toggleSoundOnWaiting()
+		return updated, command, true
+	case 4:
+		return m, soundAlert(sound.Done), true
+	}
+	return m, nil, true
+}
+
+func (m dashboard) modalContentOrigin(width, height int) (int, int) {
+	lines := m.renderModal(width, height)
+	if len(lines) == 0 {
+		return 0, 0
+	}
+	modalWidth := lipgloss.Width(lines[0])
+	return max((width-modalWidth)/2, 0) + 3, max((height-len(lines))/2, 0) + 1
+}
+
+func (m dashboard) modalContentRow(mouse tea.Mouse, width, height int) (int, bool) {
+	lines := m.renderModal(width, height)
+	if len(lines) < 2 {
+		return 0, false
+	}
+	modalWidth := lipgloss.Width(lines[0])
+	modalLeft := max((width-modalWidth)/2, 0)
+	_, contentTop := m.modalContentOrigin(width, height)
+	row := mouse.Y - contentTop
+	inside := mouse.X >= modalLeft+1 && mouse.X < modalLeft+modalWidth-1 &&
+		row >= 0 && row < len(lines)-2
+	return row, inside
+}
+
+func (m dashboard) handleDashboardMouse(message tea.MouseMsg) (tea.Model, tea.Cmd, bool) {
+	mouse := message.Mouse()
+	view := m.dimensions()
+	if m.navigationResize {
+		switch message.(type) {
+		case tea.MouseMotionMsg:
+			m.setLeftWidth(mouse.X - 1)
+			return m, m.resizeTerminal(), true
+		case tea.MouseReleaseMsg:
+			m.navigationResize = false
+			return m, tea.Batch(m.resizeTerminal(), m.saveConfig()), true
+		}
+	}
+
+	if wheel, ok := message.(tea.MouseWheelMsg); ok && mouse.X < view.leftWidth && mouse.Y < view.bodyHeight {
+		m.focus = leftPane
+		switch wheel.Button {
+		case tea.MouseWheelUp:
+			m.moveNavigation(-3)
+		case tea.MouseWheelDown:
+			m.moveNavigation(3)
+		default:
+			return m, nil, false
+		}
+		return m, nil, true
+	}
+
+	click, ok := message.(tea.MouseClickMsg)
+	if !ok || click.Button != tea.MouseLeft {
+		return m, nil, false
+	}
+	if view.separator > 0 && mouse.Y < view.bodyHeight &&
+		mouse.X >= view.leftWidth && mouse.X < view.leftWidth+view.separator {
+		m.navigationResize = true
+		return m, nil, true
+	}
+	if mouse.X < view.leftWidth && mouse.Y < view.bodyHeight {
+		index, ok := m.navigationIndexAtRow(mouse.Y, view.bodyHeight)
+		if !ok {
+			return m, nil, true
+		}
+		m.focus = leftPane
+		m.setNavigation(index)
+		m.syncTabCursor(runningTabs(m.navigationItems()[index].tabs))
+		return m, m.selectWorkspace(), true
+	}
+	if mouse.Y == 0 && mouse.X >= view.leftWidth+view.separator {
+		localX := mouse.X - view.leftWidth - view.separator
+		tabs := m.selectedTabs()
+		if m.focus == leftPane {
+			tabs = m.navigationTabs()
+		}
+		index, ok := tabIndexAtX(tabs, localX)
+		if !ok {
+			return m, nil, true
+		}
+		m.tabIndex = index
+		if m.focus == leftPane {
+			return m, m.selectWorkspace(), true
+		}
+		if index == len(tabs) {
+			updated, command := m.newTab()
+			return updated, command, true
+		}
+		return m, m.openSelectedTerminal(), true
+	}
+	return m, nil, false
+}
+
+func (m dashboard) navigationIndexAtRow(row, height int) (int, bool) {
+	items := m.navigationItems()
+	available := max(height-2, 0)
+	start, end := navigationWindow(items, m.navIndex, available)
+	currentRow := 2
+	for index := start; index < end; index++ {
+		nextRow := currentRow + navigationRows(items[index])
+		if row >= currentRow && row < nextRow {
+			return index, true
+		}
+		currentRow = nextRow
+	}
+	return 0, false
+}
+
+func tabIndexAtX(tabs []model.Tab, x int) (int, bool) {
+	position := 0
+	for index := 0; index <= len(tabs); index++ {
+		label := " + "
+		if index < len(tabs) {
+			label = " " + displayText(tabs[index].Name) + " "
+		}
+		end := position + lipgloss.Width(label)
+		if x >= position && x < end {
+			return index, true
+		}
+		position = end + 1
+	}
+	return 0, false
+}
+
 func (m dashboard) maximumHelpOffset(height int) int {
 	return max(len(m.helpEntries())-modalCapacity(height), 0)
 }
@@ -1169,15 +1489,35 @@ func (m dashboard) shutdownDaemon() tea.Cmd {
 }
 
 func (m dashboard) adjustLeftWidth(delta int) (tea.Model, tea.Cmd) {
-	current := m.paneWidth()
-	maximum := min(maximumLeftWidth, max(m.width, 40)-20)
-	m.leftWidth = min(max(current+delta, minimumLeftWidth), maximum)
+	m.setLeftWidth(m.paneWidth() + delta)
 	return m, m.saveConfig()
+}
+
+func (m *dashboard) setLeftWidth(width int) {
+	maximum := min(maximumLeftWidth, max(m.width, 40)-20)
+	m.leftWidth = min(max(width, minimumLeftWidth), maximum)
 }
 
 func (m dashboard) toggleScrollbackMouse() (tea.Model, tea.Cmd) {
 	m.scrollbackMouse = !m.scrollbackMouse
 	return m, m.saveConfig()
+}
+
+func (m dashboard) toggleSoundOnDone() (tea.Model, tea.Cmd) {
+	m.soundOnDone = !m.soundOnDone
+	return m, m.saveConfig()
+}
+
+func (m dashboard) toggleSoundOnWaiting() (tea.Model, tea.Cmd) {
+	m.soundOnWaiting = !m.soundOnWaiting
+	return m, m.saveConfig()
+}
+
+func soundAlert(kind sound.Kind) tea.Cmd {
+	return func() tea.Msg {
+		_ = playSound(kind)
+		return soundPlayedMsg{kind: kind}
+	}
 }
 
 func (m dashboard) saveConfig() tea.Cmd {
@@ -1189,12 +1529,15 @@ func (m dashboard) saveConfig() tea.Cmd {
 	config := m.config
 	config.LeftWidth = m.leftWidth
 	config.ScrollbackMouse = m.scrollbackMouse
+	config.SoundOnDone = m.soundOnDone
+	config.SoundOnWaiting = m.soundOnWaiting
 	config.GitDiffView = gitDiffViewSetting(m.gitDiffSplit)
 	config.LastWorkspacePath = m.rememberedWorkspacePath
 	config.LastTabID = m.rememberedTabID
 	return func() tea.Msg {
 		return configSavedMsg{
 			leftWidth: config.LeftWidth, scrollbackMouse: config.ScrollbackMouse,
+			soundOnDone: config.SoundOnDone, soundOnWaiting: config.SoundOnWaiting,
 			gitDiffView:       config.GitDiffView,
 			lastWorkspacePath: config.LastWorkspacePath, lastTabID: config.LastTabID,
 			err: saveConfig(path, config),
@@ -1320,8 +1663,9 @@ func (m dashboard) handleOpenedTerminal(message terminalOpenedMsg) (tea.Model, t
 	}
 	m.closeTerminal()
 	columns, rows := m.terminalSize()
-	terminal := newEmbeddedTerminal(message.tabID, message.stream, int(columns), int(rows))
-	terminal.writeOutput(message.replay)
+	terminal := newEmbeddedTerminalWithReplay(
+		message.tabID, message.stream, message.replay, int(columns), int(rows),
+	)
 	m.terminal = terminal
 	m.terminalOpenedAt = now()
 	// The scrollback on screen belongs to the terminal that just went away, so
@@ -1504,6 +1848,42 @@ func (m *dashboard) updateAgents(statuses map[string]model.AgentStatus) {
 	m.agentAnimationActive = m.hasAnimatedAgent()
 }
 
+func (m dashboard) soundForAgentTransitions(statuses map[string]model.AgentStatus) (sound.Kind, bool) {
+	changed := func(tab model.Tab) (sound.Kind, bool) {
+		status, ok := statuses[tab.ID]
+		if !ok || status.Agent != model.AgentClaude && status.Agent != model.AgentCodex {
+			return "", false
+		}
+		if m.soundOnDone && animatedAgentPhase(tab.AgentPhase) &&
+			(status.Phase == model.AgentPhaseIdle || status.Phase == model.AgentPhaseError) {
+			return sound.Done, true
+		}
+		if m.soundOnWaiting && !waitingAgentPhase(tab.AgentPhase) && waitingAgentPhase(status.Phase) {
+			return sound.Waiting, true
+		}
+		return "", false
+	}
+	for _, root := range m.state.Roots {
+		for _, tab := range root.Tabs {
+			if kind, ok := changed(tab); ok {
+				return kind, true
+			}
+		}
+		for _, workspace := range root.Directories {
+			for _, tab := range workspace.Tabs {
+				if kind, ok := changed(tab); ok {
+					return kind, true
+				}
+			}
+		}
+	}
+	return "", false
+}
+
+func waitingAgentPhase(phase model.AgentPhase) bool {
+	return phase == model.AgentPhaseWaitingInput || phase == model.AgentPhaseWaitingApproval
+}
+
 func (m dashboard) hasAnimatedAgent() bool {
 	for _, root := range m.state.Roots {
 		for _, tab := range root.Tabs {
@@ -1530,6 +1910,11 @@ func animatedAgentPhase(phase model.AgentPhase) bool {
 	default:
 		return false
 	}
+}
+
+func (m dashboard) hasPendingActivity() bool {
+	return m.tabPending || m.restorePending || m.gitActionPending || m.shutdownPending ||
+		m.hookInstallPending || m.modal == browseModal && m.browse.loading
 }
 
 func (m dashboard) readGitStatus(forceFetch, reschedule bool) tea.Cmd {
@@ -2220,13 +2605,14 @@ func (m dashboard) View() tea.View {
 	return view
 }
 
-// mouseMode claims the live terminal's wheel so it can enter scrollback. Copy
-// mode gives the mouse back to the host for native selection and takes its
-// wheel through alternate scroll instead. A guest application that asked for
-// the mouse takes precedence only when the user opted into passthrough.
+// mouseMode asks for pointer motion wherever romty draws hoverable controls.
+// Copy mode still gives the mouse back to the host for native selection. A
+// guest application that asked for the mouse receives events only when the
+// user opted into passthrough, while romty keeps motion for its surrounding
+// dashboard chrome.
 func (m dashboard) mouseMode() tea.MouseMode {
-	if m.modal == helpModal {
-		return tea.MouseModeCellMotion
+	if m.modal != noModal {
+		return tea.MouseModeAllMotion
 	}
 	if m.gitDiff.active {
 		return tea.MouseModeCellMotion
@@ -2241,13 +2627,10 @@ func (m dashboard) mouseMode() tea.MouseMode {
 		}
 		return tea.MouseModeNone
 	}
-	if m.terminal == nil {
-		return tea.MouseModeNone
-	}
-	if m.guestOwnsMouse() {
-		return m.terminal.guestMouseMode()
-	}
-	return tea.MouseModeCellMotion
+	// Motion is what the hover highlights are drawn from, so romty asks for it
+	// even while passthrough hands the buttons to the guest. forwardMouse then
+	// keeps the motion a guest never asked for to itself.
+	return tea.MouseModeAllMotion
 }
 
 // guestOwnsMouse reports whether passthrough has handed the mouse to the guest.
@@ -2338,6 +2721,8 @@ func (m dashboard) renderStatus(width, bodyHeight int) []string {
 			label, text, title = m.styles.noticeLabel, m.styles.noticeText, " NOTE "
 		}
 		status = truncate(label.Render(title)+" "+text.Render(displayText(m.errorMessage)), width)
+	case m.tabPending || m.restorePending:
+		status = m.renderActivityStatus("OPENING", "preparing terminal", width)
 	case m.modal == helpModal:
 		shortcuts := []shortcut{{key: "Esc", description: "close"}}
 		if m.maximumHelpOffset(bodyHeight) > 0 {
@@ -2350,13 +2735,12 @@ func (m dashboard) renderStatus(width, bodyHeight int) []string {
 		status = renderShortcuts(m.styles, width,
 			shortcut{key: "←/→", description: "adjust width"},
 			shortcut{key: "m", description: "scrollback mouse"},
+			shortcut{key: "d/b", description: "sounds"},
+			shortcut{key: "s", description: "test"},
 			shortcut{key: "Esc", description: "close"},
 		)
 	case m.modal == gitActionsModal && m.gitActionPending:
-		status = truncate(
-			m.styles.promptLabel.Render(" RUNNING ")+" "+m.styles.shortcutDescription.Render(m.gitAction.label()+" in "+displayText(m.gitActionTarget.Name)),
-			width,
-		)
+		status = m.renderActivityStatus("RUNNING", m.gitAction.label()+" in "+displayText(m.gitActionTarget.Name), width)
 	case m.modal == gitActionsModal && m.gitActionComplete:
 		shortcuts := []shortcut{
 			{key: "Enter", description: "actions"},
@@ -2374,10 +2758,9 @@ func (m dashboard) renderStatus(width, bodyHeight int) []string {
 		)
 	case m.modal == shutdownModal && m.shutdownPending:
 		// The request is already out; no key can take it back.
-		status = truncate(
-			m.styles.promptLabel.Render(" STOPPING ")+" "+m.styles.shortcutDescription.Render("waiting for the daemon to stop"),
-			width,
-		)
+		status = m.renderActivityStatus("STOPPING", "waiting for the daemon to stop", width)
+	case m.modal == browseModal && m.browse.loading:
+		status = m.renderActivityStatus("READING", displayText(m.browse.path), width)
 	case m.modal == browseModal:
 		status = renderShortcuts(m.styles, width,
 			shortcut{key: "↑/↓", description: "select"},
@@ -2402,10 +2785,7 @@ func (m dashboard) renderStatus(width, bodyHeight int) []string {
 			shortcut{key: "Esc", description: "cancel"},
 		)
 	case m.modal == hookInstallModal && m.hookInstallPending:
-		status = truncate(
-			m.styles.promptLabel.Render(" INSTALLING ")+" "+m.styles.shortcutDescription.Render("updating agent status hooks"),
-			width,
-		)
+		status = m.renderActivityStatus("INSTALLING", "updating agent status hooks", width)
 	case m.modal == hookInstallModal:
 		status = renderShortcuts(m.styles, width,
 			shortcut{key: "Enter", description: "install hooks"},
@@ -2462,6 +2842,12 @@ func (m dashboard) renderStatus(width, bodyHeight int) []string {
 	return []string{rail, status}
 }
 
+func (m dashboard) renderActivityStatus(title, description string, width int) string {
+	frame := agentAnimationFrames[m.agentAnimationFrame%len(agentAnimationFrames)]
+	label := m.styles.promptLabel.Render(" " + frame + " " + title + " ")
+	return truncate(label+" "+m.styles.shortcutDescription.Render(description), width)
+}
+
 // scrollbackPosition reports how far back the viewport sits in the history.
 func (m dashboard) scrollbackPosition() string {
 	if m.terminal == nil {
@@ -2507,32 +2893,32 @@ func (m dashboard) renderModal(width, height int) []string {
 	}
 	if m.modal == removeSelectionModal {
 		if m.removeTarget.isRoot {
-			return modalBox(m.styles, modalWidth, "Forget root",
+			return m.withModalActions(modalBox(m.styles, modalWidth, "Forget root",
 				m.styles.modalStrong.Render("Forget "+displayText(m.removeTarget.root.Name)+"?"),
 				m.styles.empty.Render(displayText(m.removeTarget.root.Path)),
 				"",
 				m.styles.modalBody.Render("The directory stays on disk."),
 				m.styles.errorText.Render("Its running shells will be terminated."),
-			)
+			))
 		}
 		// What is about to be deleted comes first, its path under it as the
 		// context it is, and the consequences below the break. The path used to
 		// trail the two red lines in the body colour, where it read as a third
 		// consequence rather than as the thing being named.
-		return modalBox(m.styles, modalWidth, "Delete workspace",
+		return m.withModalActions(modalBox(m.styles, modalWidth, "Delete workspace",
 			m.styles.modalStrong.Render("Delete "+displayText(m.removeTarget.workspace.Name)+"?"),
 			m.styles.empty.Render(displayText(m.removeTarget.workspace.Path)),
 			"",
 			m.styles.errorText.Render("This permanently deletes all contents."),
 			m.styles.errorText.Render("Its running shells will be terminated."),
-		)
+		))
 	}
 	if m.modal == shutdownModal {
-		return modalBox(m.styles, modalWidth, "Stop daemon",
+		return m.withModalActions(modalBox(m.styles, modalWidth, "Stop daemon",
 			m.styles.modalStrong.Render("Stop daemon and all running terminal sessions?"),
 			"",
 			m.styles.errorText.Render("Running shells will be terminated."),
-		)
+		))
 	}
 	if m.modal == hookInstallModal {
 		lines := []string{
@@ -2554,27 +2940,104 @@ func (m dashboard) renderModal(width, height int) []string {
 			lines = append(lines, m.styles.modalBody.Render(status.Provider.DisplayName()+": "+action))
 		}
 		lines = append(lines, "", m.styles.empty.Render("Existing settings and other hooks are preserved."))
-		return modalBox(m.styles, modalWidth, "Agent hooks", lines...)
+		return m.withModalActions(modalBox(m.styles, modalWidth, "Agent hooks", lines...))
 	}
 	if m.modal == configModal {
-		// One setting per group: its name and value in the body colour, the
-		// keys that move it muted underneath, and a blank line between the
-		// groups. Four lines of one weight read as one paragraph, and the
-		// second setting looked like a third line of the first. Five lines and
-		// its borders also fit the shortest screen romty lays out for, which a
-		// box padded top and bottom no longer did.
 		return modalBox(m.styles, modalWidth, "Config",
-			m.styles.modalStrong.Render(fmt.Sprintf("Left pane width: %d", m.paneWidth())),
-			m.styles.empty.Render("←/→ or [/] to adjust"),
-			"",
-			m.styles.modalStrong.Render("Scrollback mouse: "+onOff(m.scrollbackMouse)),
-			m.styles.empty.Render("m to toggle"),
+			m.renderConfigRow(modalWidth, 0, fmt.Sprintf("Left pane: %d", m.paneWidth()), "←/→"),
+			m.renderConfigRow(modalWidth, 1, "Scrollback mouse: "+onOff(m.scrollbackMouse), "m"),
+			m.renderConfigRow(modalWidth, 2, "Sound on done: "+onOff(m.soundOnDone), "d"),
+			m.renderConfigRow(modalWidth, 3, "Sound on waiting: "+onOff(m.soundOnWaiting), "b"),
+			m.renderConfigRow(modalWidth, 4, "Test sound", "s"),
 		)
 	}
 	return modalBox(m.styles, modalWidth, "About",
 		m.styles.modalStrong.Render("romty")+"  "+m.styles.empty.Render(version.String()),
 		m.styles.modalBody.Render(tagline),
 	)
+}
+
+func (m dashboard) renderConfigRow(width, index int, label, key string) string {
+	if m.hover.kind == hoverConfigRow && m.hover.index == index {
+		return m.styles.interactiveHover.Render(pad(label+"  "+key, max(width-6, 0)))
+	}
+	return m.styles.modalStrong.Render(label) + "  " + m.styles.empty.Render(key)
+}
+
+func (m dashboard) modalActions() []modalAction {
+	switch m.modal {
+	case removeSelectionModal:
+		description := "forget root"
+		if !m.removeTarget.isRoot {
+			description = "delete workspace"
+		}
+		return []modalAction{
+			{shortcut: shortcut{key: "Enter", description: description}, code: tea.KeyEnter},
+			{shortcut: shortcut{key: "Esc", description: "cancel"}, code: tea.KeyEscape},
+		}
+	case shutdownModal:
+		if m.shutdownPending {
+			return nil
+		}
+		return []modalAction{
+			{shortcut: shortcut{key: "Enter", description: "stop daemon"}, code: tea.KeyEnter},
+			{shortcut: shortcut{key: "Esc", description: "cancel"}, code: tea.KeyEscape},
+		}
+	case hookInstallModal:
+		if m.hookInstallPending {
+			return nil
+		}
+		return []modalAction{
+			{shortcut: shortcut{key: "Enter", description: "install hooks"}, code: tea.KeyEnter},
+			{shortcut: shortcut{key: "Esc", description: "skip"}, code: tea.KeyEscape},
+		}
+	}
+	return nil
+}
+
+func (m dashboard) withModalActions(lines []string) []string {
+	actions := m.modalActions()
+	if len(actions) == 0 || len(lines) < 2 {
+		return lines
+	}
+	width := lipgloss.Width(lines[0])
+	segments := make([]string, 0, len(actions))
+	for index, action := range actions {
+		segments = append(segments, m.renderModalAction(action,
+			m.hover.kind == hoverModalAction && m.hover.index == index))
+	}
+	actionLine := truncate(strings.Join(segments, "  "), max(width-6, 0))
+	boxed := make([]string, 0, len(lines)+2)
+	boxed = append(boxed, lines[:len(lines)-1]...)
+	boxed = append(boxed, modalContentLine(m.styles, width, ""))
+	boxed = append(boxed, modalContentLine(m.styles, width, actionLine))
+	return append(boxed, lines[len(lines)-1])
+}
+
+func (m dashboard) modalActionHits(width, height int) []modalActionHit {
+	actions := m.modalActions()
+	if len(actions) == 0 {
+		return nil
+	}
+	lines := m.renderModal(width, height)
+	modalWidth := lipgloss.Width(lines[0])
+	left := max((width-modalWidth)/2, 0) + 3
+	row := max((height-len(lines))/2, 0) + len(lines) - 2
+	hits := make([]modalActionHit, 0, len(actions))
+	for _, action := range actions {
+		segment := m.renderModalAction(action, false)
+		segmentWidth := lipgloss.Width(segment)
+		hits = append(hits, modalActionHit{action: action, left: left, right: left + segmentWidth, row: row})
+		left += segmentWidth + 2
+	}
+	return hits
+}
+
+func (m dashboard) renderModalAction(action modalAction, hovered bool) string {
+	if hovered {
+		return m.styles.interactiveHover.Render(" " + action.key + "  " + action.description)
+	}
+	return renderShortcuts(m.styles, 1<<16, action.shortcut)
 }
 
 func (m dashboard) helpEntries() []string {
@@ -2610,6 +3073,10 @@ func (m dashboard) helpEntries() []string {
 		renderHelpSection(m.styles, "FILE DIFF", "changed file tree and diff"),
 		renderHelpShortcut(m.styles, "Toggle diff layout", "F6"),
 		renderHelpShortcut(m.styles, "Scroll diff one line", "Ctrl+↑/↓"),
+		renderHelpSection(m.styles, "MOUSE", "dashboard chrome"),
+		renderHelpShortcut(m.styles, "Open workspace or tab", "Click"),
+		renderHelpShortcut(m.styles, "Move workspace cursor", "Wheel over tree"),
+		renderHelpShortcut(m.styles, "Resize workspace pane", "Drag divider"),
 		renderHelpSection(m.styles, "CONTEXT", "workspace, picker, modals and prompts"),
 		renderHelpShortcut(m.styles, "Activate / submit", "Enter"),
 		renderHelpShortcut(m.styles, "Close / cancel / leave", "Esc"),
@@ -2662,18 +3129,26 @@ func modalBox(styles *uiStyles, width int, title string, values ...string) []str
 			styles.modalTitle.Render(title)+
 			styles.modalBorder.Render(strings.Repeat("─", topFill)+"╮"),
 	)
-	contentWidth := max(interior-4, 0)
 	for _, value := range values {
-		content := pad(truncate(value, contentWidth), contentWidth)
-		lines = append(lines, styles.modalBorder.Render("│")+"  "+content+"  "+styles.modalBorder.Render("│"))
+		lines = append(lines, modalContentLine(styles, width, value))
 	}
 	return append(lines, styles.modalBorder.Render("╰"+strings.Repeat("─", interior)+"╯"))
+}
+
+func modalContentLine(styles *uiStyles, width int, value string) string {
+	contentWidth := max(width-6, 0)
+	content := pad(truncate(value, contentWidth), contentWidth)
+	return styles.modalBorder.Render("│") + "  " + content + "  " + styles.modalBorder.Render("│")
 }
 
 // paneSeparators returns the divider for the first body row, which carries the
 // focus arrow, and the one shared by every remaining row.
 func (m dashboard) paneSeparators() (string, string) {
-	divider := m.styles.divider.Render("│")
+	dividerStyle := m.styles.divider
+	if m.navigationResize || m.hover.kind == hoverDivider {
+		dividerStyle = m.styles.dividerActive
+	}
+	divider := dividerStyle.Render("│")
 	if m.focus == leftPane {
 		return m.styles.dividerActive.Render("◀") + divider + " ", " " + divider + " "
 	}
@@ -2770,6 +3245,9 @@ func (m dashboard) renderNavigationItem(item navItem, index, width int) []string
 	}
 	if isSelected {
 		style = m.styles.navigationSelected
+	} else if m.hover.kind == hoverNavigation && m.hover.index == index {
+		style = style.Foreground(m.styles.interactiveHover.GetForeground()).
+			Background(m.styles.interactiveHover.GetBackground())
 	}
 	markers := openTabMarkers(m.styles, style, item.tabs, m.agentAnimationFrame)
 	var nameLine string
@@ -2841,7 +3319,11 @@ func (m dashboard) renderTerminal(width int) []string {
 	if m.focus == leftPane {
 		tabs = m.navigationTabs()
 	}
-	lines := renderTabBar(m.styles, tabs, m.tabIndex, width)
+	hover := -1
+	if m.hover.kind == hoverTab {
+		hover = m.hover.index
+	}
+	lines := renderTabBarWithHover(m.styles, tabs, m.tabIndex, hover, width)
 	if m.terminal != nil {
 		return append(lines, m.terminal.renderViewport(m.scrollOffset)...)
 	}
@@ -2855,6 +3337,10 @@ func (m dashboard) renderTerminal(width int) []string {
 }
 
 func renderTabBar(styles *uiStyles, tabs []model.Tab, active, width int) []string {
+	return renderTabBarWithHover(styles, tabs, active, -1, width)
+}
+
+func renderTabBarWithHover(styles *uiStyles, tabs []model.Tab, active, hover, width int) []string {
 	labels := make([]string, 0, len(tabs)+1)
 	for _, tab := range tabs {
 		labels = append(labels, " "+displayText(tab.Name)+" ")
@@ -2875,6 +3361,9 @@ func renderTabBar(styles *uiStyles, tabs []model.Tab, active, width int) []strin
 			style = styles.tabSelected
 			railStyle = styles.tabRailSelected
 			railCharacter = "━"
+		} else if index == hover {
+			style = styles.interactiveHover
+			railStyle = styles.dividerActive
 		}
 		tabsLine.WriteString(style.Render(label))
 		railLine.WriteString(railStyle.Render(strings.Repeat(railCharacter, lipgloss.Width(label))))

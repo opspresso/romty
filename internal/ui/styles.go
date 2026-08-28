@@ -9,6 +9,7 @@ type uiStyles struct {
 	navigationRoot      lipgloss.Style
 	navigationCurrent   lipgloss.Style
 	navigationSelected  lipgloss.Style
+	interactiveHover    lipgloss.Style
 	agentClaude         lipgloss.Style
 	agentCodex          lipgloss.Style
 	gitBranch           lipgloss.Style
@@ -55,6 +56,7 @@ func newUIStyles(hasDarkBackground bool) *uiStyles {
 	accent := lightDark(lipgloss.Color("#0F766E"), lipgloss.Color("#5EEAD4"))
 	accentSurface := lightDark(lipgloss.Color("#CCFBF1"), lipgloss.Color("#134E4A"))
 	accentText := lightDark(lipgloss.Color("#115E59"), lipgloss.Color("#F0FDFA"))
+	hoverSurface := lightDark(lipgloss.Color("#E0F2FE"), lipgloss.Color("#243247"))
 	errorColor := lightDark(lipgloss.Color("#BE123C"), lipgloss.Color("#FB7185"))
 	errorText := lightDark(lipgloss.Color("#FFFFFF"), lipgloss.Color("#0F172A"))
 	addedColor := lightDark(lipgloss.Color("#15803D"), lipgloss.Color("#86EFAC"))
@@ -68,6 +70,7 @@ func newUIStyles(hasDarkBackground bool) *uiStyles {
 		navigationRoot:      lipgloss.NewStyle().Foreground(text).Bold(true),
 		navigationCurrent:   lipgloss.NewStyle().Foreground(accent).Bold(true),
 		navigationSelected:  lipgloss.NewStyle().Foreground(accentText).Background(accentSurface).Bold(true),
+		interactiveHover:    lipgloss.NewStyle().Foreground(text).Background(hoverSurface),
 		agentClaude:         lipgloss.NewStyle().Foreground(lipgloss.Color("#D97757")),
 		agentCodex:          lipgloss.NewStyle().Foreground(lipgloss.Color("#3B82F6")),
 		gitBranch:           lipgloss.NewStyle().Foreground(muted),
