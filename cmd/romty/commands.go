@@ -19,21 +19,45 @@ import (
 	"github.com/opspresso/romty/internal/version"
 )
 
-const helpText = `romty - persistent terminal workspace manager
+// command is one romty subcommand: the word that runs it, what help says about
+// it, and whether it is the one help colours as destructive.
+type command struct {
+	name        string
+	description string
+	destructive bool
+}
 
-Usage:
-  romty
-  romty <command>
+// commands is what romty accepts, in the order help prints them. It is the only
+// place they are named: help, the colour help writes, and the check that
+// refuses an unknown word all read this. Naming them again in any of those is
+// how one of them falls behind.
+var commands = []command{
+	{name: "status", description: "Show daemon and session status"},
+	{name: "version", description: "Show the romty version"},
+	{name: "help", description: "Show this help"},
+	{name: "doctor", description: "Check the local romty environment"},
+	{name: "hooks", description: "Install or update agent status hooks"},
+	{name: "list", description: "List roots, workspaces, and sessions"},
+	{name: "stop", description: "Stop the daemon and all running sessions", destructive: true},
+}
 
-Commands:
-  status   Show daemon and session status
-  version  Show the romty version
-  help     Show this help
-  doctor   Check the local romty environment
-  hooks    Install or update agent status hooks
-  list     List roots, workspaces, and sessions
-  stop     Stop the daemon and all running sessions
-`
+// knownCommand reports whether romty has a command by that name. The empty word
+// opens the TUI, and daemon is what the TUI starts behind it rather than
+// something a user runs, so neither is in the help list.
+func knownCommand(name string) bool {
+	if name == "" || name == "daemon" {
+		return true
+	}
+	for _, value := range commands {
+		if value.name == name {
+			return true
+		}
+	}
+	return false
+}
+
+// helpNameWidth is the column the descriptions line up in.
+const helpNameWidth = 9
 
 const commandLabelWidth = 11
 
@@ -84,27 +108,18 @@ func (t commandTheme) agent(agent model.Agent, value string) string {
 }
 
 func printHelp(output io.Writer, theme commandTheme) error {
-	if !theme.enabled {
-		_, err := io.WriteString(output, helpText)
-		return err
+	var help strings.Builder
+	fmt.Fprintf(&help, "%s - persistent terminal workspace manager\n\n%s\n  romty\n  romty <command>\n\n%s\n",
+		theme.label("romty"), theme.label("Usage:"), theme.label("Commands:"))
+	for _, value := range commands {
+		paint := theme.good
+		if value.destructive {
+			paint = theme.failure
+		}
+		padding := strings.Repeat(" ", max(helpNameWidth-len(value.name), 1))
+		fmt.Fprintf(&help, "  %s%s%s\n", paint(value.name), padding, value.description)
 	}
-	_, err := fmt.Fprintf(output, `%s - persistent terminal workspace manager
-
-%s
-  romty
-  romty <command>
-
-%s
-  %s   Show daemon and session status
-  %s  Show the romty version
-  %s     Show this help
-  %s   Check the local romty environment
-  %s    Install or update agent status hooks
-  %s     List roots, workspaces, and sessions
-  %s     Stop the daemon and all running sessions
-`, theme.label("romty"), theme.label("Usage:"), theme.label("Commands:"),
-		theme.good("status"), theme.good("version"), theme.good("help"), theme.good("doctor"), theme.good("hooks"),
-		theme.good("list"), theme.failure("stop"))
+	_, err := io.WriteString(output, help.String())
 	return err
 }
 
