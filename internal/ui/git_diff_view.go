@@ -32,6 +32,18 @@ type gitDiffView struct {
 	request           uint64
 }
 
+// clearDiff drops whatever diff is on screen. Four paths reach that state — a
+// file list that failed or arrived, a diff that was asked for, a diff that
+// failed — and setting the fields by hand at each is how one of them ends up
+// leaving the previous file's highlighting under the next file's text, or its
+// scroll offset under a diff that is shorter.
+func (v *gitDiffView) clearDiff() {
+	v.diffLines = nil
+	v.diffSyntax = nil
+	v.syntaxHighlighted = false
+	v.diffOffset = 0
+}
+
 type gitChangedFilesMsg struct {
 	path    string
 	request uint64
@@ -103,9 +115,7 @@ func (m dashboard) handleGitChangedFiles(message gitChangedFilesMsg) (tea.Model,
 	m.gitDiff.filesPending = false
 	if message.err != nil {
 		m.gitDiff.files = nil
-		m.gitDiff.diffLines = nil
-		m.gitDiff.diffSyntax = nil
-		m.gitDiff.syntaxHighlighted = false
+		m.gitDiff.clearDiff()
 		m.gitDiff.err = message.err.Error()
 		return m, nil
 	}
@@ -117,10 +127,7 @@ func (m dashboard) handleGitChangedFiles(message gitChangedFilesMsg) (tea.Model,
 			break
 		}
 	}
-	m.gitDiff.diffLines = nil
-	m.gitDiff.diffSyntax = nil
-	m.gitDiff.syntaxHighlighted = false
-	m.gitDiff.diffOffset = 0
+	m.gitDiff.clearDiff()
 	m.gitDiff.err = ""
 	if len(m.gitDiff.files) == 0 {
 		return m, nil
@@ -137,10 +144,7 @@ func (m *dashboard) loadSelectedFileDiff() tea.Cmd {
 	path := m.gitDiff.target.Path
 	file := m.gitDiff.files[m.gitDiff.fileIndex]
 	m.gitDiff.diffPending = true
-	m.gitDiff.diffLines = nil
-	m.gitDiff.diffSyntax = nil
-	m.gitDiff.syntaxHighlighted = false
-	m.gitDiff.diffOffset = 0
+	m.gitDiff.clearDiff()
 	m.gitDiff.err = ""
 	return func() tea.Msg {
 		diff, err := loadGitFileDiff(path, file)
@@ -162,9 +166,7 @@ func (m dashboard) handleGitFileDiff(message gitFileDiffMsg) (tea.Model, tea.Cmd
 	m.gitDiff.diffPending = false
 	if message.err != nil {
 		m.gitDiff.err = message.err.Error()
-		m.gitDiff.diffLines = nil
-		m.gitDiff.diffSyntax = nil
-		m.gitDiff.syntaxHighlighted = false
+		m.gitDiff.clearDiff()
 		return m, nil
 	}
 	m.gitDiff.diffLines = message.lines
@@ -292,28 +294,16 @@ func (m dashboard) maximumGitDiffOffset() int {
 }
 
 func (m dashboard) renderGitDiffPanes(leftWidth, rightWidth, height int) []string {
-	left := m.renderGitChangedFiles(leftWidth, height)
-	right := m.renderGitFileDiff(rightWidth, height)
 	separator := " " + m.styles.divider.Render("│") + " "
-	lines := make([]string, 0, height)
-	for row := range height {
-		leftLine, rightLine := "", ""
-		if row < len(left) {
-			leftLine = left[row]
-		}
-		if row < len(right) {
-			rightLine = right[row]
-		}
-		lines = append(lines, pad(truncate(leftLine, leftWidth), leftWidth)+separator+truncate(rightLine, rightWidth))
-	}
-	return lines
+	return mergePanes(
+		m.renderGitChangedFiles(leftWidth, height), m.renderGitFileDiff(rightWidth, height),
+		leftWidth, rightWidth, height,
+		func(int) string { return separator })
 }
 
 func (m dashboard) renderGitChangedFiles(width, height int) []string {
 	title := " Changes · " + displayText(m.gitDiff.target.Name) + " "
-	header := m.styles.paneTitleActive.Render(truncate(title, width))
-	header += m.styles.tabRail.Render(strings.Repeat("─", max(width-lipgloss.Width(header), 0)))
-	lines := []string{header, ""}
+	lines := []string{m.paneHeader(m.styles.paneTitleActive, title, width), ""}
 	switch {
 	case m.gitDiff.filesPending:
 		return append(lines, m.styles.empty.Render("  Loading changed files…"))
@@ -392,9 +382,7 @@ func (m dashboard) renderGitFileDiff(width, height int) []string {
 		mode = "split"
 	}
 	title += " · " + mode + " "
-	header := m.styles.paneTitle.Render(truncate(title, width))
-	header += m.styles.tabRail.Render(strings.Repeat("─", max(width-lipgloss.Width(header), 0)))
-	lines := []string{header, ""}
+	lines := []string{m.paneHeader(m.styles.paneTitle, title, width), ""}
 	switch {
 	case m.gitDiff.diffPending:
 		return append(lines, m.styles.empty.Render("  Loading diff…"))
@@ -564,9 +552,9 @@ func (m dashboard) renderGitDiffLine(line string, width int) string {
 	style := m.styles.navigationItem
 	changed := false
 	switch {
-	case strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "+++"):
+	case isAddedDiffLine(line):
 		style, changed = m.styles.diffAddedLine, true
-	case strings.HasPrefix(line, "-") && !strings.HasPrefix(line, "---"):
+	case isRemovedDiffLine(line):
 		style, changed = m.styles.diffRemovedLine, true
 	case strings.HasPrefix(line, "@@"):
 		style = m.styles.diffHunk

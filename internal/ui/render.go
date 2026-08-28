@@ -167,26 +167,46 @@ func (m dashboard) render() string {
 }
 
 func (m dashboard) renderPanes(leftWidth, rightWidth, bodyHeight int) []string {
-	left := m.renderNavigation(leftWidth, bodyHeight)
-	right := m.renderTerminal(rightWidth)
 	headSeparator, bodySeparator := m.paneSeparators()
-	lines := make([]string, 0, bodyHeight+2)
-	for row := 0; row < bodyHeight; row++ {
-		leftLine := ""
+	return mergePanes(
+		m.renderNavigation(leftWidth, bodyHeight), m.renderTerminal(rightWidth),
+		leftWidth, rightWidth, bodyHeight,
+		func(row int) string {
+			if row == 0 {
+				return headSeparator
+			}
+			return bodySeparator
+		})
+}
+
+// mergePanes lays two panes side by side for the height of the body, padding
+// each row of the left one out to its width so the divider stands in a column.
+// The workspace split and the file view both do this; the only difference is
+// that the split carries the focus arrow on its first row, which is why the
+// separator is asked for per row rather than given once.
+func mergePanes(left, right []string, leftWidth, rightWidth, height int, separator func(row int) string) []string {
+	lines := make([]string, 0, height)
+	for row := range height {
+		leftLine, rightLine := "", ""
 		if row < len(left) {
 			leftLine = left[row]
 		}
-		rightLine := ""
 		if row < len(right) {
 			rightLine = right[row]
 		}
-		separator := bodySeparator
-		if row == 0 {
-			separator = headSeparator
-		}
-		lines = append(lines, pad(truncate(leftLine, leftWidth), leftWidth)+separator+truncate(rightLine, rightWidth))
+		lines = append(lines,
+			pad(truncate(leftLine, leftWidth), leftWidth)+separator(row)+truncate(rightLine, rightWidth))
 	}
 	return lines
+}
+
+// paneHeader is a pane's title chip and the rule that runs from it to the
+// pane's edge. Three panes drew it, and the rule's width is a subtraction each
+// of them had to get right against a title that may have been truncated.
+func (m dashboard) paneHeader(style lipgloss.Style, title string, width int) string {
+	rendered := style.Render(truncate(title, width))
+	return rendered + m.styles.tabRail.Render(
+		strings.Repeat("─", max(width-lipgloss.Width(rendered), 0)))
 }
 
 // renderRows lays out a single full-width pane. Copy mode uses it so every row
@@ -397,9 +417,7 @@ func (m dashboard) renderNavigation(width, height int) []string {
 	if m.focus == leftPane {
 		titleStyle = m.styles.paneTitleActive
 	}
-	title := titleStyle.Render(" romty ")
-	header := title + m.styles.tabRail.Render(strings.Repeat("─", max(width-lipgloss.Width(title), 0)))
-	lines := []string{header, ""}
+	lines := []string{m.paneHeader(titleStyle, " romty ", width), ""}
 	items := m.navigationItems()
 	available := max(height-len(lines), 0)
 	start, end := navigationWindow(items, m.navOffset, available)
