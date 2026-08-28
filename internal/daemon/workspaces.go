@@ -46,10 +46,33 @@ func (s *Server) removeRoot(rootID string) protocol.Response {
 
 	previous := cloneState(s.value)
 	s.value.Roots = append(s.value.Roots[:index], s.value.Roots[index+1:]...)
-	workspaces := make([]model.Workspace, 0, len(s.value.Workspaces))
+	sessions, _ := s.dropWorkspacesLocked(func(workspace model.Workspace) bool {
+		return workspace.RootID == rootID
+	})
+	if err := s.saveLocked(previous); err != nil {
+		s.mu.Unlock()
+		finish()
+		return protocol.Response{Error: err.Error()}
+	}
+	s.mu.Unlock()
+	closeSessions(sessions)
+	finish()
+	return s.snapshotResponse()
+}
+
+// dropWorkspacesLocked forgets every workspace the predicate names along with
+// the tabs inside them, and hands back the sessions those tabs were running
+// and how many workspaces went. The caller closes the sessions once the lock
+// is released: closing a shell waits for it to be reaped, and waiting for that
+// under the lock stops every other request the daemon is serving.
+//
+// Forgetting a root and deleting a workspace directory differ only in which
+// workspaces they name. Everything after that was written out twice.
+func (s *Server) dropWorkspacesLocked(matches func(model.Workspace) bool) ([]*session, int) {
 	orphaned := make(map[string]struct{})
+	workspaces := make([]model.Workspace, 0, len(s.value.Workspaces))
 	for _, workspace := range s.value.Workspaces {
-		if workspace.RootID == rootID {
+		if matches(workspace) {
 			orphaned[workspace.ID] = struct{}{}
 			continue
 		}
@@ -68,19 +91,26 @@ func (s *Server) removeRoot(rootID string) protocol.Response {
 		tabs = append(tabs, tab)
 	}
 	s.value.Tabs = tabs
+	return sessions, len(orphaned)
+}
+
+// saveLocked records the state and, when the write fails, puts back what was
+// there before it. An in-memory tree that outran the file it is supposed to be
+// recorded in is the one outcome none of these operations can leave behind:
+// the next daemon would start from the file. The server lock must be held.
+func (s *Server) saveLocked(previous model.State) error {
 	if err := s.store.Save(s.value); err != nil {
 		s.value = previous
-		s.mu.Unlock()
-		finish()
-		return protocol.Response{Error: err.Error()}
+		return err
 	}
 	s.revision++
-	s.mu.Unlock()
+	return nil
+}
+
+func closeSessions(sessions []*session) {
 	for _, value := range sessions {
 		value.close()
 	}
-	finish()
-	return s.snapshotResponse()
 }
 
 func (s *Server) removeWorkspace(rootID, path string) protocol.Response {
@@ -106,40 +136,21 @@ func (s *Server) removeWorkspace(rootID, path string) protocol.Response {
 
 	s.mu.Lock()
 	previous := cloneState(s.value)
-	removedWorkspaceIDs := make(map[string]struct{})
-	workspaces := make([]model.Workspace, 0, len(s.value.Workspaces))
-	for _, workspace := range s.value.Workspaces {
-		if workspace.RootID == rootID && workspace.Path == workspacePath {
-			removedWorkspaceIDs[workspace.ID] = struct{}{}
-			continue
-		}
-		workspaces = append(workspaces, workspace)
+	sessions, removed := s.dropWorkspacesLocked(func(workspace model.Workspace) bool {
+		return workspace.RootID == rootID && workspace.Path == workspacePath
+	})
+	if removed == 0 {
+		// A directory romty was never asked to open has no record to rewrite,
+		// and rewriting one anyway would let a failed write turn a deletion
+		// that succeeded into an error. The tree still changed, so the
+		// revision moves for the directory that is no longer on disk.
+		s.revision++
+	} else if err := s.saveLocked(previous); err != nil {
+		s.mu.Unlock()
+		return protocol.Response{Error: fmt.Sprintf("workspace directory deleted but persist state: %v", err)}
 	}
-	s.value.Workspaces = workspaces
-	sessions := make([]*session, 0, len(removedWorkspaceIDs))
-	tabs := make([]model.Tab, 0, len(s.value.Tabs))
-	for _, tab := range s.value.Tabs {
-		if _, removed := removedWorkspaceIDs[tab.WorkspaceID]; removed {
-			if value, ok := s.sessions[tab.ID]; ok {
-				sessions = append(sessions, value)
-			}
-			continue
-		}
-		tabs = append(tabs, tab)
-	}
-	s.value.Tabs = tabs
-	if len(removedWorkspaceIDs) > 0 {
-		if err := s.store.Save(s.value); err != nil {
-			s.value = previous
-			s.mu.Unlock()
-			return protocol.Response{Error: fmt.Sprintf("workspace directory deleted but persist state: %v", err)}
-		}
-	}
-	s.revision++
 	s.mu.Unlock()
-	for _, value := range sessions {
-		value.close()
-	}
+	closeSessions(sessions)
 	return s.snapshotResponse()
 }
 
@@ -183,15 +194,14 @@ func (s *Server) addRoot(path string) protocol.Response {
 			return s.snapshotResponse()
 		}
 	}
+	previous := cloneState(s.value)
 	root := model.Root{ID: newID(), Name: filepath.Base(canonical), Path: canonical}
 	s.value.Roots = append(s.value.Roots, root)
-	if err := s.store.Save(s.value); err != nil {
-		s.value.Roots = s.value.Roots[:len(s.value.Roots)-1]
+	if err := s.saveLocked(previous); err != nil {
 		s.mu.Unlock()
 		finish()
 		return protocol.Response{Error: err.Error()}
 	}
-	s.revision++
 	s.mu.Unlock()
 	finish()
 	return s.snapshotResponse()
@@ -244,12 +254,11 @@ func (s *Server) ensureWorkspace(rootID, path string) protocol.Response {
 		Name:   filepath.Base(canonical),
 		Path:   canonical,
 	}
+	previous := cloneState(s.value)
 	s.value.Workspaces = append(s.value.Workspaces, workspace)
-	if err := s.store.Save(s.value); err != nil {
-		s.value.Workspaces = s.value.Workspaces[:len(s.value.Workspaces)-1]
+	if err := s.saveLocked(previous); err != nil {
 		return protocol.Response{Error: err.Error()}
 	}
-	s.revision++
 	return protocol.Response{Workspace: &workspace}
 }
 
@@ -286,16 +295,15 @@ func (s *Server) createTab(request protocol.Request) protocol.Response {
 		s.mu.Unlock()
 		return protocol.Response{Error: err.Error()}
 	}
+	previous := cloneState(s.value)
 	s.value.Tabs = append(s.value.Tabs, tab)
 	s.sessions[tab.ID] = value
-	if err := s.store.Save(s.value); err != nil {
-		s.value.Tabs = s.value.Tabs[:len(s.value.Tabs)-1]
+	if err := s.saveLocked(previous); err != nil {
 		delete(s.sessions, tab.ID)
 		s.mu.Unlock()
 		value.close()
 		return protocol.Response{Error: err.Error()}
 	}
-	s.revision++
 	s.mu.Unlock()
 	return protocol.Response{Tab: &tab}
 }

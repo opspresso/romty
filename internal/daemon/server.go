@@ -203,9 +203,7 @@ func (s *Server) shutdown() {
 		sessions = append(sessions, value)
 	}
 	s.mu.Unlock()
-	for _, value := range sessions {
-		value.close()
-	}
+	closeSessions(sessions)
 	_ = os.Remove(s.socket)
 }
 
