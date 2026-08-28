@@ -3,11 +3,14 @@ package daemon
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/opspresso/romty/internal/model"
 	"github.com/opspresso/romty/internal/protocol"
+	"github.com/opspresso/romty/internal/usage"
 )
 
 func TestAgentHookEventsMapToPhases(t *testing.T) {
@@ -128,6 +131,70 @@ func TestAgentStatusInfersAPhaseOnlyWhereNoHookHasSpoken(t *testing.T) {
 		"tab-1": {Agent: model.AgentClaude, Phase: model.AgentPhaseIdle},
 		"tab-2": {Agent: model.AgentClaude, Phase: model.AgentPhaseWaitingApproval},
 		"tab-3": {Agent: model.AgentCodex, Phase: model.AgentPhaseWaitingApproval},
+	}
+	if got := server.agentStatusesSnapshot(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("agentStatusesSnapshot() = %#v, want %#v", got, want)
+	}
+}
+
+// The counters need the session identifier, which only a hook reports. Without
+// one romty cannot tell which of a directory's transcripts belongs to which tab.
+func TestAgentStatusReportsTheLedgerOnlyForAHookedSession(t *testing.T) {
+	configDir := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", configDir)
+	workspace := "/projects/alpha"
+	directory := filepath.Join(configDir, "projects", strings.NewReplacer("/", "-", ".", "-").Replace(workspace))
+	if err := os.MkdirAll(directory, 0o700); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	transcript := `{"type":"assistant","message":{"usage":{"input_tokens":2,` +
+		`"cache_creation_input_tokens":1288,"cache_read_input_tokens":342813}}}` + "\n" +
+		`{"type":"summary","totalCostUSD":1.25}` + "\n"
+	if err := os.WriteFile(filepath.Join(directory, "session-1.jsonl"), []byte(transcript), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	hooked, unhooked := new(os.File), new(os.File)
+	previousGroup := foregroundProcessGroup
+	previousList := runProcessList
+	foregroundProcessGroup = func(terminal *os.File) (int, error) {
+		if terminal == hooked {
+			return 101, nil
+		}
+		return 102, nil
+	}
+	runProcessList = func(context.Context) ([]byte, error) { return []byte("101 claude\n102 claude\n"), nil }
+	t.Cleanup(func() {
+		foregroundProcessGroup = previousGroup
+		runProcessList = previousList
+	})
+
+	server := &Server{
+		sessions: map[string]*session{
+			"tab-1": newSessionForTest(hooked),
+			"tab-2": newSessionForTest(unhooked),
+		},
+		agentStatuses: map[string]agentRuntime{
+			"tab-1": {
+				AgentStatus: model.AgentStatus{Agent: model.AgentClaude, Phase: model.AgentPhaseWorking},
+				SessionID:   "session-1",
+			},
+		},
+		usage: usage.NewReader(),
+	}
+	server.value.Workspaces = []model.Workspace{{ID: "workspace-1", Path: workspace}}
+	server.value.Tabs = []model.Tab{
+		{ID: "tab-1", WorkspaceID: "workspace-1"},
+		{ID: "tab-2", WorkspaceID: "workspace-1"},
+	}
+
+	want := map[string]model.AgentStatus{
+		"tab-1": {
+			Agent: model.AgentClaude, Phase: model.AgentPhaseWorking,
+			ContextTokens: 2 + 1288 + 342813, CostUSD: 1.25,
+		},
+		// No hook, so no session to name a transcript with.
+		"tab-2": {Agent: model.AgentClaude, Phase: model.AgentPhaseUnknown},
 	}
 	if got := server.agentStatusesSnapshot(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("agentStatusesSnapshot() = %#v, want %#v", got, want)

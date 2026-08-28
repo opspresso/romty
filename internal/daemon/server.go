@@ -20,6 +20,7 @@ import (
 	"github.com/opspresso/romty/internal/model"
 	"github.com/opspresso/romty/internal/protocol"
 	"github.com/opspresso/romty/internal/state"
+	"github.com/opspresso/romty/internal/usage"
 )
 
 var ErrAlreadyRunning = errors.New("romty daemon is already running")
@@ -65,6 +66,8 @@ type Server struct {
 
 	connections chan struct{}
 	attachments chan struct{}
+
+	usage *usage.Reader
 }
 
 func New(socket, statePath, shell string) (*Server, error) {
@@ -91,6 +94,7 @@ func New(socket, statePath, shell string) (*Server, error) {
 		accepting:     true,
 		connections:   make(chan struct{}, maxActiveConnections),
 		attachments:   make(chan struct{}, maxTerminalAttachments),
+		usage:         usage.NewReader(),
 	}, nil
 }
 
@@ -952,14 +956,16 @@ func (s *Server) agentStatusesSnapshot() map[string]model.AgentStatus {
 	for tabID, session := range s.sessions {
 		sessions[tabID] = session
 	}
-	reported := make(map[string]model.Agent, len(s.agentStatuses))
+	reported := make(map[string]agentRuntime, len(s.agentStatuses))
 	for tabID, runtime := range s.agentStatuses {
-		reported[tabID] = runtime.Agent
+		reported[tabID] = runtime
 	}
+	workspaces := s.tabWorkspaces()
 	s.mu.Unlock()
 
 	agents := sessionAgents(sessions)
 	inferred := inferPhases(sessions, agents, reported)
+	ledgers := s.sessionUsage(reported, workspaces)
 
 	result := make(map[string]model.AgentStatus, len(agents))
 	s.mu.Lock()
@@ -972,6 +978,9 @@ func (s *Server) agentStatusesSnapshot() map[string]model.AgentStatus {
 		switch runtime, ok := s.agentStatuses[tabID]; {
 		case ok && runtime.Agent == agent:
 			status.Phase = runtime.Phase
+			if ledger, ok := ledgers[tabID]; ok {
+				status.ContextTokens, status.CostUSD = ledger.ContextTokens, ledger.CostUSD
+			}
 		default:
 			if phase, ok := inferred[tabID]; ok {
 				status.Phase = phase
@@ -988,11 +997,11 @@ func (s *Server) agentStatusesSnapshot() map[string]model.AgentStatus {
 func inferPhases(
 	sessions map[string]*session,
 	agents map[string]model.Agent,
-	reported map[string]model.Agent,
+	reported map[string]agentRuntime,
 ) map[string]model.AgentPhase {
 	phases := make(map[string]model.AgentPhase)
 	for tabID, agent := range agents {
-		if reported[tabID] == agent {
+		if reported[tabID].Agent == agent {
 			continue
 		}
 		value, ok := sessions[tabID]

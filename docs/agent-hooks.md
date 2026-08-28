@@ -19,6 +19,14 @@ An agent that has no romty hook installed still reports a phase, read from the l
 
 The newest phrase in the output wins, so an agent that answered a prompt and went back to work reports work again. The window title is consulted only when the output says nothing, because a title is sticky and can outlive the state it named. A hook always wins over both, and no phase is guessed for a tab whose agent has drawn nothing recognisable.
 
+## Token and cost readings
+
+A hooked Claude Code session also reports what it has spent. romty reads the counters Claude Code writes to its own transcript under `${CLAUDE_CONFIG_DIR:-~/.claude}/projects` and shows them on the rail above the status row while that terminal is open: the tokens the newest request carried into the model, and the session cost the agent totalled.
+
+Both are the agent's own numbers. romty never estimates them, and never converts them to a share of a context window — a transcript records no window size, so a percentage could only come from a table of model limits that would go stale as models change. A tab shows no reading when the transcript cannot be read.
+
+The reading needs the session identifier, which only a hook reports: two tabs running an agent in the same directory cannot otherwise be told apart. Codex records its counters differently and is not read yet.
+
 ## Install or update
 
 When the TUI starts, romty looks for `claude`, `claude-code`, and `codex` on `PATH`. If a detected agent has missing or outdated romty hooks, the TUI opens a confirmation dialog. Press `Enter` to install or update every listed provider, or `Esc` to leave the files unchanged for that run.

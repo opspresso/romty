@@ -4730,6 +4730,70 @@ func TestDashboardOpensHelpFromTheTerminalPane(t *testing.T) {
 // the table that routes those keys says that; counting rendered lines did not,
 // and the hand-copied list of every shortcut that stood beside it was a second
 // copy of the reference that quietly fell behind it.
+// The counters are the agent's own; romty reports them and estimates nothing,
+// so a tab with none shows none.
+func TestDashboardShowsTheOpenAgentLedgerInTheRail(t *testing.T) {
+	root := model.Root{ID: "root-1", Name: "projects", Path: "/projects"}
+	alpha := model.Workspace{ID: "workspace-1", RootID: root.ID, Name: "alpha", Path: "/projects/alpha"}
+	tab := model.Tab{ID: "tab-1", WorkspaceID: alpha.ID, Name: "1", Running: true,
+		Agent: model.AgentClaude, AgentPhase: model.AgentPhaseWorking,
+		AgentContextTokens: 344103, AgentCostUSD: 1.25}
+	snapshot := model.Snapshot{Roots: []model.RootView{{
+		Root:        root,
+		Directories: []model.WorkspaceView{{Workspace: alpha, Tabs: []model.Tab{tab}}},
+	}}}
+
+	value := newDashboard(&fakeBackend{snapshot: snapshot}, snapshot)
+	value.width = 120
+	value.height = 30
+	value.selectedWorkspaceID = alpha.ID
+	value.selectedPath = alpha.Path
+	value.focus = terminalPane
+
+	rail := ansi.Strip(value.renderStatus(value.width, value.dimensions().bodyHeight)[0])
+	if !strings.Contains(rail, "344k ctx") || !strings.Contains(rail, "$1.25") {
+		t.Fatalf("rail = %q, want the agent's counters", rail)
+	}
+
+	// Nothing read means nothing shown, not a zero.
+	value.state.Roots[0].Directories[0].Tabs[0].AgentContextTokens = 0
+	value.state.Roots[0].Directories[0].Tabs[0].AgentCostUSD = 0
+	rail = ansi.Strip(value.renderStatus(value.width, value.dimensions().bodyHeight)[0])
+	if strings.Contains(rail, "ctx") || strings.Contains(rail, "$") {
+		t.Fatalf("rail = %q, want no reading shown", rail)
+	}
+}
+
+// The shortcuts are what the rail is for; a note that does not fit beside them
+// is dropped rather than pushing them off the row.
+func TestShortcutRailDropsANoteThatDoesNotFit(t *testing.T) {
+	styles := newUIStyles(true)
+	keys := []shortcut{{key: "Ctrl+/", description: "navigation"}}
+	full := ansi.Strip(renderShortcutRailNote(styles, 20, "344k ctx  $1.25", keys...))
+	if strings.Contains(full, "ctx") {
+		t.Fatalf("narrow rail = %q, want the note dropped", full)
+	}
+	if !strings.Contains(full, "navigation") {
+		t.Fatalf("narrow rail = %q, want the shortcuts kept", full)
+	}
+	wide := renderShortcutRailNote(styles, 120, "344k ctx  $1.25", keys...)
+	if got := lipgloss.Width(wide); got != 120 {
+		t.Fatalf("rail width = %d, want 120", got)
+	}
+}
+
+func TestFormatTokensKeepsItsWidthAsItGrows(t *testing.T) {
+	for _, probe := range []struct {
+		count int
+		want  string
+	}{{count: 0, want: "0"}, {count: 999, want: "999"}, {count: 1000, want: "1k"},
+		{count: 344103, want: "344k"}, {count: 1_250_000, want: "1.2M"}} {
+		if got := formatTokens(probe.count); got != probe.want {
+			t.Errorf("formatTokens(%d) = %q, want %q", probe.count, got, probe.want)
+		}
+	}
+}
+
 func TestHelpReferenceDocumentsEveryGlobalKey(t *testing.T) {
 	documented := make(map[string]bool)
 	for _, entry := range helpReference() {

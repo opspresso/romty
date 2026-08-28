@@ -1835,20 +1835,24 @@ func (m *dashboard) updateAgents(statuses map[string]model.AgentStatus) {
 	for rootIndex := range m.state.Roots {
 		root := &m.state.Roots[rootIndex]
 		for tabIndex := range root.Tabs {
-			status := statuses[root.Tabs[tabIndex].ID]
-			root.Tabs[tabIndex].Agent = status.Agent
-			root.Tabs[tabIndex].AgentPhase = status.Phase
+			applyAgentStatus(&root.Tabs[tabIndex], statuses)
 		}
 		for workspaceIndex := range root.Directories {
 			tabs := root.Directories[workspaceIndex].Tabs
 			for tabIndex := range tabs {
-				status := statuses[tabs[tabIndex].ID]
-				tabs[tabIndex].Agent = status.Agent
-				tabs[tabIndex].AgentPhase = status.Phase
+				applyAgentStatus(&tabs[tabIndex], statuses)
 			}
 		}
 	}
 	m.agentAnimationActive = m.hasAnimatedAgent()
+}
+
+func applyAgentStatus(tab *model.Tab, statuses map[string]model.AgentStatus) {
+	status := statuses[tab.ID]
+	tab.Agent = status.Agent
+	tab.AgentPhase = status.Phase
+	tab.AgentContextTokens = status.ContextTokens
+	tab.AgentCostUSD = status.CostUSD
 }
 
 func (m dashboard) soundForAgentTransitions(statuses map[string]model.AgentStatus) (sound.Kind, bool) {
@@ -2561,11 +2565,21 @@ func (m dashboard) selectedTabs() []model.Tab {
 // openSelectedTerminal reads, so it answers "is this still the tab romty asked
 // for" rather than approximating it.
 func (m dashboard) selectedTabID() string {
-	tabs := m.selectedTabs()
-	if m.tabIndex < 0 || m.tabIndex >= len(tabs) {
+	tab, ok := m.openTab()
+	if !ok {
 		return ""
 	}
-	return tabs[m.tabIndex].ID
+	return tab.ID
+}
+
+// openTab is the tab the cursor names among the open terminal's own tabs. The
+// new-tab slot is not one, so it reports false there.
+func (m dashboard) openTab() (model.Tab, bool) {
+	tabs := m.selectedTabs()
+	if m.tabIndex < 0 || m.tabIndex >= len(tabs) {
+		return model.Tab{}, false
+	}
+	return tabs[m.tabIndex], true
 }
 
 func runningTabs(tabs []model.Tab) []model.Tab {
@@ -2896,7 +2910,7 @@ func (m dashboard) renderStatus(width, bodyHeight int) []string {
 			// rail carries what the row cannot.
 			contextShortcuts = []shortcut{{key: "Ctrl+/", description: "navigation"}}
 		}
-		rail = renderShortcutRail(m.styles, width, contextShortcuts...)
+		rail = renderShortcutRailNote(m.styles, width, m.agentLedger(), contextShortcuts...)
 		status = renderShortcuts(m.styles, width,
 			shortcut{key: "F1", description: "help"},
 			shortcut{key: "F2", description: "add root"},
@@ -3489,12 +3503,57 @@ func renderShortcuts(styles *uiStyles, width int, values ...shortcut) string {
 }
 
 func renderShortcutRail(styles *uiStyles, width int, values ...shortcut) string {
+	return renderShortcutRailNote(styles, width, "", values...)
+}
+
+// renderShortcutRailNote draws a note into the rule the rail is otherwise
+// filled with, so a reading that is worth glancing at costs no row of its own.
+// A note that does not fit is dropped rather than pushing the shortcuts off.
+func renderShortcutRailNote(styles *uiStyles, width int, note string, values ...shortcut) string {
 	shortcuts := renderShortcuts(styles, width, values...)
 	fill := max(width-lipgloss.Width(shortcuts)-1, 0)
+	if note != "" {
+		rendered := styles.shortcutDescription.Render(note)
+		if used := lipgloss.Width(rendered) + 3; used <= fill {
+			return styles.tabRail.Render("─") + " " + rendered + " " +
+				styles.tabRail.Render(strings.Repeat("─", fill-used)) + " " + shortcuts
+		}
+	}
 	if fill == 0 {
 		return shortcuts
 	}
 	return styles.tabRail.Render(strings.Repeat("─", fill)) + " " + shortcuts
+}
+
+// agentLedger is what the open terminal's agent has spent, as the agent's own
+// transcript records it. It is empty when no agent is open, or when romty had
+// nothing to read: the counters are reported, never estimated.
+func (m dashboard) agentLedger() string {
+	tab, ok := m.openTab()
+	if !ok {
+		return ""
+	}
+	parts := make([]string, 0, 2)
+	if tab.AgentContextTokens > 0 {
+		parts = append(parts, formatTokens(tab.AgentContextTokens)+" ctx")
+	}
+	if tab.AgentCostUSD > 0 {
+		parts = append(parts, fmt.Sprintf("$%.2f", tab.AgentCostUSD))
+	}
+	return strings.Join(parts, "  ")
+}
+
+// formatTokens abbreviates a count so it keeps its width as it grows, the way
+// an agent's own status line writes it.
+func formatTokens(count int) string {
+	switch {
+	case count >= 1_000_000:
+		return fmt.Sprintf("%.1fM", float64(count)/1_000_000)
+	case count >= 1_000:
+		return fmt.Sprintf("%dk", count/1_000)
+	default:
+		return fmt.Sprintf("%d", count)
+	}
 }
 
 func truncate(value string, width int) string {
