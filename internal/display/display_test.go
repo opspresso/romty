@@ -19,7 +19,8 @@ func TestTextNeutralizesControlCharacters(t *testing.T) {
 		{name: "a newline", value: "a\nb", want: "a�b"},
 		{name: "a carriage return", value: "a\rb", want: "a�b"},
 		{name: "a bell", value: "a\x07b", want: "a�b"},
-		{name: "a C1 introducer", value: "ab", want: "a�b"},
+		// The single-byte form of ESC [, which a terminal reads the same way.
+		{name: "a C1 introducer", value: "a\u009bb", want: "a\ufffdb"},
 		{name: "a NUL", value: "a\x00b", want: "a�b"},
 		{name: "nothing at all", value: "", want: ""},
 	} {
