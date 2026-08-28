@@ -248,16 +248,28 @@ func (m dashboard) handleBrowseMouse(message tea.MouseMsg) (tea.Model, tea.Cmd, 
 }
 
 func (m dashboard) browseIndexAtContentRow(row int) (int, bool) {
-	if row < 2 || m.browse.loading || m.browse.failure != "" {
+	if row < browseHeaderRows || m.browse.loading || m.browse.failure != "" {
 		return 0, false
 	}
-	capacity := max(modalCapacity(m.dimensions().bodyHeight)-2, 1)
-	start := 0
+	start, _ := m.browseWindow(m.dimensions().bodyHeight)
+	index := start + row - browseHeaderRows
+	return index, index >= 0 && index < m.browse.rows()
+}
+
+// browseHeaderRows are the path and the blank line the picker draws above its
+// list, which is what separates a content row from an entry index.
+const browseHeaderRows = 2
+
+// browseWindow is the first entry the picker draws and how many of them fit.
+// Drawing the list and deciding which entry a click landed on are the same
+// question asked twice; answering it in two places is how a click starts
+// opening the row above the one under the pointer.
+func (m dashboard) browseWindow(height int) (start, capacity int) {
+	capacity = max(modalCapacity(height)-browseHeaderRows, 1)
 	if rows := m.browse.rows(); rows > capacity {
 		start = min(max(m.browse.cursor-capacity/2, 0), rows-capacity)
 	}
-	index := start + row - 2
-	return index, index >= 0 && index < m.browse.rows()
+	return start, capacity
 }
 
 func (m dashboard) openBrowseSelection() (tea.Model, tea.Cmd) {
@@ -299,7 +311,7 @@ func (m dashboard) browseCapacity() int {
 func (m dashboard) renderBrowseModal(width, height int) []string {
 	contentWidth := max(width-6, 0)
 	lines := []string{m.styles.empty.Render(shortenPath(displayText(m.browse.path), contentWidth)), ""}
-	capacity := max(modalCapacity(height)-len(lines), 1)
+	start, capacity := m.browseWindow(height)
 	switch {
 	case m.browse.failure != "":
 		lines = append(lines, m.styles.errorText.Render(displayText(m.browse.failure)))
@@ -308,10 +320,6 @@ func (m dashboard) renderBrowseModal(width, height int) []string {
 		lines = append(lines, m.styles.empty.Render(frame+" Reading…"))
 	default:
 		rows := m.browse.rows()
-		start := 0
-		if rows > capacity {
-			start = min(max(m.browse.cursor-capacity/2, 0), rows-capacity)
-		}
 		for index := start; index < rows && index-start < capacity; index++ {
 			lines = append(lines, m.renderBrowseRow(index, contentWidth))
 		}

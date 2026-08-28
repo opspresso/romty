@@ -288,8 +288,7 @@ func (m dashboard) renderGitActionsModal(width, height int) []string {
 			style = m.styles.errorText
 		}
 		if m.hover.kind == hoverGitResult && m.hover.index == index+2 {
-			style = style.Foreground(m.styles.interactiveHover.GetForeground()).
-				Background(m.styles.interactiveHover.GetBackground())
+			style = m.styles.hovered(style)
 		}
 		lines = append(lines, style.Render(line))
 	}

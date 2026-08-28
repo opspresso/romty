@@ -112,3 +112,12 @@ func newUIStyles(hasDarkBackground bool) *uiStyles {
 		empty:       lipgloss.NewStyle().Foreground(muted),
 	}
 }
+
+// hovered tints a style with the hover colours while keeping everything else it
+// carries — weight, and whatever the row already meant. A row under the pointer
+// is still the row it was, so replacing its style outright would drop the very
+// thing the hover is meant to point at.
+func (s *uiStyles) hovered(style lipgloss.Style) lipgloss.Style {
+	return style.Foreground(s.interactiveHover.GetForeground()).
+		Background(s.interactiveHover.GetBackground())
+}

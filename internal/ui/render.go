@@ -466,8 +466,7 @@ func (m dashboard) renderNavigationItem(item navItem, index, width int) []string
 	if isSelected {
 		style = m.styles.navigationSelected
 	} else if m.hover.kind == hoverNavigation && m.hover.index == index {
-		style = style.Foreground(m.styles.interactiveHover.GetForeground()).
-			Background(m.styles.interactiveHover.GetBackground())
+		style = m.styles.hovered(style)
 	}
 	markers := openTabMarkers(m.styles, style, item.tabs, m.agentAnimationFrame)
 	var nameLine string
