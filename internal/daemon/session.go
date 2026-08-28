@@ -180,10 +180,10 @@ func (s *session) broadcast(data []byte) {
 				stalled = append(stalled, connection)
 				continue
 			}
-			copy := append([]byte(nil), data...)
+			chunk := append([]byte(nil), data...)
 			select {
-			case attached.output <- copy:
-				attached.queuedBytes += len(copy)
+			case attached.output <- chunk:
+				attached.queuedBytes += len(chunk)
 			default:
 				stalled = append(stalled, connection)
 			}
