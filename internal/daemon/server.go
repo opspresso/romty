@@ -809,13 +809,15 @@ func (s *Server) handleAttach(connection net.Conn, request protocol.Request) {
 		if err := replyFor(connection, request, protocol.Response{}); err != nil {
 			return
 		}
-		if err := value.attachClientReady(connection, request.ClientID, func(int) error { return nil }); err != nil {
+		if err := value.attachClientReady(connection, request.ClientID, func(int, uint16, uint16) error { return nil }); err != nil {
 			s.logger.Printf("attach to tab %s ended: %v", request.TabID, err)
 		}
 		return
 	}
-	if err := value.attachClientReady(connection, request.ClientID, func(replayBytes int) error {
-		return replyFor(connection, request, protocol.Response{ReplayBytes: replayBytes})
+	if err := value.attachClientReady(connection, request.ClientID, func(replayBytes int, columns, rows uint16) error {
+		return replyFor(connection, request, protocol.Response{
+			ReplayBytes: replayBytes, ReplayColumns: columns, ReplayRows: rows,
+		})
 	}); err != nil {
 		s.logger.Printf("attach to tab %s ended: %v", request.TabID, err)
 	}

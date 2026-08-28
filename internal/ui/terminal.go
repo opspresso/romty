@@ -36,6 +36,10 @@ type terminalOutputMsg struct {
 	inputFailure bool
 }
 
+type replaySizer interface {
+	ReplaySize() (uint16, uint16)
+}
+
 func newEmbeddedTerminal(id string, stream io.ReadWriteCloser, width, height int) *embeddedTerminal {
 	emulator := vt.NewSafeEmulator(width, height)
 	emulator.SetScrollbackSize(10_000)
@@ -63,6 +67,27 @@ func newEmbeddedTerminal(id string, stream io.ReadWriteCloser, width, height int
 			_ = stream.Close()
 		}
 	}()
+	return terminal
+}
+
+func newEmbeddedTerminalWithReplay(
+	id string,
+	stream io.ReadWriteCloser,
+	replay []byte,
+	width, height int,
+) *embeddedTerminal {
+	replayWidth, replayHeight := width, height
+	if sized, ok := stream.(replaySizer); ok {
+		columns, rows := sized.ReplaySize()
+		if columns > 0 && rows > 0 {
+			replayWidth, replayHeight = int(columns), int(rows)
+		}
+	}
+	terminal := newEmbeddedTerminal(id, stream, replayWidth, replayHeight)
+	terminal.writeOutput(replay)
+	if replayWidth != width || replayHeight != height {
+		terminal.resize(width, height)
+	}
 	return terminal
 }
 

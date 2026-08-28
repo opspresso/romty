@@ -8,6 +8,16 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
+type replaySizedMemoryStream struct {
+	*memoryStream
+	columns uint16
+	rows    uint16
+}
+
+func (s replaySizedMemoryStream) ReplaySize() (uint16, uint16) {
+	return s.columns, s.rows
+}
+
 func TestEmbeddedTerminalForwardsKeysAndPaste(t *testing.T) {
 	stream := newMemoryStream("")
 	terminal := newEmbeddedTerminal("tab-1", stream, 40, 10)
@@ -36,6 +46,32 @@ func TestEmbeddedTerminalRendersANSIOutput(t *testing.T) {
 	rendered := strings.Join(terminal.render(), "\n")
 	if !strings.Contains(rendered, "hello") || !strings.Contains(rendered, "red") {
 		t.Fatalf("rendered terminal = %q", rendered)
+	}
+}
+
+func TestZshPartialLineMarkerNeedsItsRecordedWidth(t *testing.T) {
+	const recordedWidth = 80
+	replay := []byte("abc\x1b[1m\x1b[7m%\x1b[27m\x1b[1m\x1b[0m " +
+		strings.Repeat(" ", recordedWidth-len("abc")-2) +
+		"\r \r\r\x1b[0m\x1b[27m\x1b[24m\x1b[JPROMPT> ")
+
+	direct := newEmbeddedTerminal("direct", newMemoryStream(""), 40, 6)
+	direct.writeOutput(replay)
+	directScreen := strings.Join(direct.render(), "\n")
+	direct.close()
+
+	stream := replaySizedMemoryStream{
+		memoryStream: newMemoryStream(""), columns: recordedWidth, rows: 6,
+	}
+	restored := newEmbeddedTerminalWithReplay("restored", stream, replay, 40, 6)
+	restoredScreen := strings.Join(restored.render(), "\n")
+	restored.close()
+
+	if !strings.Contains(directScreen, "%") {
+		t.Fatalf("wrong-width replay did not reproduce the zsh marker:\n%s", directScreen)
+	}
+	if strings.Contains(restoredScreen, "%") {
+		t.Fatalf("recorded-width replay retained the zsh marker:\n%s", restoredScreen)
 	}
 }
 

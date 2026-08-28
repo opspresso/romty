@@ -537,6 +537,7 @@ func TestAttachInfersCapabilitiesForAPreNegotiationClient(t *testing.T) {
 	defer daemonSide.Close()
 
 	value := newSessionForTest()
+	value.columns, value.rows = 90, 25
 	value.history.append([]byte("version five history"))
 	server := &Server{
 		sessions: map[string]*session{"tab-1": value},
@@ -558,8 +559,9 @@ func TestAttachInfersCapabilitiesForAPreNegotiationClient(t *testing.T) {
 		t.Fatalf("Read() attach response error = %v", err)
 	}
 	want := []byte(resetScreen + "version five history")
-	if response.Version != 5 || response.ReplayBytes != len(want) {
-		t.Fatalf("version 5 attach response = %#v, want replay size %d", response, len(want))
+	if response.Version != 5 || response.ReplayBytes != len(want) ||
+		response.ReplayColumns != 90 || response.ReplayRows != 25 {
+		t.Fatalf("version 5 attach response = %#v, want replay size %d at 90x25", response, len(want))
 	}
 	replay := make([]byte, len(want))
 	if _, err := io.ReadFull(reader, replay); err != nil {

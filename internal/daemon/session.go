@@ -39,6 +39,8 @@ const replayChunkBytes = 64 << 10
 type session struct {
 	id       string
 	pty      *os.File
+	columns  uint16
+	rows     uint16
 	command  *exec.Cmd
 	onExit   func()
 	readDone chan struct{}
@@ -102,6 +104,8 @@ func startSession(id, directory, shell string, environment []string, columns, ro
 	value := &session{
 		id:       id,
 		pty:      terminal,
+		columns:  columns,
+		rows:     rows,
 		command:  command,
 		onExit:   onExit,
 		readDone: make(chan struct{}),
@@ -200,17 +204,23 @@ func (s *session) broadcast(data []byte) {
 }
 
 func (s *session) attach(connection net.Conn) error {
-	return s.attachClientReady(connection, "", func(int) error { return nil })
+	return s.attachClientReady(connection, "", func(int, uint16, uint16) error { return nil })
 }
 
 // attachReady announces the exact initial replay before writing it. The
 // client can consume that history off-screen, then treat everything after the
 // boundary as live output.
 func (s *session) attachReady(connection net.Conn, ready func(int) error) error {
-	return s.attachClientReady(connection, "", ready)
+	return s.attachClientReady(connection, "", func(replayBytes int, _, _ uint16) error {
+		return ready(replayBytes)
+	})
 }
 
-func (s *session) attachClientReady(connection net.Conn, clientID string, ready func(int) error) error {
+func (s *session) attachClientReady(
+	connection net.Conn,
+	clientID string,
+	ready func(int, uint16, uint16) error,
+) error {
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()
@@ -225,6 +235,7 @@ func (s *session) attachClientReady(connection net.Conn, clientID string, ready 
 	// slice into it would be rewritten under the replay's feet.
 	recorded := s.history.bytes()
 	modes := s.modes.restore()
+	replayColumns, replayRows := s.columns, s.rows
 	s.activity++
 	attached := &attachment{
 		clientID: clientID,
@@ -240,7 +251,7 @@ func (s *session) attachClientReady(connection net.Conn, clientID string, ready 
 	go s.writeClient(connection, attached)
 
 	recorded = stripQueries(recorded)
-	if err := ready(len(resetScreen) + len(modes) + len(recorded)); err != nil {
+	if err := ready(len(resetScreen)+len(modes)+len(recorded), replayColumns, replayRows); err != nil {
 		s.detach(connection)
 		return err
 	}
@@ -353,7 +364,7 @@ func (s *session) detach(connection net.Conn) {
 		if s.foreground == connection {
 			s.foreground = s.mostRecentClient()
 			if next := s.clients[s.foreground]; next != nil && next.columns > 0 && next.rows > 0 {
-				_ = pty.Setsize(s.pty, &pty.Winsize{Cols: next.columns, Rows: next.rows})
+				_ = s.applySize(next.columns, next.rows)
 			}
 		}
 	}
@@ -398,9 +409,9 @@ func (s *session) writeFrom(connection net.Conn, data []byte) error {
 		if s.foreground != connection {
 			s.foreground = connection
 			if attached.columns > 0 && attached.rows > 0 {
-				if err := pty.Setsize(s.pty, &pty.Winsize{Cols: attached.columns, Rows: attached.rows}); err != nil {
+				if err := s.applySize(attached.columns, attached.rows); err != nil {
 					s.mu.Unlock()
-					return fmt.Errorf("resize terminal for active client: %w", err)
+					return err
 				}
 			}
 		}
@@ -437,17 +448,21 @@ func (s *session) resizeFor(clientID string, columns, rows uint16) error {
 			if s.foreground != connection {
 				return nil
 			}
-			return resizePTY(s.pty, columns, rows)
+			return s.applySize(columns, rows)
 		}
 		return fmt.Errorf("terminal attachment not found")
 	}
-	return resizePTY(s.pty, columns, rows)
+	return s.applySize(columns, rows)
 }
 
-func resizePTY(terminal *os.File, columns, rows uint16) error {
-	if err := pty.Setsize(terminal, &pty.Winsize{Cols: columns, Rows: rows}); err != nil {
+func (s *session) applySize(columns, rows uint16) error {
+	if s.columns == columns && s.rows == rows {
+		return nil
+	}
+	if err := pty.Setsize(s.pty, &pty.Winsize{Cols: columns, Rows: rows}); err != nil {
 		return fmt.Errorf("resize terminal: %w", err)
 	}
+	s.columns, s.rows = columns, rows
 	return nil
 }
 

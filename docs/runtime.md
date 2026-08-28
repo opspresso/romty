@@ -23,7 +23,7 @@ The TUI communicates with a detached local daemon over a Unix socket. The daemon
 
 New terminals use the environment and `$SHELL` of the romty client that creates them. They do not inherit the potentially older environment of the detached daemon.
 
-Each session retains up to 8 MiB of terminal output. Terminal modes are tracked separately so a replay remains usable after older output is trimmed. Completed terminal queries are omitted from a replay to prevent an unsolicited response from reaching the shell command line.
+Each session retains up to 8 MiB of terminal output. Terminal modes are tracked separately so a replay remains usable after older output is trimmed. Completed terminal queries are omitted from a replay to prevent an unsolicited response from reaching the shell command line. Reconnect replay starts at the PTY dimensions that produced the latest output, then resizes the local emulator to the current pane; width-sensitive shell redraws therefore keep the wrapping and erase behavior they had when recorded.
 
 A dropped terminal connection reconnects automatically with backoff. Press `Enter` on a disconnected tab to retry after automatic attempts stop. When a shell exits, its tab is removed. If the daemon or operating system stops, roots and workspace metadata remain but stale PTY tabs are discarded.
 

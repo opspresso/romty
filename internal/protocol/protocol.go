@@ -122,7 +122,9 @@ type Response struct {
 	Tab           *model.Tab                   `json:"tab,omitempty"`
 	// ReplayBytes is the exact initial terminal history that follows an attach
 	// response. Anything after it is live output.
-	ReplayBytes int `json:"replay_bytes,omitempty"`
+	ReplayBytes   int    `json:"replay_bytes,omitempty"`
+	ReplayColumns uint16 `json:"replay_columns,omitempty"`
+	ReplayRows    uint16 `json:"replay_rows,omitempty"`
 }
 
 // SelectVersion returns the highest revision both peers support.

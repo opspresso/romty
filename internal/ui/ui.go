@@ -1660,8 +1660,9 @@ func (m dashboard) handleOpenedTerminal(message terminalOpenedMsg) (tea.Model, t
 	}
 	m.closeTerminal()
 	columns, rows := m.terminalSize()
-	terminal := newEmbeddedTerminal(message.tabID, message.stream, int(columns), int(rows))
-	terminal.writeOutput(message.replay)
+	terminal := newEmbeddedTerminalWithReplay(
+		message.tabID, message.stream, message.replay, int(columns), int(rows),
+	)
 	m.terminal = terminal
 	m.terminalOpenedAt = now()
 	// The scrollback on screen belongs to the terminal that just went away, so

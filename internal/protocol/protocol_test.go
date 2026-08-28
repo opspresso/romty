@@ -30,11 +30,13 @@ func TestMessageRoundTrip(t *testing.T) {
 
 func TestAttachResponseRoundTrip(t *testing.T) {
 	want := protocol.Response{
-		Version:      protocol.Version,
-		MinVersion:   protocol.MinimumVersion,
-		MaxVersion:   protocol.Version,
-		Capabilities: protocol.CapabilitiesForVersion(protocol.Version),
-		ReplayBytes:  123456,
+		Version:       protocol.Version,
+		MinVersion:    protocol.MinimumVersion,
+		MaxVersion:    protocol.Version,
+		Capabilities:  protocol.CapabilitiesForVersion(protocol.Version),
+		ReplayBytes:   123456,
+		ReplayColumns: 120,
+		ReplayRows:    40,
 	}
 	var stream bytes.Buffer
 

@@ -432,8 +432,10 @@ func TestOpenTerminalSeparatesReplayFromLiveOutput(t *testing.T) {
 			return
 		}
 		if err := protocol.Write(connection, protocol.Response{
-			Version:     protocol.Version,
-			ReplayBytes: len(replay),
+			Version:       protocol.Version,
+			ReplayBytes:   len(replay),
+			ReplayColumns: 100,
+			ReplayRows:    30,
 		}); err != nil {
 			return
 		}
@@ -450,6 +452,11 @@ func TestOpenTerminalSeparatesReplayFromLiveOutput(t *testing.T) {
 	defer stream.Close()
 	if !bytes.Equal(restored, replay) {
 		t.Fatalf("replay length = %d, want %d", len(restored), len(replay))
+	}
+	if sized, ok := stream.(interface{ ReplaySize() (uint16, uint16) }); !ok {
+		t.Fatal("terminal stream does not expose its replay size")
+	} else if columns, rows := sized.ReplaySize(); columns != 100 || rows != 30 {
+		t.Fatalf("replay size = %dx%d, want 100x30", columns, rows)
 	}
 	gotLive := make([]byte, len(live))
 	if _, err := io.ReadFull(stream, gotLive); err != nil {
