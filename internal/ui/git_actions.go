@@ -213,6 +213,34 @@ func (m dashboard) scrollGitAction(delta int) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m dashboard) handleGitActionsMouse(message tea.MouseMsg) (tea.Model, tea.Cmd, bool) {
+	row, inside := m.modalContentRow(message.Mouse(), max(m.width, 40), m.dimensions().bodyHeight)
+	if !inside {
+		return m, nil, false
+	}
+	if wheel, ok := message.(tea.MouseWheelMsg); ok && m.gitActionComplete {
+		switch wheel.Button {
+		case tea.MouseWheelUp:
+			updated, command := m.scrollGitAction(-3)
+			return updated, command, true
+		case tea.MouseWheelDown:
+			updated, command := m.scrollGitAction(3)
+			return updated, command, true
+		}
+	}
+	click, ok := message.(tea.MouseClickMsg)
+	if !ok || click.Button != tea.MouseLeft || m.gitActionPending || m.gitActionComplete {
+		return m, nil, false
+	}
+	index := row - 2
+	if index < 0 || index >= len(gitActionChoices) {
+		return m, nil, true
+	}
+	m.gitActionIndex = index
+	updated, command := m.startGitAction()
+	return updated, command, true
+}
+
 func (m dashboard) renderGitActionsModal(width, height int) []string {
 	target := m.styles.modalStrong.Render(displayText(m.gitActionTarget.Name)) +
 		m.styles.empty.Render("  "+displayText(m.gitActionTarget.Path))

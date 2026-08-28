@@ -149,6 +149,30 @@ func TestDashboardScrollsGitActionResult(t *testing.T) {
 	}
 }
 
+func TestDashboardClicksAndScrollsGitActions(t *testing.T) {
+	value := newDashboard(&fakeBackend{}, model.Snapshot{})
+	value.width, value.height = 100, 12
+	value.modal = gitActionsModal
+	value.gitActionTarget = model.Workspace{Name: "alpha", Path: "/projects/alpha"}
+	left, top := value.modalContentOrigin(value.width, value.dimensions().bodyHeight)
+
+	updated, command := value.Update(tea.MouseClickMsg{X: left + 2, Y: top + 4, Button: tea.MouseLeft})
+	value = updated.(dashboard)
+	if value.gitActionIndex != 2 || !value.gitActionPending || command == nil {
+		t.Fatalf("Git action click = (index %d, pending %v, command %v)",
+			value.gitActionIndex, value.gitActionPending, command)
+	}
+	value.cancelGitAction()
+	value.gitActionPending = false
+	value.gitActionComplete = true
+	value.gitActionOutput = strings.Join([]string{"one", "two", "three", "four", "five", "six", "seven"}, "\n")
+	updated, _ = value.Update(tea.MouseWheelMsg{X: left + 2, Y: top + 3, Button: tea.MouseWheelDown})
+	value = updated.(dashboard)
+	if value.gitActionOffset == 0 {
+		t.Fatal("Git result wheel did not scroll")
+	}
+}
+
 func TestDashboardHoldsGitActionModalWhileCommandRuns(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, model.Snapshot{})
 	value.modal = gitActionsModal

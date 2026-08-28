@@ -1887,6 +1887,25 @@ func TestDashboardConfiguresAndTestsSoundAlerts(t *testing.T) {
 	}
 }
 
+func TestDashboardClicksConfigControls(t *testing.T) {
+	value := newDashboard(&fakeBackend{}, model.Snapshot{})
+	value.width, value.height = 100, 24
+	updated, _ := value.Update(key(tea.KeyF3, ""))
+	value = updated.(dashboard)
+	left, top := value.modalContentOrigin(value.width, value.dimensions().bodyHeight)
+
+	updated, save := value.Update(tea.MouseClickMsg{X: left + 2, Y: top + 2, Button: tea.MouseLeft})
+	value = updated.(dashboard)
+	if !value.soundOnDone || save == nil {
+		t.Fatalf("done sound click = (enabled %v, save %v)", value.soundOnDone, save)
+	}
+	updated, sound := value.Update(tea.MouseClickMsg{X: left + 2, Y: top + 4, Button: tea.MouseLeft})
+	value = updated.(dashboard)
+	if sequences := rawSequences(sound); !slices.Equal(sequences, []string{"\a"}) {
+		t.Fatalf("test sound click sequences = %q", sequences)
+	}
+}
+
 func TestDashboardSoundsOnceForAgentTransitions(t *testing.T) {
 	workspace := model.Workspace{ID: "workspace-1", RootID: "root-1", Name: "alpha", Path: "/alpha"}
 	tab := model.Tab{

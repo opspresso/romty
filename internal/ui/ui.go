@@ -1202,6 +1202,20 @@ func (m dashboard) handleHelpMouse(message tea.MouseMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m dashboard) handleModalMouse(message tea.MouseMsg) (tea.Model, tea.Cmd, bool) {
+	switch m.modal {
+	case browseModal:
+		if updated, command, handled := m.handleBrowseMouse(message); handled {
+			return updated, command, true
+		}
+	case gitActionsModal:
+		if updated, command, handled := m.handleGitActionsMouse(message); handled {
+			return updated, command, true
+		}
+	case configModal:
+		if updated, command, handled := m.handleConfigMouse(message); handled {
+			return updated, command, true
+		}
+	}
 	click, ok := message.(tea.MouseClickMsg)
 	if !ok || click.Button != tea.MouseLeft {
 		return m, nil, false
@@ -1214,6 +1228,64 @@ func (m dashboard) handleModalMouse(message tea.MouseMsg) (tea.Model, tea.Cmd, b
 		}
 	}
 	return m, nil, false
+}
+
+func (m dashboard) handleConfigMouse(message tea.MouseMsg) (tea.Model, tea.Cmd, bool) {
+	row, inside := m.modalContentRow(message.Mouse(), max(m.width, 40), m.dimensions().bodyHeight)
+	if !inside {
+		return m, nil, false
+	}
+	if wheel, ok := message.(tea.MouseWheelMsg); ok && row == 0 {
+		switch wheel.Button {
+		case tea.MouseWheelUp:
+			updated, command := m.adjustLeftWidth(1)
+			return updated, command, true
+		case tea.MouseWheelDown:
+			updated, command := m.adjustLeftWidth(-1)
+			return updated, command, true
+		}
+	}
+	click, ok := message.(tea.MouseClickMsg)
+	if !ok || click.Button != tea.MouseLeft {
+		return m, nil, false
+	}
+	switch row {
+	case 1:
+		updated, command := m.toggleScrollbackMouse()
+		return updated, command, true
+	case 2:
+		updated, command := m.toggleSoundOnDone()
+		return updated, command, true
+	case 3:
+		updated, command := m.toggleSoundOnWaiting()
+		return updated, command, true
+	case 4:
+		return m, soundAlert(), true
+	}
+	return m, nil, true
+}
+
+func (m dashboard) modalContentOrigin(width, height int) (int, int) {
+	lines := m.renderModal(width, height)
+	if len(lines) == 0 {
+		return 0, 0
+	}
+	modalWidth := lipgloss.Width(lines[0])
+	return max((width-modalWidth)/2, 0) + 3, max((height-len(lines))/2, 0) + 1
+}
+
+func (m dashboard) modalContentRow(mouse tea.Mouse, width, height int) (int, bool) {
+	lines := m.renderModal(width, height)
+	if len(lines) < 2 {
+		return 0, false
+	}
+	modalWidth := lipgloss.Width(lines[0])
+	modalLeft := max((width-modalWidth)/2, 0)
+	_, contentTop := m.modalContentOrigin(width, height)
+	row := mouse.Y - contentTop
+	inside := mouse.X >= modalLeft+1 && mouse.X < modalLeft+modalWidth-1 &&
+		row >= 0 && row < len(lines)-2
+	return row, inside
 }
 
 func (m dashboard) handleDashboardMouse(message tea.MouseMsg) (tea.Model, tea.Cmd, bool) {

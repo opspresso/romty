@@ -83,6 +83,20 @@ func TestBrowsePickerListsDirectoriesOnly(t *testing.T) {
 	}
 }
 
+func TestBrowsePickerOpensClickedDirectory(t *testing.T) {
+	home := t.TempDir()
+	makeDirectories(t, home, "alpha", "beta")
+	value := browsing(t, &fakeBackend{}, home)
+	left, top := value.modalContentOrigin(value.width, value.dimensions().bodyHeight)
+
+	updated, command := value.Update(tea.MouseClickMsg{X: left + 2, Y: top + 4, Button: tea.MouseLeft})
+	value = updated.(dashboard)
+	if command == nil || value.browse.path != filepath.Join(home, "beta") || !value.browse.loading {
+		t.Fatalf("clicked directory = (path %q, loading %v, command %v)",
+			value.browse.path, value.browse.loading, command)
+	}
+}
+
 func TestBrowsePickerReplacesControlCharactersInNames(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, model.Snapshot{})
 	value.width = 120

@@ -102,6 +102,8 @@ The dashboard chrome is mouse-aware. Click a root or workspace to select and ope
 
 Confirmation dialogs render their Enter and Esc actions inside the box and accept clicks on those actions. Longer operations such as opening a terminal, reading a directory, running a Git action, stopping the daemon, or installing hooks show a moving one-cell activity marker; the marker stops scheduling frames when no visible work or agent animation remains.
 
+Modal content is pointer-aware as well. Click a directory in the root picker to open it, click a Git action to run it, and use the wheel over a completed Git result to read longer output. Config rows toggle when clicked; use the wheel over the pane-width row for one-column adjustments.
+
 romty discovers direct child directories only. Press `F5` after a command adds or removes a child. An unreadable root is marked `✗` and listed without workspaces; other roots remain usable.
 
 ## Scrollback and mouse
