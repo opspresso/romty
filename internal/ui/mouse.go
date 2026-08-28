@@ -182,8 +182,8 @@ func (m dashboard) hoverTargetAt(mouse tea.Mouse) hoverTarget {
 				return hoverTarget{kind: hoverGitAction, index: row - gitActionHeaderRows}
 			}
 		case configModal:
-			if row >= 0 && row < len(configRows()) {
-				return hoverTarget{kind: hoverConfigRow, index: row}
+			if index, ok := configIndexAtContentRow(row, height); ok {
+				return hoverTarget{kind: hoverConfigRow, index: index}
 			}
 		}
 		return hoverTarget{}
@@ -218,7 +218,9 @@ func (m dashboard) handleConfigMouse(message tea.MouseMsg) (tea.Model, tea.Cmd, 
 	if !inside {
 		return m, nil, false
 	}
-	if wheel, ok := message.(tea.MouseWheelMsg); ok && row == 0 {
+	_, height := m.bodySize()
+	index, setting := configIndexAtContentRow(row, height)
+	if wheel, ok := message.(tea.MouseWheelMsg); ok && setting && index == 0 {
 		switch wheel.Button {
 		case tea.MouseWheelUp:
 			updated, command := m.adjustLeftWidth(1)
@@ -234,15 +236,20 @@ func (m dashboard) handleConfigMouse(message tea.MouseMsg) (tea.Model, tea.Cmd, 
 	}
 	// The row clicked becomes the row the cursor is on, the way clicking a
 	// workspace or a tab moves the cursor to it.
-	if row >= 0 && row < len(configRows()) {
-		m.configIndex = row
-	}
-	if updated, command, ok := m.runConfigRow(row); ok {
-		return updated, command, true
+	if setting {
+		m.configIndex = index
+		if updated, command, ok := m.runConfigRow(index); ok {
+			return updated, command, true
+		}
 	}
 	// A click inside the box that lands on no setting is still the modal's;
 	// letting it fall through would send it to whatever is drawn behind.
 	return m, nil, true
+}
+
+func configIndexAtContentRow(row, height int) (int, bool) {
+	index := row - configContentOffset(height)
+	return index, index >= 0 && index < len(configRows())
 }
 
 // modalContentRowAt answers the same question for the modal that is open now,

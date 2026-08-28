@@ -220,10 +220,14 @@ func TestConfigRowsDrawAndAnswerTogether(t *testing.T) {
 	if _, ok := value.browseIndexAtContentRow(0); ok {
 		t.Error("the picker answered for a config row")
 	}
-	if target := value.hoverTargetAtRow(len(rows) - 1); target.kind != hoverConfigRow {
+	offset := configContentOffset(value.dimensions().bodyHeight)
+	if offset > 0 && value.hoverTargetAtRow(0).kind == hoverConfigRow {
+		t.Error("the blank row above the settings was highlighted as one")
+	}
+	if target := value.hoverTargetAtRow(offset + len(rows) - 1); target.kind != hoverConfigRow {
 		t.Errorf("last row hover = %v, want a config row", target.kind)
 	}
-	if target := value.hoverTargetAtRow(len(rows)); target.kind == hoverConfigRow {
+	if target := value.hoverTargetAtRow(offset + len(rows)); target.kind == hoverConfigRow {
 		t.Error("a row past the last setting was highlighted as one")
 	}
 }

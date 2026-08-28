@@ -310,7 +310,7 @@ func (m dashboard) renderConfigModal(maximum, height int) []string {
 	// A blank row above and below the settings, when the screen has the rows
 	// to spare. On the shortest screen romty lays out for it does not, and a
 	// box that loses its bottom edge is worse than one drawn tight.
-	padded := height >= len(rows)+4
+	padded := configContentOffset(height) > 0
 	if padded {
 		lines = append(lines, "")
 	}
@@ -321,6 +321,16 @@ func (m dashboard) renderConfigModal(maximum, height int) []string {
 		lines = append(lines, "")
 	}
 	return modalBoxFit(m.styles, m.configFloorWidth(maximum), maximum, "Config", lines...)
+}
+
+// configContentOffset is the number of blank rows before the first setting.
+// Pointer handling uses the same offset as rendering so a click runs the row
+// it is visibly on.
+func configContentOffset(height int) int {
+	if height >= len(configRows())+4 {
+		return 1
+	}
+	return 0
 }
 
 // configCursorWidth is the marker column every list romty draws carries, so a

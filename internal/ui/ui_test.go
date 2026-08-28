@@ -1058,7 +1058,7 @@ func TestDashboardHighlightsDialogMouseTargets(t *testing.T) {
 	before = value.render()
 	updated, _ = value.Update(tea.MouseMotionMsg{X: left + 2, Y: top + 2})
 	value = updated.(dashboard)
-	if value.hover.kind != hoverConfigRow || value.hover.index != 2 || value.render() == before {
+	if value.hover.kind != hoverConfigRow || value.hover.index != 1 || value.render() == before {
 		t.Fatalf("config hover = %#v", value.hover)
 	}
 }
@@ -2082,10 +2082,11 @@ func TestDashboardClicksConfigControls(t *testing.T) {
 
 	updated, save := value.Update(tea.MouseClickMsg{X: left + 2, Y: top + 2, Button: tea.MouseLeft})
 	value = updated.(dashboard)
-	if !value.soundOnDone || save == nil {
-		t.Fatalf("done sound click = (enabled %v, save %v)", value.soundOnDone, save)
+	if !value.scrollbackMouse || save == nil || value.configIndex != 1 {
+		t.Fatalf("scrollback mouse click = (enabled %v, save %v, cursor %d)",
+			value.scrollbackMouse, save, value.configIndex)
 	}
-	updated, soundCommand := value.Update(tea.MouseClickMsg{X: left + 2, Y: top + 4, Button: tea.MouseLeft})
+	updated, soundCommand := value.Update(tea.MouseClickMsg{X: left + 2, Y: top + 5, Button: tea.MouseLeft})
 	value = updated.(dashboard)
 	if played := commandMessage[soundPlayedMsg](t, soundCommand); played.kind != sound.Done {
 		t.Fatalf("test sound click = %q, want done", played.kind)
