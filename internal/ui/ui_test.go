@@ -3812,6 +3812,140 @@ func TestDashboardKeepsTheWorkspaceWhenThereIsNowhereToSwitch(t *testing.T) {
 	}
 }
 
+// A sound and a tab marker say an agent stopped to ask something; without a way
+// to reach it the user still has to walk the tree to find which one.
+func TestDashboardJumpsToTheNextWaitingAgent(t *testing.T) {
+	root := model.Root{ID: "root-1", Name: "projects", Path: "/projects"}
+	alpha := model.Workspace{ID: "workspace-1", RootID: root.ID, Name: "alpha", Path: "/projects/alpha"}
+	bravo := model.Workspace{ID: "workspace-2", RootID: root.ID, Name: "bravo", Path: "/projects/bravo"}
+	charlie := model.Workspace{ID: "workspace-3", RootID: root.ID, Name: "charlie", Path: "/projects/charlie"}
+	// alpha's agent is busy; bravo's wants input and charlie's wants approval.
+	alphaTab := model.Tab{ID: "tab-1", WorkspaceID: alpha.ID, Name: "1", Running: true,
+		Agent: model.AgentClaude, AgentPhase: model.AgentPhaseWorking}
+	bravoTab := model.Tab{ID: "tab-2", WorkspaceID: bravo.ID, Name: "1", Running: true,
+		Agent: model.AgentClaude, AgentPhase: model.AgentPhaseWaitingInput}
+	charlieTab := model.Tab{ID: "tab-3", WorkspaceID: charlie.ID, Name: "1", Running: true,
+		Agent: model.AgentCodex, AgentPhase: model.AgentPhaseWaitingApproval}
+	snapshot := model.Snapshot{Roots: []model.RootView{{
+		Root: root,
+		Directories: []model.WorkspaceView{
+			{Workspace: alpha, Tabs: []model.Tab{alphaTab}},
+			{Workspace: bravo, Tabs: []model.Tab{bravoTab}},
+			{Workspace: charlie, Tabs: []model.Tab{charlieTab}},
+		},
+	}}}
+
+	backend := &fakeBackend{snapshot: snapshot, workspace: bravo}
+	value := newDashboard(backend, snapshot)
+	value.selectedWorkspaceID = alpha.ID
+	value.selectedPath = alpha.Path
+	value.terminal = newEmbeddedTerminal(alphaTab.ID, newMemoryStream(""), 40, 10)
+	value.focus = terminalPane
+	t.Cleanup(func() { value.closeTerminal() })
+
+	// The open terminal is not waiting, so the walk starts at the first stop
+	// and skips the busy agent entirely.
+	value = pressJumpToWaitingAgent(t, value)
+	if backend.openedTab != bravoTab.ID || value.terminal.id != bravoTab.ID {
+		t.Fatalf("Ctrl+Shift+A = (opened %q, terminal %q), want bravo's waiting terminal",
+			backend.openedTab, value.terminal.id)
+	}
+	if item, ok := value.navigationItem(); !ok || item.workspace.Path != bravo.Path {
+		t.Fatalf("cursor = %+v, want it on bravo", item)
+	}
+
+	// Waiting for approval is a stop as much as waiting for input.
+	backend.workspace = charlie
+	value = pressJumpToWaitingAgent(t, value)
+	if value.terminal.id != charlieTab.ID {
+		t.Fatalf("second jump = terminal %q, want charlie's", value.terminal.id)
+	}
+
+	// The last stop wraps rather than stopping at the end of the tree.
+	backend.workspace = bravo
+	value = pressJumpToWaitingAgent(t, value)
+	if value.terminal.id != bravoTab.ID {
+		t.Fatalf("third jump = terminal %q, want it wrapped to bravo", value.terminal.id)
+	}
+}
+
+// Reopening the terminal that is already attached would tear it down to attach
+// a new one in its place, so the only waiting agent gets the keyboard instead.
+func TestDashboardJumpToTheOnlyWaitingAgentMovesTheFocus(t *testing.T) {
+	root := model.Root{ID: "root-1", Name: "projects", Path: "/projects"}
+	alpha := model.Workspace{ID: "workspace-1", RootID: root.ID, Name: "alpha", Path: "/projects/alpha"}
+	alphaTab := model.Tab{ID: "tab-1", WorkspaceID: alpha.ID, Name: "1", Running: true,
+		Agent: model.AgentClaude, AgentPhase: model.AgentPhaseWaitingInput}
+	snapshot := model.Snapshot{Roots: []model.RootView{{
+		Root:        root,
+		Directories: []model.WorkspaceView{{Workspace: alpha, Tabs: []model.Tab{alphaTab}}},
+	}}}
+
+	backend := &fakeBackend{snapshot: snapshot, workspace: alpha}
+	value := newDashboard(backend, snapshot)
+	value.selectedWorkspaceID = alpha.ID
+	value.selectedPath = alpha.Path
+	value.terminal = newEmbeddedTerminal(alphaTab.ID, newMemoryStream(""), 40, 10)
+	value.focus = leftPane
+	t.Cleanup(func() { value.closeTerminal() })
+
+	updated, command := value.Update(jumpToWaitingAgentKey())
+	value = updated.(dashboard)
+	if command != nil || backend.openedTab != "" {
+		t.Fatalf("jump to the open terminal = (command %v, opened %q), want no reattach",
+			command, backend.openedTab)
+	}
+	if value.focus != terminalPane {
+		t.Fatalf("focus = %v, want the terminal", value.focus)
+	}
+}
+
+func TestDashboardJumpSaysWhenNoAgentIsWaiting(t *testing.T) {
+	root := model.Root{ID: "root-1", Name: "projects", Path: "/projects"}
+	alpha := model.Workspace{ID: "workspace-1", RootID: root.ID, Name: "alpha", Path: "/projects/alpha"}
+	alphaTab := model.Tab{ID: "tab-1", WorkspaceID: alpha.ID, Name: "1", Running: true,
+		Agent: model.AgentClaude, AgentPhase: model.AgentPhaseWorking}
+	snapshot := model.Snapshot{Roots: []model.RootView{{
+		Root:        root,
+		Directories: []model.WorkspaceView{{Workspace: alpha, Tabs: []model.Tab{alphaTab}}},
+	}}}
+
+	value := newDashboard(&fakeBackend{snapshot: snapshot}, snapshot)
+	updated, command := value.Update(jumpToWaitingAgentKey())
+	value = updated.(dashboard)
+	if command != nil {
+		t.Fatalf("jump with nothing waiting produced %v, want no command", command)
+	}
+	if value.errorMessage != "no agent is waiting" || !value.noticeMessage {
+		t.Fatalf("status = (%q, notice %v), want a note that nothing is waiting",
+			value.errorMessage, value.noticeMessage)
+	}
+}
+
+func jumpToWaitingAgentKey() tea.KeyPressMsg {
+	return tea.KeyPressMsg(tea.Key{Code: 'a', ShiftedCode: 'A', Mod: tea.ModCtrl | tea.ModShift})
+}
+
+// pressJumpToWaitingAgent presses Ctrl+Shift+A and settles the commands the
+// jump produces, the way pressSwitchTab settles a switch.
+func pressJumpToWaitingAgent(t *testing.T, value dashboard) dashboard {
+	t.Helper()
+	updated, command := value.Update(jumpToWaitingAgentKey())
+	value = updated.(dashboard)
+	if command == nil {
+		t.Fatal("Ctrl+Shift+A produced no command")
+	}
+	for step := 0; command != nil && step < 4; step++ {
+		message := command()
+		if _, reading := message.(terminalOutputMsg); reading {
+			break
+		}
+		updated, command = value.Update(message)
+		value = updated.(dashboard)
+	}
+	return value
+}
+
 func switchTabKey(code rune) tea.KeyPressMsg {
 	return tea.KeyPressMsg(tea.Key{Code: code, Mod: tea.ModCtrl | tea.ModShift})
 }
@@ -4595,8 +4729,8 @@ func TestDashboardShowsCompleteShortcutReferenceInHelpModal(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, model.Snapshot{})
 	value.width = 100
 	value.height = 80
-	if entries := value.helpEntries(); len(entries) != 41 {
-		t.Fatalf("help entries = %d, want 7 sections and 33 shortcuts", len(entries))
+	if entries := value.helpEntries(); len(entries) != 42 {
+		t.Fatalf("help entries = %d, want 7 sections and 35 shortcuts", len(entries))
 	}
 
 	updated, command := value.Update(key('?', "?"))

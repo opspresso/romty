@@ -17,6 +17,8 @@ Claude Code markers are orange and Codex markers are blue. Foreground process de
 | `■` | Waiting for permission approval |
 | `★` | Stopped with an error |
 
+Press `Ctrl`+`Shift`+`A` to open the next terminal whose agent is waiting for input or approval. It walks those terminals in the order the tree draws them and wraps at the end, so repeated presses cycle every agent that stopped to ask something. When the only waiting agent is the terminal already open, the keyboard moves to it rather than reattaching. When nothing is waiting, the status bar says so and the open terminal is left alone.
+
 Git metadata is rendered as `(branch*) ↑N ↓N`. `*` means the worktree has tracked or untracked changes, `!` replaces it for conflicts, and the arrows count commits ahead of or behind the upstream. A detached HEAD appears as `(@abcdef0)`.
 
 romty refreshes local Git state every 10 seconds. It fetches remote-tracking refs in the background at startup and every 5 minutes. `F5` refreshes local state immediately and starts another background fetch; fetches never prompt for credentials and time out without blocking the interface.
@@ -59,6 +61,7 @@ Press `Ctrl`+`Shift`+`F` to toggle the file view for the same contextual workspa
 | `Ctrl`+`Shift`+`F` | Toggle changed files and Git diff |
 | `Ctrl`+`Shift`+`←`/`→` | Switch terminal tab |
 | `Ctrl`+`Shift`+`↑`/`↓` | Switch to a workspace with a running terminal |
+| `Ctrl`+`Shift`+`A` | Open the next terminal whose agent is waiting |
 
 ### Move
 

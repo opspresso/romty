@@ -716,6 +716,9 @@ var globalKeys = map[string]func(dashboard) (tea.Model, tea.Cmd){
 	// keys and a change of pane for the move a user makes most often.
 	"ctrl+shift+up":   func(m dashboard) (tea.Model, tea.Cmd) { return m.switchWorkspace(-1) },
 	"ctrl+shift+down": func(m dashboard) (tea.Model, tea.Cmd) { return m.switchWorkspace(1) },
+	// The third axis: not where the user was going, but where an agent is
+	// waiting for them.
+	"ctrl+shift+a": func(m dashboard) (tea.Model, tea.Cmd) { return m.jumpToWaitingAgent() },
 }
 
 func (m dashboard) handleKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
@@ -2139,6 +2142,71 @@ func (m dashboard) switchTab(delta int) (tea.Model, tea.Cmd) {
 	return m, m.openSelectedTerminal()
 }
 
+// jumpToWaitingAgent opens the next terminal whose agent stopped to ask
+// something. The tab markers and the optional sound already say that an agent
+// is waiting; without this the user still has to walk the tree to find which
+// one, which is the work a notification exists to save.
+func (m dashboard) jumpToWaitingAgent() (tea.Model, tea.Cmd) {
+	if m.modal != noModal {
+		// A modal is a question waiting for an answer, and the jump would land
+		// behind it.
+		return m, nil
+	}
+	stops := m.waitingAgentStops()
+	if len(stops) == 0 {
+		m.setNotice(treeError, "no agent is waiting")
+		return m, nil
+	}
+	next := nextWaitingStop(stops, m.selectedTabID())
+	if next.tabID == m.selectedTabID() {
+		// The only agent waiting is the one already open. Reopening it would
+		// tear the live terminal down and attach a new one in its place, so
+		// move the keyboard to it instead.
+		m.focusTerminal()
+		return m, nil
+	}
+	m.setNavigation(next.navIndex)
+	m.tabIndex = next.tabIndex
+	return m, m.selectWorkspace()
+}
+
+// waitingAgentStop addresses one waiting terminal the way the tree addresses
+// it, so opening it is the same move the cursor and Enter would make.
+type waitingAgentStop struct {
+	navIndex int
+	tabIndex int
+	tabID    string
+}
+
+// waitingAgentStops lists the waiting terminals in the order the tree draws
+// them, so repeated presses walk the screen rather than a map order that
+// changes between snapshots.
+func (m dashboard) waitingAgentStops() []waitingAgentStop {
+	stops := make([]waitingAgentStop, 0)
+	for navIndex, item := range m.navigationItems() {
+		for tabIndex, tab := range runningTabs(item.tabs) {
+			if waitingAgentPhase(tab.AgentPhase) {
+				stops = append(stops, waitingAgentStop{
+					navIndex: navIndex, tabIndex: tabIndex, tabID: tab.ID,
+				})
+			}
+		}
+	}
+	return stops
+}
+
+// nextWaitingStop is the stop after the open terminal, wrapping at the end. A
+// terminal that is not itself waiting leaves the walk at the first stop, which
+// is where a user who was reading something else expects to land.
+func nextWaitingStop(stops []waitingAgentStop, openTabID string) waitingAgentStop {
+	for index, stop := range stops {
+		if stop.tabID == openTabID {
+			return stops[(index+1)%len(stops)]
+		}
+	}
+	return stops[0]
+}
+
 // switchWorkspace opens a terminal in the workspace delta steps along the ones
 // that have a terminal running.
 //
@@ -3063,6 +3131,7 @@ func (m dashboard) helpEntries() []string {
 		renderHelpShortcut(m.styles, "Toggle file view", "Ctrl+Shift+F"),
 		renderHelpShortcut(m.styles, "Switch tab", "Ctrl+Shift+←/→"),
 		renderHelpShortcut(m.styles, "Switch workspace", "Ctrl+Shift+↑/↓"),
+		renderHelpShortcut(m.styles, "Jump to a waiting agent", "Ctrl+Shift+A"),
 		renderHelpSection(m.styles, "MOVE", "lists, output and file view"),
 		renderHelpShortcut(m.styles, "Move one item / line", "↑/↓", "k/j"),
 		renderHelpShortcut(m.styles, "Tab; picker child/parent", "←/→", "h/l"),
