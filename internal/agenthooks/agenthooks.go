@@ -282,7 +282,7 @@ func normalize(data []byte, value definition, command string) (map[string]any, i
 		if kept[event] {
 			continue
 		}
-		hookMap[event] = appendHookGroup(hookMap[event], value.provider, command)
+		hookMap[event] = appendHookGroup(hookMap[event], command)
 		changed = true
 	}
 	return document, owned, changed, nil
@@ -357,7 +357,7 @@ func normalizeGroups(groups []any, event string, provider Provider, command stri
 	return result, owned, changed, nil
 }
 
-func appendHookGroup(raw any, provider Provider, command string) []any {
+func appendHookGroup(raw any, command string) []any {
 	groups, _ := raw.([]any)
 	return append(groups, map[string]any{
 		"hooks": []any{newHandler(command)},

@@ -432,10 +432,6 @@ func (s *session) writeFrom(connection net.Conn, data []byte) error {
 	return nil
 }
 
-func (s *session) resize(columns, rows uint16) error {
-	return s.resizeFor("", columns, rows)
-}
-
 func (s *session) resizeFor(clientID string, columns, rows uint16) error {
 	if columns == 0 || rows == 0 {
 		return fmt.Errorf("terminal size must be greater than zero")
