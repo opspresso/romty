@@ -11,7 +11,9 @@ import (
 )
 
 func TestMessageRoundTrip(t *testing.T) {
-	want := protocol.Request{Action: protocol.ActionResize, TabID: "tab-1", Columns: 120, Rows: 40}
+	want := protocol.Request{
+		Action: protocol.ActionResize, TabID: "tab-1", ClientID: "client-1", Columns: 120, Rows: 40,
+	}
 	var stream bytes.Buffer
 
 	if err := protocol.Write(&stream, want); err != nil {

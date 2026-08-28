@@ -30,6 +30,11 @@ var ErrAlreadyRunning = errors.New("romty daemon is already running")
 // client ever meets it. It is a variable so tests need not wait.
 var requestTimeout = 10 * time.Second
 
+// These are variables so saturation tests can reach the limits without opening
+// enough local sockets to make the test host itself the limiting factor.
+var maxActiveConnections = 128
+var maxTerminalAttachments = 64
+
 var resolveDirectory = canonicalDirectory
 var readDirectory = os.ReadDir
 
@@ -57,6 +62,9 @@ type Server struct {
 	requestMu sync.Mutex
 	accepting bool
 	mutations sync.WaitGroup
+
+	connections chan struct{}
+	attachments chan struct{}
 }
 
 func New(socket, statePath, shell string) (*Server, error) {
@@ -81,6 +89,8 @@ func New(socket, statePath, shell string) (*Server, error) {
 		agentStatuses: make(map[string]agentRuntime),
 		stop:          make(chan struct{}),
 		accepting:     true,
+		connections:   make(chan struct{}, maxActiveConnections),
+		attachments:   make(chan struct{}, maxTerminalAttachments),
 	}, nil
 }
 
@@ -157,7 +167,15 @@ func (s *Server) Serve(ctx context.Context) error {
 			}
 			return fmt.Errorf("accept daemon connection: %w", err)
 		}
-		go s.handle(connection)
+		select {
+		case s.connections <- struct{}{}:
+			go func() {
+				defer func() { <-s.connections }()
+				s.handle(connection)
+			}()
+		default:
+			connection.Close()
+		}
 	}
 }
 
@@ -307,6 +325,13 @@ func (s *Server) handle(connection net.Conn) {
 		return
 	}
 	if request.Action == protocol.ActionAttach {
+		select {
+		case s.attachments <- struct{}{}:
+			defer func() { <-s.attachments }()
+		default:
+			_ = replyFor(connection, request, protocol.Response{Error: "too many terminal attachments"})
+			return
+		}
 		finish, ok := s.beginRequest(request.Action)
 		if !ok {
 			_ = replyFor(connection, request, protocol.Response{Error: "daemon is shutting down"})
@@ -431,7 +456,7 @@ func (s *Server) dispatch(request protocol.Request) protocol.Response {
 	case protocol.ActionCreateTab:
 		return s.createTab(request)
 	case protocol.ActionResize:
-		return s.resize(request.TabID, request.Columns, request.Rows)
+		return s.resize(request.TabID, request.ClientID, request.Columns, request.Rows)
 	default:
 		return protocol.Response{Error: fmt.Sprintf("unknown action %q", request.Action)}
 	}
@@ -759,14 +784,14 @@ func (s *Server) createTab(request protocol.Request) protocol.Response {
 	return protocol.Response{Tab: &tab}
 }
 
-func (s *Server) resize(tabID string, columns, rows uint16) protocol.Response {
+func (s *Server) resize(tabID, clientID string, columns, rows uint16) protocol.Response {
 	s.mu.Lock()
 	value, ok := s.sessions[tabID]
 	s.mu.Unlock()
 	if !ok {
 		return protocol.Response{Error: "running terminal session not found"}
 	}
-	if err := value.resize(columns, rows); err != nil {
+	if err := value.resizeFor(clientID, columns, rows); err != nil {
 		return protocol.Response{Error: err.Error()}
 	}
 	return protocol.Response{}
@@ -784,12 +809,12 @@ func (s *Server) handleAttach(connection net.Conn, request protocol.Request) {
 		if err := replyFor(connection, request, protocol.Response{}); err != nil {
 			return
 		}
-		if err := value.attach(connection); err != nil {
+		if err := value.attachClientReady(connection, request.ClientID, func(int) error { return nil }); err != nil {
 			s.logger.Printf("attach to tab %s ended: %v", request.TabID, err)
 		}
 		return
 	}
-	if err := value.attachReady(connection, func(replayBytes int) error {
+	if err := value.attachClientReady(connection, request.ClientID, func(replayBytes int) error {
 		return replyFor(connection, request, protocol.Response{ReplayBytes: replayBytes})
 	}); err != nil {
 		s.logger.Printf("attach to tab %s ended: %v", request.TabID, err)

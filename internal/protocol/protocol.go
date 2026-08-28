@@ -80,8 +80,11 @@ type Request struct {
 	RootID       string   `json:"root_id,omitempty"`
 	WorkspaceID  string   `json:"workspace_id,omitempty"`
 	TabID        string   `json:"tab_id,omitempty"`
-	Columns      uint16   `json:"columns,omitempty"`
-	Rows         uint16   `json:"rows,omitempty"`
+	// ClientID connects an attachment to its out-of-band resize requests.
+	// Empty keeps the global-resize behavior of clients that predate the field.
+	ClientID string `json:"client_id,omitempty"`
+	Columns  uint16 `json:"columns,omitempty"`
+	Rows     uint16 `json:"rows,omitempty"`
 	// Environment is the client's environment, sent with create_tab. The
 	// daemon may have been started days ago from a different shell, so its
 	// own environment is not the one the user is working in.

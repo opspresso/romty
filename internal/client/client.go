@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -35,9 +36,12 @@ var (
 
 type Client struct {
 	socket     string
+	id         string
 	protocolMu sync.Mutex
 	protocol   *negotiatedProtocol
 }
+
+var nextClientID atomic.Uint64
 
 type negotiatedProtocol struct {
 	selectedVersion int
@@ -56,7 +60,7 @@ func (s *terminalStream) Read(data []byte) (int, error) {
 var _ io.ReadWriteCloser = (*terminalStream)(nil)
 
 func New(socket string) *Client {
-	return &Client{socket: socket}
+	return &Client{socket: socket, id: fmt.Sprintf("%d-%d", os.Getpid(), nextClientID.Add(1))}
 }
 
 func (c *Client) Ping() error {
@@ -236,10 +240,11 @@ func (c *Client) CreateTab(workspaceID string, columns, rows uint16) (model.Tab,
 
 func (c *Client) Resize(tabID string, columns, rows uint16) error {
 	_, err := c.call(protocol.Request{
-		Action:  protocol.ActionResize,
-		TabID:   tabID,
-		Columns: columns,
-		Rows:    rows,
+		Action:   protocol.ActionResize,
+		TabID:    tabID,
+		ClientID: c.id,
+		Columns:  columns,
+		Rows:     rows,
 	})
 	return err
 }
@@ -331,7 +336,9 @@ func (c *Client) openAttach(tabID string) (net.Conn, *bufio.Reader, int, error) 
 		connection.Close()
 		return nil, nil, 0, fmt.Errorf("set daemon deadline: %w", err)
 	}
-	if err := sendRequest(connection, protocol.Request{Action: protocol.ActionAttach, TabID: tabID},
+	if err := sendRequest(connection, protocol.Request{
+		Action: protocol.ActionAttach, TabID: tabID, ClientID: c.id,
+	},
 		negotiated.selectedVersion, negotiated.capabilities); err != nil {
 		connection.Close()
 		return nil, nil, 0, err

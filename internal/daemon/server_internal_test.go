@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/creack/pty"
 	"github.com/opspresso/romty/internal/model"
 	"github.com/opspresso/romty/internal/protocol"
 )
@@ -200,6 +201,136 @@ func TestHandshakeTimesOutOnASilentPeer(t *testing.T) {
 	}
 }
 
+func TestServeLimitsActiveConnectionsAndRecoversCapacity(t *testing.T) {
+	previous := maxActiveConnections
+	maxActiveConnections = 1
+	t.Cleanup(func() { maxActiveConnections = previous })
+
+	base, err := os.MkdirTemp("/tmp", "romty-capacity-")
+	if err != nil {
+		t.Fatalf("MkdirTemp() error = %v", err)
+	}
+	t.Cleanup(func() { os.RemoveAll(base) })
+	socket := filepath.Join(base, "daemon.sock")
+	server, err := New(socket, filepath.Join(base, "state.json"), "/bin/sh")
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	server.SetLogger(log.New(io.Discard, "", 0))
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- server.Serve(ctx) }()
+	defer func() { cancel(); <-done }()
+
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		probe, err := net.Dial("unix", socket)
+		if err == nil {
+			probe.Close()
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("could not reach daemon: %v", err)
+		}
+		time.Sleep(time.Millisecond)
+	}
+	for len(server.connections) != 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("startup probe did not release capacity")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	silent, err := net.Dial("unix", socket)
+	if err != nil {
+		t.Fatalf("Dial() silent error = %v", err)
+	}
+	defer silent.Close()
+	for len(server.connections) != 1 {
+		if time.Now().After(deadline) {
+			t.Fatal("silent connection never occupied capacity")
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	rejected, err := net.Dial("unix", socket)
+	if err != nil {
+		t.Fatalf("Dial() rejected error = %v", err)
+	}
+	rejected.SetReadDeadline(time.Now().Add(time.Second))
+	if _, err := rejected.Read(make([]byte, 1)); err == nil {
+		t.Fatal("connection above the active limit stayed open")
+	}
+	rejected.Close()
+
+	silent.Close()
+	for len(server.connections) != 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("closed connection did not release capacity")
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+func TestAttachLimitRejectsOnlyExcessTerminalClients(t *testing.T) {
+	value := newSessionForTest()
+	server := &Server{
+		sessions:    map[string]*session{"tab-1": value},
+		logger:      log.New(io.Discard, "", 0),
+		accepting:   true,
+		attachments: make(chan struct{}, 1),
+	}
+
+	firstDaemon, firstClient := net.Pipe()
+	firstDone := make(chan struct{})
+	go func() {
+		server.handle(firstDaemon)
+		close(firstDone)
+	}()
+	if err := protocol.Write(firstClient, protocol.Request{
+		Action: protocol.ActionAttach, Version: protocol.Version, TabID: "tab-1", ClientID: "first",
+	}); err != nil {
+		t.Fatalf("Write() first attach error = %v", err)
+	}
+	firstReader := bufio.NewReader(firstClient)
+	var firstResponse protocol.Response
+	if err := protocol.Read(firstReader, &firstResponse); err != nil {
+		t.Fatalf("Read() first attach error = %v", err)
+	}
+	if firstResponse.Error != "" {
+		t.Fatalf("first attach error = %q", firstResponse.Error)
+	}
+	if _, err := io.CopyN(io.Discard, firstReader, int64(firstResponse.ReplayBytes)); err != nil {
+		t.Fatalf("read first replay error = %v", err)
+	}
+
+	secondDaemon, secondClient := net.Pipe()
+	secondDone := make(chan struct{})
+	go func() {
+		server.handle(secondDaemon)
+		close(secondDone)
+	}()
+	if err := protocol.Write(secondClient, protocol.Request{
+		Action: protocol.ActionAttach, Version: protocol.Version, TabID: "tab-1", ClientID: "second",
+	}); err != nil {
+		t.Fatalf("Write() second attach error = %v", err)
+	}
+	var secondResponse protocol.Response
+	if err := protocol.Read(bufio.NewReader(secondClient), &secondResponse); err != nil {
+		t.Fatalf("Read() second attach error = %v", err)
+	}
+	if secondResponse.Error != "too many terminal attachments" {
+		t.Fatalf("second attach error = %q", secondResponse.Error)
+	}
+	secondClient.Close()
+	<-secondDone
+
+	firstClient.Close()
+	<-firstDone
+	if len(server.attachments) != 0 {
+		t.Fatal("closed attachment did not release capacity")
+	}
+}
+
 // A client attaching must not stop the shell for everyone else. The recording
 // can be megabytes and the socket slow, so none of that may happen while the
 // PTY read loop's lock is held. Driven through attach so the locking decision
@@ -235,6 +366,97 @@ func TestAttachDoesNotStallTheSessionForOtherClients(t *testing.T) {
 	case <-attached:
 	case <-time.After(3 * time.Second):
 		t.Fatal("attach never returned after its client went away")
+	}
+}
+
+func TestSlowLiveClientDoesNotStallAnotherClient(t *testing.T) {
+	previous := maxLiveClientQueueBytes
+	maxLiveClientQueueBytes = 64
+	t.Cleanup(func() { maxLiveClientQueueBytes = previous })
+
+	value := newSessionForTest()
+	slow, unread := net.Pipe()
+	healthy, reader := net.Pipe()
+	t.Cleanup(func() {
+		slow.Close()
+		unread.Close()
+		healthy.Close()
+		reader.Close()
+	})
+	for _, connection := range []net.Conn{slow, healthy} {
+		attached := &attachment{
+			output: make(chan []byte, maxLiveClientQueueChunks),
+			done:   make(chan struct{}),
+			live:   true,
+		}
+		value.clients[connection] = attached
+		go value.writeClient(connection, attached)
+	}
+
+	var received []byte
+	for range 3 {
+		started := time.Now()
+		value.broadcast(bytes.Repeat([]byte("x"), 32))
+		if time.Since(started) > 100*time.Millisecond {
+			t.Fatal("broadcast waited for a live client that stopped reading")
+		}
+		buffer := make([]byte, 32)
+		reader.SetReadDeadline(time.Now().Add(3 * time.Second))
+		if _, err := io.ReadFull(reader, buffer); err != nil {
+			t.Fatalf("healthy client was stalled behind another live client: %v", err)
+		}
+		received = append(received, buffer...)
+	}
+	if !bytes.Equal(received, bytes.Repeat([]byte("x"), 96)) {
+		t.Fatalf("healthy client output = %q", received)
+	}
+}
+
+func TestForegroundClientOwnsTerminalSize(t *testing.T) {
+	terminal, peer, err := pty.Open()
+	if err != nil {
+		t.Fatalf("pty.Open() error = %v", err)
+	}
+	defer terminal.Close()
+	defer peer.Close()
+
+	first, firstPeer := net.Pipe()
+	second, secondPeer := net.Pipe()
+	defer firstPeer.Close()
+	defer secondPeer.Close()
+	value := newSessionForTest()
+	value.pty = terminal
+	value.clients[first] = &attachment{clientID: "first", columns: 80, rows: 24, activity: 1}
+	value.clients[second] = &attachment{clientID: "second", columns: 120, rows: 40, activity: 2}
+	value.foreground = first
+	value.activity = 2
+
+	if err := value.resizeFor("first", 80, 24); err != nil {
+		t.Fatalf("resizeFor() foreground error = %v", err)
+	}
+	if err := value.resizeFor("second", 120, 40); err != nil {
+		t.Fatalf("resizeFor() background error = %v", err)
+	}
+	assertTerminalSize(t, terminal, 80, 24)
+
+	if err := value.writeFrom(second, []byte("x")); err != nil {
+		t.Fatalf("writeFrom() background error = %v", err)
+	}
+	assertTerminalSize(t, terminal, 120, 40)
+
+	value.detach(second)
+	assertTerminalSize(t, terminal, 80, 24)
+	first.Close()
+}
+
+func assertTerminalSize(t *testing.T, terminal *os.File, columns, rows int) {
+	t.Helper()
+	gotRows, gotColumns, err := pty.Getsize(terminal)
+	if err != nil {
+		t.Fatalf("pty.Getsize() error = %v", err)
+	}
+	if gotColumns != columns || gotRows != rows {
+		t.Fatalf("terminal size = %dx%d, want %dx%d", gotColumns, gotRows, columns, rows)
 	}
 }
 
