@@ -2032,6 +2032,37 @@ func TestDashboardDoesNotSoundOnTheFirstAgentSnapshot(t *testing.T) {
 	}
 }
 
+// romty asks the host for all motion so it can draw its own hover highlights.
+// A guest that asked only for clicks must not be handed those extra reports.
+func TestDashboardWithholdsUnrequestedMotionFromTheGuest(t *testing.T) {
+	value := scrolledDashboard(t, 200)
+	// ?1000h is click tracking: button press and release, no motion.
+	value.terminal.writeOutput([]byte("\x1b[?1000h\x1b[?1006h"))
+	value.mousePassthrough = true
+	if value.terminal.guestMouseMode() != tea.MouseModeCellMotion {
+		t.Fatalf("guest mouse mode = %v, want click tracking", value.terminal.guestMouseMode())
+	}
+	if !value.guestOwnsMouse() {
+		t.Fatal("passthrough did not hand the mouse to the guest")
+	}
+
+	x, y := value.dimensions().leftWidth+3+4, terminalTop+2
+	value.Update(tea.MouseMotionMsg{X: x, Y: y})
+	sent := waitForGuestSilence(t, value.terminal, "")
+
+	// The buttons the guest did ask for still reach it.
+	value.Update(tea.MouseClickMsg{X: x, Y: y, Button: tea.MouseLeft})
+	sent += "\x1b[<0;5;3M"
+	waitForGuest(t, value.terminal.stream.(*memoryStream), sent)
+
+	// ?1002h is button-event tracking: motion, but only while a button is held.
+	value.terminal.writeOutput([]byte("\x1b[?1002h"))
+	value.Update(tea.MouseMotionMsg{X: x, Y: y})
+	sent = waitForGuestSilence(t, value.terminal, sent)
+	value.Update(tea.MouseMotionMsg{X: x, Y: y, Button: tea.MouseLeft})
+	waitForGuest(t, value.terminal.stream.(*memoryStream), sent+"\x1b[<32;5;3M")
+}
+
 func TestDashboardKeepsMouseWithTheHostUnlessPassthroughIsOn(t *testing.T) {
 	value := scrolledDashboard(t, 200)
 	// A guest that wants the mouse, the way Claude Code and htop do.

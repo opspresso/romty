@@ -1029,6 +1029,9 @@ func (m dashboard) forwardMouse(message tea.MouseMsg) (tea.Model, tea.Cmd) {
 	case tea.MouseWheelMsg:
 		m.terminal.sendMouse(uv.MouseWheelEvent(mouse))
 	case tea.MouseMotionMsg:
+		if !m.terminal.guestWantsMotion(mouse.Button != uv.MouseNone) {
+			return m, nil
+		}
 		m.terminal.sendMouse(uv.MouseMotionEvent(mouse))
 	}
 	return m, nil
@@ -2624,9 +2627,9 @@ func (m dashboard) mouseMode() tea.MouseMode {
 		}
 		return tea.MouseModeNone
 	}
-	if m.guestOwnsMouse() {
-		return tea.MouseModeAllMotion
-	}
+	// Motion is what the hover highlights are drawn from, so romty asks for it
+	// even while passthrough hands the buttons to the guest. forwardMouse then
+	// keeps the motion a guest never asked for to itself.
 	return tea.MouseModeAllMotion
 }
 

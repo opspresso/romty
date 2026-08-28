@@ -245,6 +245,17 @@ func (t *embeddedTerminal) guestMouseMode() tea.MouseMode {
 	return tea.MouseModeNone
 }
 
+// guestWantsMotion reports whether the guest asked for the motion reports the
+// host now delivers. romty keeps all-motion tracking on for its own hover
+// highlights, so a guest that asked only for clicks must not be handed every
+// pointer move; button-event tracking wants motion only while a button is held.
+func (t *embeddedTerminal) guestWantsMotion(dragging bool) bool {
+	if t.guestMouse[ansi.ModeMouseAnyEvent] {
+		return true
+	}
+	return dragging && t.guestMouse[ansi.ModeMouseButtonEvent]
+}
+
 func (t *embeddedTerminal) sendMouse(event uv.MouseEvent) {
 	t.emulator.SendMouse(event)
 }
