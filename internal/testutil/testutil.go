@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/opspresso/romty/internal/client"
 	"github.com/opspresso/romty/internal/paths"
 )
 
@@ -39,9 +38,16 @@ func ShortTempDir(t *testing.T) string {
 	return directory
 }
 
+// Pinger is all WaitForDaemon needs of a client. Naming it rather than the
+// concrete type keeps this package out of the client's import graph, so the
+// client's own tests can use the helpers here instead of keeping copies.
+type Pinger interface {
+	Ping() error
+}
+
 // WaitForDaemon blocks until the daemon answers a ping, and fails the test when
 // it does not become ready in time.
-func WaitForDaemon(t *testing.T, backend *client.Client) {
+func WaitForDaemon(t *testing.T, backend Pinger) {
 	t.Helper()
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {

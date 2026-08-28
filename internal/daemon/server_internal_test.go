@@ -17,6 +17,7 @@ import (
 	"github.com/creack/pty"
 	"github.com/opspresso/romty/internal/model"
 	"github.com/opspresso/romty/internal/protocol"
+	"github.com/opspresso/romty/internal/testutil"
 )
 
 // newSessionForTest builds the parts of a session that do not need a live PTY.
@@ -163,11 +164,7 @@ func TestHandshakeTimesOutOnASilentPeer(t *testing.T) {
 	requestTimeout = 150 * time.Millisecond
 	t.Cleanup(func() { requestTimeout = previous })
 
-	base, err := os.MkdirTemp("/tmp", "romty-handshake-")
-	if err != nil {
-		t.Fatalf("MkdirTemp() error = %v", err)
-	}
-	t.Cleanup(func() { os.RemoveAll(base) })
+	base := testutil.ShortTempDir(t)
 	socket := filepath.Join(base, "daemon.sock")
 	server, err := New(socket, filepath.Join(base, "state.json"), "/bin/sh")
 	if err != nil {
@@ -210,11 +207,7 @@ func TestServeLimitsActiveConnectionsAndRecoversCapacity(t *testing.T) {
 	maxActiveConnections = 1
 	t.Cleanup(func() { maxActiveConnections = previous })
 
-	base, err := os.MkdirTemp("/tmp", "romty-capacity-")
-	if err != nil {
-		t.Fatalf("MkdirTemp() error = %v", err)
-	}
-	t.Cleanup(func() { os.RemoveAll(base) })
+	base := testutil.ShortTempDir(t)
 	socket := filepath.Join(base, "daemon.sock")
 	server, err := New(socket, filepath.Join(base, "state.json"), "/bin/sh")
 	if err != nil {
@@ -622,11 +615,7 @@ func TestAttachHandsOffToLiveOutputInOrder(t *testing.T) {
 // on it, because only an orderly shutdown removes it. The next daemon has to
 // unlink that one and bind its own, or romty never starts again after a crash.
 func TestServeReplacesASocketNothingAnswersOn(t *testing.T) {
-	base, err := os.MkdirTemp("/tmp", "romty-stale-")
-	if err != nil {
-		t.Fatalf("MkdirTemp() error = %v", err)
-	}
-	t.Cleanup(func() { os.RemoveAll(base) })
+	base := testutil.ShortTempDir(t)
 	socket := filepath.Join(base, "daemon.sock")
 
 	leaveStaleSocket(t, socket)
@@ -657,11 +646,7 @@ func TestServeReplacesASocketNothingAnswersOn(t *testing.T) {
 // running daemon. Unlinking it would leave that daemon listening on a name no
 // client can reach while it kept writing the state file.
 func TestPrepareSocketRefusesOneThatAnswers(t *testing.T) {
-	base, err := os.MkdirTemp("/tmp", "romty-live-")
-	if err != nil {
-		t.Fatalf("MkdirTemp() error = %v", err)
-	}
-	t.Cleanup(func() { os.RemoveAll(base) })
+	base := testutil.ShortTempDir(t)
 	socket := filepath.Join(base, "daemon.sock")
 
 	listener, err := net.Listen("unix", socket)
@@ -716,11 +701,7 @@ func leaveStaleSocket(t *testing.T, path string) {
 // the user's romty home for every shutdown — to record something the next
 // daemon throws away before it listens.
 func TestShutdownDoesNotPersistTheTabsItIsKilling(t *testing.T) {
-	base, err := os.MkdirTemp("/tmp", "romty-shutdown-")
-	if err != nil {
-		t.Fatalf("MkdirTemp() error = %v", err)
-	}
-	t.Cleanup(func() { os.RemoveAll(base) })
+	base := testutil.ShortTempDir(t)
 	statePath := filepath.Join(base, "state.json")
 
 	server, err := New(filepath.Join(base, "daemon.sock"), statePath, "/bin/sh")
@@ -835,11 +816,7 @@ func TestAttachCopiesTheRecordingItReplays(t *testing.T) {
 // diagnosis depends entirely on what reaches daemon.log. It used to write
 // nothing at all: the file existed and was always empty.
 func TestDaemonRecordsItsLifecycleAndFailures(t *testing.T) {
-	base, err := os.MkdirTemp("/tmp", "romty-log-")
-	if err != nil {
-		t.Fatalf("MkdirTemp() error = %v", err)
-	}
-	t.Cleanup(func() { os.RemoveAll(base) })
+	base := testutil.ShortTempDir(t)
 	socket := filepath.Join(base, "daemon.sock")
 	server, err := New(socket, filepath.Join(base, "state.json"), "/bin/sh")
 	if err != nil {
@@ -870,11 +847,7 @@ func TestDaemonRecordsItsLifecycleAndFailures(t *testing.T) {
 // A shell exiting is the one place the state file can fall behind with nothing
 // to roll back to, so it has to say so.
 func TestSessionExitIsRecordedWhenStateCannotBeSaved(t *testing.T) {
-	base, err := os.MkdirTemp("/tmp", "romty-log-")
-	if err != nil {
-		t.Fatalf("MkdirTemp() error = %v", err)
-	}
-	t.Cleanup(func() { os.RemoveAll(base) })
+	base := testutil.ShortTempDir(t)
 	home := filepath.Join(base, "home")
 	if err := os.MkdirAll(home, 0o700); err != nil {
 		t.Fatalf("MkdirAll() error = %v", err)
@@ -997,11 +970,7 @@ func TestStartSessionUsesTheEnvironmentItIsGiven(t *testing.T) {
 // failed: reporting it as a bind error sent the ordinary outcome of that race
 // to daemon.log as a failure and exited non-zero.
 func TestListenPrivatelyReportsAlreadyRunningWhenTheBindIsLost(t *testing.T) {
-	base, err := os.MkdirTemp("/tmp", "romty-bind-")
-	if err != nil {
-		t.Fatalf("MkdirTemp() error = %v", err)
-	}
-	t.Cleanup(func() { os.RemoveAll(base) })
+	base := testutil.ShortTempDir(t)
 	socket := filepath.Join(base, "daemon.sock")
 
 	winner, err := net.Listen("unix", socket)
@@ -1052,11 +1021,7 @@ func TestReplyGivesUpOnAPeerThatStoppedReading(t *testing.T) {
 // the second now owned. The lock decides ownership before the socket is
 // touched at all.
 func TestServeReportsAlreadyRunningWhenAnotherDaemonHoldsTheLock(t *testing.T) {
-	base, err := os.MkdirTemp("/tmp", "romty-lock-")
-	if err != nil {
-		t.Fatalf("MkdirTemp() error = %v", err)
-	}
-	t.Cleanup(func() { os.RemoveAll(base) })
+	base := testutil.ShortTempDir(t)
 	socket := filepath.Join(base, "daemon.sock")
 
 	held, err := lockDaemon(socket + lockSuffix)
@@ -1139,11 +1104,7 @@ func TestServeClearsStaleTabsBeforeTouchingTheSocket(t *testing.T) {
 	if os.Getuid() == 0 {
 		t.Skip("root writes into a directory it has no write permission on")
 	}
-	base, err := os.MkdirTemp("/tmp", "romty-stale-")
-	if err != nil {
-		t.Fatalf("MkdirTemp() error = %v", err)
-	}
-	t.Cleanup(func() { os.RemoveAll(base) })
+	base := testutil.ShortTempDir(t)
 
 	// The state file lives where it cannot be rewritten. Its own directory,
 	// because Serve narrows the socket's directory and would undo the mode.
