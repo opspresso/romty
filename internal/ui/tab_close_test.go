@@ -157,3 +157,29 @@ func TestDashboardKeepsTheTabWhenCloseFails(t *testing.T) {
 			next, value.tabClosePending, len(value.selectedTabs()), value.errorMessage)
 	}
 }
+
+// A root holds terminals of its own, but a snapshot names the workspace they
+// belong to nowhere except on the tabs themselves. Closing one from the
+// workspace pane has to move the tab cursor the way a directory's tab does.
+func TestDashboardClosesARootTabAndMovesItsCursor(t *testing.T) {
+	tabs := []model.Tab{
+		{ID: "tab-1", WorkspaceID: "workspace-root", Name: "1", Running: true},
+		{ID: "tab-2", WorkspaceID: "workspace-root", Name: "2", Running: true},
+	}
+	snapshot := model.Snapshot{Roots: []model.RootView{{
+		Root: model.Root{ID: "root-1", Name: "projects", Path: "/projects"},
+		Tabs: tabs,
+	}}}
+	backend := &fakeBackend{snapshot: snapshot}
+	value := newDashboard(backend, snapshot)
+	value.focus, value.navIndex, value.tabIndex = leftPane, 0, 1
+
+	updated, closeCommand := value.closeTab(tabs[1], 1)
+	value = updated.(dashboard)
+	updated, next := value.Update(commandMessage[tabClosedMsg](t, closeCommand))
+	value = updated.(dashboard)
+	if next != nil || len(value.navigationTabs()) != 1 || value.tabIndex != 0 {
+		t.Fatalf("root close = (next %v, tabs %d, index %d), want the cursor on the remaining tab",
+			next, len(value.navigationTabs()), value.tabIndex)
+	}
+}
