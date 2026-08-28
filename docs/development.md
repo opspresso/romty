@@ -29,10 +29,10 @@ ROMTY_HOME=/tmp/romty-dev go run ./cmd/romty
 
 ## Sound assets
 
-The original notification recordings are `internal/sound/assets/done.flac` and `waiting.flac`. Runtime playback embeds their PCM WAV derivatives from the same directory so macOS and common Linux audio tools can play them without an in-process decoder. Regenerate a derivative without changing the original:
+The original notification recordings are `internal/sound/assets/done.mp3` and `waiting.mp3`. Runtime playback embeds their PCM WAV derivatives from the same directory so macOS and common Linux audio tools can play them without an in-process decoder. Regenerate a derivative without changing the original:
 
 ```sh
-ffmpeg -y -i internal/sound/assets/waiting.flac -c:a pcm_s16le -ar 44100 -ac 1 internal/sound/assets/waiting.wav
+ffmpeg -y -i internal/sound/assets/waiting.mp3 -c:a pcm_s16le -ar 44100 -ac 1 internal/sound/assets/waiting.wav
 ```
 
 ## Protocol compatibility
