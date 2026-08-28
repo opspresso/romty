@@ -121,6 +121,7 @@ func (m dashboard) openGitActions() (tea.Model, tea.Cmd) {
 	m.gitActionOutput = ""
 	m.gitActionError = ""
 	m.gitActionOffset = 0
+	m.gitActionReturn = noModal
 	m.clearAnyError()
 	return m, nil
 }

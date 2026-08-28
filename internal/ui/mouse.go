@@ -120,6 +120,10 @@ func (m dashboard) handleModalMouse(message tea.MouseMsg) (tea.Model, tea.Cmd, b
 		if updated, command, handled := m.handleBrowseMouse(message); handled {
 			return updated, command, true
 		}
+	case workspaceActionsModal:
+		if updated, command, handled := m.handleWorkspaceActionsMouse(message); handled {
+			return updated, command, true
+		}
 	case gitActionsModal:
 		if updated, command, handled := m.handleGitActionsMouse(message); handled {
 			return updated, command, true
@@ -146,6 +150,12 @@ func (m dashboard) handleModalMouse(message tea.MouseMsg) (tea.Model, tea.Cmd, b
 func (m dashboard) hoverTargetAt(mouse tea.Mouse) hoverTarget {
 	width := max(m.width, 40)
 	height := m.dimensions().bodyHeight
+	if m.modal == workspaceActionsModal {
+		if index, ok := m.workspaceActionIndexAtMouse(mouse, width, height); ok {
+			return hoverTarget{kind: hoverWorkspaceAction, index: index}
+		}
+		return hoverTarget{}
+	}
 	if m.modal != noModal {
 		for index, hit := range m.modalActionHits(width, height) {
 			if mouse.Y == hit.row && mouse.X >= hit.left && mouse.X < hit.right {
@@ -194,8 +204,12 @@ func (m dashboard) hoverTargetAt(mouse tea.Mouse) hoverTarget {
 		if m.focus == leftPane {
 			tabs = m.navigationTabs()
 		}
-		if index, ok := tabIndexAtX(tabs, localX); ok {
-			return hoverTarget{kind: hoverTab, index: index}
+		if hit, ok := tabHitAtX(tabs, localX); ok {
+			kind := hoverTab
+			if hit.close {
+				kind = hoverTabClose
+			}
+			return hoverTarget{kind: kind, index: hit.index}
 		}
 	}
 	return hoverTarget{}
@@ -279,7 +293,21 @@ func (m dashboard) handleDashboardMouse(message tea.MouseMsg) (tea.Model, tea.Cm
 	}
 
 	click, ok := message.(tea.MouseClickMsg)
-	if !ok || click.Button != tea.MouseLeft {
+	if !ok {
+		return m, nil, false
+	}
+	if click.Button == tea.MouseRight && mouse.X < view.leftWidth && mouse.Y < view.bodyHeight {
+		index, ok := m.navigationIndexAtRow(mouse.Y, view.bodyHeight)
+		if !ok {
+			return m, nil, true
+		}
+		m.focus = leftPane
+		m.setNavigation(index)
+		m.syncTabCursor(runningTabs(m.navigationItems()[index].tabs))
+		updated, command := m.openWorkspaceActionsAt(m.navigationItems()[index], mouse.X, mouse.Y)
+		return updated, command, true
+	}
+	if click.Button != tea.MouseLeft {
 		return m, nil, false
 	}
 	if view.separator > 0 && mouse.Y < view.bodyHeight &&
@@ -303,15 +331,19 @@ func (m dashboard) handleDashboardMouse(message tea.MouseMsg) (tea.Model, tea.Cm
 		if m.focus == leftPane {
 			tabs = m.navigationTabs()
 		}
-		index, ok := tabIndexAtX(tabs, localX)
+		hit, ok := tabHitAtX(tabs, localX)
 		if !ok {
 			return m, nil, true
 		}
-		m.tabIndex = index
+		if hit.close {
+			updated, command := m.confirmCloseTab(tabs[hit.index], hit.index)
+			return updated, command, true
+		}
+		m.tabIndex = hit.index
 		if m.focus == leftPane {
 			return m, m.selectWorkspace(), true
 		}
-		if index == len(tabs) {
+		if hit.index == len(tabs) {
 			updated, command := m.newTab()
 			return updated, command, true
 		}
@@ -335,20 +367,26 @@ func (m dashboard) navigationIndexAtRow(row, height int) (int, bool) {
 	return 0, false
 }
 
-func tabIndexAtX(tabs []model.Tab, x int) (int, bool) {
+type tabHit struct {
+	index int
+	close bool
+}
+
+func tabHitAtX(tabs []model.Tab, x int) (tabHit, bool) {
 	position := 0
 	for index := 0; index <= len(tabs); index++ {
-		label := " + "
+		label := "  +  "
 		if index < len(tabs) {
-			label = " " + displayText(tabs[index].Name) + " "
+			label = "  " + displayText(tabs[index].Name) + "  × "
 		}
 		end := position + lipgloss.Width(label)
 		if x >= position && x < end {
-			return index, true
+			close := index < len(tabs) && x >= end-2
+			return tabHit{index: index, close: close}, true
 		}
 		position = end + 1
 	}
-	return 0, false
+	return tabHit{}, false
 }
 
 // mouseMode asks for pointer motion wherever romty draws hoverable controls.

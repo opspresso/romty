@@ -434,9 +434,17 @@ func (m *dashboard) rememberSelection(tabID string) bool {
 func (m dashboard) navigationItems() []navItem {
 	result := make([]navItem, 0)
 	for rootIndex, root := range m.state.Roots {
+		// A root is only a workspace once it holds a terminal, so a snapshot
+		// names its identifier nowhere else. Its own tabs carry it, and
+		// without it the root row compares as a workspace that never matches.
+		rootWorkspaceID := ""
+		if len(root.Tabs) > 0 {
+			rootWorkspaceID = root.Tabs[0].WorkspaceID
+		}
 		result = append(result, navItem{
 			root: root.Root,
 			workspace: model.Workspace{
+				ID:     rootWorkspaceID,
 				RootID: root.Root.ID,
 				Name:   root.Root.Name,
 				Path:   root.Root.Path,

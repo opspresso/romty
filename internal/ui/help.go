@@ -64,7 +64,7 @@ func helpReference() []helpEntry {
 		{description: "Toggle scrollback", keys: []string{"F6", "Ctrl+Shift+\\"}},
 		{description: "Toggle pane focus", keys: []string{"F7", "Ctrl+/"}},
 		{section: "WORKSPACE", note: "workspace pane only"},
-		{description: "Remove selection", keys: []string{"F8"}},
+		{description: "Workspace actions", keys: []string{"F8"}},
 		{description: "Stop daemon", keys: []string{"F9"}},
 		{description: "About", keys: []string{"i"}},
 		{description: "Focus terminal", keys: []string{"Tab"}},

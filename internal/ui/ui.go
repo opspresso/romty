@@ -63,6 +63,7 @@ type Backend interface {
 	RemoveWorkspace(rootID, path string) (model.Snapshot, error)
 	EnsureWorkspace(rootID, path string) (model.Workspace, error)
 	CreateTab(workspaceID string, columns, rows uint16) (model.Tab, error)
+	CloseTab(tabID string) (model.Snapshot, error)
 	OpenTerminal(tabID string) (io.ReadWriteCloser, []byte, error)
 	Resize(tabID string, columns, rows uint16) error
 	Shutdown() error
@@ -108,7 +109,9 @@ const (
 	helpModal
 	configModal
 	browseModal
+	workspaceActionsModal
 	gitActionsModal
+	closeTabModal
 	removeSelectionModal
 	shutdownModal
 	hookInstallModal
@@ -123,9 +126,11 @@ const (
 	hoverNone hoverKind = iota
 	hoverNavigation
 	hoverTab
+	hoverTabClose
 	hoverDivider
 	hoverModalAction
 	hoverBrowseRow
+	hoverWorkspaceAction
 	hoverGitAction
 	hoverGitResult
 	hoverConfigRow
@@ -141,6 +146,8 @@ type dashboard struct {
 	snapshotApplied  uint64
 	selectionRequest uint64
 	tabPending       bool
+	tabClosePending  string
+	tabCloseActive   bool
 
 	width    int
 	height   int
@@ -175,7 +182,12 @@ type dashboard struct {
 	agentAnimationPending   bool
 	// removeTarget is the item the confirmation modal is asking about, held so
 	// the answer applies to the item the question named.
-	removeTarget   navItem
+	removeTarget navItem
+	// closeTabTarget is the tab its confirmation is asking about, held for the
+	// same reason, with the position it was drawn at so the cursor can take
+	// the place of the tab that leaves.
+	closeTabTarget model.Tab
+	closeTabIndex  int
 	terminalExited bool
 	// reattachTab and reattachAttempts damp the loop a dropped connection
 	// used to start: romty reattached at once, the daemon replayed the whole
@@ -201,6 +213,13 @@ type dashboard struct {
 	// browse is the root picker's state, kept on the dashboard so the modal
 	// renders from it and the keys move it.
 	browse browser
+	// workspaceActionTarget is captured when its action palette opens, so a
+	// refresh cannot retarget a destructive or remote action behind the modal.
+	workspaceActionTarget  navItem
+	workspaceActionIndex   int
+	workspaceActionOffset  int
+	workspaceActionAnchorX int
+	workspaceActionAnchorY int
 	// config is the document as loaded, kept so saving edits it instead of
 	// reconstructing it from fields.
 	config           Config
@@ -222,6 +241,7 @@ type dashboard struct {
 	gitStates         map[string]gitState
 	gitFetchedAt      time.Time
 	gitActionTarget   model.Workspace
+	gitActionReturn   modal
 	gitActionIndex    int
 	gitAction         gitAction
 	gitActionPending  bool
@@ -274,6 +294,15 @@ type tabMsg struct {
 	order     uint64
 	selection uint64
 	err       error
+}
+
+type tabClosedMsg struct {
+	tabID       string
+	workspaceID string
+	index       int
+	snapshot    model.Snapshot
+	order       uint64
+	err         error
 }
 
 type terminalOpenedMsg struct {
@@ -579,6 +608,8 @@ func (m dashboard) update(message tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleWorkspace(message)
 	case tabMsg:
 		return m.handleCreatedTab(message)
+	case tabClosedMsg:
+		return m.handleClosedTab(message)
 	case terminalOpenedMsg:
 		return m.handleOpenedTerminal(message)
 	case terminalOutputMsg:
@@ -765,7 +796,7 @@ func (m dashboard) handleKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "?":
 		return m.openModal(helpModal)
 	case "f8":
-		return m.confirmRemoveSelection()
+		return m.openWorkspaceActions()
 	case "f9":
 		return m.openModal(shutdownModal)
 	case "up", "k":
@@ -1200,7 +1231,7 @@ func (m dashboard) refreshAll() (tea.Model, tea.Cmd) {
 }
 
 func (m dashboard) hasPendingActivity() bool {
-	return m.tabPending || m.restorePending || m.gitActionPending || m.shutdownPending ||
+	return m.tabPending || m.tabClosePending != "" || m.restorePending || m.gitActionPending || m.shutdownPending ||
 		m.hookInstallPending || m.modal == browseModal && m.browse.loading
 }
 
@@ -1293,6 +1324,97 @@ func (m dashboard) openSelectedTerminal() tea.Cmd {
 		}
 		return terminalOpenedMsg{tabID: tab.ID, stream: stream, replay: replay, err: err}
 	}
+}
+
+// confirmCloseTab asks before a click terminates a shell. Closing a tab kills
+// what runs in it, which is the one thing romty exists to keep alive, so it
+// asks the way deleting a workspace and stopping the daemon do.
+func (m dashboard) confirmCloseTab(tab model.Tab, index int) (tea.Model, tea.Cmd) {
+	if tab.ID == "" || m.tabClosePending != "" {
+		return m, nil
+	}
+	m.closeTabTarget, m.closeTabIndex = tab, index
+	return m.openModal(closeTabModal)
+}
+
+func (m dashboard) closeTab(tab model.Tab, index int) (tea.Model, tea.Cmd) {
+	if tab.ID == "" || m.tabClosePending != "" {
+		return m, nil
+	}
+	m.tabClosePending = tab.ID
+	m.tabCloseActive = m.terminal != nil && m.terminal.id == tab.ID
+	order := m.nextSnapshotOrder()
+	backend := m.backend
+	return m, func() tea.Msg {
+		snapshot, err := backend.CloseTab(tab.ID)
+		return tabClosedMsg{
+			tabID: tab.ID, workspaceID: tab.WorkspaceID, index: index,
+			snapshot: snapshot, order: order, err: err,
+		}
+	}
+}
+
+func (m dashboard) handleClosedTab(message tabClosedMsg) (tea.Model, tea.Cmd) {
+	if message.tabID != m.tabClosePending {
+		return m, nil
+	}
+	wasActive := m.tabCloseActive
+	m.tabClosePending = ""
+	m.tabCloseActive = false
+	if message.err != nil {
+		m.setError(terminalError, "close tab: "+message.err.Error())
+		return m, nil
+	}
+	activeID := ""
+	if m.terminal != nil {
+		activeID = m.terminal.id
+	}
+	if !m.applySnapshot(message.order, message.snapshot) {
+		return m, nil
+	}
+	m.syncSelection()
+	m.ensureWorkspaceCursor()
+	if wasActive {
+		if activeID != "" && activeID != message.tabID {
+			for index, tab := range m.selectedTabs() {
+				if tab.ID == activeID {
+					m.tabIndex = index
+					return m, nil
+				}
+			}
+		}
+		if activeID == message.tabID {
+			m.closeTerminal()
+		}
+		m.stopScrollback()
+		m.terminalExited = false
+		tabs := m.selectedTabs()
+		if len(tabs) == 0 {
+			m.focusNavigation()
+			m.tabIndex = 0
+			return m, nil
+		}
+		m.tabIndex = min(message.index, len(tabs)-1)
+		return m, m.openSelectedTerminal()
+	}
+	if item, ok := m.navigationItem(); m.focus == leftPane && ok && item.workspace.ID == message.workspaceID {
+		tabs := runningTabs(item.tabs)
+		if len(tabs) == 0 {
+			m.tabIndex = 0
+		} else {
+			m.tabIndex = min(message.index, len(tabs)-1)
+		}
+		return m, nil
+	}
+	if activeID != "" {
+		for index, tab := range m.selectedTabs() {
+			if tab.ID == activeID {
+				m.tabIndex = index
+				return m, nil
+			}
+		}
+	}
+	return m, nil
 }
 
 func (m dashboard) resizeTerminal() tea.Cmd {

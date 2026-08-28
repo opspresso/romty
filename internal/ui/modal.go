@@ -41,12 +41,19 @@ func (m dashboard) handleModalKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 	switch m.modal {
 	case browseModal:
 		return m.handleBrowseKey(message)
+	case workspaceActionsModal:
+		return m.handleWorkspaceActionKey(message)
 	case gitActionsModal:
 		if m.gitActionComplete {
 			page := max(modalCapacity(m.dimensions().bodyHeight)-3, 1)
 			switch message.String() {
 			case "enter":
-				return m.resetGitActionResult(), nil
+				m = m.resetGitActionResult()
+				if m.gitActionReturn == workspaceActionsModal {
+					m.modal = workspaceActionsModal
+					m.gitActionReturn = noModal
+				}
+				return m, nil
 			case "up", "k":
 				return m.scrollGitAction(-1)
 			case "down", "j":
@@ -71,6 +78,11 @@ func (m dashboard) handleModalKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 			return m.startGitAction()
 		}
 		return m, nil
+	case closeTabModal:
+		if message.String() == "enter" {
+			m.modal = noModal
+			return m.closeTab(m.closeTabTarget, m.closeTabIndex)
+		}
 	case removeSelectionModal:
 		if message.String() == "enter" {
 			m.modal = noModal
@@ -173,6 +185,13 @@ func (m dashboard) renderModal(width, height int) []string {
 			m.styles.errorText.Render("Its running shells will be terminated."),
 		))
 	}
+	if m.modal == closeTabModal {
+		return m.withModalActions(modalBox(m.styles, modalWidth, "Close tab",
+			m.styles.modalStrong.Render("Close "+displayText(m.closeTabTarget.Name)+"?"),
+			"",
+			m.styles.errorText.Render("Its running shell will be terminated."),
+		))
+	}
 	if m.modal == shutdownModal {
 		return m.withModalActions(modalBox(m.styles, modalWidth, "Stop daemon",
 			m.styles.modalStrong.Render("Stop daemon and all running terminal sessions?"),
@@ -232,6 +251,11 @@ func (m dashboard) modalActions() []modalAction {
 		}
 		return []modalAction{
 			{shortcut: shortcut{key: "Enter", description: description}, code: tea.KeyEnter},
+			{shortcut: shortcut{key: "Esc", description: "cancel"}, code: tea.KeyEscape},
+		}
+	case closeTabModal:
+		return []modalAction{
+			{shortcut: shortcut{key: "Enter", description: "close tab"}, code: tea.KeyEnter},
 			{shortcut: shortcut{key: "Esc", description: "cancel"}, code: tea.KeyEscape},
 		}
 	case shutdownModal:

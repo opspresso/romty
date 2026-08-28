@@ -3,6 +3,7 @@ package client
 import (
 	"bufio"
 	"bytes"
+	"fmt"
 	"io"
 	"net"
 	"os"
@@ -41,7 +42,7 @@ func TestCallReportsAnOutdatedDaemon(t *testing.T) {
 	if err == nil {
 		t.Fatal("Snapshot() accepted a daemon that speaks a different protocol")
 	}
-	for _, want := range []string{"protocol 1..5", "0..0"} {
+	for _, want := range []string{fmt.Sprintf("protocol %d..%d", protocol.MinimumVersion, protocol.Version), "0..0"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("error = %q, want it to mention %q", err, want)
 		}
@@ -810,6 +811,11 @@ func TestClientDegradesFeaturesMissingFromAnOlderDaemon(t *testing.T) {
 		!strings.Contains(err.Error(), "does not support") ||
 		!strings.Contains(err.Error(), protocol.Remedy) {
 		t.Fatalf("RemoveWorkspace() error = %v, want an unsupported capability and its remedy", err)
+	}
+	if _, err := backend.CloseTab("tab-1"); err == nil ||
+		!strings.Contains(err.Error(), "requires a newer daemon") ||
+		!strings.Contains(err.Error(), protocol.Remedy) {
+		t.Fatalf("CloseTab() error = %v, want an unsupported capability and its remedy", err)
 	}
 }
 

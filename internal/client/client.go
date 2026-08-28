@@ -244,6 +244,24 @@ func (c *Client) CreateTab(workspaceID string, columns, rows uint16) (model.Tab,
 	return *response.Tab, nil
 }
 
+func (c *Client) CloseTab(tabID string) (model.Snapshot, error) {
+	supported, err := c.supports(protocol.CapabilityCloseTab)
+	if err != nil {
+		return model.Snapshot{}, err
+	}
+	if !supported {
+		return model.Snapshot{}, fmt.Errorf("closing tabs requires a newer daemon; %s", protocol.Remedy)
+	}
+	response, err := c.call(protocol.Request{Action: protocol.ActionCloseTab, TabID: tabID})
+	if err != nil {
+		return model.Snapshot{}, err
+	}
+	if response.Snapshot == nil {
+		return model.Snapshot{}, fmt.Errorf("daemon returned no snapshot")
+	}
+	return *response.Snapshot, nil
+}
+
 func (c *Client) Resize(tabID string, columns, rows uint16) error {
 	_, err := c.call(protocol.Request{
 		Action:   protocol.ActionResize,

@@ -25,7 +25,7 @@ New terminals use the environment and `$SHELL` of the romty client that creates 
 
 Each session retains up to 8 MiB of terminal output. Terminal modes are tracked separately so a replay remains usable after older output is trimmed. Completed terminal queries are omitted from a replay to prevent an unsolicited response from reaching the shell command line. Reconnect replay starts at the PTY dimensions that produced the latest output, then resizes the local emulator to the current pane; width-sensitive shell redraws therefore keep the wrapping and erase behavior they had when recorded.
 
-A dropped terminal connection reconnects automatically with backoff. Press `Enter` on a disconnected tab to retry after automatic attempts stop. When a shell exits, its tab is removed. If the daemon or operating system stops, roots and workspace metadata remain but stale PTY tabs are discarded.
+A dropped terminal connection reconnects automatically with backoff. Press `Enter` on a disconnected tab to retry after automatic attempts stop. Closing a tab from its `×` or from the workspace actions terminates its shell and removes the tab, after a confirmation. When a shell exits on its own, its tab is also removed. If the daemon or operating system stops, roots and workspace metadata remain but stale PTY tabs are discarded.
 
 More than one TUI can attach to the same terminal. Every client receives output, while the client that most recently sent input owns the PTY size. Resizing a background TUI does not disturb the active terminal; sending input promotes that client and applies its viewport first. If an attached client stops reading and exhausts its bounded output queue, only that client is disconnected.
 
