@@ -154,7 +154,7 @@ func TestDashboardClicksAndScrollsGitActions(t *testing.T) {
 	value.width, value.height = 100, 12
 	value.modal = gitActionsModal
 	value.gitActionTarget = model.Workspace{Name: "alpha", Path: "/projects/alpha"}
-	left, top := value.modalContentOrigin(value.width, value.dimensions().bodyHeight)
+	left, top := value.modalGeometry(value.width, value.dimensions().bodyHeight).contentOrigin()
 
 	updated, command := value.Update(tea.MouseClickMsg{X: left + 2, Y: top + 4, Button: tea.MouseLeft})
 	value = updated.(dashboard)
@@ -178,7 +178,7 @@ func TestDashboardHighlightsHoveredGitActionAndResult(t *testing.T) {
 	value.width, value.height = 100, 12
 	value.modal = gitActionsModal
 	value.gitActionTarget = model.Workspace{Name: "alpha", Path: "/projects/alpha"}
-	left, top := value.modalContentOrigin(value.width, value.dimensions().bodyHeight)
+	left, top := value.modalGeometry(value.width, value.dimensions().bodyHeight).contentOrigin()
 	before := value.render()
 
 	updated, _ := value.Update(tea.MouseMotionMsg{X: left + 2, Y: top + 4})
@@ -189,7 +189,7 @@ func TestDashboardHighlightsHoveredGitActionAndResult(t *testing.T) {
 
 	value.gitActionComplete = true
 	value.gitActionOutput = "one\ntwo\nthree\nfour\nfive\nsix"
-	left, top = value.modalContentOrigin(value.width, value.dimensions().bodyHeight)
+	left, top = value.modalGeometry(value.width, value.dimensions().bodyHeight).contentOrigin()
 	before = value.render()
 	updated, _ = value.Update(tea.MouseMotionMsg{X: left + 2, Y: top + 3})
 	value = updated.(dashboard)

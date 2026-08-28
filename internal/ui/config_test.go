@@ -233,6 +233,6 @@ func (m dashboard) hoverTargetAtRow(row int) hoverTarget {
 	width, height := max(m.width, 40), m.dimensions().bodyHeight
 	lines := m.renderModal(width, height)
 	left := max((width-lipgloss.Width(lines[0]))/2, 0) + 3
-	_, top := m.modalContentOrigin(width, height)
+	_, top := m.modalGeometry(width, height).contentOrigin()
 	return m.hoverTargetAt(tea.Mouse{X: left, Y: top + row})
 }

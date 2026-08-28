@@ -298,15 +298,58 @@ func (m dashboard) withModalActions(lines []string) []string {
 	return append(boxed, lines[len(lines)-1])
 }
 
-func (m dashboard) modalActionHits(width, height int) []modalActionHit {
+// modalGeometry is where the modal box lands on screen. Rendering the modal is
+// the only way to find out, so every question a pointer raises about one —
+// which action is under it, which content row, whether it is inside the box at
+// all — used to render the box again. In all-motion mouse mode that came to
+// half a dozen renders of the same box per pointer move.
+type modalGeometry struct {
+	lines []string
+	left  int
+	top   int
+	width int
+}
+
+func (m dashboard) modalGeometry(width, height int) modalGeometry {
+	lines := m.renderModal(width, height)
+	if len(lines) == 0 {
+		return modalGeometry{}
+	}
+	modalWidth := lipgloss.Width(lines[0])
+	return modalGeometry{
+		lines: lines,
+		left:  max((width-modalWidth)/2, 0),
+		top:   max((height-len(lines))/2, 0),
+		width: modalWidth,
+	}
+}
+
+// contentOrigin is where the modal's first content cell lands on screen: three
+// columns in from the box's left edge, one row under its top border.
+func (g modalGeometry) contentOrigin() (int, int) {
+	return g.left + 3, g.top + 1
+}
+
+// contentRow is the modal's own row number for a screen position, and whether
+// the position is inside the box at all. Row zero is the first line under the
+// top border.
+func (g modalGeometry) contentRow(mouse tea.Mouse) (int, bool) {
+	if len(g.lines) < 2 {
+		return 0, false
+	}
+	row := mouse.Y - g.top - 1
+	inside := mouse.X >= g.left+1 && mouse.X < g.left+g.width-1 &&
+		row >= 0 && row < len(g.lines)-2
+	return row, inside
+}
+
+func (m dashboard) modalActionHits(geometry modalGeometry) []modalActionHit {
 	actions := m.modalActions()
-	if len(actions) == 0 {
+	if len(actions) == 0 || len(geometry.lines) == 0 {
 		return nil
 	}
-	lines := m.renderModal(width, height)
-	modalWidth := lipgloss.Width(lines[0])
-	left := max((width-modalWidth)/2, 0) + 3
-	row := max((height-len(lines))/2, 0) + len(lines) - 2
+	left := geometry.left + 3
+	row := geometry.top + len(geometry.lines) - 2
 	hits := make([]modalActionHit, 0, len(actions))
 	for _, action := range actions {
 		segment := m.renderModalAction(action, false)

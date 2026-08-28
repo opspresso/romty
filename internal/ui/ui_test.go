@@ -1045,7 +1045,7 @@ func TestDashboardHighlightsDialogMouseTargets(t *testing.T) {
 	value.width, value.height = 100, 24
 	updated, _ := value.Update(key(tea.KeyF9, ""))
 	value = updated.(dashboard)
-	hit := value.modalActionHits(value.width, value.dimensions().bodyHeight)[0]
+	hit := value.modalActionHits(value.modalGeometry(value.width, value.dimensions().bodyHeight))[0]
 	before := value.render()
 	updated, _ = value.Update(tea.MouseMotionMsg{X: hit.left, Y: hit.row})
 	value = updated.(dashboard)
@@ -1054,7 +1054,7 @@ func TestDashboardHighlightsDialogMouseTargets(t *testing.T) {
 	}
 
 	value.modal = configModal
-	left, top := value.modalContentOrigin(value.width, value.dimensions().bodyHeight)
+	left, top := value.modalGeometry(value.width, value.dimensions().bodyHeight).contentOrigin()
 	before = value.render()
 	updated, _ = value.Update(tea.MouseMotionMsg{X: left + 2, Y: top + 2})
 	value = updated.(dashboard)
@@ -1125,7 +1125,7 @@ func TestDashboardConfirmationActionsAreClickable(t *testing.T) {
 			t.Fatalf("confirmation dialog has no clickable %q action:\n%s", label, plain)
 		}
 	}
-	hits := value.modalActionHits(value.width, value.dimensions().bodyHeight)
+	hits := value.modalActionHits(value.modalGeometry(value.width, value.dimensions().bodyHeight))
 	if len(hits) != 2 {
 		t.Fatalf("modal action hits = %#v, want confirm and cancel", hits)
 	}
@@ -1142,7 +1142,7 @@ func TestDashboardConfirmationActionsAreClickable(t *testing.T) {
 	value.width, value.height = 100, 24
 	updated, _ = value.Update(key(tea.KeyF9, ""))
 	value = updated.(dashboard)
-	hits = value.modalActionHits(value.width, value.dimensions().bodyHeight)
+	hits = value.modalActionHits(value.modalGeometry(value.width, value.dimensions().bodyHeight))
 	cancel := hits[1]
 	updated, command = value.Update(tea.MouseClickMsg{
 		X: (cancel.left + cancel.right) / 2, Y: cancel.row, Button: tea.MouseLeft,
@@ -2034,7 +2034,7 @@ func TestDashboardClicksConfigControls(t *testing.T) {
 	value.width, value.height = 100, 24
 	updated, _ := value.Update(key(tea.KeyF3, ""))
 	value = updated.(dashboard)
-	left, top := value.modalContentOrigin(value.width, value.dimensions().bodyHeight)
+	left, top := value.modalGeometry(value.width, value.dimensions().bodyHeight).contentOrigin()
 
 	updated, save := value.Update(tea.MouseClickMsg{X: left + 2, Y: top + 2, Button: tea.MouseLeft})
 	value = updated.(dashboard)

@@ -211,7 +211,7 @@ func (m dashboard) scrollGitAction(delta int) (tea.Model, tea.Cmd) {
 }
 
 func (m dashboard) handleGitActionsMouse(message tea.MouseMsg) (tea.Model, tea.Cmd, bool) {
-	row, inside := m.modalContentRow(message.Mouse(), max(m.width, 40), m.dimensions().bodyHeight)
+	row, inside := m.modalContentRowAt(message.Mouse())
 	if !inside {
 		return m, nil, false
 	}

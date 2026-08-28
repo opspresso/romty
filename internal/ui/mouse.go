@@ -139,7 +139,7 @@ func (m dashboard) handleModalMouse(message tea.MouseMsg) (tea.Model, tea.Cmd, b
 		return m, nil, false
 	}
 	mouse := click.Mouse()
-	for _, hit := range m.modalActionHits(max(m.width, 40), m.dimensions().bodyHeight) {
+	for _, hit := range m.modalActionHits(m.modalGeometry(max(m.width, 40), m.dimensions().bodyHeight)) {
 		if mouse.Y == hit.row && mouse.X >= hit.left && mouse.X < hit.right {
 			updated, command := m.handleKey(tea.KeyPressMsg(tea.Key{Code: hit.action.code}))
 			return updated, command, true
@@ -158,12 +158,13 @@ func (m dashboard) hoverTargetAt(mouse tea.Mouse) hoverTarget {
 		return hoverTarget{}
 	}
 	if m.modal != noModal {
-		for index, hit := range m.modalActionHits(width, height) {
+		geometry := m.modalGeometry(width, height)
+		for index, hit := range m.modalActionHits(geometry) {
 			if mouse.Y == hit.row && mouse.X >= hit.left && mouse.X < hit.right {
 				return hoverTarget{kind: hoverModalAction, index: index}
 			}
 		}
-		row, inside := m.modalContentRow(mouse, width, height)
+		row, inside := geometry.contentRow(mouse)
 		if !inside {
 			return hoverTarget{}
 		}
@@ -213,7 +214,7 @@ func (m dashboard) hoverTargetAt(mouse tea.Mouse) hoverTarget {
 }
 
 func (m dashboard) handleConfigMouse(message tea.MouseMsg) (tea.Model, tea.Cmd, bool) {
-	row, inside := m.modalContentRow(message.Mouse(), max(m.width, 40), m.dimensions().bodyHeight)
+	row, inside := m.modalContentRowAt(message.Mouse())
 	if !inside {
 		return m, nil, false
 	}
@@ -239,27 +240,10 @@ func (m dashboard) handleConfigMouse(message tea.MouseMsg) (tea.Model, tea.Cmd, 
 	return m, nil, true
 }
 
-func (m dashboard) modalContentOrigin(width, height int) (int, int) {
-	lines := m.renderModal(width, height)
-	if len(lines) == 0 {
-		return 0, 0
-	}
-	modalWidth := lipgloss.Width(lines[0])
-	return max((width-modalWidth)/2, 0) + 3, max((height-len(lines))/2, 0) + 1
-}
-
-func (m dashboard) modalContentRow(mouse tea.Mouse, width, height int) (int, bool) {
-	lines := m.renderModal(width, height)
-	if len(lines) < 2 {
-		return 0, false
-	}
-	modalWidth := lipgloss.Width(lines[0])
-	modalLeft := max((width-modalWidth)/2, 0)
-	_, contentTop := m.modalContentOrigin(width, height)
-	row := mouse.Y - contentTop
-	inside := mouse.X >= modalLeft+1 && mouse.X < modalLeft+modalWidth-1 &&
-		row >= 0 && row < len(lines)-2
-	return row, inside
+// modalContentRowAt answers the same question for the modal that is open now,
+// at the size the body is now, which is what every mouse handler wants.
+func (m dashboard) modalContentRowAt(mouse tea.Mouse) (int, bool) {
+	return m.modalGeometry(max(m.width, 40), m.dimensions().bodyHeight).contentRow(mouse)
 }
 
 func (m dashboard) handleDashboardMouse(message tea.MouseMsg) (tea.Model, tea.Cmd, bool) {
