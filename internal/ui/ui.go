@@ -3108,52 +3108,86 @@ func (m dashboard) renderModalAction(action modalAction, hovered bool) string {
 	return renderShortcuts(m.styles, 1<<16, action.shortcut)
 }
 
-func (m dashboard) helpEntries() []string {
-	return []string{
-		m.styles.modalStrong.Render("romty") + m.styles.empty.Render("  "+version.String()) +
-			m.styles.modalBody.Render("  "+tagline),
-		renderHelpSection(m.styles, "GLOBAL", "function keys both panes; other keys contextual"),
-		renderHelpShortcut(m.styles, "Help", "F1", "?"),
-		renderHelpShortcut(m.styles, "Add root", "F2"),
-		renderHelpShortcut(m.styles, "Config", "F3", ","),
-		renderHelpShortcut(m.styles, "Quit", "F4", "Ctrl+C"),
-		renderHelpShortcut(m.styles, "Refresh workspaces/files", "F5"),
-		renderHelpShortcut(m.styles, "Toggle scrollback", "F6", "Ctrl+Shift+\\"),
-		renderHelpShortcut(m.styles, "Toggle pane focus", "F7", "Ctrl+/"),
-		renderHelpSection(m.styles, "WORKSPACE", "workspace pane only"),
-		renderHelpShortcut(m.styles, "Remove selection", "F8"),
-		renderHelpShortcut(m.styles, "Stop daemon", "F9"),
-		renderHelpShortcut(m.styles, "About", "i"),
-		renderHelpShortcut(m.styles, "Focus terminal", "Tab"),
-		renderHelpSection(m.styles, "SWITCH", "workspace and terminal context"),
-		renderHelpShortcut(m.styles, "New tab", "Ctrl+Shift+T"),
-		renderHelpShortcut(m.styles, "Git actions", "Ctrl+Shift+G"),
-		renderHelpShortcut(m.styles, "Toggle file view", "Ctrl+Shift+F"),
-		renderHelpShortcut(m.styles, "Switch tab", "Ctrl+Shift+←/→"),
-		renderHelpShortcut(m.styles, "Switch workspace", "Ctrl+Shift+↑/↓"),
-		renderHelpShortcut(m.styles, "Jump to a waiting agent", "Ctrl+Shift+A"),
-		renderHelpSection(m.styles, "MOVE", "lists, output and file view"),
-		renderHelpShortcut(m.styles, "Move one item / line", "↑/↓", "k/j"),
-		renderHelpShortcut(m.styles, "Tab; picker child/parent", "←/→", "h/l"),
-		renderHelpShortcut(m.styles, "Previous / next page", "PgUp/PgDn", "Ctrl+B/F"),
-		renderHelpShortcut(m.styles, "First / last item/line", "Home/End", "g/G"),
-		renderHelpShortcut(m.styles, "Enter / page scrollback", "Shift+PgUp/PgDn"),
-		renderHelpShortcut(m.styles, "Scroll Help/history/diff", "Wheel"),
-		renderHelpSection(m.styles, "FILE DIFF", "changed file tree and diff"),
-		renderHelpShortcut(m.styles, "Toggle diff layout", "F6"),
-		renderHelpShortcut(m.styles, "Scroll diff one line", "Ctrl+↑/↓"),
-		renderHelpSection(m.styles, "MOUSE", "dashboard chrome"),
-		renderHelpShortcut(m.styles, "Open workspace or tab", "Click"),
-		renderHelpShortcut(m.styles, "Move workspace cursor", "Wheel over tree"),
-		renderHelpShortcut(m.styles, "Resize workspace pane", "Drag divider"),
-		renderHelpSection(m.styles, "CONTEXT", "workspace, picker, modals and prompts"),
-		renderHelpShortcut(m.styles, "Activate / submit", "Enter"),
-		renderHelpShortcut(m.styles, "Close / cancel / leave", "Esc"),
-		renderHelpShortcut(m.styles, "Type a picker path", "/"),
-		renderHelpShortcut(m.styles, "Erase path character", "Backspace"),
-		renderHelpShortcut(m.styles, "Adjust pane width", "←/→", "[/]"),
-		renderHelpShortcut(m.styles, "Toggle scrollback mouse", "m"),
+// helpEntry is one line of the reference: a section heading, or a shortcut and
+// the keys that run it. Keeping the keys as data rather than only as a rendered
+// string lets the reference be checked against the key table it documents —
+// counting rendered lines said nothing about whether a shortcut was documented
+// at all.
+type helpEntry struct {
+	section     string
+	note        string
+	description string
+	keys        []string
+}
+
+func (e helpEntry) isSection() bool {
+	return e.section != ""
+}
+
+// helpReference is every line of the shortcut reference in the order the modal
+// shows them.
+func helpReference() []helpEntry {
+	return []helpEntry{
+		{section: "GLOBAL", note: "function keys both panes; other keys contextual"},
+		{description: "Help", keys: []string{"F1", "?"}},
+		{description: "Add root", keys: []string{"F2"}},
+		{description: "Config", keys: []string{"F3", ","}},
+		{description: "Quit", keys: []string{"F4", "Ctrl+C"}},
+		{description: "Refresh workspaces/files", keys: []string{"F5"}},
+		{description: "Toggle scrollback", keys: []string{"F6", "Ctrl+Shift+\\"}},
+		{description: "Toggle pane focus", keys: []string{"F7", "Ctrl+/"}},
+		{section: "WORKSPACE", note: "workspace pane only"},
+		{description: "Remove selection", keys: []string{"F8"}},
+		{description: "Stop daemon", keys: []string{"F9"}},
+		{description: "About", keys: []string{"i"}},
+		{description: "Focus terminal", keys: []string{"Tab"}},
+		{section: "SWITCH", note: "workspace and terminal context"},
+		{description: "New tab", keys: []string{"Ctrl+Shift+T"}},
+		{description: "Git actions", keys: []string{"Ctrl+Shift+G"}},
+		{description: "Toggle file view", keys: []string{"Ctrl+Shift+F"}},
+		{description: "Switch tab", keys: []string{"Ctrl+Shift+←/→"}},
+		{description: "Switch workspace", keys: []string{"Ctrl+Shift+↑/↓"}},
+		{description: "Jump to a waiting agent", keys: []string{"Ctrl+Shift+A"}},
+		{section: "MOVE", note: "lists, output and file view"},
+		{description: "Move one item / line", keys: []string{"↑/↓", "k/j"}},
+		{description: "Tab; picker child/parent", keys: []string{"←/→", "h/l"}},
+		{description: "Previous / next page", keys: []string{"PgUp/PgDn", "Ctrl+B/F"}},
+		{description: "First / last item/line", keys: []string{"Home/End", "g/G"}},
+		{description: "Enter / page scrollback", keys: []string{"Shift+PgUp/PgDn"}},
+		{description: "Scroll Help/history/diff", keys: []string{"Wheel"}},
+		{section: "FILE DIFF", note: "changed file tree and diff"},
+		{description: "Toggle diff layout", keys: []string{"F6"}},
+		{description: "Scroll diff one line", keys: []string{"Ctrl+↑/↓"}},
+		{section: "MOUSE", note: "dashboard chrome"},
+		{description: "Open workspace or tab", keys: []string{"Click"}},
+		{description: "Move workspace cursor", keys: []string{"Wheel over tree"}},
+		{description: "Resize workspace pane", keys: []string{"Drag divider"}},
+		{section: "CONTEXT", note: "workspace, picker, modals and prompts"},
+		{description: "Activate / submit", keys: []string{"Enter"}},
+		{description: "Close / cancel / leave", keys: []string{"Esc"}},
+		{description: "Type a picker path", keys: []string{"/"}},
+		{description: "Erase path character", keys: []string{"Backspace"}},
+		{description: "Adjust pane width", keys: []string{"←/→", "[/]"}},
+		{description: "Toggle scrollback mouse", keys: []string{"m"}},
+		{description: "Toggle agent sounds", keys: []string{"d", "b"}},
+		{description: "Test the done sound", keys: []string{"s"}},
 	}
+}
+
+func (m dashboard) helpEntries() []string {
+	reference := helpReference()
+	lines := make([]string, 0, len(reference)+1)
+	lines = append(lines, m.styles.modalStrong.Render("romty")+
+		m.styles.empty.Render("  "+version.String())+
+		m.styles.modalBody.Render("  "+tagline))
+	for _, entry := range reference {
+		if entry.isSection() {
+			lines = append(lines, renderHelpSection(m.styles, entry.section, entry.note))
+			continue
+		}
+		lines = append(lines, renderHelpShortcut(m.styles, entry.description, entry.keys...))
+	}
+	return lines
 }
 
 // renderHelpModal windows the shortcut list so the box always fits the body and

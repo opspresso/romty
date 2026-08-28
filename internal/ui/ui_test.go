@@ -4725,12 +4725,75 @@ func TestDashboardOpensHelpFromTheTerminalPane(t *testing.T) {
 	}
 }
 
+// The help modal is the only place a user can look a shortcut up, so every key
+// romty takes in both panes has to appear there. Comparing the reference with
+// the table that routes those keys says that; counting rendered lines did not,
+// and the hand-copied list of every shortcut that stood beside it was a second
+// copy of the reference that quietly fell behind it.
+func TestHelpReferenceDocumentsEveryGlobalKey(t *testing.T) {
+	documented := make(map[string]bool)
+	for _, entry := range helpReference() {
+		for _, keycap := range entry.keys {
+			for _, name := range helpKeyNames(keycap) {
+				documented[name] = true
+			}
+		}
+	}
+	for name := range globalKeys {
+		if !documented[name] {
+			t.Errorf("global key %q appears in no help entry", name)
+		}
+	}
+}
+
+// helpKeyNames spells one help keycap the way globalKeys names it, expanding
+// the paired arrows and pages the reference writes as a single cap.
+func helpKeyNames(keycap string) []string {
+	lower := strings.ToLower(keycap)
+	for _, pair := range []struct {
+		suffix string
+		tails  []string
+	}{
+		{suffix: "←/→", tails: []string{"left", "right"}},
+		{suffix: "↑/↓", tails: []string{"up", "down"}},
+		{suffix: "pgup/pgdn", tails: []string{"pgup", "pgdown"}},
+	} {
+		prefix, found := strings.CutSuffix(lower, pair.suffix)
+		if !found {
+			continue
+		}
+		names := make([]string, 0, len(pair.tails))
+		for _, tail := range pair.tails {
+			names = append(names, prefix+tail)
+		}
+		return names
+	}
+	return []string{lower}
+}
+
+func TestHelpReferenceEntriesAreComplete(t *testing.T) {
+	for index, entry := range helpReference() {
+		switch {
+		case entry.isSection():
+			if entry.note == "" || entry.description != "" || len(entry.keys) > 0 {
+				t.Errorf("entry %d = %+v, want a section heading with only a note", index, entry)
+			}
+		case entry.description == "" || len(entry.keys) == 0:
+			t.Errorf("entry %d = %+v, want a shortcut with a description and keys", index, entry)
+		}
+	}
+	if first := helpReference()[0]; !first.isSection() {
+		t.Errorf("first entry = %+v, want a section heading", first)
+	}
+}
+
 func TestDashboardShowsCompleteShortcutReferenceInHelpModal(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, model.Snapshot{})
 	value.width = 100
 	value.height = 80
-	if entries := value.helpEntries(); len(entries) != 42 {
-		t.Fatalf("help entries = %d, want 7 sections and 35 shortcuts", len(entries))
+	// One line per reference entry, plus the name-and-version banner above them.
+	if entries := value.helpEntries(); len(entries) != len(helpReference())+1 {
+		t.Fatalf("help entries = %d, want %d", len(entries), len(helpReference())+1)
 	}
 
 	updated, command := value.Update(key('?', "?"))
@@ -4745,56 +4808,30 @@ func TestDashboardShowsCompleteShortcutReferenceInHelpModal(t *testing.T) {
 	}
 	plainLines := strings.Split(ansi.Strip(strings.Join(modalLines, "\n")), "\n")
 	plain := strings.Join(plainLines, "\n")
-	for _, section := range []string{"GLOBAL", "WORKSPACE", "SWITCH", "MOVE", "FILE DIFF", "CONTEXT"} {
-		if !strings.Contains(plain, section) {
-			t.Fatalf("help modal does not contain %q section:\n%s", section, plain)
+
+	// Every entry the reference declares reaches the screen.
+	for _, entry := range helpReference() {
+		if entry.isSection() {
+			if !strings.Contains(plain, entry.section) {
+				t.Fatalf("help modal does not contain %q section:\n%s", entry.section, plain)
+			}
+			continue
+		}
+		if !helpContainsShortcut(plainLines, entry.description, entry.keys...) {
+			t.Fatalf("help modal does not contain %v %q shortcut:\n%s", entry.keys, entry.description, plain)
 		}
 	}
+
+	// The reference was once nine sections of two or three lines each, which
+	// read as a list of headings rather than of shortcuts.
 	for _, section := range []string{"CORE", "NAVIGATE", "FILES", "SCROLLBACK", "PICKER", "HELP", "CONFIG", "GIT", "PROMPTS"} {
 		if strings.Contains(plain, section) {
 			t.Fatalf("help modal still contains duplicated %q section:\n%s", section, plain)
 		}
 	}
-	shortcuts := []struct {
-		keys        []string
-		description string
-	}{
-		{keys: []string{"F1", "?"}, description: "Help"},
-		{keys: []string{"F2"}, description: "Add root"},
-		{keys: []string{"F3", ","}, description: "Config"},
-		{keys: []string{"F4", "Ctrl+C"}, description: "Quit"},
-		{keys: []string{"F5"}, description: "Refresh workspaces/files"},
-		{keys: []string{"F6", "Ctrl+Shift+\\"}, description: "Toggle scrollback"},
-		{keys: []string{"F7", "Ctrl+/"}, description: "Toggle pane focus"},
-		{keys: []string{"F8"}, description: "Remove selection"},
-		{keys: []string{"F9"}, description: "Stop daemon"},
-		{keys: []string{"i"}, description: "About"},
-		{keys: []string{"Tab"}, description: "Focus terminal"},
-		{keys: []string{"Ctrl+Shift+T"}, description: "New tab"},
-		{keys: []string{"Ctrl+Shift+G"}, description: "Git actions"},
-		{keys: []string{"Ctrl+Shift+F"}, description: "Toggle file view"},
-		{keys: []string{"Ctrl+Shift+←/→"}, description: "Switch tab"},
-		{keys: []string{"Ctrl+Shift+↑/↓"}, description: "Switch workspace"},
-		{keys: []string{"↑/↓", "k/j"}, description: "Move one item / line"},
-		{keys: []string{"←/→", "h/l"}, description: "Tab; picker child/parent"},
-		{keys: []string{"PgUp/PgDn", "Ctrl+B/F"}, description: "Previous / next page"},
-		{keys: []string{"Home/End", "g/G"}, description: "First / last item/line"},
-		{keys: []string{"Shift+PgUp/PgDn"}, description: "Enter / page scrollback"},
-		{keys: []string{"Wheel"}, description: "Scroll Help/history/diff"},
-		{keys: []string{"F6"}, description: "Toggle diff layout"},
-		{keys: []string{"Ctrl+↑/↓"}, description: "Scroll diff one line"},
-		{keys: []string{"Enter"}, description: "Activate / submit"},
-		{keys: []string{"Esc"}, description: "Close / cancel / leave"},
-		{keys: []string{"/"}, description: "Type a picker path"},
-		{keys: []string{"Backspace"}, description: "Erase path character"},
-		{keys: []string{"←/→", "[/]"}, description: "Adjust pane width"},
-		{keys: []string{"m"}, description: "Toggle scrollback mouse"},
-	}
-	for _, shortcut := range shortcuts {
-		if !helpContainsShortcut(plainLines, shortcut.description, shortcut.keys...) {
-			t.Fatalf("help modal does not contain %v %q shortcut:\n%s", shortcut.keys, shortcut.description, plain)
-		}
-	}
+	// Each function key is documented once, so no shortcut is listed twice
+	// under different words. F6 is the exception: it toggles scrollback, and
+	// the file view gives it a second meaning of its own.
 	for _, name := range []string{"F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9"} {
 		want := 1
 		if name == "F6" {
@@ -4802,12 +4839,6 @@ func TestDashboardShowsCompleteShortcutReferenceInHelpModal(t *testing.T) {
 		}
 		if count := strings.Count(plain, name); count != want {
 			t.Fatalf("help modal contains %s %d times, want %d:\n%s", name, count, want, plain)
-		}
-	}
-	help := strings.Join(value.helpEntries(), "\n")
-	for _, key := range []string{"a", "q", "r", "s", "d", "t", "v"} {
-		if strings.Contains(help, value.styles.shortcutKey.Render(" "+key+" ")) {
-			t.Fatalf("help modal still contains removed %q shortcut:\n%s", key, plain)
 		}
 	}
 	if !strings.Contains(plain, version.String()) {

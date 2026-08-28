@@ -92,6 +92,8 @@ Press `Ctrl`+`Shift`+`F` to toggle the file view for the same contextual workspa
 | `Backspace` | Erase a path character |
 | `←`/`→` or `[`/`]` | Resize the workspace pane in Config |
 | `m` | Toggle the scrollback mouse in Config |
+| `d`/`b` | Toggle the done and waiting sounds in Config |
+| `s` | Play the done sound in Config |
 
 ## Roots, workspaces, and tabs
 
