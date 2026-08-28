@@ -207,6 +207,7 @@ type dashboard struct {
 	// reconstructing it from fields.
 	config            Config
 	leftWidth         int
+	navigationResize  bool
 	mousePassthrough  bool
 	scrollbackMouse   bool
 	gitStates         map[string]gitState
@@ -459,6 +460,12 @@ func (m dashboard) update(message tea.Msg) (tea.Model, tea.Cmd) {
 			return m.handleGitDiffMouse(message.(tea.MouseMsg))
 		}
 		mouse := message.(tea.MouseMsg)
+		if m.modal != noModal {
+			return m, nil
+		}
+		if updated, command, handled := m.handleDashboardMouse(mouse); handled {
+			return updated, command
+		}
 		if wheel, ok := message.(tea.MouseWheelMsg); ok && !m.guestOwnsMouse() {
 			return m.handleTerminalWheel(wheel)
 		}
@@ -1158,6 +1165,106 @@ func (m dashboard) handleHelpMouse(message tea.MouseMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m dashboard) handleDashboardMouse(message tea.MouseMsg) (tea.Model, tea.Cmd, bool) {
+	mouse := message.Mouse()
+	view := m.dimensions()
+	if m.navigationResize {
+		switch message.(type) {
+		case tea.MouseMotionMsg:
+			m.setLeftWidth(mouse.X - 1)
+			return m, m.resizeTerminal(), true
+		case tea.MouseReleaseMsg:
+			m.navigationResize = false
+			return m, tea.Batch(m.resizeTerminal(), m.saveConfig()), true
+		}
+	}
+
+	if wheel, ok := message.(tea.MouseWheelMsg); ok && mouse.X < view.leftWidth && mouse.Y < view.bodyHeight {
+		m.focus = leftPane
+		switch wheel.Button {
+		case tea.MouseWheelUp:
+			m.moveNavigation(-3)
+		case tea.MouseWheelDown:
+			m.moveNavigation(3)
+		default:
+			return m, nil, false
+		}
+		return m, nil, true
+	}
+
+	click, ok := message.(tea.MouseClickMsg)
+	if !ok || click.Button != tea.MouseLeft {
+		return m, nil, false
+	}
+	if view.separator > 0 && mouse.Y < view.bodyHeight &&
+		mouse.X >= view.leftWidth && mouse.X < view.leftWidth+view.separator {
+		m.navigationResize = true
+		return m, nil, true
+	}
+	if mouse.X < view.leftWidth && mouse.Y < view.bodyHeight {
+		index, ok := m.navigationIndexAtRow(mouse.Y, view.bodyHeight)
+		if !ok {
+			return m, nil, true
+		}
+		m.focus = leftPane
+		m.setNavigation(index)
+		m.syncTabCursor(runningTabs(m.navigationItems()[index].tabs))
+		return m, m.selectWorkspace(), true
+	}
+	if mouse.Y == 0 && mouse.X >= view.leftWidth+view.separator {
+		localX := mouse.X - view.leftWidth - view.separator
+		tabs := m.selectedTabs()
+		if m.focus == leftPane {
+			tabs = m.navigationTabs()
+		}
+		index, ok := tabIndexAtX(tabs, localX)
+		if !ok {
+			return m, nil, true
+		}
+		m.tabIndex = index
+		if m.focus == leftPane {
+			return m, m.selectWorkspace(), true
+		}
+		if index == len(tabs) {
+			updated, command := m.newTab()
+			return updated, command, true
+		}
+		return m, m.openSelectedTerminal(), true
+	}
+	return m, nil, false
+}
+
+func (m dashboard) navigationIndexAtRow(row, height int) (int, bool) {
+	items := m.navigationItems()
+	available := max(height-2, 0)
+	start, end := navigationWindow(items, m.navIndex, available)
+	currentRow := 2
+	for index := start; index < end; index++ {
+		nextRow := currentRow + navigationRows(items[index])
+		if row >= currentRow && row < nextRow {
+			return index, true
+		}
+		currentRow = nextRow
+	}
+	return 0, false
+}
+
+func tabIndexAtX(tabs []model.Tab, x int) (int, bool) {
+	position := 0
+	for index := 0; index <= len(tabs); index++ {
+		label := " + "
+		if index < len(tabs) {
+			label = " " + displayText(tabs[index].Name) + " "
+		}
+		end := position + lipgloss.Width(label)
+		if x >= position && x < end {
+			return index, true
+		}
+		position = end + 1
+	}
+	return 0, false
+}
+
 func (m dashboard) maximumHelpOffset(height int) int {
 	return max(len(m.helpEntries())-modalCapacity(height), 0)
 }
@@ -1169,10 +1276,13 @@ func (m dashboard) shutdownDaemon() tea.Cmd {
 }
 
 func (m dashboard) adjustLeftWidth(delta int) (tea.Model, tea.Cmd) {
-	current := m.paneWidth()
-	maximum := min(maximumLeftWidth, max(m.width, 40)-20)
-	m.leftWidth = min(max(current+delta, minimumLeftWidth), maximum)
+	m.setLeftWidth(m.paneWidth() + delta)
 	return m, m.saveConfig()
+}
+
+func (m *dashboard) setLeftWidth(width int) {
+	maximum := min(maximumLeftWidth, max(m.width, 40)-20)
+	m.leftWidth = min(max(width, minimumLeftWidth), maximum)
 }
 
 func (m dashboard) toggleScrollbackMouse() (tea.Model, tea.Cmd) {
@@ -2241,9 +2351,6 @@ func (m dashboard) mouseMode() tea.MouseMode {
 		}
 		return tea.MouseModeNone
 	}
-	if m.terminal == nil {
-		return tea.MouseModeNone
-	}
 	if m.guestOwnsMouse() {
 		return m.terminal.guestMouseMode()
 	}
@@ -2610,6 +2717,10 @@ func (m dashboard) helpEntries() []string {
 		renderHelpSection(m.styles, "FILE DIFF", "changed file tree and diff"),
 		renderHelpShortcut(m.styles, "Toggle diff layout", "F6"),
 		renderHelpShortcut(m.styles, "Scroll diff one line", "Ctrl+↑/↓"),
+		renderHelpSection(m.styles, "MOUSE", "dashboard chrome"),
+		renderHelpShortcut(m.styles, "Open workspace or tab", "Click"),
+		renderHelpShortcut(m.styles, "Move workspace cursor", "Wheel over tree"),
+		renderHelpShortcut(m.styles, "Resize workspace pane", "Drag divider"),
 		renderHelpSection(m.styles, "CONTEXT", "workspace, picker, modals and prompts"),
 		renderHelpShortcut(m.styles, "Activate / submit", "Enter"),
 		renderHelpShortcut(m.styles, "Close / cancel / leave", "Esc"),

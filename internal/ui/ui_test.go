@@ -835,6 +835,91 @@ func TestDashboardSupportsIMEIndependentShortcuts(t *testing.T) {
 	}
 }
 
+func TestDashboardMouseSelectsWorkspaceAndTab(t *testing.T) {
+	workspace := model.Workspace{ID: "workspace-1", RootID: "root-1", Name: "alpha", Path: "/projects/alpha"}
+	tabs := []model.Tab{
+		{ID: "tab-1", WorkspaceID: workspace.ID, Name: "1", Running: true},
+		{ID: "tab-2", WorkspaceID: workspace.ID, Name: "2", Running: true},
+	}
+	snapshot := model.Snapshot{Roots: []model.RootView{{
+		Root:        model.Root{ID: "root-1", Name: "projects", Path: "/projects"},
+		Directories: []model.WorkspaceView{{Workspace: workspace, Tabs: tabs}},
+	}}}
+	backend := &fakeBackend{snapshot: snapshot, workspace: workspace}
+	value := newDashboard(backend, snapshot)
+	value.width, value.height = 120, 30
+
+	updated, command := value.Update(tea.MouseClickMsg{X: 2, Y: 3, Button: tea.MouseLeft})
+	value = updated.(dashboard)
+	if value.navIndex != 1 || value.cursorPath != workspace.Path || command == nil {
+		t.Fatalf("workspace click = (index %d, path %q, command %v)", value.navIndex, value.cursorPath, command)
+	}
+
+	value.selectedWorkspaceID = workspace.ID
+	value.selectedPath = workspace.Path
+	value.focus = terminalPane
+	rightX := value.dimensions().leftWidth + value.dimensions().separator
+	updated, command = value.Update(tea.MouseClickMsg{X: rightX + 5, Y: 0, Button: tea.MouseLeft})
+	value = updated.(dashboard)
+	if value.tabIndex != 1 || command == nil {
+		t.Fatalf("tab click = (index %d, command %v), want second tab opened", value.tabIndex, command)
+	}
+}
+
+func TestDashboardMouseWheelMovesOnlyTheWorkspaceCursor(t *testing.T) {
+	value := newDashboard(&fakeBackend{}, twoRootSnapshot())
+	value.width, value.height = 120, 30
+
+	updated, command := value.Update(tea.MouseWheelMsg{X: 2, Y: 3, Button: tea.MouseWheelDown})
+	value = updated.(dashboard)
+	if value.navIndex != 1 || value.cursorPath != "/second" || command != nil {
+		t.Fatalf("workspace wheel = (index %d, path %q, command %v)", value.navIndex, value.cursorPath, command)
+	}
+}
+
+func TestDashboardDragsAndPersistsTheWorkspaceDivider(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	value := newDashboardWithConfig(&fakeBackend{}, model.Snapshot{}, path, Config{LeftWidth: 24})
+	value.width, value.height = 120, 30
+	seam := value.dimensions().leftWidth + 1
+
+	updated, command := value.Update(tea.MouseClickMsg{X: seam, Y: 5, Button: tea.MouseLeft})
+	value = updated.(dashboard)
+	if !value.navigationResize || command != nil {
+		t.Fatalf("divider press = (dragging %v, command %v)", value.navigationResize, command)
+	}
+
+	updated, _ = value.Update(tea.MouseMotionMsg{X: 35, Y: 5, Button: tea.MouseLeft})
+	value = updated.(dashboard)
+	if value.paneWidth() != 34 {
+		t.Fatalf("divider drag width = %d, want 34", value.paneWidth())
+	}
+
+	updated, command = value.Update(tea.MouseReleaseMsg{X: 35, Y: 5, Button: tea.MouseLeft})
+	value = updated.(dashboard)
+	if value.navigationResize || command == nil {
+		t.Fatalf("divider release = (dragging %v, command %v)", value.navigationResize, command)
+	}
+	message := command()
+	if saved, ok := message.(configSavedMsg); !ok || saved.err != nil {
+		t.Fatalf("save result = %#v", message)
+	}
+	config, err := loadConfig(path)
+	if err != nil {
+		t.Fatalf("loadConfig() error = %v", err)
+	}
+	if config.LeftWidth != 34 {
+		t.Fatalf("saved width = %d, want 34", config.LeftWidth)
+	}
+}
+
+func TestDashboardClaimsTheMouseWithoutAnOpenTerminal(t *testing.T) {
+	value := newDashboard(&fakeBackend{}, model.Snapshot{})
+	if got := value.View().MouseMode; got != tea.MouseModeCellMotion {
+		t.Fatalf("mouse mode = %v, want dashboard clicks enabled", got)
+	}
+}
+
 func TestDashboardConfirmsDaemonShutdown(t *testing.T) {
 	backend := &fakeBackend{}
 	terminal := newEmbeddedTerminal("tab-1", newMemoryStream(""), 40, 10)
@@ -3055,8 +3140,8 @@ func TestDashboardRefusesScrollbackWithoutTerminal(t *testing.T) {
 			t.Fatalf("%q entered scrollback with no terminal open", message.String())
 		}
 	}
-	if value.View().MouseMode != tea.MouseModeNone {
-		t.Fatalf("mouse mode = %v, want none", value.View().MouseMode)
+	if value.View().MouseMode != tea.MouseModeCellMotion {
+		t.Fatalf("mouse mode = %v, want dashboard clicks enabled", value.View().MouseMode)
 	}
 }
 
@@ -4218,8 +4303,8 @@ func TestDashboardShowsCompleteShortcutReferenceInHelpModal(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, model.Snapshot{})
 	value.width = 100
 	value.height = 80
-	if entries := value.helpEntries(); len(entries) != 37 {
-		t.Fatalf("help entries = %d, want 6 sections and 30 shortcuts", len(entries))
+	if entries := value.helpEntries(); len(entries) != 41 {
+		t.Fatalf("help entries = %d, want 7 sections and 33 shortcuts", len(entries))
 	}
 
 	updated, command := value.Update(key('?', "?"))
@@ -4373,8 +4458,8 @@ func TestDashboardScrollsHelpModalWithMouseWheel(t *testing.T) {
 
 	updated, _ = value.Update(key(tea.KeyEscape, ""))
 	value = updated.(dashboard)
-	if value.View().MouseMode != tea.MouseModeNone {
-		t.Fatalf("mouse mode after closing help = %v, want none", value.View().MouseMode)
+	if value.View().MouseMode != tea.MouseModeCellMotion {
+		t.Fatalf("mouse mode after closing help = %v, want dashboard clicks enabled", value.View().MouseMode)
 	}
 }
 

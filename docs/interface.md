@@ -98,6 +98,8 @@ The `+` key is not a shortcut. Select the `+` tab with `←`/`→` and press `En
 
 Pane focus and scrollback toggles are reversible. In the terminal pane only Global and Switch shortcuts are captured. Other keyboard and paste input, including `F8`, `F9`, and ordinary `Ctrl` combinations, is forwarded to the PTY.
 
+The dashboard chrome is mouse-aware. Click a root or workspace to select and open it, click a terminal tab or `+` to activate it, and use the wheel over the workspace tree to move its cursor without opening anything. Drag the vertical divider to resize the workspace pane; the terminal resizes live and the final width is saved when the button is released.
+
 romty discovers direct child directories only. Press `F5` after a command adds or removes a child. An unreadable root is marked `✗` and listed without workspaces; other roots remain usable.
 
 ## Scrollback and mouse
