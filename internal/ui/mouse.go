@@ -9,7 +9,6 @@ import (
 	uv "github.com/charmbracelet/ultraviolet"
 
 	"github.com/opspresso/romty/internal/model"
-	"github.com/opspresso/romty/internal/sound"
 )
 
 type hoverKind int
@@ -170,7 +169,7 @@ func (m dashboard) hoverTargetAt(mouse tea.Mouse) hoverTarget {
 				return hoverTarget{kind: hoverGitAction, index: row - 2}
 			}
 		case configModal:
-			if row >= 0 && row < 5 {
+			if row >= 0 && row < len(configRows()) {
 				return hoverTarget{kind: hoverConfigRow, index: row}
 			}
 		}
@@ -220,19 +219,11 @@ func (m dashboard) handleConfigMouse(message tea.MouseMsg) (tea.Model, tea.Cmd, 
 	if !ok || click.Button != tea.MouseLeft {
 		return m, nil, false
 	}
-	switch row {
-	case 1:
-		updated, command := m.toggleScrollbackMouse()
+	if updated, command, ok := m.runConfigRow(row); ok {
 		return updated, command, true
-	case 2:
-		updated, command := m.toggleSoundOnDone()
-		return updated, command, true
-	case 3:
-		updated, command := m.toggleSoundOnWaiting()
-		return updated, command, true
-	case 4:
-		return m, soundAlert(sound.Done), true
 	}
+	// A click inside the box that lands on no setting is still the modal's;
+	// letting it fall through would send it to whatever is drawn behind.
 	return m, nil, true
 }
 

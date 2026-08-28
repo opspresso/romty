@@ -3,14 +3,12 @@
 package ui
 
 import (
-	"fmt"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
 	"github.com/opspresso/romty/internal/agenthooks"
-	"github.com/opspresso/romty/internal/sound"
 	"github.com/opspresso/romty/internal/version"
 )
 
@@ -110,14 +108,9 @@ func (m dashboard) handleModalKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 			return m.adjustLeftWidth(-1)
 		case "right", "]":
 			return m.adjustLeftWidth(1)
-		case "m":
-			return m.toggleScrollbackMouse()
-		case "d":
-			return m.toggleSoundOnDone()
-		case "b":
-			return m.toggleSoundOnWaiting()
-		case "s":
-			return m, soundAlert(sound.Done)
+		}
+		if updated, command, ok := m.runConfigKey(message.String()); ok {
+			return updated, command
 		}
 	}
 	return m, nil
@@ -210,13 +203,12 @@ func (m dashboard) renderModal(width, height int) []string {
 		return m.withModalActions(modalBox(m.styles, modalWidth, "Agent hooks", lines...))
 	}
 	if m.modal == configModal {
-		return modalBox(m.styles, modalWidth, "Config",
-			m.renderConfigRow(modalWidth, 0, fmt.Sprintf("Left pane: %d", m.paneWidth()), "←/→"),
-			m.renderConfigRow(modalWidth, 1, "Scrollback mouse: "+onOff(m.scrollbackMouse), "m"),
-			m.renderConfigRow(modalWidth, 2, "Sound on done: "+onOff(m.soundOnDone), "d"),
-			m.renderConfigRow(modalWidth, 3, "Sound on waiting: "+onOff(m.soundOnWaiting), "b"),
-			m.renderConfigRow(modalWidth, 4, "Test sound", "s"),
-		)
+		rows := configRows()
+		lines := make([]string, 0, len(rows))
+		for index, row := range rows {
+			lines = append(lines, m.renderConfigRow(modalWidth, index, row.label(m), row.hint))
+		}
+		return modalBox(m.styles, modalWidth, "Config", lines...)
 	}
 	return modalBox(m.styles, modalWidth, "About",
 		m.styles.modalStrong.Render("romty")+"  "+m.styles.empty.Render(version.String()),

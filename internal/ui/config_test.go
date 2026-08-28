@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/opspresso/romty/internal/model"
 )
@@ -179,4 +180,59 @@ func TestConfigKnowsEveryFieldItDeclares(t *testing.T) {
 	if _, present := written["custom"]; !present {
 		t.Errorf("custom field was not preserved: %s", data)
 	}
+}
+
+// The modal, its keys, its clicks and its hover all read one list of settings.
+// A row that draws but answers nothing, or answers for its neighbour, is what
+// four separate lists produce.
+func TestConfigRowsDrawAndAnswerTogether(t *testing.T) {
+	value := newDashboard(&fakeBackend{}, model.Snapshot{})
+	value.width, value.height = 120, 40
+	value.modal = configModal
+	rows := configRows()
+
+	lines := plainRows(value.renderModal(value.width, value.dimensions().bodyHeight))
+	for index, row := range rows {
+		// One border row above the content.
+		drawn := lines[1+index]
+		label := row.label(value)
+		if !strings.Contains(drawn, label) {
+			t.Errorf("row %d draws %q, want %q", index, drawn, label)
+		}
+		if !strings.Contains(drawn, row.hint) {
+			t.Errorf("row %d draws %q, want the %q key", index, drawn, row.hint)
+		}
+		if row.action == nil {
+			continue
+		}
+		if _, _, ok := value.runConfigRow(index); !ok {
+			t.Errorf("row %d draws an action a click cannot reach", index)
+		}
+		for _, key := range row.keys {
+			if _, _, ok := value.runConfigKey(key); !ok {
+				t.Errorf("row %d key %q runs nothing", index, key)
+			}
+		}
+	}
+
+	// The pointer highlights exactly the rows that exist.
+	if _, ok := value.browseIndexAtContentRow(0); ok {
+		t.Error("the picker answered for a config row")
+	}
+	if target := value.hoverTargetAtRow(len(rows) - 1); target.kind != hoverConfigRow {
+		t.Errorf("last row hover = %v, want a config row", target.kind)
+	}
+	if target := value.hoverTargetAtRow(len(rows)); target.kind == hoverConfigRow {
+		t.Error("a row past the last setting was highlighted as one")
+	}
+}
+
+// hoverTargetAtRow is what hoverTargetAt resolves for a content row of the open
+// modal, addressed by row rather than by pixel.
+func (m dashboard) hoverTargetAtRow(row int) hoverTarget {
+	width, height := max(m.width, 40), m.dimensions().bodyHeight
+	lines := m.renderModal(width, height)
+	left := max((width-lipgloss.Width(lines[0]))/2, 0) + 3
+	_, top := m.modalContentOrigin(width, height)
+	return m.hoverTargetAt(tea.Mouse{X: left, Y: top + row})
 }
