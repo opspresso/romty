@@ -927,7 +927,7 @@ func TestDashboardDragsAndPersistsTheWorkspaceDivider(t *testing.T) {
 
 func TestDashboardClaimsTheMouseWithoutAnOpenTerminal(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, model.Snapshot{})
-	if got := value.View().MouseMode; got != tea.MouseModeCellMotion {
+	if got := value.View().MouseMode; got != tea.MouseModeAllMotion {
 		t.Fatalf("mouse mode = %v, want dashboard clicks enabled", got)
 	}
 }
@@ -942,6 +942,7 @@ func TestDashboardHighlightsMouseTargetsOnHover(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, snapshot)
 	value.width, value.height = 120, 30
 	value.setNavigation(1)
+	_, defaultDivider := value.paneSeparators()
 
 	before := value.render()
 	updated, _ := value.Update(tea.MouseMotionMsg{X: 2, Y: 2})
@@ -956,6 +957,17 @@ func TestDashboardHighlightsMouseTargetsOnHover(t *testing.T) {
 	value = updated.(dashboard)
 	if value.hover.kind != hoverDivider || value.render() == before {
 		t.Fatalf("divider hover = %#v", value.hover)
+	}
+	if _, hoveredDivider := value.paneSeparators(); hoveredDivider == defaultDivider {
+		t.Fatal("divider hover kept its default color")
+	}
+	updated, _ = value.Update(tea.MouseMotionMsg{X: seam + 10, Y: 5})
+	value = updated.(dashboard)
+	if value.hover.kind != hoverNone {
+		t.Fatalf("mouse out hover = %#v, want none", value.hover)
+	}
+	if _, divider := value.paneSeparators(); divider != defaultDivider {
+		t.Fatal("divider did not return to its default color after mouse out")
 	}
 
 	origin := value.dimensions().leftWidth + value.dimensions().separator
@@ -1316,8 +1328,8 @@ func TestDashboardScrollsTerminalHistory(t *testing.T) {
 	history := value.terminal.scrollbackLen()
 
 	// The live screen captures the wheel so it can enter scrollback directly.
-	if value.View().MouseMode != tea.MouseModeCellMotion {
-		t.Fatalf("mouse mode outside scrollback = %v, want cell motion", value.View().MouseMode)
+	if value.View().MouseMode != tea.MouseModeAllMotion {
+		t.Fatalf("mouse mode outside scrollback = %v, want all motion", value.View().MouseMode)
 	}
 	live := plainRows(value.terminal.renderViewport(0))
 
@@ -1379,7 +1391,7 @@ func TestDashboardScrollsTerminalHistory(t *testing.T) {
 
 	updated, command = value.Update(key(tea.KeyEscape, ""))
 	value = updated.(dashboard)
-	if value.scrollback || value.scrollOffset != 0 || value.View().MouseMode != tea.MouseModeCellMotion {
+	if value.scrollback || value.scrollOffset != 0 || value.View().MouseMode != tea.MouseModeAllMotion {
 		t.Fatalf("Esc = (scrollback %v, offset %d, mouse %v), want live wheel capture restored",
 			value.scrollback, value.scrollOffset, value.View().MouseMode)
 	}
@@ -2028,7 +2040,7 @@ func TestDashboardKeepsMouseWithTheHostUnlessPassthroughIsOn(t *testing.T) {
 	if value.terminal.guestMouseMode() != tea.MouseModeAllMotion {
 		t.Fatalf("guest mouse mode = %v, want all motion", value.terminal.guestMouseMode())
 	}
-	if value.View().MouseMode != tea.MouseModeCellMotion {
+	if value.View().MouseMode != tea.MouseModeAllMotion {
 		t.Fatalf("mouse mode = %v, want romty to capture the live wheel", value.View().MouseMode)
 	}
 	updated, _ := value.Update(tea.MouseWheelMsg{X: 40, Y: 6, Button: tea.MouseWheelUp})
@@ -3389,7 +3401,7 @@ func TestDashboardRefusesScrollbackWithoutTerminal(t *testing.T) {
 			t.Fatalf("%q entered scrollback with no terminal open", message.String())
 		}
 	}
-	if value.View().MouseMode != tea.MouseModeCellMotion {
+	if value.View().MouseMode != tea.MouseModeAllMotion {
 		t.Fatalf("mouse mode = %v, want dashboard clicks enabled", value.View().MouseMode)
 	}
 }
@@ -3469,8 +3481,8 @@ func TestDashboardCapturesLiveMouseWheelAndUsesKeyboardFocus(t *testing.T) {
 	value.terminal = terminal
 	value.focus = terminalPane
 
-	if view := value.View(); view.MouseMode != tea.MouseModeCellMotion {
-		t.Fatalf("initial mouse mode = %v, want cell motion", view.MouseMode)
+	if view := value.View(); view.MouseMode != tea.MouseModeAllMotion {
+		t.Fatalf("initial mouse mode = %v, want all motion", view.MouseMode)
 	}
 	if rendered := value.render(); strings.Contains(rendered, "Ctrl+G") || strings.Contains(rendered, "mouse focus") {
 		t.Fatalf("mouse focus mode is still advertised:\n%s", rendered)
@@ -3485,8 +3497,8 @@ func TestDashboardCapturesLiveMouseWheelAndUsesKeyboardFocus(t *testing.T) {
 	if rendered := value.render(); !strings.Contains(rendered, separator) {
 		t.Fatalf("workspace focus is not visible:\n%s", rendered)
 	}
-	if view := value.View(); view.MouseMode != tea.MouseModeCellMotion {
-		t.Fatalf("mouse mode after Ctrl+/ = %v, want cell motion", view.MouseMode)
+	if view := value.View(); view.MouseMode != tea.MouseModeAllMotion {
+		t.Fatalf("mouse mode after Ctrl+/ = %v, want all motion", view.MouseMode)
 	}
 }
 
@@ -4688,8 +4700,8 @@ func TestDashboardScrollsHelpModalWithMouseWheel(t *testing.T) {
 	updated, _ := value.Update(key('?', "?"))
 	value = updated.(dashboard)
 
-	if value.View().MouseMode != tea.MouseModeCellMotion {
-		t.Fatalf("help mouse mode = %v, want cell motion", value.View().MouseMode)
+	if value.View().MouseMode != tea.MouseModeAllMotion {
+		t.Fatalf("help mouse mode = %v, want all motion", value.View().MouseMode)
 	}
 	if rendered := ansi.Strip(value.render()); !strings.Contains(rendered, "↑/↓/Wheel") {
 		t.Fatalf("help status does not advertise wheel scrolling:\n%s", rendered)
@@ -4707,7 +4719,7 @@ func TestDashboardScrollsHelpModalWithMouseWheel(t *testing.T) {
 
 	updated, _ = value.Update(key(tea.KeyEscape, ""))
 	value = updated.(dashboard)
-	if value.View().MouseMode != tea.MouseModeCellMotion {
+	if value.View().MouseMode != tea.MouseModeAllMotion {
 		t.Fatalf("mouse mode after closing help = %v, want dashboard clicks enabled", value.View().MouseMode)
 	}
 }

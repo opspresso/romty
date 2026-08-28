@@ -2601,13 +2601,14 @@ func (m dashboard) View() tea.View {
 	return view
 }
 
-// mouseMode claims the live terminal's wheel so it can enter scrollback. Copy
-// mode gives the mouse back to the host for native selection and takes its
-// wheel through alternate scroll instead. A guest application that asked for
-// the mouse takes precedence only when the user opted into passthrough.
+// mouseMode asks for pointer motion wherever romty draws hoverable controls.
+// Copy mode still gives the mouse back to the host for native selection. A
+// guest application that asked for the mouse receives events only when the
+// user opted into passthrough, while romty keeps motion for its surrounding
+// dashboard chrome.
 func (m dashboard) mouseMode() tea.MouseMode {
-	if m.modal == helpModal {
-		return tea.MouseModeCellMotion
+	if m.modal != noModal {
+		return tea.MouseModeAllMotion
 	}
 	if m.gitDiff.active {
 		return tea.MouseModeCellMotion
@@ -2623,9 +2624,9 @@ func (m dashboard) mouseMode() tea.MouseMode {
 		return tea.MouseModeNone
 	}
 	if m.guestOwnsMouse() {
-		return m.terminal.guestMouseMode()
+		return tea.MouseModeAllMotion
 	}
-	return tea.MouseModeCellMotion
+	return tea.MouseModeAllMotion
 }
 
 // guestOwnsMouse reports whether passthrough has handed the mouse to the guest.
