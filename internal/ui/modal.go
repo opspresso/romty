@@ -29,6 +29,7 @@ type modalActionHit struct {
 func (m dashboard) openModal(value modal) (tea.Model, tea.Cmd) {
 	m.modal = value
 	m.helpOffset = 0
+	m.configIndex = 0
 	m.clearAnyError()
 	return m, nil
 }
@@ -123,6 +124,23 @@ func (m dashboard) handleModalKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 			return m.adjustLeftWidth(-1)
 		case "right", "]":
 			return m.adjustLeftWidth(1)
+		case "up", "k":
+			m.moveConfig(-1)
+			return m, nil
+		case "down", "j":
+			m.moveConfig(1)
+			return m, nil
+		case "home", "g":
+			m.moveConfig(-len(configRows()))
+			return m, nil
+		case "end", "G":
+			m.moveConfig(len(configRows()))
+			return m, nil
+		case "enter", " ":
+			if updated, command, ok := m.runConfigRow(m.configIndex); ok {
+				return updated, command
+			}
+			return m, nil
 		}
 		if updated, command, ok := m.runConfigKey(message.String()); ok {
 			return updated, command
@@ -237,12 +255,7 @@ func (m dashboard) renderModal(width, height int) []string {
 		return m.withModalActions(modalBoxFit(m.styles, modalWidth, "Agent hooks", lines...))
 	}
 	if m.modal == configModal {
-		rows := configRows()
-		lines := make([]string, 0, len(rows))
-		for index, row := range rows {
-			lines = append(lines, m.renderConfigRow(modalWidth, index, row.label(m), row.hint))
-		}
-		return modalBox(m.styles, modalWidth, "Config", lines...)
+		return m.renderConfigModal(modalWidth)
 	}
 	return modalBoxFit(m.styles, modalWidth, "About",
 		m.styles.modalStrong.Render("romty")+"  "+m.styles.empty.Render(version.String()),
@@ -250,11 +263,74 @@ func (m dashboard) renderModal(width, height int) []string {
 	)
 }
 
-func (m dashboard) renderConfigRow(width, index int, label, key string) string {
-	if m.hover.kind == hoverConfigRow && m.hover.index == index {
-		return m.styles.interactiveHover.Render(pad(label+"  "+key, max(width-6, 0)))
+// renderConfigModal lays the settings out in columns — name, value, key — so
+// the values line up under one another and a glance down the column says which
+// are on. The widths come from the rows themselves, and the box takes what
+// they add up to.
+func (m dashboard) renderConfigModal(maximum int) []string {
+	rows := configRows()
+	nameWidth, valueWidth, hintWidth := 0, 0, 0
+	for _, row := range rows {
+		nameWidth = max(nameWidth, lipgloss.Width(row.name))
+		valueWidth = max(valueWidth, lipgloss.Width(row.text(m)))
+		hintWidth = max(hintWidth, lipgloss.Width(row.hint))
 	}
-	return m.styles.modalStrong.Render(label) + "  " + m.styles.empty.Render(key)
+	lines := make([]string, 0, len(rows))
+	for index, row := range rows {
+		lines = append(lines, m.renderConfigRow(row, index, nameWidth, valueWidth, hintWidth))
+	}
+	return modalBoxFit(m.styles, maximum, "Config", lines...)
+}
+
+// configCursorWidth is the marker column every list romty draws carries, so a
+// selected setting is marked the way a selected workspace or tab is.
+const configCursorWidth = 2
+
+// configColumnGap separates the name, the value and the key on a setting's row.
+const configColumnGap = "   "
+
+func (m dashboard) renderConfigRow(row configRow, index, nameWidth, valueWidth, hintWidth int) string {
+	cursor := "  "
+	if m.configIndex == index {
+		cursor = "▌ "
+	}
+	name, value, hint := row.name, row.text(m), row.hint
+	// A selected or hovered row is one colour all the way across, the way the
+	// picker and the Git action list draw theirs, so it is padded to the width
+	// every row shares before the style is applied.
+	if m.configIndex == index || m.hover.kind == hoverConfigRow && m.hover.index == index {
+		width := configCursorWidth + nameWidth + valueWidth + hintWidth + 2*len(configColumnGap)
+		filled := pad(cursor+pad(name, nameWidth)+configColumnGap+
+			pad(value, valueWidth)+configColumnGap+hint, width)
+		if m.configIndex == index {
+			return m.styles.navigationSelected.Render(filled)
+		}
+		return m.styles.interactiveHover.Render(filled)
+	}
+	// At rest each column carries its own colour, and the padding between them
+	// is left unstyled: a run of styled spaces paints a background where there
+	// is no content to justify one.
+	return m.styles.modalBorder.Render(cursor) +
+		m.styles.modalStrong.Render(name) + columnPad(name, nameWidth) + configColumnGap +
+		m.configValueStyle(row).Render(value) + columnPad(value, valueWidth) + configColumnGap +
+		m.styles.empty.Render(hint)
+}
+
+func columnPad(value string, width int) string {
+	return strings.Repeat(" ", max(width-lipgloss.Width(value), 0))
+}
+
+// configValueStyle is what a setting's value is drawn in: on stands out, off
+// recedes, and anything that is not a switch reads as plain text.
+func (m dashboard) configValueStyle(row configRow) lipgloss.Style {
+	switch row.text(m) {
+	case "on":
+		return m.styles.navigationCurrent
+	case "off":
+		return m.styles.empty
+	default:
+		return m.styles.modalBody
+	}
 }
 
 func (m dashboard) modalActions() []modalAction {

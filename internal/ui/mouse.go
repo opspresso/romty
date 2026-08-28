@@ -232,6 +232,11 @@ func (m dashboard) handleConfigMouse(message tea.MouseMsg) (tea.Model, tea.Cmd, 
 	if !ok || click.Button != tea.MouseLeft {
 		return m, nil, false
 	}
+	// The row clicked becomes the row the cursor is on, the way clicking a
+	// workspace or a tab moves the cursor to it.
+	if row >= 0 && row < len(configRows()) {
+		m.configIndex = row
+	}
 	if updated, command, ok := m.runConfigRow(row); ok {
 		return updated, command, true
 	}

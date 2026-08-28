@@ -271,11 +271,13 @@ func (m dashboard) renderStatus(width, bodyHeight int) []string {
 	case m.modal == aboutModal:
 		status = renderShortcuts(m.styles, width, shortcut{key: "Esc", description: "close"})
 	case m.modal == configModal:
+		// The letter keys are drawn beside every row they belong to, so the
+		// rail names the moves that are the same in every list instead of
+		// listing four keycaps the modal is already showing.
 		status = renderShortcuts(m.styles, width,
-			shortcut{key: "←/→", description: "adjust width"},
-			shortcut{key: "m", description: "scrollback mouse"},
-			shortcut{key: "d/b", description: "sounds"},
-			shortcut{key: "s", description: "test"},
+			shortcut{key: "↑/↓", description: "select"},
+			shortcut{key: "Enter", description: "toggle"},
+			shortcut{key: "←/→", description: "pane width"},
 			shortcut{key: "Esc", description: "close"},
 		)
 	case m.modal == workspaceActionsModal:

@@ -1948,6 +1948,22 @@ func TestDashboardNamesTheDeleteTargetBeforeItsConsequences(t *testing.T) {
 	}
 }
 
+// configRowReads reports whether the Config modal draws a setting with the
+// value given, which now sit in columns of their own rather than glued into
+// one "name: value" string.
+func configRowReads(rendered, name, value string) bool {
+	for _, line := range strings.Split(rendered, "\n") {
+		at := strings.Index(line, name)
+		if at < 0 {
+			continue
+		}
+		if strings.Contains(line[at+len(name):], value) {
+			return true
+		}
+	}
+	return false
+}
+
 func TestDashboardKeepsConfigControlsCompact(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, model.Snapshot{})
 	value.width, value.height = 100, 24
@@ -1958,15 +1974,43 @@ func TestDashboardKeepsConfigControlsCompact(t *testing.T) {
 	for _, line := range lines[1 : len(lines)-1] {
 		body = append(body, strings.TrimSpace(strings.Trim(line, "│")))
 	}
-	want := []string{
-		fmt.Sprintf("Left pane: %d  ←/→", value.paneWidth()),
-		"Scrollback mouse: off  m",
-		"Sound on done: off  d",
-		"Sound on waiting: off  b",
-		"Test sound  s",
+	rows := configRows()
+	if len(body) != len(rows) {
+		t.Fatalf("config modal body = %q, want one row per setting", body)
 	}
-	if !slices.Equal(body, want) {
-		t.Fatalf("config modal body = %q, want each setting grouped with its keys %q", body, want)
+	// Name, then value, then the key the row advertises — each in its own
+	// column, all on the one row the setting owns.
+	for index, row := range rows {
+		name := strings.Index(body[index], row.name)
+		hint := strings.LastIndex(body[index], row.hint)
+		if name < 0 || hint <= name {
+			t.Errorf("row %d = %q, want %q then %q", index, body[index], row.name, row.hint)
+			continue
+		}
+		text := row.text(value)
+		if text == "" {
+			continue
+		}
+		if at := strings.Index(body[index][name+len(row.name):], text); at < 0 {
+			t.Errorf("row %d = %q, want %q between the name and the key", index, body[index], text)
+		}
+	}
+	// Values share a column, which is the whole point of splitting them out of
+	// the name: one glance down the box says which settings are on. Measured
+	// on the drawn line, cursor column and all, rather than on the trimmed one.
+	column := -1
+	for index, row := range rows {
+		text := row.text(value)
+		if text == "" {
+			continue
+		}
+		drawn := lines[1+index]
+		at := lipgloss.Width(drawn[:strings.Index(drawn, text)])
+		if column < 0 {
+			column = at
+		} else if at != column {
+			t.Errorf("row %d puts its value at column %d, want %d", index, at, column)
+		}
 	}
 
 	// Keys stay subordinate to the settings while sharing their row, so every
@@ -1997,8 +2041,8 @@ func TestDashboardTogglesScrollbackMouseFromConfig(t *testing.T) {
 		t.Fatalf("m = (scrollback mouse %v, command %v), want the setting on and saved",
 			value.scrollbackMouse, command)
 	}
-	if rendered := ansi.Strip(value.render()); !strings.Contains(rendered, "Scrollback mouse: on") {
-		t.Fatalf("config modal does not report the setting:\n%s", rendered)
+	if !configRowReads(ansi.Strip(value.render()), "Scrollback mouse", "on") {
+		t.Fatalf("config modal does not report the setting:\n%s", ansi.Strip(value.render()))
 	}
 
 	updated, _ = value.Update(key('m', "m"))
@@ -5268,8 +5312,8 @@ func TestDashboardAdjustsAndPersistsLeftPaneWidth(t *testing.T) {
 	if err != nil {
 		t.Fatalf("loadConfig() error = %v", err)
 	}
-	if loaded.LeftWidth != 29 || !strings.Contains(value.render(), "Left pane: 29") {
-		t.Fatalf("persisted config = %#v\n%s", loaded, value.render())
+	if loaded.LeftWidth != 29 || !configRowReads(ansi.Strip(value.render()), "Left pane", "29") {
+		t.Fatalf("persisted config = %#v\n%s", loaded, ansi.Strip(value.render()))
 	}
 
 	updated, _ = value.Update(key(tea.KeyEscape, ""))

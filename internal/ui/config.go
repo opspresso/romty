@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"strconv"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -125,10 +126,17 @@ func validateConfig(value Config) error {
 	return nil
 }
 
-// configRow is one setting in the Config modal: what the row says, the key it
-// shows, the keys that run it, and what running it does.
+// configRow is one setting in the Config modal: what it is called, what it is
+// set to, the key the row advertises, the keys that run it, and what running it
+// does.
+//
+// The name and the value are separate so the modal can put each in a column of
+// its own. As one string — "Sound on done: off" — the values landed wherever
+// the names happened to end, and reading five settings meant reading five
+// sentences rather than glancing down a column.
 type configRow struct {
-	label  func(dashboard) string
+	name   string
+	value  func(dashboard) string
 	hint   string
 	keys   []string
 	action func(dashboard) (tea.Model, tea.Cmd)
@@ -145,34 +153,59 @@ type configRow struct {
 func configRows() []configRow {
 	return []configRow{
 		{
-			label: func(m dashboard) string { return fmt.Sprintf("Left pane: %d", m.paneWidth()) },
+			name:  "Left pane",
+			value: func(m dashboard) string { return strconv.Itoa(m.paneWidth()) },
 			hint:  "←/→",
 		},
 		{
-			label:  func(m dashboard) string { return "Scrollback mouse: " + onOff(m.scrollbackMouse) },
+			name:   "Scrollback mouse",
+			value:  func(m dashboard) string { return onOff(m.scrollbackMouse) },
 			hint:   "m",
 			keys:   []string{"m"},
 			action: dashboard.toggleScrollbackMouse,
 		},
 		{
-			label:  func(m dashboard) string { return "Sound on done: " + onOff(m.soundOnDone) },
+			name:   "Sound on done",
+			value:  func(m dashboard) string { return onOff(m.soundOnDone) },
 			hint:   "d",
 			keys:   []string{"d"},
 			action: dashboard.toggleSoundOnDone,
 		},
 		{
-			label:  func(m dashboard) string { return "Sound on waiting: " + onOff(m.soundOnWaiting) },
+			name:   "Sound on waiting",
+			value:  func(m dashboard) string { return onOff(m.soundOnWaiting) },
 			hint:   "b",
 			keys:   []string{"b"},
 			action: dashboard.toggleSoundOnWaiting,
 		},
 		{
-			label:  func(dashboard) string { return "Test sound" },
+			name:   "Test sound",
 			hint:   "s",
 			keys:   []string{"s"},
 			action: func(m dashboard) (tea.Model, tea.Cmd) { return m, soundAlert(sound.Done) },
 		},
 	}
+}
+
+// text is what the row is set to, or nothing for a row that is an action
+// rather than a setting.
+func (r configRow) text(m dashboard) string {
+	if r.value == nil {
+		return ""
+	}
+	return r.value(m)
+}
+
+// moveConfig walks the settings, stopping at the ends. Every other list romty
+// draws is walked with the arrow keys and run with Enter; Config alone asked
+// the user to remember which letter belonged to which row.
+func (m *dashboard) moveConfig(delta int) {
+	rows := configRows()
+	if len(rows) == 0 {
+		m.configIndex = 0
+		return
+	}
+	m.configIndex = min(max(m.configIndex+delta, 0), len(rows)-1)
 }
 
 // runConfigKey runs the setting a key belongs to, if any does.

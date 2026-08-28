@@ -219,7 +219,10 @@ type dashboard struct {
 	terminalFullWidth bool
 	scrollOffset      int
 	helpOffset        int
-	configPath        string
+	// configIndex is the setting the Config modal's cursor is on, so it is
+	// walked and run the way every other list romty draws is.
+	configIndex int
+	configPath  string
 	// homePath is where the root picker opens, resolved once at startup.
 	homePath string
 	// browse is the root picker's state, kept on the dashboard so the modal
