@@ -53,6 +53,14 @@ jobs:
         # detector is the check that matters most here.
         run: go test -race ./...
 
+      - name: Diagnose the close-tab shell start
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          echo "SHELL=$SHELL TMPDIR=$TMPDIR umask=$(umask)"
+          ls -ld /bin /bin/bash /usr/bin/bash /tmp
+          mount | grep -E " /tmp | / " || true
+          go test -race -run TestCloseTabTerminatesOnlyTheSelectedSession -count=15 -v ./internal/daemon/ 2>&1 | tail -60
+
       - name: Build
         run: go build ./...
 

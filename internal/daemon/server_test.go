@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -480,7 +481,7 @@ func TestCloseTabTerminatesOnlyTheSelectedSession(t *testing.T) {
 	}
 	first, err := backend.CreateTab(workspace.ID, 80, 24)
 	if err != nil {
-		t.Fatalf("CreateTab() first error = %v", err)
+		t.Fatalf("CreateTab() first error = %v\n%s", err, diagnoseShellStart(workspacePath))
 	}
 	second, err := backend.CreateTab(workspace.ID, 80, 24)
 	if err != nil {
@@ -1231,4 +1232,36 @@ func speakRaw(t *testing.T, socket string, request map[string]any) protocol.Resp
 		t.Fatalf("Read() error = %v", err)
 	}
 	return response
+}
+
+// diagnoseShellStart reports what a failed shell start had to work with. It is
+// temporary: it exists to name the cause of an exec failure that only appears
+// on the Linux CI runner.
+func diagnoseShellStart(directory string) string {
+	var report strings.Builder
+	fmt.Fprintf(&report, "  uid=%d gid=%d SHELL=%q TMPDIR=%q\n",
+		os.Getuid(), os.Getgid(), os.Getenv("SHELL"), os.Getenv("TMPDIR"))
+	for _, candidate := range []string{"/bin/bash", "/usr/bin/bash", "/bin/sh"} {
+		info, err := os.Stat(candidate)
+		if err != nil {
+			fmt.Fprintf(&report, "  %s: %v\n", candidate, err)
+			continue
+		}
+		fmt.Fprintf(&report, "  %s: mode=%v size=%d\n", candidate, info.Mode(), info.Size())
+	}
+	for path := directory; ; path = filepath.Dir(path) {
+		info, err := os.Stat(path)
+		if err != nil {
+			fmt.Fprintf(&report, "  %s: %v\n", path, err)
+		} else {
+			fmt.Fprintf(&report, "  %s: mode=%v\n", path, info.Mode())
+		}
+		if path == "/" || filepath.Dir(path) == path {
+			break
+		}
+	}
+	command := exec.Command("/bin/bash", "-c", "exit 0")
+	command.Dir = directory
+	fmt.Fprintf(&report, "  retry /bin/bash in place: %v\n", command.Run())
+	return report.String()
 }
