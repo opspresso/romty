@@ -100,7 +100,7 @@ Press `Ctrl`+`Shift`+`F` to toggle the file view for the same contextual workspa
 
 `F2` opens a picker on the home directory. The first row is the open directory itself, shown as `.`, so `Enter` always adds the highlighted row. Files and dot-directories are omitted; `/` opens a path prompt. Directory reads run in the background so a slow mount does not block the TUI or its terminals.
 
-Tabs have a wider click target and an `×` at the right edge. Clicking the label opens the tab; clicking `×` immediately terminates its shell and removes it. The `+` key is not a shortcut. Select the wider `+` tab with `←`/`→` and press `Enter`, or use `Ctrl`+`Shift`+`T`. From the workspace pane the shortcut uses the workspace under the cursor; from the terminal pane or scrollback it uses the open terminal workspace. The switch shortcuts wrap at both ends.
+Tabs have a wider click target and an `×` at the right edge. Clicking the label opens the tab; clicking `×` asks for confirmation, then terminates its shell and removes it. The `+` key is not a shortcut. Select the wider `+` tab with `←`/`→` and press `Enter`, or use `Ctrl`+`Shift`+`T`. From the workspace pane the shortcut uses the workspace under the cursor; from the terminal pane or scrollback it uses the open terminal workspace. The switch shortcuts wrap at both ends.
 
 Pane focus and scrollback toggles are reversible. In the terminal pane only Global and Switch shortcuts are captured. Other keyboard and paste input, including `F8`, `F9`, and ordinary `Ctrl` combinations, is forwarded to the PTY.
 
@@ -142,7 +142,7 @@ The wheel then scrolls scrollback on any terminal that reports the mouse, at the
 
 ## Destructive actions and config
 
-`F8` opens a compact action menu beside the highlighted row; right-clicking a workspace or root opens the same menu at the pointer. The menu offers terminal creation, changed-file review, Git status/fetch/pull/push, and removal directly when they apply. Deleting a workspace recursively removes all of its contents. Forgetting a root removes it only from romty. Both removal actions require confirmation and terminate terminal sessions under the selected item.
+`F8` opens a compact action menu beside the highlighted row; right-clicking a workspace or root opens the same menu at the pointer. The menu offers terminal creation, closing the selected tab, changed-file review, Git status/fetch/pull/push, and removal directly when they apply. Closing a tab asks before it terminates that shell. Deleting a workspace recursively removes all of its contents. Forgetting a root removes it only from romty. Both removal actions require confirmation and terminate terminal sessions under the selected item.
 
 `F9` asks before stopping the daemon because this terminates every running shell. Once confirmed, shutdown cannot be cancelled.
 

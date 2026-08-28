@@ -287,6 +287,11 @@ func (m dashboard) renderStatus(width, bodyHeight int) []string {
 			shortcut{key: "Enter", description: action},
 			shortcut{key: "Esc", description: "cancel"},
 		)
+	case m.modal == closeTabModal:
+		status = renderShortcuts(m.styles, width,
+			shortcut{key: "Enter", description: "close tab"},
+			shortcut{key: "Esc", description: "cancel"},
+		)
 	case m.modal == shutdownModal:
 		status = renderShortcuts(m.styles, width,
 			shortcut{key: "Enter", description: "stop daemon"},

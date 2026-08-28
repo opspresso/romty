@@ -336,7 +336,7 @@ func (m dashboard) handleDashboardMouse(message tea.MouseMsg) (tea.Model, tea.Cm
 			return m, nil, true
 		}
 		if hit.close {
-			updated, command := m.closeTab(tabs[hit.index], hit.index)
+			updated, command := m.confirmCloseTab(tabs[hit.index], hit.index)
 			return updated, command, true
 		}
 		m.tabIndex = hit.index

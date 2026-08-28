@@ -111,6 +111,7 @@ const (
 	browseModal
 	workspaceActionsModal
 	gitActionsModal
+	closeTabModal
 	removeSelectionModal
 	shutdownModal
 	hookInstallModal
@@ -181,7 +182,12 @@ type dashboard struct {
 	agentAnimationPending   bool
 	// removeTarget is the item the confirmation modal is asking about, held so
 	// the answer applies to the item the question named.
-	removeTarget   navItem
+	removeTarget navItem
+	// closeTabTarget is the tab its confirmation is asking about, held for the
+	// same reason, with the position it was drawn at so the cursor can take
+	// the place of the tab that leaves.
+	closeTabTarget model.Tab
+	closeTabIndex  int
 	terminalExited bool
 	// reattachTab and reattachAttempts damp the loop a dropped connection
 	// used to start: romty reattached at once, the daemon replayed the whole
@@ -1318,6 +1324,17 @@ func (m dashboard) openSelectedTerminal() tea.Cmd {
 		}
 		return terminalOpenedMsg{tabID: tab.ID, stream: stream, replay: replay, err: err}
 	}
+}
+
+// confirmCloseTab asks before a click terminates a shell. Closing a tab kills
+// what runs in it, which is the one thing romty exists to keep alive, so it
+// asks the way deleting a workspace and stopping the daemon do.
+func (m dashboard) confirmCloseTab(tab model.Tab, index int) (tea.Model, tea.Cmd) {
+	if tab.ID == "" || m.tabClosePending != "" {
+		return m, nil
+	}
+	m.closeTabTarget, m.closeTabIndex = tab, index
+	return m.openModal(closeTabModal)
 }
 
 func (m dashboard) closeTab(tab model.Tab, index int) (tea.Model, tea.Cmd) {

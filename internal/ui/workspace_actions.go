@@ -16,6 +16,7 @@ type workspaceAction int
 const (
 	workspaceOpenTerminalAction workspaceAction = iota
 	workspaceNewTabAction
+	workspaceCloseTabAction
 	workspaceFileChangesAction
 	workspaceGitStatusAction
 	workspaceGitFetchAction
@@ -99,6 +100,11 @@ func (m dashboard) workspaceActionChoices() []workspaceActionChoice {
 		choices = append(choices, workspaceActionChoice{
 			action: workspaceNewTabAction, label: "New tab",
 		})
+		if m.tabIndex < len(runningTabs(target.tabs)) {
+			choices = append(choices, workspaceActionChoice{
+				action: workspaceCloseTabAction, label: "Close tab",
+			})
+		}
 		if target.hasGit {
 			choices = append(choices,
 				workspaceActionChoice{action: workspaceFileChangesAction, label: "File changes", group: workspaceGitGroup},
@@ -228,6 +234,14 @@ func (m dashboard) runWorkspaceAction(action workspaceAction) (tea.Model, tea.Cm
 		m.tabIndex = len(runningTabs(target.tabs))
 		m.modal = noModal
 		return m, m.selectWorkspace()
+	case workspaceCloseTabAction:
+		tabs := runningTabs(target.tabs)
+		if m.tabIndex >= len(tabs) {
+			m.modal = noModal
+			m.setNotice(terminalError, "selected workspace has no running terminal")
+			return m, nil
+		}
+		return m.confirmCloseTab(tabs[m.tabIndex], m.tabIndex)
 	case workspaceFileChangesAction:
 		m.modal = noModal
 		return m.openGitDiffView(target)

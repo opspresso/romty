@@ -149,6 +149,40 @@ func TestWorkspaceActionsRunTerminalAndFileCommands(t *testing.T) {
 		}
 	})
 
+	t.Run("close tab", func(t *testing.T) {
+		tabs := []model.Tab{
+			{ID: "tab-1", WorkspaceID: "workspace-1", Name: "1", Running: true},
+			{ID: "tab-2", WorkspaceID: "workspace-1", Name: "2", Running: true},
+		}
+		snapshot, _ := workspaceActionsSnapshot(tabs)
+		value := newDashboard(&fakeBackend{}, snapshot)
+		value.setNavigation(1)
+		value.tabIndex = 1
+		updated, _ := value.Update(key(tea.KeyF8, ""))
+		value = updated.(dashboard)
+		value.workspaceActionIndex = workspaceActionIndexFor(t, value, workspaceCloseTabAction)
+
+		updated, command := value.Update(key(tea.KeyEnter, ""))
+		value = updated.(dashboard)
+		if command != nil || value.modal != closeTabModal || value.closeTabTarget.ID != tabs[1].ID {
+			t.Fatalf("close tab = (command %v, modal %v, target %q)", command, value.modal, value.closeTabTarget.ID)
+		}
+	})
+
+	t.Run("no tab to close", func(t *testing.T) {
+		snapshot, _ := workspaceActionsSnapshot(nil)
+		value := newDashboard(&fakeBackend{}, snapshot)
+		value.setNavigation(1)
+		updated, _ := value.Update(key(tea.KeyF8, ""))
+		value = updated.(dashboard)
+		for _, choice := range value.workspaceActionChoices() {
+			if choice.action == workspaceCloseTabAction {
+				t.Fatalf("actions = %+v, want no close entry without a running terminal",
+					value.workspaceActionChoices())
+			}
+		}
+	})
+
 	t.Run("file changes", func(t *testing.T) {
 		snapshot, workspace := workspaceActionsSnapshot(nil)
 		value := newDashboard(&fakeBackend{}, snapshot)

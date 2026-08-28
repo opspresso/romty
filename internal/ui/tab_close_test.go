@@ -34,6 +34,53 @@ func tabCloseLocalX(tabs []model.Tab, want int) int {
 	return -1
 }
 
+// clickTabClose presses a tab's close button and answers the confirmation it
+// opens, which is the whole path a click takes to reach the daemon.
+func clickTabClose(t *testing.T, value dashboard, tabs []model.Tab, index int) (dashboard, tea.Cmd) {
+	t.Helper()
+	origin := value.dimensions().leftWidth + value.dimensions().separator
+	updated, _ := value.Update(tea.MouseClickMsg{
+		X: origin + tabCloseLocalX(tabs, index), Y: 0, Button: tea.MouseLeft,
+	})
+	value = updated.(dashboard)
+	if value.modal != closeTabModal || value.closeTabTarget.ID != tabs[index].ID {
+		t.Fatalf("close click = (modal %v, target %q), want the confirmation for %q",
+			value.modal, value.closeTabTarget.ID, tabs[index].ID)
+	}
+	updated, command := value.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+	return updated.(dashboard), command
+}
+
+// A close button that fires on the click alone would end a shell romty exists
+// to keep running, so the confirmation has to stand between the two.
+func TestDashboardKeepsTheTabUntilTheCloseIsConfirmed(t *testing.T) {
+	tabs := []model.Tab{
+		{ID: "tab-1", WorkspaceID: "workspace-1", Name: "1", Running: true},
+		{ID: "tab-2", WorkspaceID: "workspace-1", Name: "2", Running: true},
+	}
+	snapshot, workspace := tabCloseSnapshot(tabs)
+	backend := &fakeBackend{snapshot: snapshot}
+	value := newDashboard(backend, snapshot)
+	value.selectedWorkspaceID, value.selectedPath = workspace.ID, workspace.Path
+	value.focus = terminalPane
+	origin := value.dimensions().leftWidth + value.dimensions().separator
+
+	updated, command := value.Update(tea.MouseClickMsg{
+		X: origin + tabCloseLocalX(tabs, 1), Y: 0, Button: tea.MouseLeft,
+	})
+	value = updated.(dashboard)
+	if command != nil || value.tabClosePending != "" || value.modal != closeTabModal {
+		t.Fatalf("close click = (command %v, pending %q, modal %v), want only the confirmation",
+			command, value.tabClosePending, value.modal)
+	}
+	updated, cancelled := value.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEscape}))
+	value = updated.(dashboard)
+	if cancelled != nil || value.modal != noModal || backend.closedTabID != "" {
+		t.Fatalf("cancelled close = (command %v, modal %v, closed %q), want the tab left alone",
+			cancelled, value.modal, backend.closedTabID)
+	}
+}
+
 func TestTabHitSeparatesTheLabelAndCloseButton(t *testing.T) {
 	tabs := []model.Tab{{Name: "1"}, {Name: "two"}}
 	for _, probe := range []struct {
@@ -67,12 +114,8 @@ func TestDashboardClosesAnInactiveTabWithoutReplacingTheOpenTerminal(t *testing.
 	value.focus = terminalPane
 	value.terminal = newEmbeddedTerminal(tabs[0].ID, newMemoryStream(""), 40, 10)
 	t.Cleanup(value.closeTerminal)
-	origin := value.dimensions().leftWidth + value.dimensions().separator
 
-	updated, command := value.Update(tea.MouseClickMsg{
-		X: origin + tabCloseLocalX(tabs, 1), Y: 0, Button: tea.MouseLeft,
-	})
-	value = updated.(dashboard)
+	value, command := clickTabClose(t, value, tabs, 1)
 	if command == nil || value.tabClosePending != tabs[1].ID {
 		t.Fatalf("close click = (command %v, pending %q), want tab-2", command, value.tabClosePending)
 	}
@@ -97,14 +140,10 @@ func TestDashboardClosesTheActiveTabAndOpensItsNextSibling(t *testing.T) {
 	value.selectedWorkspaceID, value.selectedPath = workspace.ID, workspace.Path
 	value.focus, value.tabIndex = terminalPane, 1
 	value.terminal = newEmbeddedTerminal(tabs[1].ID, newMemoryStream(""), 40, 10)
-	origin := value.dimensions().leftWidth + value.dimensions().separator
 
-	updated, closeCommand := value.Update(tea.MouseClickMsg{
-		X: origin + tabCloseLocalX(tabs, 1), Y: 0, Button: tea.MouseLeft,
-	})
-	value = updated.(dashboard)
+	value, closeCommand := clickTabClose(t, value, tabs, 1)
 	closingTerminal := value.terminal
-	updated, _ = value.Update(terminalOutputMsg{terminal: closingTerminal, err: io.EOF})
+	updated, _ := value.Update(terminalOutputMsg{terminal: closingTerminal, err: io.EOF})
 	value = updated.(dashboard)
 	updated, openCommand := value.Update(commandMessage[tabClosedMsg](t, closeCommand))
 	value = updated.(dashboard)
@@ -127,11 +166,8 @@ func TestDashboardClosesTheOnlyTabAndReturnsToTheWorkspacePane(t *testing.T) {
 	value.selectedWorkspaceID, value.selectedPath = workspace.ID, workspace.Path
 	value.focus = terminalPane
 	value.terminal = newEmbeddedTerminal(tabs[0].ID, newMemoryStream(""), 40, 10)
-	origin := value.dimensions().leftWidth + value.dimensions().separator
-	updated, closeCommand := value.Update(tea.MouseClickMsg{
-		X: origin + tabCloseLocalX(tabs, 0), Y: 0, Button: tea.MouseLeft,
-	})
-	value = updated.(dashboard)
+
+	value, closeCommand := clickTabClose(t, value, tabs, 0)
 	updated, next := value.Update(commandMessage[tabClosedMsg](t, closeCommand))
 	value = updated.(dashboard)
 	if next != nil || value.terminal != nil || value.focus != leftPane || value.tabIndex != 0 {
