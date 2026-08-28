@@ -1,6 +1,7 @@
 // Agent presence and phase: the markers the tree draws, the animation that
 // keeps them moving, the sounds a transition plays, and the jump that reaches
 // the agent waiting for an answer.
+
 package ui
 
 import (

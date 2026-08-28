@@ -1,3 +1,6 @@
+// Package ui is romty's dashboard: the workspace tree, the terminal it opens
+// beside it, and the state machine between them. It talks to the daemon
+// through a Backend and owns nothing that survives the TUI closing.
 package ui
 
 import (

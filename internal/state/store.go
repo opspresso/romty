@@ -1,3 +1,6 @@
+// Package state is the daemon's record of the workspace tree, held in memory
+// and written to one JSON file so the next daemon starts where this one
+// stopped.
 package state
 
 import (

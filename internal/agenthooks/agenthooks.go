@@ -1,3 +1,7 @@
+// Package agenthooks installs the status hooks that let an agent tell romty
+// what it is doing. It edits an agent's own settings file in place, keeping
+// every hook it did not write, and refuses to install from a build that has
+// no stable path to name as the hook command.
 package agenthooks
 
 import (

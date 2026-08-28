@@ -1,3 +1,6 @@
+// Package protocol is the wire contract between a romty client and its
+// daemon: the framed messages, the revision range each side advertises, and
+// the capabilities that let one side use a feature the other may not have.
 package protocol
 
 import (

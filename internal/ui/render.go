@@ -1,5 +1,6 @@
 // Laying the screen out and drawing it: the pane split, the workspace tree, the
 // tab rail, the status row, and the pieces of text they are all built from.
+
 package ui
 
 import (

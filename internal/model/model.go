@@ -1,3 +1,6 @@
+// Package model is what the daemon and the TUI agree romty is made of:
+// roots, the workspaces under them, the terminal tabs inside those, and the
+// snapshot that carries the whole tree across the socket.
 package model
 
 import "iter"

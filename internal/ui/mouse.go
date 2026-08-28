@@ -1,6 +1,7 @@
 // Pointer handling: what the dashboard chrome does with a click, a drag and a
 // wheel, which target the pointer is over, and how much of the mouse is left
 // for the guest application.
+
 package ui
 
 import (

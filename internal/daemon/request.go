@@ -1,6 +1,7 @@
 // Answering one client request: the handshake that agrees a protocol revision,
 // the table that routes an action, and the gates that let a shutdown finish
 // what is in flight without admitting anything new.
+
 package daemon
 
 import (

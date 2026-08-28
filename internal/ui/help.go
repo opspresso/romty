@@ -1,5 +1,6 @@
 // The shortcut reference. It is data first and rendering second, so what the
 // modal shows can be checked against the key table it documents.
+
 package ui
 
 import (

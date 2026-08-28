@@ -1,5 +1,6 @@
 // Scrollback: entering and leaving the retained output, moving the viewport
 // through it, and finding text in it.
+
 package ui
 
 import (

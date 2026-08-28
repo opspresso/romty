@@ -1,3 +1,6 @@
+// Package client speaks the daemon's protocol over its unix socket. It
+// negotiates a revision once per client, refuses a socket that is not the
+// daemon's, and starts a daemon when nothing is listening on one.
 package client
 
 import (

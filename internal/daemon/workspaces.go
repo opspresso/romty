@@ -1,5 +1,6 @@
 // Roots, workspaces and tabs: the operations that change what the daemon
 // remembers, and the snapshot it hands back afterwards.
+
 package daemon
 
 import (

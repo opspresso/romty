@@ -1,5 +1,6 @@
 // Workspace actions: the context palette for the highlighted root or
 // directory, including its direct terminal, Git, and removal operations.
+
 package ui
 
 import (

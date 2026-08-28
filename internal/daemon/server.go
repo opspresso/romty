@@ -1,5 +1,9 @@
 // The daemon itself: its lifetime, the sessions it holds, and the agent status
 // it reports for them.
+
+// Package daemon keeps romty's shell sessions alive between TUIs. One
+// daemon owns a private unix socket, the workspace tree behind it, and a
+// PTY per terminal tab, and it outlives every client that attaches to it.
 package daemon
 
 import (

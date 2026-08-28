@@ -1,5 +1,6 @@
 // Modals: the boxes romty draws over the panes, the keys and clicks they take,
 // and the frame every one of them is drawn in.
+
 package ui
 
 import (

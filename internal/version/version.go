@@ -1,3 +1,5 @@
+// Package version reports which romty is running: the tag a release was
+// stamped with, or the commit any other build was made from.
 package version
 
 import (

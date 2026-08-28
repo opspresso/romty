@@ -1,5 +1,6 @@
 // The workspace tree and tab cursors: what is selected, what moving does, and
 // how a selection survives a snapshot that rearranged everything under it.
+
 package ui
 
 import (
