@@ -20,9 +20,9 @@ laptop -> Tailscale -> SSH -> always-on machine -> romty -> AI coding agent
 
 - Organize roots and their direct child directories as a workspace tree.
 - Keep multiple terminal tabs alive independently of the TUI.
-- Restore up to 8 MiB of recent output and browse 10,000 lines of scrollback.
+- Restore up to 8 MiB of recent output, and browse and search 10,000 lines of scrollback.
 - Open full-width scrollback for native terminal selection and copying, with light or dark colors.
-- Show Claude Code and Codex activity, idle, and waiting states through optional hooks.
+- Show Claude Code and Codex working and waiting states from their own output, and every phase through optional hooks.
 - Use function-key navigation that remains reliable with an active IME.
 
 ## Install

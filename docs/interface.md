@@ -6,7 +6,7 @@ The left pane shows roots, their direct child workspaces, Git state, and one mar
 
 Below 80 columns the workspace pane takes half the screen from the terminal, so focusing the terminal hides it and gives the terminal the full width. `Ctrl`+`/` or `F7` brings it back and moves the focus with it. At 80 columns and above both panes stay on screen, and focus never resizes the terminal. A terminal that speaks the Kitty keyboard protocol reports `Ctrl`+`/` as itself; every other terminal, including phone SSH clients, sends it as `Ctrl`+`_`, and romty accepts both.
 
-Claude Code markers are orange and Codex markers are blue. Foreground process detection supplies the color without configuration; [agent status hooks](agent-hooks.md) add the phase:
+Claude Code markers are orange and Codex markers are blue. Foreground process detection supplies the color without configuration, and the agent's recent output supplies a working or waiting phase. [Agent status hooks](agent-hooks.md) replace that reading with the agent's own report and add the phases it cannot show:
 
 | Marker | Meaning |
 |---|---|
@@ -16,6 +16,8 @@ Claude Code markers are orange and Codex markers are blue. Foreground process de
 | `▲` | Waiting for user input |
 | `■` | Waiting for permission approval |
 | `★` | Stopped with an error |
+
+Press `Ctrl`+`Shift`+`A` to open the next terminal whose agent is waiting for input or approval. It walks those terminals in the order the tree draws them and wraps at the end, so repeated presses cycle every agent that stopped to ask something. When the only waiting agent is the terminal already open, the keyboard moves to it rather than reattaching. When nothing is waiting, the status bar says so and the open terminal is left alone.
 
 Git metadata is rendered as `(branch*) ↑N ↓N`. `*` means the worktree has tracked or untracked changes, `!` replaces it for conflicts, and the arrows count commits ahead of or behind the upstream. A detached HEAD appears as `(@abcdef0)`.
 
@@ -59,6 +61,7 @@ Press `Ctrl`+`Shift`+`F` to toggle the file view for the same contextual workspa
 | `Ctrl`+`Shift`+`F` | Toggle changed files and Git diff |
 | `Ctrl`+`Shift`+`←`/`→` | Switch terminal tab |
 | `Ctrl`+`Shift`+`↑`/`↓` | Switch to a workspace with a running terminal |
+| `Ctrl`+`Shift`+`A` | Open the next terminal whose agent is waiting |
 
 ### Move
 
@@ -85,10 +88,13 @@ Press `Ctrl`+`Shift`+`F` to toggle the file view for the same contextual workspa
 |---|---|
 | `Enter` | Open, run, return, submit, or confirm in the workspace, picker, Git views, and prompts |
 | `Esc` | Close a modal or file view, cancel a prompt, or leave scrollback |
-| `/` | Type a path in the root picker |
 | `Backspace` | Erase a path character |
 | `←`/`→` or `[`/`]` | Resize the workspace pane in Config |
+| `/` | Find in scrollback, or type a path in the root picker |
+| `n`/`N` | Move to the next or previous scrollback match |
 | `m` | Toggle the scrollback mouse in Config |
+| `d`/`b` | Toggle the done and waiting sounds in Config |
+| `s` | Play the done sound in Config |
 
 ## Roots, workspaces, and tabs
 
@@ -98,7 +104,7 @@ The `+` key is not a shortcut. Select the `+` tab with `←`/`→` and press `En
 
 Pane focus and scrollback toggles are reversible. In the terminal pane only Global and Switch shortcuts are captured. Other keyboard and paste input, including `F8`, `F9`, and ordinary `Ctrl` combinations, is forwarded to the PTY.
 
-The dashboard chrome is mouse-aware. Click a root or workspace to select and open it, click a terminal tab or `+` to activate it, and use the wheel over the workspace tree to move its cursor without opening anything. Drag the vertical divider to resize the workspace pane; the terminal resizes live and the final width is saved when the button is released.
+The dashboard chrome is mouse-aware. Click a root or workspace to select and open it, click a terminal tab or `+` to activate it, and use the wheel over the workspace tree to scroll its viewport without moving the cursor or keyboard focus. Arrow-key cursor movement scrolls the viewport only when the selected row would otherwise leave it. Drag the vertical divider to resize the workspace pane; the terminal resizes live and the final width is saved when the button is released.
 
 Mouse targets identify themselves before activation. Workspace, tab, picker, Git, Config, and dialog-action targets gain a muted background on hover, while the draggable divider changes to the accent color. Keyboard selection keeps the stronger accent treatment and is never replaced by hover.
 
@@ -111,6 +117,8 @@ romty discovers direct child directories only. Press `F5` after a command adds o
 ## Scrollback and mouse
 
 romty keeps 10,000 scrollback lines for each terminal. Scrollback fills the width so native terminal selection copies output without the workspace tree. New output does not move a historical view. `Shift`+`PgUp`/`PgDn` and the mouse wheel continue browsing history; other terminal input, including paste, returns to the live screen and is forwarded without dropping the first input.
+
+Press `/` in scrollback to find text in the retained output. The query is applied when `Enter` confirms it, matching without regard to case and ignoring the colours around a phrase. The view moves to the newest match first, and `n` and `N` walk towards older and newer matches, wrapping at both ends. The status bar carries the query and the position among the matches. Leaving scrollback forgets the search.
 
 Full-screen applications such as `vim`, `less`, and Claude Code use an alternate screen with no romty history. In that mode `Shift`+`PgUp`/`PgDn` is forwarded as plain `PgUp`/`PgDn` so the application can page itself, and the wheel goes to the application as well: as mouse reports when it asked for the mouse, and otherwise as three cursor keys per notch, which is what a terminal sends for alternate scroll. This does not depend on `mouse_passthrough`.
 

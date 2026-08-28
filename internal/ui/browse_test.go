@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -394,5 +395,46 @@ func TestShortenPathKeepsTheEnd(t *testing.T) {
 		if got := shortenPath(probe.path, probe.width); got != probe.want {
 			t.Fatalf("shortenPath(%q, %d) = %q, want %q", probe.path, probe.width, got, probe.want)
 		}
+	}
+}
+
+// The picker draws a window of its entries and a click has to land in the same
+// one. Two copies of that arithmetic drift, and the click starts opening a
+// neighbouring row.
+func TestBrowseClicksFollowTheScrolledWindow(t *testing.T) {
+	home := t.TempDir()
+	for index := range 40 {
+		if err := os.Mkdir(filepath.Join(home, fmt.Sprintf("child-%02d", index)), 0o755); err != nil {
+			t.Fatalf("Mkdir() error = %v", err)
+		}
+	}
+	value := browsing(t, &fakeBackend{}, home)
+	// Deep enough into the list that the window has scrolled off the first row.
+	value.browse.cursor = 30
+
+	start, capacity := value.browseWindow(value.dimensions().bodyHeight)
+	if start == 0 {
+		t.Fatalf("window start = %d, want the list scrolled", start)
+	}
+	for row := range capacity {
+		index, ok := value.browseIndexAtContentRow(row + browseHeaderRows)
+		if !ok {
+			break
+		}
+		if index != start+row {
+			t.Fatalf("content row %d = index %d, want %d", row, index, start+row)
+		}
+	}
+
+	// The entry a click on the first content row resolves to is the one drawn
+	// there — the modal's own top border sits above the content.
+	index, ok := value.browseIndexAtContentRow(browseHeaderRows)
+	if !ok {
+		t.Fatal("the first content row resolved to no entry")
+	}
+	screen := plainRows(value.renderBrowseModal(value.width, value.dimensions().bodyHeight))
+	drawn := screen[1+browseHeaderRows]
+	if name := value.browse.entries[index-1]; !strings.Contains(drawn, name) {
+		t.Fatalf("first content row draws %q, want the clicked entry %q", drawn, name)
 	}
 }

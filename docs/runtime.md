@@ -29,6 +29,8 @@ A dropped terminal connection reconnects automatically with backoff. Press `Ente
 
 More than one TUI can attach to the same terminal. Every client receives output, while the client that most recently sent input owns the PTY size. Resizing a background TUI does not disturb the active terminal; sending input promotes that client and applies its viewport first. If an attached client stops reading and exhausts its bounded output queue, only that client is disconnected.
 
+The daemon reads a hooked Claude Code session's own transcript to report its token and cost counters. It reads at most the last mebibyte of that file, skips any record larger than 64 KiB, decodes only the counter fields, and re-reads a transcript only after it changes. Prompts, tool inputs, and assistant messages are never decoded or retained.
+
 romty refuses to start inside one of its own terminal sessions.
 
 ## Data and configuration

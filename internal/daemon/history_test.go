@@ -288,3 +288,38 @@ func BenchmarkStripQueries(b *testing.B) {
 		stripQueries(history)
 	}
 }
+
+// A terminal abandons an OSC or DCS at any ESC that is not the string
+// terminator and parses from that ESC. A filter that keeps looking for a BEL
+// instead swallows the sequence the ESC introduced — which is a place to hide a
+// query, and the clipboard read is the one that matters: what the terminal
+// sends back lands on the command line of a shell that asked nothing.
+func TestStripQueriesFindsAQueryBehindAnAbandonedString(t *testing.T) {
+	for _, probe := range []struct {
+		name    string
+		history string
+		want    string
+	}{
+		{
+			name:    "clipboard read behind an unterminated OSC",
+			history: "before\x1b]0;\x1b]52;c;?\x07after",
+			want:    "before\x1b]0;after",
+		},
+		{
+			name:    "colour query behind an unterminated OSC",
+			history: "before\x1b]0;title\x1b]11;?\x07after",
+			want:    "before\x1b]0;titleafter",
+		},
+		{
+			name:    "setting request behind an unterminated DCS",
+			history: "before\x1bPq\x1bP$qm\x1b\\after",
+			want:    "before\x1bPqafter",
+		},
+	} {
+		t.Run(probe.name, func(t *testing.T) {
+			if got := string(stripQueries([]byte(probe.history))); got != probe.want {
+				t.Fatalf("stripQueries(%q) = %q, want %q", probe.history, got, probe.want)
+			}
+		})
+	}
+}

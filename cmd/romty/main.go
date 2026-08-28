@@ -54,8 +54,8 @@ func runCommandWithInput(arguments []string, output io.Writer, input io.Reader) 
 		return printHelp(output, theme)
 	case "version", "-v", "--version":
 		return printVersion(output, theme)
-	case "", "daemon", "stop", "status", "doctor", "hooks", "list":
-	default:
+	}
+	if !knownCommand(command) {
 		return fmt.Errorf("unknown command %q; run `romty help` for usage", command)
 	}
 

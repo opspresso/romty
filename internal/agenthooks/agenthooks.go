@@ -460,7 +460,19 @@ func findDefinition(provider Provider) (definition, bool) {
 	return definition{}, false
 }
 
-func configurationPath(value definition) (string, error) {
+// ConfigDirectory is where a provider keeps its files: the directory its own
+// environment variable names, or the default under the user's home. romty reads
+// more out of it than the hook settings, and where to look must not be worked
+// out in two places that can disagree.
+func ConfigDirectory(provider Provider) (string, error) {
+	value, ok := findDefinition(provider)
+	if !ok {
+		return "", fmt.Errorf("unknown agent provider %q", provider)
+	}
+	return providerDirectory(value)
+}
+
+func providerDirectory(value definition) (string, error) {
 	directory := os.Getenv(value.environment)
 	if directory == "" {
 		home, err := userHomeDirectory()
@@ -473,7 +485,15 @@ func configurationPath(value definition) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("resolve %s directory: %w", value.provider, err)
 	}
-	return filepath.Join(absolute, value.filename), nil
+	return absolute, nil
+}
+
+func configurationPath(value definition) (string, error) {
+	directory, err := providerDirectory(value)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(directory, value.filename), nil
 }
 
 func readConfiguration(path string) ([]byte, bool, error) {

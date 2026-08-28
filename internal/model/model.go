@@ -44,6 +44,12 @@ const (
 type AgentStatus struct {
 	Agent Agent      `json:"agent"`
 	Phase AgentPhase `json:"phase"`
+	// ContextTokens is what the agent's newest request carried into the model,
+	// and CostUSD what the session has cost, both as the agent recorded them in
+	// its own transcript. Zero means romty had nothing to read: the counters
+	// are never estimated.
+	ContextTokens int     `json:"context_tokens,omitempty"`
+	CostUSD       float64 `json:"cost_usd,omitempty"`
 }
 
 type Tab struct {
@@ -53,6 +59,10 @@ type Tab struct {
 	Running     bool       `json:"running"`
 	Agent       Agent      `json:"agent,omitempty"`
 	AgentPhase  AgentPhase `json:"agent_phase,omitempty"`
+	// AgentContextTokens and AgentCostUSD mirror the agent's own counters; see
+	// AgentStatus.
+	AgentContextTokens int     `json:"agent_context_tokens,omitempty"`
+	AgentCostUSD       float64 `json:"agent_cost_usd,omitempty"`
 }
 
 type Snapshot struct {

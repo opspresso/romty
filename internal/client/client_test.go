@@ -14,6 +14,7 @@ import (
 	"github.com/opspresso/romty/internal/model"
 	"github.com/opspresso/romty/internal/paths"
 	"github.com/opspresso/romty/internal/protocol"
+	"github.com/opspresso/romty/internal/testutil"
 )
 
 func TestNormalizePathExpandsHome(t *testing.T) {
@@ -78,7 +79,7 @@ func TestExemptCallsSurviveAnOutdatedDaemon(t *testing.T) {
 }
 
 func TestShutdownWaitsForTheDaemonToReleaseItsSocket(t *testing.T) {
-	socket := filepath.Join(shortTempDir(t), "daemon.sock")
+	socket := filepath.Join(testutil.ShortTempDir(t), "daemon.sock")
 	listener, err := net.Listen("unix", socket)
 	if err != nil {
 		t.Fatalf("Listen() error = %v", err)
@@ -142,7 +143,7 @@ func TestShutdownWaitsForTheDaemonToReleaseItsSocket(t *testing.T) {
 // way one from before the field would.
 func serveUnversioned(t *testing.T) string {
 	t.Helper()
-	socket := filepath.Join(shortTempDir(t), "daemon.sock")
+	socket := filepath.Join(testutil.ShortTempDir(t), "daemon.sock")
 	listener, err := net.Listen("unix", socket)
 	if err != nil {
 		t.Fatalf("Listen() error = %v", err)
@@ -193,7 +194,7 @@ func TestEnsureDaemonAcceptsAnOutdatedDaemon(t *testing.T) {
 // either. Reporting what the ping said beats spending three seconds waiting
 // for a daemon that was never going to start.
 func TestEnsureDaemonReportsASocketThatAnswersNothing(t *testing.T) {
-	socket := filepath.Join(shortTempDir(t), "daemon.sock")
+	socket := filepath.Join(testutil.ShortTempDir(t), "daemon.sock")
 	listener, err := net.Listen("unix", socket)
 	if err != nil {
 		t.Fatalf("Listen() error = %v", err)
@@ -238,7 +239,7 @@ func TestEnsureDaemonRejectsAPermissiveSocket(t *testing.T) {
 }
 
 func TestEnsureDaemonDoesNotFollowALogSymlink(t *testing.T) {
-	directory := shortTempDir(t)
+	directory := testutil.ShortTempDir(t)
 	target := filepath.Join(directory, "target")
 	runtime := runtimeFor(filepath.Join(directory, "daemon.sock"))
 	if err := os.Symlink(target, runtime.Log); err != nil {
@@ -254,7 +255,7 @@ func TestEnsureDaemonDoesNotFollowALogSymlink(t *testing.T) {
 }
 
 func TestOpenDaemonLogRotatesAtTheSizeLimit(t *testing.T) {
-	directory := shortTempDir(t)
+	directory := testutil.ShortTempDir(t)
 	path := filepath.Join(directory, "daemon.log")
 	if err := os.WriteFile(path, []byte("full"), 0o600); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
@@ -291,7 +292,7 @@ func TestOpenDaemonLogRotatesAtTheSizeLimit(t *testing.T) {
 }
 
 func TestOpenDaemonLogKeepsOneArchive(t *testing.T) {
-	directory := shortTempDir(t)
+	directory := testutil.ShortTempDir(t)
 	path := filepath.Join(directory, "daemon.log")
 	if err := os.WriteFile(path, []byte("current"), 0o600); err != nil {
 		t.Fatalf("WriteFile() current error = %v", err)
@@ -319,7 +320,7 @@ func TestOpenDaemonLogKeepsOneArchive(t *testing.T) {
 }
 
 func TestOpenDaemonLogRejectsAHardLink(t *testing.T) {
-	directory := shortTempDir(t)
+	directory := testutil.ShortTempDir(t)
 	target := filepath.Join(directory, "target")
 	if err := os.WriteFile(target, []byte("unchanged"), 0o600); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
@@ -359,7 +360,7 @@ func runtimeFor(socket string) paths.Paths {
 // runs on the goroutine that opens a terminal, so a read with no deadline
 // leaves the tab never appearing and nothing to say why.
 func TestOpenAttachGivesUpOnADaemonThatNeverAnswers(t *testing.T) {
-	socket := filepath.Join(shortTempDir(t), "daemon.sock")
+	socket := filepath.Join(testutil.ShortTempDir(t), "daemon.sock")
 	listener, err := net.Listen("unix", socket)
 	if err != nil {
 		t.Fatalf("Listen() error = %v", err)
@@ -405,7 +406,7 @@ func TestOpenAttachGivesUpOnADaemonThatNeverAnswers(t *testing.T) {
 // UI, so a long session can be restored without rendering every read along the
 // way. Bytes after that exact boundary stay on the stream as live output.
 func TestOpenTerminalSeparatesReplayFromLiveOutput(t *testing.T) {
-	socket := filepath.Join(shortTempDir(t), "daemon.sock")
+	socket := filepath.Join(testutil.ShortTempDir(t), "daemon.sock")
 	listener, err := net.Listen("unix", socket)
 	if err != nil {
 		t.Fatalf("Listen() error = %v", err)
@@ -468,7 +469,7 @@ func TestOpenTerminalSeparatesReplayFromLiveOutput(t *testing.T) {
 }
 
 func TestTerminalRequestsShareAClientIdentity(t *testing.T) {
-	socket := filepath.Join(shortTempDir(t), "daemon.sock")
+	socket := filepath.Join(testutil.ShortTempDir(t), "daemon.sock")
 	listener, err := net.Listen("unix", socket)
 	if err != nil {
 		t.Fatalf("Listen() error = %v", err)
@@ -527,7 +528,7 @@ func TestTerminalRequestsShareAClientIdentity(t *testing.T) {
 }
 
 func TestOpenTerminalFallsBackToALegacyReplayStream(t *testing.T) {
-	socket := filepath.Join(shortTempDir(t), "daemon.sock")
+	socket := filepath.Join(testutil.ShortTempDir(t), "daemon.sock")
 	listener, err := net.Listen("unix", socket)
 	if err != nil {
 		t.Fatalf("Listen() error = %v", err)
@@ -590,7 +591,7 @@ func TestOpenTerminalFallsBackToALegacyReplayStream(t *testing.T) {
 }
 
 func TestClientSelectsTheHighestProtocolSharedWithAFutureDaemon(t *testing.T) {
-	socket := filepath.Join(shortTempDir(t), "daemon.sock")
+	socket := filepath.Join(testutil.ShortTempDir(t), "daemon.sock")
 	listener, err := net.Listen("unix", socket)
 	if err != nil {
 		t.Fatalf("Listen() error = %v", err)
@@ -630,7 +631,7 @@ func TestClientSelectsTheHighestProtocolSharedWithAFutureDaemon(t *testing.T) {
 }
 
 func TestClientUsesAnOlderDaemonSelectedProtocol(t *testing.T) {
-	socket := filepath.Join(shortTempDir(t), "daemon.sock")
+	socket := filepath.Join(testutil.ShortTempDir(t), "daemon.sock")
 	listener, err := net.Listen("unix", socket)
 	if err != nil {
 		t.Fatalf("Listen() error = %v", err)
@@ -686,7 +687,7 @@ func TestClientUsesAnOlderDaemonSelectedProtocol(t *testing.T) {
 // client can negotiate with. What it said is the only clue there is, and
 // swallowing it leaves EnsureDaemon treating the socket as healthy.
 func TestPingReportsAPeerThatNamesNoProtocol(t *testing.T) {
-	socket := filepath.Join(shortTempDir(t), "daemon.sock")
+	socket := filepath.Join(testutil.ShortTempDir(t), "daemon.sock")
 	listener, err := net.Listen("unix", socket)
 	if err != nil {
 		t.Fatalf("Listen() error = %v", err)
@@ -721,7 +722,7 @@ func TestPingReportsAPeerThatNamesNoProtocol(t *testing.T) {
 // client's version check does not refuse the very reply that is reporting the
 // mismatch and hide the sentence naming the remedy.
 func TestClientShowsADaemonRefusalForTheSelectedProtocol(t *testing.T) {
-	socket := filepath.Join(shortTempDir(t), "daemon.sock")
+	socket := filepath.Join(testutil.ShortTempDir(t), "daemon.sock")
 	listener, err := net.Listen("unix", socket)
 	if err != nil {
 		t.Fatalf("Listen() error = %v", err)
@@ -783,7 +784,7 @@ func TestReadReplayKeepsAReplayThatEndsWithItsError(t *testing.T) {
 }
 
 func TestClientDegradesFeaturesMissingFromAnOlderDaemon(t *testing.T) {
-	socket := filepath.Join(shortTempDir(t), "daemon.sock")
+	socket := filepath.Join(testutil.ShortTempDir(t), "daemon.sock")
 	listener, err := net.Listen("unix", socket)
 	if err != nil {
 		t.Fatalf("Listen() error = %v", err)
@@ -815,7 +816,7 @@ func TestClientDegradesFeaturesMissingFromAnOlderDaemon(t *testing.T) {
 // A mismatch is only useful to a user who is told what to do about it, and
 // romty stop is what every one of them resolves to.
 func TestNegotiationFailureNamesItsRemedy(t *testing.T) {
-	socket := filepath.Join(shortTempDir(t), "daemon.sock")
+	socket := filepath.Join(testutil.ShortTempDir(t), "daemon.sock")
 	listener, err := net.Listen("unix", socket)
 	if err != nil {
 		t.Fatalf("Listen() error = %v", err)
@@ -838,7 +839,7 @@ func TestNegotiationFailureNamesItsRemedy(t *testing.T) {
 }
 
 func TestOpenTerminalGivesUpWhenReplayStopsMakingProgress(t *testing.T) {
-	socket := filepath.Join(shortTempDir(t), "daemon.sock")
+	socket := filepath.Join(testutil.ShortTempDir(t), "daemon.sock")
 	listener, err := net.Listen("unix", socket)
 	if err != nil {
 		t.Fatalf("Listen() error = %v", err)
@@ -902,16 +903,4 @@ func answerNegotiation(listener net.Listener, maximum, minimum int) error {
 		MaxVersion:   maximum,
 		Capabilities: protocol.CapabilitiesForVersion(min(maximum, protocol.Version)),
 	})
-}
-
-// shortTempDir keeps the socket path within the portable 104-byte limit, which
-// the per-user temporary directory on macOS does not leave room for.
-func shortTempDir(t *testing.T) string {
-	t.Helper()
-	directory, err := os.MkdirTemp("/tmp", "romty-client-")
-	if err != nil {
-		t.Fatalf("MkdirTemp() error = %v", err)
-	}
-	t.Cleanup(func() { os.RemoveAll(directory) })
-	return directory
 }

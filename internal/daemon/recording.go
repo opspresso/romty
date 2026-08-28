@@ -72,11 +72,20 @@ func (r *recording) append(data []byte) {
 // into the ring in place, so an aliased slice would be rewritten under the
 // replay's feet.
 func (r *recording) bytes() []byte {
-	result := make([]byte, r.size)
-	if r.size == 0 {
+	return r.tail(r.size)
+}
+
+// tail returns the newest count bytes, oldest first, as a slice of its own.
+// Reading what an agent last drew needs the end of the recording, not all of
+// it, and the whole of it can be megabytes.
+func (r *recording) tail(count int) []byte {
+	count = min(max(count, 0), r.size)
+	result := make([]byte, count)
+	if count == 0 {
 		return result
 	}
-	front := copy(result, r.data[r.start:min(r.start+r.size, len(r.data))])
+	start := (r.start + r.size - count) % len(r.data)
+	front := copy(result, r.data[start:min(start+count, len(r.data))])
 	copy(result[front:], r.data)
 	return result
 }

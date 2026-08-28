@@ -144,8 +144,16 @@ func (s *historyScanner) scanOperatingSystemCommand(data []byte, index, body int
 		if data[cursor] == bell || data[cursor] == stringTerminator {
 			return cursor + 1, isQueryPayload(data[body:cursor])
 		}
-		if data[cursor] == escape && cursor+1 < len(data) && data[cursor+1] == '\\' {
-			return cursor + 2, isQueryPayload(data[body:cursor])
+		if data[cursor] == escape {
+			if cursor+1 < len(data) && data[cursor+1] == '\\' {
+				return cursor + 2, isQueryPayload(data[body:cursor])
+			}
+			// Any other ESC abandons the string: a terminal stops reading it
+			// there and parses from the ESC. Reading on would swallow whatever
+			// that ESC introduces, and a query written behind an unterminated
+			// OSC would then reach the replay unfiltered — which is how a
+			// clipboard read hides from a filter that keeps looking for a BEL.
+			return cursor, false
 		}
 	}
 	// Neither terminator exists in the rest of the buffer, so a string
@@ -191,8 +199,12 @@ func (s *historyScanner) scanDeviceControlString(data []byte, index, body int) (
 			// DECRQSS, the request for a setting's current value.
 			return cursor + 1, bytes.HasPrefix(data[body:cursor], []byte("$q"))
 		}
-		if data[cursor] == escape && cursor+1 < len(data) && data[cursor+1] == '\\' {
-			return cursor + 2, bytes.HasPrefix(data[body:cursor], []byte("$q"))
+		if data[cursor] == escape {
+			if cursor+1 < len(data) && data[cursor+1] == '\\' {
+				return cursor + 2, bytes.HasPrefix(data[body:cursor], []byte("$q"))
+			}
+			// Abandoned at the ESC, for the same reason an OSC is.
+			return cursor, false
 		}
 	}
 	s.noStringTerminator = true

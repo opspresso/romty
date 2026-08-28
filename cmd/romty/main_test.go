@@ -510,3 +510,30 @@ func serveCommandDaemon(t *testing.T, runtime paths.Paths) *client.Client {
 	testutil.WaitForDaemon(t, backend)
 	return backend
 }
+
+// Help and the check that refuses an unknown word read one list. A command that
+// runs but is not in that list would be undocumented; one in the list that does
+// not run would be advertised and refused.
+func TestEveryCommandIsBothDocumentedAndAccepted(t *testing.T) {
+	var help bytes.Buffer
+	if err := printHelp(&help, commandTheme{}); err != nil {
+		t.Fatalf("printHelp() error = %v", err)
+	}
+	for _, value := range commands {
+		if !strings.Contains(help.String(), value.name) {
+			t.Errorf("help does not mention %q:\n%s", value.name, help.String())
+		}
+		if !strings.Contains(help.String(), value.description) {
+			t.Errorf("help does not describe %q:\n%s", value.name, help.String())
+		}
+		if !knownCommand(value.name) {
+			t.Errorf("command %q is documented but refused", value.name)
+		}
+		if err := runCommand([]string{value.name, "extra"}, io.Discard); err == nil {
+			t.Errorf("command %q accepted a second argument", value.name)
+		}
+	}
+	if knownCommand("nonsense") {
+		t.Error("knownCommand accepted a word romty has no command for")
+	}
+}

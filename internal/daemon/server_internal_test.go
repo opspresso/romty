@@ -17,12 +17,17 @@ import (
 	"github.com/creack/pty"
 	"github.com/opspresso/romty/internal/model"
 	"github.com/opspresso/romty/internal/protocol"
+	"github.com/opspresso/romty/internal/testutil"
 )
 
-// newSessionForTest builds the parts of a session that do not need a PTY.
-func newSessionForTest() *session {
+// newSessionForTest builds the parts of a session that do not need a live PTY.
+// Every test session goes through it so none is left half-built: the daemon
+// reads a session's guest tracker and recording whether or not the test that
+// made it cared about either.
+func newSessionForTest(terminal *os.File) *session {
 	return &session{
-		modes:   newModeTracker(),
+		pty:     terminal,
+		guest:   newGuestTracker(),
 		clients: make(map[net.Conn]*attachment),
 	}
 }
@@ -159,11 +164,7 @@ func TestHandshakeTimesOutOnASilentPeer(t *testing.T) {
 	requestTimeout = 150 * time.Millisecond
 	t.Cleanup(func() { requestTimeout = previous })
 
-	base, err := os.MkdirTemp("/tmp", "romty-handshake-")
-	if err != nil {
-		t.Fatalf("MkdirTemp() error = %v", err)
-	}
-	t.Cleanup(func() { os.RemoveAll(base) })
+	base := testutil.ShortTempDir(t)
 	socket := filepath.Join(base, "daemon.sock")
 	server, err := New(socket, filepath.Join(base, "state.json"), "/bin/sh")
 	if err != nil {
@@ -206,11 +207,7 @@ func TestServeLimitsActiveConnectionsAndRecoversCapacity(t *testing.T) {
 	maxActiveConnections = 1
 	t.Cleanup(func() { maxActiveConnections = previous })
 
-	base, err := os.MkdirTemp("/tmp", "romty-capacity-")
-	if err != nil {
-		t.Fatalf("MkdirTemp() error = %v", err)
-	}
-	t.Cleanup(func() { os.RemoveAll(base) })
+	base := testutil.ShortTempDir(t)
 	socket := filepath.Join(base, "daemon.sock")
 	server, err := New(socket, filepath.Join(base, "state.json"), "/bin/sh")
 	if err != nil {
@@ -270,7 +267,7 @@ func waitForConnections(t *testing.T, server *Server, want int, message string) 
 }
 
 func TestAttachLimitRejectsOnlyExcessTerminalClients(t *testing.T) {
-	value := newSessionForTest()
+	value := newSessionForTest(nil)
 	server := &Server{
 		sessions:    map[string]*session{"tab-1": value},
 		logger:      log.New(io.Discard, "", 0),
@@ -338,7 +335,7 @@ func TestAttachDoesNotStallTheSessionForOtherClients(t *testing.T) {
 	defer slow.Close()
 	defer unread.Close()
 
-	value := newSessionForTest()
+	value := newSessionForTest(nil)
 	value.history.append(bytes.Repeat([]byte("history\r\n"), 4096))
 
 	attached := make(chan error, 1)
@@ -372,7 +369,7 @@ func TestSlowLiveClientDoesNotStallAnotherClient(t *testing.T) {
 	maxLiveClientQueueBytes = 64
 	t.Cleanup(func() { maxLiveClientQueueBytes = previous })
 
-	value := newSessionForTest()
+	value := newSessionForTest(nil)
 	slow, unread := net.Pipe()
 	healthy, reader := net.Pipe()
 	t.Cleanup(func() {
@@ -422,7 +419,7 @@ func TestForegroundClientOwnsTerminalSize(t *testing.T) {
 	second, secondPeer := net.Pipe()
 	defer firstPeer.Close()
 	defer secondPeer.Close()
-	value := newSessionForTest()
+	value := newSessionForTest(nil)
 	value.pty = terminal
 	value.clients[first] = &attachment{clientID: "first", columns: 80, rows: 24, activity: 1}
 	value.clients[second] = &attachment{clientID: "second", columns: 120, rows: 40, activity: 2}
@@ -462,7 +459,7 @@ func TestAttachAnnouncesTheInitialReplayBoundary(t *testing.T) {
 	client, daemonSide := net.Pipe()
 	defer daemonSide.Close()
 
-	value := newSessionForTest()
+	value := newSessionForTest(nil)
 	value.history.append([]byte("before\x1b[6nafter"))
 
 	announced := make(chan int, 1)
@@ -494,7 +491,7 @@ func TestAttachKeepsLegacyReplayOnTheTerminalStream(t *testing.T) {
 	client, daemonSide := net.Pipe()
 	defer daemonSide.Close()
 
-	value := newSessionForTest()
+	value := newSessionForTest(nil)
 	value.history.append([]byte("legacy history"))
 	server := &Server{
 		sessions: map[string]*session{"tab-1": value},
@@ -534,7 +531,7 @@ func TestAttachInfersCapabilitiesForAPreNegotiationClient(t *testing.T) {
 	client, daemonSide := net.Pipe()
 	defer daemonSide.Close()
 
-	value := newSessionForTest()
+	value := newSessionForTest(nil)
 	value.columns, value.rows = 90, 25
 	value.history.append([]byte("version five history"))
 	server := &Server{
@@ -579,7 +576,7 @@ func TestAttachHandsOffToLiveOutputInOrder(t *testing.T) {
 	client, daemonSide := net.Pipe()
 	defer daemonSide.Close()
 
-	value := newSessionForTest()
+	value := newSessionForTest(nil)
 	value.history.append(bytes.Repeat([]byte("RECORDED"), 8192))
 
 	attached := make(chan error, 1)
@@ -618,11 +615,7 @@ func TestAttachHandsOffToLiveOutputInOrder(t *testing.T) {
 // on it, because only an orderly shutdown removes it. The next daemon has to
 // unlink that one and bind its own, or romty never starts again after a crash.
 func TestServeReplacesASocketNothingAnswersOn(t *testing.T) {
-	base, err := os.MkdirTemp("/tmp", "romty-stale-")
-	if err != nil {
-		t.Fatalf("MkdirTemp() error = %v", err)
-	}
-	t.Cleanup(func() { os.RemoveAll(base) })
+	base := testutil.ShortTempDir(t)
 	socket := filepath.Join(base, "daemon.sock")
 
 	leaveStaleSocket(t, socket)
@@ -653,11 +646,7 @@ func TestServeReplacesASocketNothingAnswersOn(t *testing.T) {
 // running daemon. Unlinking it would leave that daemon listening on a name no
 // client can reach while it kept writing the state file.
 func TestPrepareSocketRefusesOneThatAnswers(t *testing.T) {
-	base, err := os.MkdirTemp("/tmp", "romty-live-")
-	if err != nil {
-		t.Fatalf("MkdirTemp() error = %v", err)
-	}
-	t.Cleanup(func() { os.RemoveAll(base) })
+	base := testutil.ShortTempDir(t)
 	socket := filepath.Join(base, "daemon.sock")
 
 	listener, err := net.Listen("unix", socket)
@@ -712,11 +701,7 @@ func leaveStaleSocket(t *testing.T, path string) {
 // the user's romty home for every shutdown — to record something the next
 // daemon throws away before it listens.
 func TestShutdownDoesNotPersistTheTabsItIsKilling(t *testing.T) {
-	base, err := os.MkdirTemp("/tmp", "romty-shutdown-")
-	if err != nil {
-		t.Fatalf("MkdirTemp() error = %v", err)
-	}
-	t.Cleanup(func() { os.RemoveAll(base) })
+	base := testutil.ShortTempDir(t)
 	statePath := filepath.Join(base, "state.json")
 
 	server, err := New(filepath.Join(base, "daemon.sock"), statePath, "/bin/sh")
@@ -762,7 +747,7 @@ func TestAttachSurvivesAClientThatReadsSteadilyButSlowly(t *testing.T) {
 	client, daemonSide := net.Pipe()
 	defer daemonSide.Close()
 
-	value := newSessionForTest()
+	value := newSessionForTest(nil)
 	value.history.append(bytes.Repeat([]byte("R"), maxHistoryBytes))
 
 	attached := make(chan error, 1)
@@ -795,7 +780,7 @@ func TestAttachCopiesTheRecordingItReplays(t *testing.T) {
 	client, daemonSide := net.Pipe()
 	defer daemonSide.Close()
 
-	value := newSessionForTest()
+	value := newSessionForTest(nil)
 	value.history.append(bytes.Repeat([]byte("O"), maxHistoryBytes))
 
 	attached := make(chan error, 1)
@@ -831,11 +816,7 @@ func TestAttachCopiesTheRecordingItReplays(t *testing.T) {
 // diagnosis depends entirely on what reaches daemon.log. It used to write
 // nothing at all: the file existed and was always empty.
 func TestDaemonRecordsItsLifecycleAndFailures(t *testing.T) {
-	base, err := os.MkdirTemp("/tmp", "romty-log-")
-	if err != nil {
-		t.Fatalf("MkdirTemp() error = %v", err)
-	}
-	t.Cleanup(func() { os.RemoveAll(base) })
+	base := testutil.ShortTempDir(t)
 	socket := filepath.Join(base, "daemon.sock")
 	server, err := New(socket, filepath.Join(base, "state.json"), "/bin/sh")
 	if err != nil {
@@ -866,11 +847,7 @@ func TestDaemonRecordsItsLifecycleAndFailures(t *testing.T) {
 // A shell exiting is the one place the state file can fall behind with nothing
 // to roll back to, so it has to say so.
 func TestSessionExitIsRecordedWhenStateCannotBeSaved(t *testing.T) {
-	base, err := os.MkdirTemp("/tmp", "romty-log-")
-	if err != nil {
-		t.Fatalf("MkdirTemp() error = %v", err)
-	}
-	t.Cleanup(func() { os.RemoveAll(base) })
+	base := testutil.ShortTempDir(t)
 	home := filepath.Join(base, "home")
 	if err := os.MkdirAll(home, 0o700); err != nil {
 		t.Fatalf("MkdirAll() error = %v", err)
@@ -911,7 +888,7 @@ func TestAttachRestoresModesTheRecordingNoLongerHolds(t *testing.T) {
 	maxHistoryBytes = 2048
 	t.Cleanup(func() { maxHistoryBytes = previous })
 
-	value := newSessionForTest()
+	value := newSessionForTest(nil)
 	value.broadcast([]byte("\x1b[?2004h\x1b[?1h"))
 	// Enough output to push those modes out of the recording entirely.
 	value.broadcast([]byte(strings.Repeat("x", maxHistoryBytes*2)))
@@ -993,11 +970,7 @@ func TestStartSessionUsesTheEnvironmentItIsGiven(t *testing.T) {
 // failed: reporting it as a bind error sent the ordinary outcome of that race
 // to daemon.log as a failure and exited non-zero.
 func TestListenPrivatelyReportsAlreadyRunningWhenTheBindIsLost(t *testing.T) {
-	base, err := os.MkdirTemp("/tmp", "romty-bind-")
-	if err != nil {
-		t.Fatalf("MkdirTemp() error = %v", err)
-	}
-	t.Cleanup(func() { os.RemoveAll(base) })
+	base := testutil.ShortTempDir(t)
 	socket := filepath.Join(base, "daemon.sock")
 
 	winner, err := net.Listen("unix", socket)
@@ -1048,11 +1021,7 @@ func TestReplyGivesUpOnAPeerThatStoppedReading(t *testing.T) {
 // the second now owned. The lock decides ownership before the socket is
 // touched at all.
 func TestServeReportsAlreadyRunningWhenAnotherDaemonHoldsTheLock(t *testing.T) {
-	base, err := os.MkdirTemp("/tmp", "romty-lock-")
-	if err != nil {
-		t.Fatalf("MkdirTemp() error = %v", err)
-	}
-	t.Cleanup(func() { os.RemoveAll(base) })
+	base := testutil.ShortTempDir(t)
 	socket := filepath.Join(base, "daemon.sock")
 
 	held, err := lockDaemon(socket + lockSuffix)
@@ -1135,11 +1104,7 @@ func TestServeClearsStaleTabsBeforeTouchingTheSocket(t *testing.T) {
 	if os.Getuid() == 0 {
 		t.Skip("root writes into a directory it has no write permission on")
 	}
-	base, err := os.MkdirTemp("/tmp", "romty-stale-")
-	if err != nil {
-		t.Fatalf("MkdirTemp() error = %v", err)
-	}
-	t.Cleanup(func() { os.RemoveAll(base) })
+	base := testutil.ShortTempDir(t)
 
 	// The state file lives where it cannot be rewritten. Its own directory,
 	// because Serve narrows the socket's directory and would undo the mode.

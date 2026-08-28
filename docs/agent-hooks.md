@@ -1,6 +1,6 @@
 # Agent status hooks
 
-romty identifies foreground Claude Code and Codex processes without configuration. Hooks add the phase behind the colored tab marker:
+romty identifies foreground Claude Code and Codex processes without configuration, and reads a phase back from what the agent last drew. Hooks replace that reading with the agent's own report:
 
 | Marker | Meaning |
 |---|---|
@@ -12,6 +12,20 @@ romty identifies foreground Claude Code and Codex processes without configuratio
 | `★` | Stopped with an error |
 
 The hook command reads JSON from standard input and sends only the tab ID, provider, session ID, event name, tool name, notification type, permission mode, and whether background work remains. It does not send or retain prompts, transcripts, tool inputs, tool outputs, or assistant messages. It writes nothing to standard output or standard error and exits successfully when it is outside a romty tab, the daemon is unavailable, or the running daemon predates hook support.
+
+## Without hooks
+
+An agent that has no romty hook installed still reports a phase, read from the last 4 KiB of its terminal output and the window title it set. An approval prompt names the choices it accepts and a generating agent says how to interrupt it, so those phrases stand in for a hook. Only `working`, `waiting for input`, and `waiting for permission` are recognised this way; `thinking`, `planning`, `compacting`, `idle`, and `error` need a hook.
+
+The newest phrase in the output wins, so an agent that answered a prompt and went back to work reports work again. The window title is consulted only when the output says nothing, because a title is sticky and can outlive the state it named. A hook always wins over both, and no phase is guessed for a tab whose agent has drawn nothing recognisable.
+
+## Token and cost readings
+
+A hooked Claude Code session also reports what it has spent. romty reads the counters Claude Code writes to its own transcript under `${CLAUDE_CONFIG_DIR:-~/.claude}/projects` and shows them on the rail above the status row while that terminal is open: the tokens the newest request carried into the model, and the session cost the agent totalled.
+
+Both are the agent's own numbers. romty never estimates them, and never converts them to a share of a context window — a transcript records no window size, so a percentage could only come from a table of model limits that would go stale as models change. A tab shows no reading when the transcript cannot be read.
+
+The reading needs the session identifier, which only a hook reports: two tabs running an agent in the same directory cannot otherwise be told apart. Codex records its counters differently and is not read yet.
 
 ## Install or update
 

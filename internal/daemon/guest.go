@@ -35,11 +35,24 @@ var trackedModes = []int{
 // dozen bytes; anything longer is not one being split.
 const modeCarryLimit = 128
 
-// modeTracker follows the sticky terminal modes a guest turns on and off. It reads
-// the same bytes the recording does, but keeps only the conclusion, so it is
-// unaffected by the recording being trimmed.
-type modeTracker struct {
+// titleCarryLimit is the same bound for a window title, which carries text and
+// so runs longer than a mode sequence but still not unbounded.
+const titleCarryLimit = 1024
+
+// maxTitleBytes caps what is kept from a title. A window title is a line of
+// text; a guest that sends more is not naming a window.
+const maxTitleBytes = 512
+
+// guestTracker follows what a guest declares about its terminal over the whole
+// stream: the sticky modes it turns on and off, and the window title it sets.
+// Both are sticky, both would otherwise be lost with the oldest bytes of a
+// trimmed recording, and both are read from one pass over the bytes the
+// recording sees, keeping only the conclusion.
+type guestTracker struct {
 	set map[int]bool
+	// title is the window title the guest last set. Agents name their state
+	// there, which is the one report romty gets without a hook installed.
+	title string
 	// keypad is DECKPAM/DECKPNM, an ESC sequence rather than a CSI mode.
 	keypad      bool
 	keypadKnown bool
@@ -48,11 +61,11 @@ type modeTracker struct {
 	carry []byte
 }
 
-func newModeTracker() *modeTracker {
-	return &modeTracker{set: make(map[int]bool, len(trackedModes))}
+func newGuestTracker() *guestTracker {
+	return &guestTracker{set: make(map[int]bool, len(trackedModes))}
 }
 
-func (t *modeTracker) observe(data []byte) {
+func (t *guestTracker) observe(data []byte) {
 	scan := data
 	if len(t.carry) > 0 {
 		scan = append(t.carry, data...)
@@ -61,7 +74,7 @@ func (t *modeTracker) observe(data []byte) {
 	for index := 0; index < len(scan); {
 		if scan[index] == escape {
 			if index+1 >= len(scan) {
-				t.hold(scan[index:])
+				t.hold(scan[index:], modeCarryLimit)
 				return
 			}
 			switch scan[index+1] {
@@ -75,6 +88,22 @@ func (t *modeTracker) observe(data []byte) {
 				continue
 			}
 		}
+		if body, found := titleIntroducer(scan, index); found {
+			end, content, state := scanTitleSequence(scan, body)
+			switch state {
+			case titleSplit:
+				t.hold(scan[index:], titleCarryLimit)
+				return
+			case titleMalformed:
+				// Not this sequence's terminator after all. Step past the
+				// introducer rather than swallowing the rest of the chunk.
+				index = body
+				continue
+			}
+			t.applyTitle(content)
+			index = end
+			continue
+		}
 		body, state := modeIntroducer(scan, index)
 		switch state {
 		case notAnIntroducer:
@@ -82,12 +111,12 @@ func (t *modeTracker) observe(data []byte) {
 			continue
 		case introducerSplit:
 			// An escape at the very end of the chunk may be the start of one.
-			t.hold(scan[index:])
+			t.hold(scan[index:], modeCarryLimit)
 			return
 		}
 		end, params, final, complete := scanModeSequence(scan, body)
 		if !complete {
-			t.hold(scan[index:])
+			t.hold(scan[index:], modeCarryLimit)
 			return
 		}
 		if final == 'h' || final == 'l' {
@@ -98,14 +127,28 @@ func (t *modeTracker) observe(data []byte) {
 }
 
 // hold keeps a sequence the chunk boundary cut in half, unless it is already
-// longer than any mode sequence could be.
-func (t *modeTracker) hold(tail []byte) {
-	if len(tail) <= modeCarryLimit {
+// longer than that kind of sequence could be.
+func (t *guestTracker) hold(tail []byte, limit int) {
+	if len(tail) <= limit {
 		t.carry = append([]byte(nil), tail...)
 	}
 }
 
-func (t *modeTracker) apply(params string, enabled bool) {
+// applyTitle records the window title an OSC sets. 0 names the icon and the
+// window together and 2 the window alone; 1 is the icon name only and says
+// nothing about the window.
+func (t *guestTracker) applyTitle(content string) {
+	params, text, found := strings.Cut(content, ";")
+	if !found || (params != "0" && params != "2") {
+		return
+	}
+	if len(text) > maxTitleBytes {
+		text = text[:maxTitleBytes]
+	}
+	t.title = text
+}
+
+func (t *guestTracker) apply(params string, enabled bool) {
 	if !strings.HasPrefix(params, "?") {
 		return
 	}
@@ -125,7 +168,11 @@ func (t *modeTracker) apply(params string, enabled bool) {
 // restore returns the sequences that put a fresh emulator into the state the
 // guest believes the terminal is in. It is written before the recording, so
 // any mode change still inside the recording replays on top and wins.
-func (t *modeTracker) restore() []byte {
+//
+// The window title is deliberately not restored. romty draws its own tab rail
+// and never shows the guest's title, so replaying it would only rename the host
+// terminal the user is sitting in front of.
+func (t *guestTracker) restore() []byte {
 	var preamble strings.Builder
 	for _, mode := range trackedModes {
 		enabled, known := t.set[mode]
@@ -173,6 +220,49 @@ func modeIntroducer(data []byte, index int) (int, introducerState) {
 		return 0, notAnIntroducer
 	}
 	return index + 2, introducerFound
+}
+
+// titleIntroducer reports where an OSC sequence's parameters begin, accepting
+// both the ESC form and the single C1 byte. A split introducer needs no answer
+// of its own: the lone ESC that might begin one is held back by the mode scan
+// that follows.
+func titleIntroducer(data []byte, index int) (int, bool) {
+	if data[index] == commandIntroducer {
+		return index + 1, true
+	}
+	if data[index] != escape || index+1 >= len(data) || data[index+1] != ']' {
+		return 0, false
+	}
+	return index + 2, true
+}
+
+type titleState int
+
+const (
+	titleComplete titleState = iota
+	titleSplit
+	titleMalformed
+)
+
+// scanTitleSequence walks an OSC sequence to its terminator — BEL, the ESC form
+// of ST, or the single C1 terminator — and reports the body between the
+// introducer and it.
+func scanTitleSequence(data []byte, body int) (end int, content string, state titleState) {
+	for cursor := body; cursor < len(data); cursor++ {
+		switch data[cursor] {
+		case bell, stringTerminator:
+			return cursor + 1, string(data[body:cursor]), titleComplete
+		case escape:
+			if cursor+1 >= len(data) {
+				return 0, "", titleSplit
+			}
+			if data[cursor+1] != '\\' {
+				return 0, "", titleMalformed
+			}
+			return cursor + 2, string(data[body:cursor]), titleComplete
+		}
+	}
+	return 0, "", titleSplit
 }
 
 // scanModeSequence walks a CSI sequence by its grammar and reports its

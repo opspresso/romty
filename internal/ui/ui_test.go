@@ -878,14 +878,41 @@ func TestDashboardMouseSelectsWorkspaceAndTab(t *testing.T) {
 	}
 }
 
-func TestDashboardMouseWheelMovesOnlyTheWorkspaceCursor(t *testing.T) {
-	value := newDashboard(&fakeBackend{}, twoRootSnapshot())
-	value.width, value.height = 120, 30
+func TestDashboardMouseWheelScrollsTheWorkspaceWithoutMovingItsCursor(t *testing.T) {
+	directories := make([]model.WorkspaceView, 0, 6)
+	for index := range 6 {
+		name := fmt.Sprintf("workspace-%02d", index)
+		directories = append(directories, model.WorkspaceView{Workspace: model.Workspace{
+			ID: name, RootID: "root-1", Name: name, Path: "/projects/" + name,
+		}})
+	}
+	value := newDashboard(&fakeBackend{}, model.Snapshot{Roots: []model.RootView{{
+		Root: model.Root{ID: "root-1", Name: "projects", Path: "/projects"}, Directories: directories,
+	}}})
+	value.width, value.height = 120, 10
+	value.focus = terminalPane
+	before := ansi.Strip(strings.Join(value.renderNavigation(value.dimensions().leftWidth, value.dimensions().bodyHeight), "\n"))
 
 	updated, command := value.Update(tea.MouseWheelMsg{X: 2, Y: 3, Button: tea.MouseWheelDown})
 	value = updated.(dashboard)
-	if value.navIndex != 1 || value.cursorPath != "/second" || command != nil {
-		t.Fatalf("workspace wheel = (index %d, path %q, command %v)", value.navIndex, value.cursorPath, command)
+	if value.navIndex != 0 || value.cursorPath != "/projects" || value.focus != terminalPane || command != nil {
+		t.Fatalf("workspace wheel = (index %d, path %q, focus %v, command %v)",
+			value.navIndex, value.cursorPath, value.focus, command)
+	}
+	after := ansi.Strip(strings.Join(value.renderNavigation(value.dimensions().leftWidth, value.dimensions().bodyHeight), "\n"))
+	if before == after || strings.Contains(after, "workspace-00") || !strings.Contains(after, "workspace-02") {
+		t.Fatalf("workspace wheel did not move the viewport:\n%s\nwant later workspaces", after)
+	}
+	if index, ok := value.navigationIndexAtRow(3, value.dimensions().bodyHeight); !ok || index != 3 {
+		t.Fatalf("visible row hit = (%d, %v), want workspace-02", index, ok)
+	}
+	if value.hover.kind != hoverNavigation || value.hover.index != 3 {
+		t.Fatalf("hover after wheel = (%v, %d), want workspace-02", value.hover.kind, value.hover.index)
+	}
+	offset := value.navOffset
+	value.ensureWorkspaceCursor()
+	if value.navOffset != offset {
+		t.Fatalf("snapshot cursor sync moved the scrolled viewport from %d to %d", offset, value.navOffset)
 	}
 }
 
@@ -3812,6 +3839,140 @@ func TestDashboardKeepsTheWorkspaceWhenThereIsNowhereToSwitch(t *testing.T) {
 	}
 }
 
+// A sound and a tab marker say an agent stopped to ask something; without a way
+// to reach it the user still has to walk the tree to find which one.
+func TestDashboardJumpsToTheNextWaitingAgent(t *testing.T) {
+	root := model.Root{ID: "root-1", Name: "projects", Path: "/projects"}
+	alpha := model.Workspace{ID: "workspace-1", RootID: root.ID, Name: "alpha", Path: "/projects/alpha"}
+	bravo := model.Workspace{ID: "workspace-2", RootID: root.ID, Name: "bravo", Path: "/projects/bravo"}
+	charlie := model.Workspace{ID: "workspace-3", RootID: root.ID, Name: "charlie", Path: "/projects/charlie"}
+	// alpha's agent is busy; bravo's wants input and charlie's wants approval.
+	alphaTab := model.Tab{ID: "tab-1", WorkspaceID: alpha.ID, Name: "1", Running: true,
+		Agent: model.AgentClaude, AgentPhase: model.AgentPhaseWorking}
+	bravoTab := model.Tab{ID: "tab-2", WorkspaceID: bravo.ID, Name: "1", Running: true,
+		Agent: model.AgentClaude, AgentPhase: model.AgentPhaseWaitingInput}
+	charlieTab := model.Tab{ID: "tab-3", WorkspaceID: charlie.ID, Name: "1", Running: true,
+		Agent: model.AgentCodex, AgentPhase: model.AgentPhaseWaitingApproval}
+	snapshot := model.Snapshot{Roots: []model.RootView{{
+		Root: root,
+		Directories: []model.WorkspaceView{
+			{Workspace: alpha, Tabs: []model.Tab{alphaTab}},
+			{Workspace: bravo, Tabs: []model.Tab{bravoTab}},
+			{Workspace: charlie, Tabs: []model.Tab{charlieTab}},
+		},
+	}}}
+
+	backend := &fakeBackend{snapshot: snapshot, workspace: bravo}
+	value := newDashboard(backend, snapshot)
+	value.selectedWorkspaceID = alpha.ID
+	value.selectedPath = alpha.Path
+	value.terminal = newEmbeddedTerminal(alphaTab.ID, newMemoryStream(""), 40, 10)
+	value.focus = terminalPane
+	t.Cleanup(func() { value.closeTerminal() })
+
+	// The open terminal is not waiting, so the walk starts at the first stop
+	// and skips the busy agent entirely.
+	value = pressJumpToWaitingAgent(t, value)
+	if backend.openedTab != bravoTab.ID || value.terminal.id != bravoTab.ID {
+		t.Fatalf("Ctrl+Shift+A = (opened %q, terminal %q), want bravo's waiting terminal",
+			backend.openedTab, value.terminal.id)
+	}
+	if item, ok := value.navigationItem(); !ok || item.workspace.Path != bravo.Path {
+		t.Fatalf("cursor = %+v, want it on bravo", item)
+	}
+
+	// Waiting for approval is a stop as much as waiting for input.
+	backend.workspace = charlie
+	value = pressJumpToWaitingAgent(t, value)
+	if value.terminal.id != charlieTab.ID {
+		t.Fatalf("second jump = terminal %q, want charlie's", value.terminal.id)
+	}
+
+	// The last stop wraps rather than stopping at the end of the tree.
+	backend.workspace = bravo
+	value = pressJumpToWaitingAgent(t, value)
+	if value.terminal.id != bravoTab.ID {
+		t.Fatalf("third jump = terminal %q, want it wrapped to bravo", value.terminal.id)
+	}
+}
+
+// Reopening the terminal that is already attached would tear it down to attach
+// a new one in its place, so the only waiting agent gets the keyboard instead.
+func TestDashboardJumpToTheOnlyWaitingAgentMovesTheFocus(t *testing.T) {
+	root := model.Root{ID: "root-1", Name: "projects", Path: "/projects"}
+	alpha := model.Workspace{ID: "workspace-1", RootID: root.ID, Name: "alpha", Path: "/projects/alpha"}
+	alphaTab := model.Tab{ID: "tab-1", WorkspaceID: alpha.ID, Name: "1", Running: true,
+		Agent: model.AgentClaude, AgentPhase: model.AgentPhaseWaitingInput}
+	snapshot := model.Snapshot{Roots: []model.RootView{{
+		Root:        root,
+		Directories: []model.WorkspaceView{{Workspace: alpha, Tabs: []model.Tab{alphaTab}}},
+	}}}
+
+	backend := &fakeBackend{snapshot: snapshot, workspace: alpha}
+	value := newDashboard(backend, snapshot)
+	value.selectedWorkspaceID = alpha.ID
+	value.selectedPath = alpha.Path
+	value.terminal = newEmbeddedTerminal(alphaTab.ID, newMemoryStream(""), 40, 10)
+	value.focus = leftPane
+	t.Cleanup(func() { value.closeTerminal() })
+
+	updated, command := value.Update(jumpToWaitingAgentKey())
+	value = updated.(dashboard)
+	if command != nil || backend.openedTab != "" {
+		t.Fatalf("jump to the open terminal = (command %v, opened %q), want no reattach",
+			command, backend.openedTab)
+	}
+	if value.focus != terminalPane {
+		t.Fatalf("focus = %v, want the terminal", value.focus)
+	}
+}
+
+func TestDashboardJumpSaysWhenNoAgentIsWaiting(t *testing.T) {
+	root := model.Root{ID: "root-1", Name: "projects", Path: "/projects"}
+	alpha := model.Workspace{ID: "workspace-1", RootID: root.ID, Name: "alpha", Path: "/projects/alpha"}
+	alphaTab := model.Tab{ID: "tab-1", WorkspaceID: alpha.ID, Name: "1", Running: true,
+		Agent: model.AgentClaude, AgentPhase: model.AgentPhaseWorking}
+	snapshot := model.Snapshot{Roots: []model.RootView{{
+		Root:        root,
+		Directories: []model.WorkspaceView{{Workspace: alpha, Tabs: []model.Tab{alphaTab}}},
+	}}}
+
+	value := newDashboard(&fakeBackend{snapshot: snapshot}, snapshot)
+	updated, command := value.Update(jumpToWaitingAgentKey())
+	value = updated.(dashboard)
+	if command != nil {
+		t.Fatalf("jump with nothing waiting produced %v, want no command", command)
+	}
+	if value.errorMessage != "no agent is waiting" || !value.noticeMessage {
+		t.Fatalf("status = (%q, notice %v), want a note that nothing is waiting",
+			value.errorMessage, value.noticeMessage)
+	}
+}
+
+func jumpToWaitingAgentKey() tea.KeyPressMsg {
+	return tea.KeyPressMsg(tea.Key{Code: 'a', ShiftedCode: 'A', Mod: tea.ModCtrl | tea.ModShift})
+}
+
+// pressJumpToWaitingAgent presses Ctrl+Shift+A and settles the commands the
+// jump produces, the way pressSwitchTab settles a switch.
+func pressJumpToWaitingAgent(t *testing.T, value dashboard) dashboard {
+	t.Helper()
+	updated, command := value.Update(jumpToWaitingAgentKey())
+	value = updated.(dashboard)
+	if command == nil {
+		t.Fatal("Ctrl+Shift+A produced no command")
+	}
+	for step := 0; command != nil && step < 4; step++ {
+		message := command()
+		if _, reading := message.(terminalOutputMsg); reading {
+			break
+		}
+		updated, command = value.Update(message)
+		value = updated.(dashboard)
+	}
+	return value
+}
+
 func switchTabKey(code rune) tea.KeyPressMsg {
 	return tea.KeyPressMsg(tea.Key{Code: code, Mod: tea.ModCtrl | tea.ModShift})
 }
@@ -4501,12 +4662,26 @@ func TestDashboardKeepsNavigationCursorVisible(t *testing.T) {
 		Directories: directories,
 	}}})
 	value.width = 120
-	value.height = 30
+	value.height = 12
 	view := value.dimensions()
 	leftWidth, bodyHeight := view.leftWidth, view.bodyHeight
 
+	// Moving inside the current page leaves the viewport still. Only the next
+	// move, which would put the cursor below it, advances by the one root row
+	// needed to make the workspace fit.
+	for range 3 {
+		value.moveNavigation(1)
+	}
+	if value.navOffset != 0 {
+		t.Fatalf("viewport moved to %d while the cursor was still visible", value.navOffset)
+	}
+	value.moveNavigation(1)
+	if value.navOffset != 1 {
+		t.Fatalf("viewport moved to %d at the lower edge, want the minimal offset 1", value.navOffset)
+	}
+
 	for _, navIndex := range []int{0, 20, len(directories)} {
-		value.navIndex = navIndex
+		value.setNavigation(navIndex)
 		lines := value.renderNavigation(leftWidth, bodyHeight)
 		if len(lines) > bodyHeight {
 			t.Fatalf("navigation at index %d rendered %d lines, want at most %d", navIndex, len(lines), bodyHeight)
@@ -4591,12 +4766,252 @@ func TestDashboardOpensHelpFromTheTerminalPane(t *testing.T) {
 	}
 }
 
+// The help modal is the only place a user can look a shortcut up, so every key
+// romty takes in both panes has to appear there. Comparing the reference with
+// the table that routes those keys says that; counting rendered lines did not,
+// and the hand-copied list of every shortcut that stood beside it was a second
+// copy of the reference that quietly fell behind it.
+// The counters are the agent's own; romty reports them and estimates nothing,
+// so a tab with none shows none.
+func TestDashboardFindsAndWalksScrollbackMatches(t *testing.T) {
+	value := scrolledDashboard(t, 200)
+	updated, _ := value.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyPgUp, Mod: tea.ModShift}))
+	value = updated.(dashboard)
+	if !value.scrollback {
+		t.Fatal("Shift+PgUp did not enter scrollback")
+	}
+
+	value = typeSearch(t, value, "line-004")
+	if len(value.searchMatches) != 1 {
+		t.Fatalf("matches = %v, want the one line-004", value.searchMatches)
+	}
+	if !strings.Contains(plainStatus(value), "line-004 1/1") {
+		t.Fatalf("status = %q, want the match counted", plainStatus(value))
+	}
+	// The match is on screen at the offset the search scrolled to.
+	if !scrollbackShows(value, "line-004") {
+		t.Fatalf("viewport does not show the match:\n%s", strings.Join(plainRows(value.terminal.renderViewport(value.scrollOffset)), "\n"))
+	}
+
+	// A query on many lines starts at the newest and walks towards the oldest.
+	value = typeSearch(t, value, "line-01")
+	if len(value.searchMatches) != 10 {
+		t.Fatalf("matches = %d, want the ten line-01x rows", len(value.searchMatches))
+	}
+	if !scrollbackShows(value, "line-019") {
+		t.Fatal("search did not start at the newest match")
+	}
+	updated, _ = value.Update(key('n', "n"))
+	value = updated.(dashboard)
+	if !scrollbackShows(value, "line-018") {
+		t.Fatal("n did not step towards older output")
+	}
+	updated, _ = value.Update(tea.KeyPressMsg(tea.Key{Code: 'n', ShiftedCode: 'N', Text: "N", Mod: tea.ModShift}))
+	value = updated.(dashboard)
+	if !scrollbackShows(value, "line-019") {
+		t.Fatal("N did not step back towards newer output")
+	}
+}
+
+func TestDashboardSaysWhenScrollbackHasNoMatch(t *testing.T) {
+	value := scrolledDashboard(t, 200)
+	updated, _ := value.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyPgUp, Mod: tea.ModShift}))
+	value = updated.(dashboard)
+
+	value = typeSearch(t, value, "nothing-here")
+	if len(value.searchMatches) != 0 {
+		t.Fatalf("matches = %v, want none", value.searchMatches)
+	}
+	if value.errorMessage == "" || !value.noticeMessage {
+		t.Fatalf("status = (%q, notice %v), want a note that nothing matched",
+			value.errorMessage, value.noticeMessage)
+	}
+	// Without matches n is not a search key, so it goes back to being what any
+	// other key is in scrollback: leave, and send it to the shell.
+	updated, _ = value.Update(key('n', "n"))
+	if updated.(dashboard).scrollback {
+		t.Fatal("n with no matches did not leave scrollback")
+	}
+}
+
+// Leaving scrollback forgets the search, so reopening it does not land on a
+// stale match from output that has since scrolled away.
+func TestDashboardForgetsTheSearchOnLeavingScrollback(t *testing.T) {
+	value := scrolledDashboard(t, 200)
+	updated, _ := value.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyPgUp, Mod: tea.ModShift}))
+	value = typeSearch(t, updated.(dashboard), "line-004")
+
+	updated, _ = value.Update(key(tea.KeyEscape, ""))
+	value = updated.(dashboard)
+	if value.scrollback || value.searchMode || value.searchQuery != "" || len(value.searchMatches) != 0 {
+		t.Fatalf("after leaving = (scrollback %v, mode %v, query %q, matches %v), want the search forgotten",
+			value.scrollback, value.searchMode, value.searchQuery, value.searchMatches)
+	}
+}
+
+// typeSearch opens the find prompt, types a query one key at a time, and
+// confirms it.
+func typeSearch(t *testing.T, value dashboard, query string) dashboard {
+	t.Helper()
+	updated, _ := value.Update(key('/', "/"))
+	value = updated.(dashboard)
+	if !value.searchMode {
+		t.Fatal("/ did not open the find prompt")
+	}
+	for _, letter := range query {
+		updated, _ = value.Update(key(letter, string(letter)))
+		value = updated.(dashboard)
+	}
+	if value.searchQuery != query {
+		t.Fatalf("typed query = %q, want %q", value.searchQuery, query)
+	}
+	updated, _ = value.Update(key(tea.KeyEnter, ""))
+	value = updated.(dashboard)
+	if value.searchMode {
+		t.Fatal("Enter did not close the find prompt")
+	}
+	return value
+}
+
+func scrollbackShows(value dashboard, text string) bool {
+	for _, line := range plainRows(value.terminal.renderViewport(value.scrollOffset)) {
+		if strings.Contains(line, text) {
+			return true
+		}
+	}
+	return false
+}
+
+func plainStatus(value dashboard) string {
+	return ansi.Strip(strings.Join(value.renderStatus(value.width, value.dimensions().bodyHeight), "\n"))
+}
+
+func TestDashboardShowsTheOpenAgentLedgerInTheRail(t *testing.T) {
+	root := model.Root{ID: "root-1", Name: "projects", Path: "/projects"}
+	alpha := model.Workspace{ID: "workspace-1", RootID: root.ID, Name: "alpha", Path: "/projects/alpha"}
+	tab := model.Tab{ID: "tab-1", WorkspaceID: alpha.ID, Name: "1", Running: true,
+		Agent: model.AgentClaude, AgentPhase: model.AgentPhaseWorking,
+		AgentContextTokens: 344103, AgentCostUSD: 1.25}
+	snapshot := model.Snapshot{Roots: []model.RootView{{
+		Root:        root,
+		Directories: []model.WorkspaceView{{Workspace: alpha, Tabs: []model.Tab{tab}}},
+	}}}
+
+	value := newDashboard(&fakeBackend{snapshot: snapshot}, snapshot)
+	value.width = 120
+	value.height = 30
+	value.selectedWorkspaceID = alpha.ID
+	value.selectedPath = alpha.Path
+	value.focus = terminalPane
+
+	rail := ansi.Strip(value.renderStatus(value.width, value.dimensions().bodyHeight)[0])
+	if !strings.Contains(rail, "344k ctx") || !strings.Contains(rail, "$1.25") {
+		t.Fatalf("rail = %q, want the agent's counters", rail)
+	}
+
+	// Nothing read means nothing shown, not a zero.
+	value.state.Roots[0].Directories[0].Tabs[0].AgentContextTokens = 0
+	value.state.Roots[0].Directories[0].Tabs[0].AgentCostUSD = 0
+	rail = ansi.Strip(value.renderStatus(value.width, value.dimensions().bodyHeight)[0])
+	if strings.Contains(rail, "ctx") || strings.Contains(rail, "$") {
+		t.Fatalf("rail = %q, want no reading shown", rail)
+	}
+}
+
+// The shortcuts are what the rail is for; a note that does not fit beside them
+// is dropped rather than pushing them off the row.
+func TestShortcutRailDropsANoteThatDoesNotFit(t *testing.T) {
+	styles := newUIStyles(true)
+	keys := []shortcut{{key: "Ctrl+/", description: "navigation"}}
+	full := ansi.Strip(renderShortcutRailNote(styles, 20, "344k ctx  $1.25", keys...))
+	if strings.Contains(full, "ctx") {
+		t.Fatalf("narrow rail = %q, want the note dropped", full)
+	}
+	if !strings.Contains(full, "navigation") {
+		t.Fatalf("narrow rail = %q, want the shortcuts kept", full)
+	}
+	wide := renderShortcutRailNote(styles, 120, "344k ctx  $1.25", keys...)
+	if got := lipgloss.Width(wide); got != 120 {
+		t.Fatalf("rail width = %d, want 120", got)
+	}
+}
+
+func TestFormatTokensKeepsItsWidthAsItGrows(t *testing.T) {
+	for _, probe := range []struct {
+		count int
+		want  string
+	}{{count: 0, want: "0"}, {count: 999, want: "999"}, {count: 1000, want: "1k"},
+		{count: 344103, want: "344k"}, {count: 1_250_000, want: "1.2M"}} {
+		if got := formatTokens(probe.count); got != probe.want {
+			t.Errorf("formatTokens(%d) = %q, want %q", probe.count, got, probe.want)
+		}
+	}
+}
+
+func TestHelpReferenceDocumentsEveryGlobalKey(t *testing.T) {
+	documented := make(map[string]bool)
+	for _, entry := range helpReference() {
+		for _, keycap := range entry.keys {
+			for _, name := range helpKeyNames(keycap) {
+				documented[name] = true
+			}
+		}
+	}
+	for name := range globalKeys {
+		if !documented[name] {
+			t.Errorf("global key %q appears in no help entry", name)
+		}
+	}
+}
+
+// helpKeyNames spells one help keycap the way globalKeys names it, expanding
+// the paired arrows and pages the reference writes as a single cap.
+func helpKeyNames(keycap string) []string {
+	lower := strings.ToLower(keycap)
+	for _, pair := range []struct {
+		suffix string
+		tails  []string
+	}{
+		{suffix: "←/→", tails: []string{"left", "right"}},
+		{suffix: "↑/↓", tails: []string{"up", "down"}},
+		{suffix: "pgup/pgdn", tails: []string{"pgup", "pgdown"}},
+	} {
+		prefix, found := strings.CutSuffix(lower, pair.suffix)
+		if !found {
+			continue
+		}
+		names := make([]string, 0, len(pair.tails))
+		for _, tail := range pair.tails {
+			names = append(names, prefix+tail)
+		}
+		return names
+	}
+	return []string{lower}
+}
+
+func TestHelpReferenceEntriesAreComplete(t *testing.T) {
+	for index, entry := range helpReference() {
+		switch {
+		case entry.isSection():
+			if entry.note == "" || entry.description != "" || len(entry.keys) > 0 {
+				t.Errorf("entry %d = %+v, want a section heading with only a note", index, entry)
+			}
+		case entry.description == "" || len(entry.keys) == 0:
+			t.Errorf("entry %d = %+v, want a shortcut with a description and keys", index, entry)
+		}
+	}
+	if first := helpReference()[0]; !first.isSection() {
+		t.Errorf("first entry = %+v, want a section heading", first)
+	}
+}
+
 func TestDashboardShowsCompleteShortcutReferenceInHelpModal(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, model.Snapshot{})
 	value.width = 100
 	value.height = 80
-	if entries := value.helpEntries(); len(entries) != 41 {
-		t.Fatalf("help entries = %d, want 7 sections and 33 shortcuts", len(entries))
+	// One line per reference entry, plus the name-and-version banner above them.
+	if entries := value.helpEntries(); len(entries) != len(helpReference())+1 {
+		t.Fatalf("help entries = %d, want %d", len(entries), len(helpReference())+1)
 	}
 
 	updated, command := value.Update(key('?', "?"))
@@ -4611,56 +5026,30 @@ func TestDashboardShowsCompleteShortcutReferenceInHelpModal(t *testing.T) {
 	}
 	plainLines := strings.Split(ansi.Strip(strings.Join(modalLines, "\n")), "\n")
 	plain := strings.Join(plainLines, "\n")
-	for _, section := range []string{"GLOBAL", "WORKSPACE", "SWITCH", "MOVE", "FILE DIFF", "CONTEXT"} {
-		if !strings.Contains(plain, section) {
-			t.Fatalf("help modal does not contain %q section:\n%s", section, plain)
+
+	// Every entry the reference declares reaches the screen.
+	for _, entry := range helpReference() {
+		if entry.isSection() {
+			if !strings.Contains(plain, entry.section) {
+				t.Fatalf("help modal does not contain %q section:\n%s", entry.section, plain)
+			}
+			continue
+		}
+		if !helpContainsShortcut(plainLines, entry.description, entry.keys...) {
+			t.Fatalf("help modal does not contain %v %q shortcut:\n%s", entry.keys, entry.description, plain)
 		}
 	}
+
+	// The reference was once nine sections of two or three lines each, which
+	// read as a list of headings rather than of shortcuts.
 	for _, section := range []string{"CORE", "NAVIGATE", "FILES", "SCROLLBACK", "PICKER", "HELP", "CONFIG", "GIT", "PROMPTS"} {
 		if strings.Contains(plain, section) {
 			t.Fatalf("help modal still contains duplicated %q section:\n%s", section, plain)
 		}
 	}
-	shortcuts := []struct {
-		keys        []string
-		description string
-	}{
-		{keys: []string{"F1", "?"}, description: "Help"},
-		{keys: []string{"F2"}, description: "Add root"},
-		{keys: []string{"F3", ","}, description: "Config"},
-		{keys: []string{"F4", "Ctrl+C"}, description: "Quit"},
-		{keys: []string{"F5"}, description: "Refresh workspaces/files"},
-		{keys: []string{"F6", "Ctrl+Shift+\\"}, description: "Toggle scrollback"},
-		{keys: []string{"F7", "Ctrl+/"}, description: "Toggle pane focus"},
-		{keys: []string{"F8"}, description: "Remove selection"},
-		{keys: []string{"F9"}, description: "Stop daemon"},
-		{keys: []string{"i"}, description: "About"},
-		{keys: []string{"Tab"}, description: "Focus terminal"},
-		{keys: []string{"Ctrl+Shift+T"}, description: "New tab"},
-		{keys: []string{"Ctrl+Shift+G"}, description: "Git actions"},
-		{keys: []string{"Ctrl+Shift+F"}, description: "Toggle file view"},
-		{keys: []string{"Ctrl+Shift+←/→"}, description: "Switch tab"},
-		{keys: []string{"Ctrl+Shift+↑/↓"}, description: "Switch workspace"},
-		{keys: []string{"↑/↓", "k/j"}, description: "Move one item / line"},
-		{keys: []string{"←/→", "h/l"}, description: "Tab; picker child/parent"},
-		{keys: []string{"PgUp/PgDn", "Ctrl+B/F"}, description: "Previous / next page"},
-		{keys: []string{"Home/End", "g/G"}, description: "First / last item/line"},
-		{keys: []string{"Shift+PgUp/PgDn"}, description: "Enter / page scrollback"},
-		{keys: []string{"Wheel"}, description: "Scroll Help/history/diff"},
-		{keys: []string{"F6"}, description: "Toggle diff layout"},
-		{keys: []string{"Ctrl+↑/↓"}, description: "Scroll diff one line"},
-		{keys: []string{"Enter"}, description: "Activate / submit"},
-		{keys: []string{"Esc"}, description: "Close / cancel / leave"},
-		{keys: []string{"/"}, description: "Type a picker path"},
-		{keys: []string{"Backspace"}, description: "Erase path character"},
-		{keys: []string{"←/→", "[/]"}, description: "Adjust pane width"},
-		{keys: []string{"m"}, description: "Toggle scrollback mouse"},
-	}
-	for _, shortcut := range shortcuts {
-		if !helpContainsShortcut(plainLines, shortcut.description, shortcut.keys...) {
-			t.Fatalf("help modal does not contain %v %q shortcut:\n%s", shortcut.keys, shortcut.description, plain)
-		}
-	}
+	// Each function key is documented once, so no shortcut is listed twice
+	// under different words. F6 is the exception: it toggles scrollback, and
+	// the file view gives it a second meaning of its own.
 	for _, name := range []string{"F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9"} {
 		want := 1
 		if name == "F6" {
@@ -4668,12 +5057,6 @@ func TestDashboardShowsCompleteShortcutReferenceInHelpModal(t *testing.T) {
 		}
 		if count := strings.Count(plain, name); count != want {
 			t.Fatalf("help modal contains %s %d times, want %d:\n%s", name, count, want, plain)
-		}
-	}
-	help := strings.Join(value.helpEntries(), "\n")
-	for _, key := range []string{"a", "q", "r", "s", "d", "t", "v"} {
-		if strings.Contains(help, value.styles.shortcutKey.Render(" "+key+" ")) {
-			t.Fatalf("help modal still contains removed %q shortcut:\n%s", key, plain)
 		}
 	}
 	if !strings.Contains(plain, version.String()) {
