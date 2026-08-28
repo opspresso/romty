@@ -191,10 +191,9 @@ func TestConfigRowsDrawAndAnswerTogether(t *testing.T) {
 	value.modal = configModal
 	rows := configRows()
 
-	lines := plainRows(value.renderModal(value.width, value.dimensions().bodyHeight))
+	lines := configModalRows(t, value)
 	for index, row := range rows {
-		// One border row above the content.
-		drawn := lines[1+index]
+		drawn := lines[index]
 		if !strings.Contains(drawn, row.name) {
 			t.Errorf("row %d draws %q, want the name %q", index, drawn, row.name)
 		}
@@ -263,7 +262,7 @@ func TestConfigWalksAndTogglesWithTheCursor(t *testing.T) {
 	}
 
 	// The row it is on is marked, and no other row is.
-	drawn := plainRows(value.renderModal(value.width, value.dimensions().bodyHeight))
+	drawn := configModalRows(t, value)
 	marked := 0
 	for _, line := range drawn {
 		if strings.Contains(line, "▌") {
@@ -274,7 +273,7 @@ func TestConfigWalksAndTogglesWithTheCursor(t *testing.T) {
 		t.Fatalf("config modal marks %d rows, want exactly the one the cursor is on:\n%s",
 			marked, strings.Join(drawn, "\n"))
 	}
-	if !strings.Contains(drawn[2], "▌") {
+	if !strings.Contains(drawn[1], "▌") {
 		t.Fatalf("the mark is not on the second setting:\n%s", strings.Join(drawn, "\n"))
 	}
 
@@ -289,6 +288,25 @@ func TestConfigWalksAndTogglesWithTheCursor(t *testing.T) {
 	if !value.scrollbackMouse {
 		t.Fatal("Enter on the last setting toggled a different one")
 	}
+}
+
+// configModalRows are the drawn rows that carry a setting, found by the names
+// they hold rather than at a fixed offset: the box pads itself above and below
+// when the screen has the rows to spare.
+func configModalRows(t *testing.T, value dashboard) []string {
+	t.Helper()
+	drawn := plainRows(value.renderModal(value.width, value.dimensions().bodyHeight))
+	rows := configRows()
+	found := make([]string, 0, len(rows))
+	for _, line := range drawn {
+		if len(found) < len(rows) && strings.Contains(line, rows[len(found)].name) {
+			found = append(found, line)
+		}
+	}
+	if len(found) != len(rows) {
+		t.Fatalf("found %d setting rows, want %d:\n%s", len(found), len(rows), strings.Join(drawn, "\n"))
+	}
+	return found
 }
 
 // hoverTargetAtRow is what hoverTargetAt resolves for a content row of the open

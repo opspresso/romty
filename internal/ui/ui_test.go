@@ -1969,9 +1969,9 @@ func TestDashboardKeepsConfigControlsCompact(t *testing.T) {
 	value.width, value.height = 100, 24
 	value.modal = configModal
 
-	lines := plainRows(value.renderModal(72, 22))
-	var body []string
-	for _, line := range lines[1 : len(lines)-1] {
+	lines := configModalRows(t, value)
+	body := make([]string, 0, len(lines))
+	for _, line := range lines {
 		body = append(body, strings.TrimSpace(strings.Trim(line, "│")))
 	}
 	rows := configRows()
@@ -2004,7 +2004,7 @@ func TestDashboardKeepsConfigControlsCompact(t *testing.T) {
 		if text == "" {
 			continue
 		}
-		drawn := lines[1+index]
+		drawn := lines[index]
 		at := lipgloss.Width(drawn[:strings.Index(drawn, text)])
 		if column < 0 {
 			column = at
@@ -4809,8 +4809,13 @@ func TestDashboardCentersModalOverTheDashboardItLeavesShowing(t *testing.T) {
 	if !strings.Contains(rendered, "About") || !strings.Contains(rendered, tagline) {
 		t.Fatalf("about modal is missing:\n%s", rendered)
 	}
-	if !strings.Contains(rendered, value.styles.paneTitleActive.Render(" romty ")) {
-		t.Fatalf("the dashboard behind the modal was blanked:\n%s", rendered)
+	// The dashboard is still there to be read, in the receding tone a backdrop
+	// is drawn in rather than in its own colours.
+	if !strings.Contains(ansi.Strip(rendered), " romty ") {
+		t.Fatalf("the dashboard behind the modal was blanked:\n%s", ansi.Strip(rendered))
+	}
+	if strings.Contains(rendered, value.styles.paneTitleActive.Render(" romty ")) {
+		t.Fatalf("the dashboard behind the modal kept its own colours:\n%s", rendered)
 	}
 
 	bodyHeight := value.dimensions().bodyHeight

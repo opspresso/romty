@@ -164,6 +164,22 @@ func (m dashboard) overlayModal(base []string, width, height int) []string {
 	return overlayBox(base, box, left, top, width, height)
 }
 
+// dimBackdrop takes the colour out of what is behind a modal and redraws it in
+// one receding tone, so the box in front is the only thing on screen asking to
+// be read.
+//
+// The colour is stripped rather than adjusted because most of what is behind a
+// modal is not romty's to restyle: the workspace tree is, but the terminal is
+// whatever the guest printed. Wrapping the row in a faint attribute would not
+// survive it either — the first reset inside the content clears it.
+func dimBackdrop(styles *uiStyles, rows []string) []string {
+	dimmed := make([]string, len(rows))
+	for index, row := range rows {
+		dimmed[index] = styles.backdrop.Render(ansi.Strip(row))
+	}
+	return dimmed
+}
+
 // overlayBox pastes a box over what is already drawn, leaving the rest of each
 // row showing. Both the modals and the workspace action palette want exactly
 // this, and each had written its own copy of the cut-and-splice.
@@ -200,7 +216,7 @@ func (m dashboard) renderModal(width, height int) []string {
 	}
 	if m.modal == removeSelectionModal {
 		if m.removeTarget.isRoot {
-			return m.withModalActions(modalBoxFit(m.styles, modalWidth, "Forget root",
+			return m.withModalActions(modalBoxFit(m.styles, minimumModalWidth, modalWidth, "Forget root",
 				m.styles.modalStrong.Render("Forget "+display.Text(m.removeTarget.root.Name)+"?"),
 				m.styles.empty.Render(display.Text(m.removeTarget.root.Path)),
 				"",
@@ -212,7 +228,7 @@ func (m dashboard) renderModal(width, height int) []string {
 		// context it is, and the consequences below the break. The path used to
 		// trail the two red lines in the body colour, where it read as a third
 		// consequence rather than as the thing being named.
-		return m.withModalActions(modalBoxFit(m.styles, modalWidth, "Delete workspace",
+		return m.withModalActions(modalBoxFit(m.styles, minimumModalWidth, modalWidth, "Delete workspace",
 			m.styles.modalStrong.Render("Delete "+display.Text(m.removeTarget.workspace.Name)+"?"),
 			m.styles.empty.Render(display.Text(m.removeTarget.workspace.Path)),
 			"",
@@ -221,14 +237,14 @@ func (m dashboard) renderModal(width, height int) []string {
 		))
 	}
 	if m.modal == closeTabModal {
-		return m.withModalActions(modalBoxFit(m.styles, modalWidth, "Close tab",
+		return m.withModalActions(modalBoxFit(m.styles, minimumModalWidth, modalWidth, "Close tab",
 			m.styles.modalStrong.Render("Close "+display.Text(m.closeTabTarget.Name)+"?"),
 			"",
 			m.styles.errorText.Render("Its running shell will be terminated."),
 		))
 	}
 	if m.modal == shutdownModal {
-		return m.withModalActions(modalBoxFit(m.styles, modalWidth, "Stop daemon",
+		return m.withModalActions(modalBoxFit(m.styles, minimumModalWidth, modalWidth, "Stop daemon",
 			m.styles.modalStrong.Render("Stop daemon and all running terminal sessions?"),
 			"",
 			m.styles.errorText.Render("Running shells will be terminated."),
@@ -254,22 +270,30 @@ func (m dashboard) renderModal(width, height int) []string {
 			lines = append(lines, m.styles.modalBody.Render(status.Provider.DisplayName()+": "+action))
 		}
 		lines = append(lines, "", m.styles.empty.Render("Existing settings and other hooks are preserved."))
-		return m.withModalActions(modalBoxFit(m.styles, modalWidth, "Agent hooks", lines...))
+		return m.withModalActions(modalBoxFit(m.styles, minimumModalWidth, modalWidth, "Agent hooks", lines...))
 	}
 	if m.modal == configModal {
-		return m.renderConfigModal(modalWidth)
+		return m.renderConfigModal(modalWidth, height)
 	}
-	return modalBoxFit(m.styles, modalWidth, "About",
+	return modalBoxFit(m.styles, minimumModalWidth, modalWidth, "About",
 		m.styles.modalStrong.Render("romty")+"  "+m.styles.empty.Render(version.String()),
 		m.styles.modalBody.Render(tagline),
 	)
 }
 
+// configFloorWidth keeps the settings box from shrinking to the width of five
+// short labels. Config is the one modal a user reads rather than answers, so
+// it is given room: half the screen, between a legible floor and the cap.
+func (m dashboard) configFloorWidth(maximum int) int {
+	return min(max(m.screenWidth()/2, 46), maximum)
+}
+
 // renderConfigModal lays the settings out in columns — name, value, key — so
 // the values line up under one another and a glance down the column says which
-// are on. The widths come from the rows themselves, and the box takes what
-// they add up to.
-func (m dashboard) renderConfigModal(maximum int) []string {
+// are on. The name holds the left edge and the value and the key are pushed to
+// the right, so the row fills whatever width the box takes rather than
+// trailing off into a void.
+func (m dashboard) renderConfigModal(maximum, height int) []string {
 	rows := configRows()
 	nameWidth, valueWidth, hintWidth := 0, 0, 0
 	for _, row := range rows {
@@ -277,11 +301,24 @@ func (m dashboard) renderConfigModal(maximum int) []string {
 		valueWidth = max(valueWidth, lipgloss.Width(row.text(m)))
 		hintWidth = max(hintWidth, lipgloss.Width(row.hint))
 	}
-	lines := make([]string, 0, len(rows))
-	for index, row := range rows {
-		lines = append(lines, m.renderConfigRow(row, index, nameWidth, valueWidth, hintWidth))
+	natural := configCursorWidth + nameWidth + valueWidth + hintWidth + 2*len(configColumnGap)
+	rowWidth := min(max(natural, m.configFloorWidth(maximum)-6), max(maximum-6, 0))
+
+	lines := make([]string, 0, len(rows)+2)
+	// A blank row above and below the settings, when the screen has the rows
+	// to spare. On the shortest screen romty lays out for it does not, and a
+	// box that loses its bottom edge is worse than one drawn tight.
+	padded := height >= len(rows)+4
+	if padded {
+		lines = append(lines, "")
 	}
-	return modalBoxFit(m.styles, maximum, "Config", lines...)
+	for index, row := range rows {
+		lines = append(lines, m.renderConfigRow(row, index, nameWidth, valueWidth, hintWidth, rowWidth))
+	}
+	if padded {
+		lines = append(lines, "")
+	}
+	return modalBoxFit(m.styles, m.configFloorWidth(maximum), maximum, "Config", lines...)
 }
 
 // configCursorWidth is the marker column every list romty draws carries, so a
@@ -291,29 +328,32 @@ const configCursorWidth = 2
 // configColumnGap separates the name, the value and the key on a setting's row.
 const configColumnGap = "   "
 
-func (m dashboard) renderConfigRow(row configRow, index, nameWidth, valueWidth, hintWidth int) string {
+func (m dashboard) renderConfigRow(row configRow, index, nameWidth, valueWidth, hintWidth, rowWidth int) string {
 	cursor := "  "
 	if m.configIndex == index {
 		cursor = "▌ "
 	}
 	name, value, hint := row.name, row.text(m), row.hint
+	// The name holds the left edge; the value and the key are a block on the
+	// right. Whatever width the box takes, the gap opens between them rather
+	// than after the key.
+	head := cursor + pad(name, nameWidth)
+	tail := pad(value, valueWidth) + configColumnGap + pad(hint, hintWidth)
+	gap := strings.Repeat(" ", max(rowWidth-lipgloss.Width(head)-lipgloss.Width(tail), len(configColumnGap)))
+
 	// A selected or hovered row is one colour all the way across, the way the
-	// picker and the Git action list draw theirs, so it is padded to the width
-	// every row shares before the style is applied.
+	// picker and the Git action list draw theirs.
 	if m.configIndex == index || m.hover.kind == hoverConfigRow && m.hover.index == index {
-		width := configCursorWidth + nameWidth + valueWidth + hintWidth + 2*len(configColumnGap)
-		filled := pad(cursor+pad(name, nameWidth)+configColumnGap+
-			pad(value, valueWidth)+configColumnGap+hint, width)
 		if m.configIndex == index {
-			return m.styles.navigationSelected.Render(filled)
+			return m.styles.navigationSelected.Render(head + gap + tail)
 		}
-		return m.styles.interactiveHover.Render(filled)
+		return m.styles.interactiveHover.Render(head + gap + tail)
 	}
-	// At rest each column carries its own colour, and the padding between them
+	// At rest each column carries its own colour, and the space between them
 	// is left unstyled: a run of styled spaces paints a background where there
 	// is no content to justify one.
 	return m.styles.modalBorder.Render(cursor) +
-		m.styles.modalStrong.Render(name) + columnPad(name, nameWidth) + configColumnGap +
+		m.styles.modalStrong.Render(name) + columnPad(name, nameWidth) + gap +
 		m.configValueStyle(row).Render(value) + columnPad(value, valueWidth) + configColumnGap +
 		m.styles.empty.Render(hint)
 }
@@ -470,7 +510,7 @@ func modalCapacity(height int) int {
 // confirmation of four short lines used to be laid out at the cap itself,
 // which covered most of the screen to ask one question — and, now that the
 // modal no longer blanks what is behind it, covered it for no reason at all.
-func modalBoxFit(styles *uiStyles, maximum int, title string, values ...string) []string {
+func modalBoxFit(styles *uiStyles, minimum, maximum int, title string, values ...string) []string {
 	content := 0
 	for _, value := range values {
 		content = max(content, lipgloss.Width(value))
@@ -478,7 +518,7 @@ func modalBoxFit(styles *uiStyles, maximum int, title string, values ...string) 
 	// Six columns for the border and the two spaces of padding on each side,
 	// and enough for the title to sit on the top border with a corner beside it.
 	width := max(content+6, lipgloss.Width(title)+5)
-	return modalBox(styles, min(max(width, minimumModalWidth), maximum), title, values...)
+	return modalBox(styles, min(max(width, minimum), maximum), title, values...)
 }
 
 func modalBox(styles *uiStyles, width int, title string, values ...string) []string {

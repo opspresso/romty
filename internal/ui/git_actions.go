@@ -249,7 +249,7 @@ func (m dashboard) renderGitActionsModal(maximum, height int) []string {
 	target := m.styles.modalStrong.Render(display.Text(m.gitActionTarget.Name)) +
 		m.styles.empty.Render("  "+display.Text(m.gitActionTarget.Path))
 	if m.gitActionPending {
-		return modalBoxFit(m.styles, maximum, "Git · "+m.gitAction.label(),
+		return modalBoxFit(m.styles, minimumModalWidth, maximum, "Git · "+m.gitAction.label(),
 			target,
 			"",
 			m.styles.modalBody.Render("Running…"),
@@ -279,7 +279,7 @@ func (m dashboard) renderGitActionsModal(maximum, height int) []string {
 			}
 			lines = append(lines, style.Render(pad(truncate(prefix+label, contentWidth), contentWidth)))
 		}
-		return modalBoxFit(m.styles, maximum, "Git actions", lines...)
+		return modalBoxFit(m.styles, minimumModalWidth, maximum, "Git actions", lines...)
 	}
 
 	result := m.gitActionResultLines()
@@ -295,7 +295,7 @@ func (m dashboard) renderGitActionsModal(maximum, height int) []string {
 		hovered := m.hover.kind == hoverGitResult && m.hover.index == index+gitActionHeaderRows
 		lines = append(lines, m.renderGitOutputLine(line, hovered))
 	}
-	return modalBoxFit(m.styles, maximum, title, lines...)
+	return modalBoxFit(m.styles, minimumModalWidth, maximum, title, lines...)
 }
 
 // gitActionLabelWidth is the column the action descriptions line up in.
