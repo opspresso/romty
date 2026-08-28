@@ -43,7 +43,6 @@ const (
 	maximumReattachAttempts = 3
 	initialReattachBackoff  = 250 * time.Millisecond
 	maximumReattachBackoff  = 2 * time.Second
-	agentRefreshInterval    = 2 * time.Second
 	gitRefreshInterval      = 10 * time.Second
 	gitFetchInterval        = 5 * time.Minute
 	// healthyAttachInterval is how long a terminal has to stay attached before
@@ -60,6 +59,7 @@ var now = time.Now
 // agentAnimationInterval is a variable so tests can execute batched animation
 // commands without sleeping between frames.
 var agentAnimationInterval = 120 * time.Millisecond
+var agentRefreshInterval = 2 * time.Second
 
 var agentAnimationFrames = [...]string{"◐", "◓", "◑", "◒"}
 
@@ -224,6 +224,9 @@ type dashboard struct {
 	navigationResize  bool
 	mousePassthrough  bool
 	scrollbackMouse   bool
+	soundOnDone       bool
+	soundOnWaiting    bool
+	agentSoundReady   bool
 	gitStates         map[string]gitState
 	gitFetchedAt      time.Time
 	gitActionTarget   model.Workspace
@@ -287,6 +290,8 @@ type terminalOpenedMsg struct {
 type configSavedMsg struct {
 	leftWidth         int
 	scrollbackMouse   bool
+	soundOnDone       bool
+	soundOnWaiting    bool
 	gitDiffView       string
 	lastWorkspacePath string
 	lastTabID         string
@@ -365,6 +370,8 @@ func newDashboardWithConfig(backend Backend, initial model.Snapshot, configPath 
 		leftWidth:        config.LeftWidth,
 		mousePassthrough: config.MousePassthrough,
 		scrollbackMouse:  config.ScrollbackMouse,
+		soundOnDone:      config.SoundOnDone,
+		soundOnWaiting:   config.SoundOnWaiting,
 		gitDiffSplit:     config.GitDiffView == gitDiffViewSplit,
 		styles:           newUIStyles(true),
 		gitFetchedAt:     now(),
@@ -537,7 +544,12 @@ func (m dashboard) update(message tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case agentSnapshotMsg:
 		if message.err == nil {
+			ring := m.agentSoundReady && m.shouldSoundForAgentTransitions(message.value)
 			m.updateAgents(message.value)
+			m.agentSoundReady = true
+			if ring {
+				return m, tea.Batch(m.refreshAgents(), soundAlert())
+			}
 		}
 		return m, m.refreshAgents()
 	case agentAnimationMsg:
@@ -584,6 +596,7 @@ func (m dashboard) update(message tea.Msg) (tea.Model, tea.Cmd) {
 		selectionChanged := message.lastWorkspacePath != m.rememberedWorkspacePath ||
 			message.lastTabID != m.rememberedTabID
 		if message.leftWidth != m.leftWidth || message.scrollbackMouse != m.scrollbackMouse ||
+			message.soundOnDone != m.soundOnDone || message.soundOnWaiting != m.soundOnWaiting ||
 			viewChanged || selectionChanged {
 			// The width moved while this one was being written, so it is
 			// already out of date. A later save answers whatever this one said.
@@ -933,6 +946,12 @@ func (m dashboard) handleModalKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 			return m.adjustLeftWidth(1)
 		case "m":
 			return m.toggleScrollbackMouse()
+		case "d":
+			return m.toggleSoundOnDone()
+		case "b":
+			return m.toggleSoundOnWaiting()
+		case "s":
+			return m, soundAlert()
 		}
 	}
 	return m, nil
@@ -1322,6 +1341,20 @@ func (m dashboard) toggleScrollbackMouse() (tea.Model, tea.Cmd) {
 	return m, m.saveConfig()
 }
 
+func (m dashboard) toggleSoundOnDone() (tea.Model, tea.Cmd) {
+	m.soundOnDone = !m.soundOnDone
+	return m, m.saveConfig()
+}
+
+func (m dashboard) toggleSoundOnWaiting() (tea.Model, tea.Cmd) {
+	m.soundOnWaiting = !m.soundOnWaiting
+	return m, m.saveConfig()
+}
+
+func soundAlert() tea.Cmd {
+	return tea.Raw("\a")
+}
+
 func (m dashboard) saveConfig() tea.Cmd {
 	path := m.configPath
 	// Edit the document romty loaded rather than rebuilding it from fields.
@@ -1331,12 +1364,15 @@ func (m dashboard) saveConfig() tea.Cmd {
 	config := m.config
 	config.LeftWidth = m.leftWidth
 	config.ScrollbackMouse = m.scrollbackMouse
+	config.SoundOnDone = m.soundOnDone
+	config.SoundOnWaiting = m.soundOnWaiting
 	config.GitDiffView = gitDiffViewSetting(m.gitDiffSplit)
 	config.LastWorkspacePath = m.rememberedWorkspacePath
 	config.LastTabID = m.rememberedTabID
 	return func() tea.Msg {
 		return configSavedMsg{
 			leftWidth: config.LeftWidth, scrollbackMouse: config.ScrollbackMouse,
+			soundOnDone: config.SoundOnDone, soundOnWaiting: config.SoundOnWaiting,
 			gitDiffView:       config.GitDiffView,
 			lastWorkspacePath: config.LastWorkspacePath, lastTabID: config.LastTabID,
 			err: saveConfig(path, config),
@@ -1644,6 +1680,39 @@ func (m *dashboard) updateAgents(statuses map[string]model.AgentStatus) {
 		}
 	}
 	m.agentAnimationActive = m.hasAnimatedAgent()
+}
+
+func (m dashboard) shouldSoundForAgentTransitions(statuses map[string]model.AgentStatus) bool {
+	changed := func(tab model.Tab) bool {
+		status, ok := statuses[tab.ID]
+		if !ok || status.Agent != model.AgentClaude && status.Agent != model.AgentCodex {
+			return false
+		}
+		if m.soundOnDone && animatedAgentPhase(tab.AgentPhase) &&
+			(status.Phase == model.AgentPhaseIdle || status.Phase == model.AgentPhaseError) {
+			return true
+		}
+		return m.soundOnWaiting && !waitingAgentPhase(tab.AgentPhase) && waitingAgentPhase(status.Phase)
+	}
+	for _, root := range m.state.Roots {
+		for _, tab := range root.Tabs {
+			if changed(tab) {
+				return true
+			}
+		}
+		for _, workspace := range root.Directories {
+			for _, tab := range workspace.Tabs {
+				if changed(tab) {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+func waitingAgentPhase(phase model.AgentPhase) bool {
+	return phase == model.AgentPhaseWaitingInput || phase == model.AgentPhaseWaitingApproval
 }
 
 func (m dashboard) hasAnimatedAgent() bool {
@@ -2496,6 +2565,8 @@ func (m dashboard) renderStatus(width, bodyHeight int) []string {
 		status = renderShortcuts(m.styles, width,
 			shortcut{key: "←/→", description: "adjust width"},
 			shortcut{key: "m", description: "scrollback mouse"},
+			shortcut{key: "d/b", description: "sounds"},
+			shortcut{key: "s", description: "test"},
 			shortcut{key: "Esc", description: "close"},
 		)
 	case m.modal == gitActionsModal && m.gitActionPending:
@@ -2702,18 +2773,12 @@ func (m dashboard) renderModal(width, height int) []string {
 		return m.withModalActions(modalBox(m.styles, modalWidth, "Agent hooks", lines...))
 	}
 	if m.modal == configModal {
-		// One setting per group: its name and value in the body colour, the
-		// keys that move it muted underneath, and a blank line between the
-		// groups. Four lines of one weight read as one paragraph, and the
-		// second setting looked like a third line of the first. Five lines and
-		// its borders also fit the shortest screen romty lays out for, which a
-		// box padded top and bottom no longer did.
 		return modalBox(m.styles, modalWidth, "Config",
-			m.styles.modalStrong.Render(fmt.Sprintf("Left pane width: %d", m.paneWidth())),
-			m.styles.empty.Render("←/→ or [/] to adjust"),
-			"",
-			m.styles.modalStrong.Render("Scrollback mouse: "+onOff(m.scrollbackMouse)),
-			m.styles.empty.Render("m to toggle"),
+			m.styles.modalStrong.Render(fmt.Sprintf("Left pane: %d", m.paneWidth()))+"  "+m.styles.empty.Render("←/→"),
+			m.styles.modalStrong.Render("Scrollback mouse: "+onOff(m.scrollbackMouse))+"  "+m.styles.empty.Render("m"),
+			m.styles.modalStrong.Render("Sound on done: "+onOff(m.soundOnDone))+"  "+m.styles.empty.Render("d"),
+			m.styles.modalStrong.Render("Sound on waiting: "+onOff(m.soundOnWaiting))+"  "+m.styles.empty.Render("b"),
+			m.styles.modalStrong.Render("Test sound")+"  "+m.styles.empty.Render("s"),
 		)
 	}
 	return modalBox(m.styles, modalWidth, "About",

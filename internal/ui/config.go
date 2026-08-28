@@ -23,6 +23,8 @@ type Config struct {
 	// the host. Scrolling then works on a terminal with no alternate scroll, at
 	// the cost of the drag selection scrollback otherwise offers.
 	ScrollbackMouse   bool   `json:"scrollback_mouse,omitempty"`
+	SoundOnDone       bool   `json:"sound_on_done,omitempty"`
+	SoundOnWaiting    bool   `json:"sound_on_waiting,omitempty"`
 	GitDiffView       string `json:"git_diff_view,omitempty"`
 	LastWorkspacePath string `json:"last_workspace_path,omitempty"`
 	LastTabID         string `json:"last_tab_id,omitempty"`
@@ -42,6 +44,8 @@ func (c *Config) UnmarshalJSON(data []byte) error {
 	delete(fields, "left_width")
 	delete(fields, "mouse_passthrough")
 	delete(fields, "scrollback_mouse")
+	delete(fields, "sound_on_done")
+	delete(fields, "sound_on_waiting")
 	delete(fields, "git_diff_view")
 	delete(fields, "last_workspace_path")
 	delete(fields, "last_tab_id")

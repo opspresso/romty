@@ -26,6 +26,7 @@ import (
 
 func TestMain(m *testing.M) {
 	agentAnimationInterval = 0
+	agentRefreshInterval = 0
 	os.Exit(m.Run())
 }
 
@@ -1805,10 +1806,7 @@ func TestDashboardNamesTheDeleteTargetBeforeItsConsequences(t *testing.T) {
 	}
 }
 
-// Two settings of one weight read as one paragraph, and the second one looked
-// like a third line of the first. Each setting is its own group: a name and
-// value, the keys that move it under them, and a blank line between.
-func TestDashboardGroupsEachConfigSettingWithItsKeys(t *testing.T) {
+func TestDashboardKeepsConfigControlsCompact(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, model.Snapshot{})
 	value.width, value.height = 100, 24
 	value.modal = configModal
@@ -1819,20 +1817,20 @@ func TestDashboardGroupsEachConfigSettingWithItsKeys(t *testing.T) {
 		body = append(body, strings.TrimSpace(strings.Trim(line, "│")))
 	}
 	want := []string{
-		fmt.Sprintf("Left pane width: %d", value.paneWidth()),
-		"←/→ or [/] to adjust",
-		"",
-		"Scrollback mouse: off",
-		"m to toggle",
+		fmt.Sprintf("Left pane: %d  ←/→", value.paneWidth()),
+		"Scrollback mouse: off  m",
+		"Sound on done: off  d",
+		"Sound on waiting: off  b",
+		"Test sound  s",
 	}
 	if !slices.Equal(body, want) {
 		t.Fatalf("config modal body = %q, want each setting grouped with its keys %q", body, want)
 	}
 
-	// The hint is subordinate to the setting it belongs to, not another line of
-	// the same weight.
+	// Keys stay subordinate to the settings while sharing their row, so every
+	// control still fits on the shortest supported screen.
 	rendered := strings.Join(value.renderModal(72, 22), "\n")
-	if !strings.Contains(rendered, value.styles.empty.Render("m to toggle")) {
+	if !strings.Contains(rendered, value.styles.empty.Render("s")) {
 		t.Fatalf("the key hint is not muted:\n%s", rendered)
 	}
 
@@ -1865,6 +1863,72 @@ func TestDashboardTogglesScrollbackMouseFromConfig(t *testing.T) {
 	value = updated.(dashboard)
 	if value.scrollbackMouse {
 		t.Fatal("m did not turn the setting back off")
+	}
+}
+
+func TestDashboardConfiguresAndTestsSoundAlerts(t *testing.T) {
+	value := newDashboard(&fakeBackend{}, model.Snapshot{})
+	updated, _ := value.Update(key(tea.KeyF3, ""))
+	value = updated.(dashboard)
+
+	updated, saveDone := value.Update(key('d', "d"))
+	value = updated.(dashboard)
+	updated, saveWaiting := value.Update(key('b', "b"))
+	value = updated.(dashboard)
+	if !value.soundOnDone || !value.soundOnWaiting || saveDone == nil || saveWaiting == nil {
+		t.Fatalf("sound toggles = (done %v, waiting %v, saves %v/%v)",
+			value.soundOnDone, value.soundOnWaiting, saveDone, saveWaiting)
+	}
+
+	updated, sound := value.Update(key('s', "s"))
+	value = updated.(dashboard)
+	if sequences := rawSequences(sound); !slices.Equal(sequences, []string{"\a"}) {
+		t.Fatalf("test sound sequences = %q, want BEL", sequences)
+	}
+}
+
+func TestDashboardSoundsOnceForAgentTransitions(t *testing.T) {
+	workspace := model.Workspace{ID: "workspace-1", RootID: "root-1", Name: "alpha", Path: "/alpha"}
+	tab := model.Tab{
+		ID: "tab-1", WorkspaceID: workspace.ID, Name: "1", Running: true,
+		Agent: model.AgentCodex, AgentPhase: model.AgentPhaseWorking,
+	}
+	value := newDashboardWithConfig(&fakeBackend{}, model.Snapshot{Roots: []model.RootView{{
+		Root:        model.Root{ID: "root-1", Name: "root", Path: "/"},
+		Directories: []model.WorkspaceView{{Workspace: workspace, Tabs: []model.Tab{tab}}},
+	}}}, "", Config{SoundOnDone: true, SoundOnWaiting: true})
+	value.agentSoundReady = true
+
+	idle := map[string]model.AgentStatus{"tab-1": {Agent: model.AgentCodex, Phase: model.AgentPhaseIdle}}
+	updated, command := value.Update(agentSnapshotMsg{value: idle})
+	value = updated.(dashboard)
+	if sequences := rawSequences(command); !slices.Contains(sequences, "\a") {
+		t.Fatalf("done transition sequences = %q, want BEL", sequences)
+	}
+	updated, command = value.Update(agentSnapshotMsg{value: idle})
+	value = updated.(dashboard)
+	if sequences := rawSequences(command); slices.Contains(sequences, "\a") {
+		t.Fatalf("stable idle transition rang again: %q", sequences)
+	}
+
+	waiting := map[string]model.AgentStatus{"tab-1": {Agent: model.AgentCodex, Phase: model.AgentPhaseWaitingApproval}}
+	updated, command = value.Update(agentSnapshotMsg{value: waiting})
+	value = updated.(dashboard)
+	if sequences := rawSequences(command); !slices.Contains(sequences, "\a") {
+		t.Fatalf("waiting transition sequences = %q, want BEL", sequences)
+	}
+}
+
+func TestDashboardDoesNotSoundOnTheFirstAgentSnapshot(t *testing.T) {
+	value := newDashboardWithConfig(&fakeBackend{}, model.Snapshot{}, "", Config{SoundOnWaiting: true})
+	waiting := map[string]model.AgentStatus{"tab-1": {Agent: model.AgentCodex, Phase: model.AgentPhaseWaitingInput}}
+	updated, command := value.Update(agentSnapshotMsg{value: waiting})
+	value = updated.(dashboard)
+	if !value.agentSoundReady {
+		t.Fatal("first successful agent snapshot did not arm later sounds")
+	}
+	if sequences := rawSequences(command); slices.Contains(sequences, "\a") {
+		t.Fatalf("first agent snapshot rang: %q", sequences)
 	}
 }
 
@@ -4618,7 +4682,7 @@ func TestDashboardAdjustsAndPersistsLeftPaneWidth(t *testing.T) {
 	if err != nil {
 		t.Fatalf("loadConfig() error = %v", err)
 	}
-	if loaded.LeftWidth != 29 || !strings.Contains(value.render(), "Left pane width: 29") {
+	if loaded.LeftWidth != 29 || !strings.Contains(value.render(), "Left pane: 29") {
 		t.Fatalf("persisted config = %#v\n%s", loaded, value.render())
 	}
 

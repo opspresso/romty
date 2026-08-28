@@ -135,3 +135,5 @@ The wheel then scrolls scrollback on any terminal that reports the mouse, at the
 `F9` asks before stopping the daemon because this terminates every running shell. Once confirmed, shutdown cannot be cancelled.
 
 The last opened workspace and terminal tab, workspace pane width, and inline or split diff layout are saved automatically in `config.json`. Reopening romty reconnects to that tab when it is still running; a removed workspace or stopped tab falls back to the workspace list. The pane width is constrained to 18 through 40 columns and may shrink further when the terminal is narrow.
+
+Sound alerts are off by default. Open Config with `F3`, press `d` to toggle a bell when an agent finishes active work, `b` to toggle a bell when an agent begins waiting for input or approval, and `s` to test the host terminal bell. A stable state does not ring repeatedly, and the first agent snapshot after startup stays silent.
