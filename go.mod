@@ -1,6 +1,6 @@
 module github.com/opspresso/romty
 
-go 1.25.0
+go 1.25.14
 
 require (
 	charm.land/bubbletea/v2 v2.0.9
