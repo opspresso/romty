@@ -37,8 +37,9 @@ func (u Usage) Empty() bool {
 
 // maxTranscriptTail bounds the read. The newest counters are at the end of the
 // file, a transcript grows to hundreds of megabytes, and none of the rest of it
-// answers the question.
-const maxTranscriptTail = 1 << 20
+// answers the question. It is a variable so a test can reach the boundary
+// without writing a megabyte to get there.
+var maxTranscriptTail int64 = 1 << 20
 
 // maxRecordBytes skips a record too large to be one that carries counters. A
 // single JSONL line can hold a whole tool result or an inline image, and
@@ -159,6 +160,13 @@ func readTranscript(path string) (Usage, bool) {
 		return Usage{}, false
 	}
 	offset := max(info.Size()-maxTranscriptTail, 0)
+	if offset > 0 {
+		// Back up a byte so the line discarded below is always a fragment.
+		// A boundary that lands exactly on a record start would otherwise
+		// throw a whole record away, and if that were the one carrying the
+		// newest counters romty would report the previous request's, or none.
+		offset--
+	}
 	if _, err := file.Seek(offset, io.SeekStart); err != nil {
 		return Usage{}, false
 	}

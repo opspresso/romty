@@ -192,3 +192,27 @@ func TestTranscriptDirectoryMatchesClaudesNaming(t *testing.T) {
 		t.Fatalf("transcriptDirectory() = %q, want dots and separators dashed", got)
 	}
 }
+
+// The tail is read from a fixed distance back, which can land exactly on a
+// record boundary. The first line read is discarded as a fragment, so a seek
+// that lands on a boundary would throw away a whole record — and if that record
+// carried the newest counters, romty would report the previous request's.
+func TestReadClaudeKeepsARecordThatStartsAtTheTailBoundary(t *testing.T) {
+	configDir := t.TempDir()
+	workspace := "/Users/example/work/romty"
+	// The newest counters, then a record that carries none.
+	newest := assistantLine(1, 2, 3)
+	trailing := `{"type":"user","message":{"content":"thanks"}}`
+	older := assistantLine(100, 200, 300)
+
+	previous := maxTranscriptTail
+	// Exactly the two final records, so the boundary sits on newest's first byte.
+	maxTranscriptTail = int64(len(newest) + len(trailing) + 2)
+	t.Cleanup(func() { maxTranscriptTail = previous })
+
+	writeTranscript(t, configDir, workspace, "session-1", older, newest, trailing)
+	value, ok := NewReader().ReadClaude(configDir, workspace, "session-1")
+	if !ok || value.ContextTokens != 6 {
+		t.Fatalf("ReadClaude() = (%+v, %v), want the 6 tokens on the boundary record", value, ok)
+	}
+}
