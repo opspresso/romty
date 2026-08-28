@@ -28,7 +28,7 @@ func (s *Server) snapshotResponse() protocol.Response {
 func (s *Server) removeRoot(rootID string) protocol.Response {
 	finish, ok := s.beginMutation()
 	if !ok {
-		return protocol.Response{Error: "daemon is shutting down"}
+		return protocol.Response{Error: errShuttingDown}
 	}
 
 	s.mu.Lock()
@@ -42,7 +42,7 @@ func (s *Server) removeRoot(rootID string) protocol.Response {
 	if index < 0 {
 		s.mu.Unlock()
 		finish()
-		return protocol.Response{Error: "root not found"}
+		return protocol.Response{Error: errRootNotFound}
 	}
 
 	previous := cloneState(s.value)
@@ -117,7 +117,7 @@ func closeSessions(sessions []*session) {
 func (s *Server) removeWorkspace(rootID, path string) protocol.Response {
 	finish, ok := s.beginMutation()
 	if !ok {
-		return protocol.Response{Error: "daemon is shutting down"}
+		return protocol.Response{Error: errShuttingDown}
 	}
 	defer finish()
 
@@ -125,7 +125,7 @@ func (s *Server) removeWorkspace(rootID, path string) protocol.Response {
 	root, ok := findRoot(s.value.Roots, rootID)
 	s.mu.Unlock()
 	if !ok {
-		return protocol.Response{Error: "root not found"}
+		return protocol.Response{Error: errRootNotFound}
 	}
 	workspacePath, err := removableWorkspacePath(root, path)
 	if err != nil {
@@ -184,7 +184,7 @@ func (s *Server) addRoot(path string) protocol.Response {
 	}
 	finish, ok := s.beginMutation()
 	if !ok {
-		return protocol.Response{Error: "daemon is shutting down"}
+		return protocol.Response{Error: errShuttingDown}
 	}
 
 	s.mu.Lock()
@@ -212,7 +212,7 @@ func (s *Server) ensureWorkspace(rootID, path string) protocol.Response {
 	s.mu.Lock()
 	if _, ok := findRoot(s.value.Roots, rootID); !ok {
 		s.mu.Unlock()
-		return protocol.Response{Error: "root not found"}
+		return protocol.Response{Error: errRootNotFound}
 	}
 	for _, workspace := range s.value.Workspaces {
 		if workspace.RootID == rootID && workspace.Path == path && workspaceHasTabs(s.value.Tabs, workspace.ID) {
@@ -229,7 +229,7 @@ func (s *Server) ensureWorkspace(rootID, path string) protocol.Response {
 	}
 	finish, ok := s.beginMutation()
 	if !ok {
-		return protocol.Response{Error: "daemon is shutting down"}
+		return protocol.Response{Error: errShuttingDown}
 	}
 	defer finish()
 
@@ -237,7 +237,7 @@ func (s *Server) ensureWorkspace(rootID, path string) protocol.Response {
 	defer s.mu.Unlock()
 	root, ok := findRoot(s.value.Roots, rootID)
 	if !ok {
-		return protocol.Response{Error: "root not found"}
+		return protocol.Response{Error: errRootNotFound}
 	}
 	if canonical != root.Path && filepath.Dir(canonical) != root.Path {
 		return protocol.Response{Error: "workspace must be its root or a direct child"}

@@ -56,7 +56,7 @@ func (s *Server) handle(connection net.Conn) {
 		}
 		finish, ok := s.beginRequest(request.Action)
 		if !ok {
-			_ = replyFor(connection, request, protocol.Response{Error: "daemon is shutting down"})
+			_ = replyFor(connection, request, protocol.Response{Error: errShuttingDown})
 			return
 		}
 		finish()
@@ -150,7 +150,7 @@ func (s *Server) stopped() bool {
 func (s *Server) dispatch(request protocol.Request) protocol.Response {
 	finish, ok := s.beginRequest(request.Action)
 	if !ok {
-		return protocol.Response{Error: "daemon is shutting down"}
+		return protocol.Response{Error: errShuttingDown}
 	}
 	defer finish()
 

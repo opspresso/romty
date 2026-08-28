@@ -28,7 +28,7 @@ func (s *Server) recordAgentEvent(tabID string, event *protocol.AgentEvent) prot
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, ok := s.sessions[tabID]; !ok {
-		return protocol.Response{Error: "running terminal session not found"}
+		return protocol.Response{Error: errNoSession}
 	}
 	current, exists := s.agentStatuses[tabID]
 	if terminal {

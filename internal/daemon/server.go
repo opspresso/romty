@@ -25,6 +25,15 @@ import (
 
 var ErrAlreadyRunning = errors.New("romty daemon is already running")
 
+// What a client is told when a request cannot be served. Each of these is
+// raised from several places, and a sentence a user may end up searching for
+// has to read the same from every one of them.
+const (
+	errShuttingDown = "daemon is shutting down"
+	errRootNotFound = "root not found"
+	errNoSession    = "running terminal session not found"
+)
+
 // requestTimeout bounds both halves of the handshake — reading the request and
 // writing the reply — but not the session that may follow it. A local socket
 // handshake takes microseconds; this only has to be long enough that no honest
@@ -216,7 +225,7 @@ func (s *Server) resize(tabID, clientID string, columns, rows uint16) protocol.R
 	value, ok := s.sessions[tabID]
 	s.mu.Unlock()
 	if !ok {
-		return protocol.Response{Error: "running terminal session not found"}
+		return protocol.Response{Error: errNoSession}
 	}
 	if err := value.resizeFor(clientID, columns, rows); err != nil {
 		return protocol.Response{Error: err.Error()}
@@ -229,7 +238,7 @@ func (s *Server) handleAttach(connection net.Conn, request protocol.Request) {
 	value, ok := s.sessions[request.TabID]
 	s.mu.Unlock()
 	if !ok {
-		_ = replyFor(connection, request, protocol.Response{Error: "running terminal session not found"})
+		_ = replyFor(connection, request, protocol.Response{Error: errNoSession})
 		return
 	}
 	// The reply announces the exact history that follows it, so the client can
@@ -295,7 +304,7 @@ func (s *Server) closeTab(tabID string) protocol.Response {
 	value, ok := s.sessions[tabID]
 	s.mu.Unlock()
 	if !ok {
-		return protocol.Response{Error: "running terminal session not found"}
+		return protocol.Response{Error: errNoSession}
 	}
 	value.close()
 	return s.snapshotResponse()
