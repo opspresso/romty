@@ -69,6 +69,30 @@ func New(socket string) *Client {
 	return &Client{socket: socket, id: fmt.Sprintf("%d-%d", os.Getpid(), nextClientID.Add(1))}
 }
 
+// callFor sends a request and hands back the one field of the reply the action
+// asked for. Seven actions each repeated the same three steps — call, refuse a
+// reply that carries no such field, dereference — which is seven places for the
+// middle one to be forgotten in, and a forgotten one is a nil dereference in
+// the TUI rather than a message naming the daemon.
+func callFor[T any](c *Client, request protocol.Request, field func(protocol.Response) *T, noun string) (T, error) {
+	var value T
+	response, err := c.call(request)
+	if err != nil {
+		return value, err
+	}
+	carried := field(response)
+	if carried == nil {
+		return value, fmt.Errorf("daemon returned no %s", noun)
+	}
+	return *carried, nil
+}
+
+func snapshotOf(response protocol.Response) *model.Snapshot { return response.Snapshot }
+
+func workspaceOf(response protocol.Response) *model.Workspace { return response.Workspace }
+
+func tabOf(response protocol.Response) *model.Tab { return response.Tab }
+
 func (c *Client) Ping() error {
 	_, err := c.probeProtocol()
 	return err
@@ -84,14 +108,7 @@ func (c *Client) ProtocolVersion() (int, error) {
 }
 
 func (c *Client) Snapshot() (model.Snapshot, error) {
-	response, err := c.call(protocol.Request{Action: protocol.ActionSnapshot})
-	if err != nil {
-		return model.Snapshot{}, err
-	}
-	if response.Snapshot == nil {
-		return model.Snapshot{}, fmt.Errorf("daemon returned no snapshot")
-	}
-	return *response.Snapshot, nil
+	return callFor(c, protocol.Request{Action: protocol.ActionSnapshot}, snapshotOf, "snapshot")
 }
 
 func (c *Client) Agents() (map[string]model.Agent, error) {
@@ -150,14 +167,7 @@ func (c *Client) AddRoot(path string) (model.Snapshot, error) {
 	if err != nil {
 		return model.Snapshot{}, err
 	}
-	response, err := c.call(protocol.Request{Action: protocol.ActionAddRoot, Path: normalized})
-	if err != nil {
-		return model.Snapshot{}, err
-	}
-	if response.Snapshot == nil {
-		return model.Snapshot{}, fmt.Errorf("daemon returned no snapshot")
-	}
-	return *response.Snapshot, nil
+	return callFor(c, protocol.Request{Action: protocol.ActionAddRoot, Path: normalized}, snapshotOf, "snapshot")
 }
 
 func normalizePath(path string) (string, error) {
@@ -176,14 +186,7 @@ func normalizePath(path string) (string, error) {
 }
 
 func (c *Client) RemoveRoot(rootID string) (model.Snapshot, error) {
-	response, err := c.call(protocol.Request{Action: protocol.ActionRemoveRoot, RootID: rootID})
-	if err != nil {
-		return model.Snapshot{}, err
-	}
-	if response.Snapshot == nil {
-		return model.Snapshot{}, fmt.Errorf("daemon returned no snapshot")
-	}
-	return *response.Snapshot, nil
+	return callFor(c, protocol.Request{Action: protocol.ActionRemoveRoot, RootID: rootID}, snapshotOf, "snapshot")
 }
 
 func (c *Client) RemoveWorkspace(rootID, path string) (model.Snapshot, error) {
@@ -194,54 +197,33 @@ func (c *Client) RemoveWorkspace(rootID, path string) (model.Snapshot, error) {
 	if !supported {
 		return model.Snapshot{}, fmt.Errorf("running daemon does not support removing workspaces; %s", protocol.Remedy)
 	}
-	response, err := c.call(protocol.Request{
+	return callFor(c, protocol.Request{
 		Action: protocol.ActionRemoveWorkspace,
 		RootID: rootID,
 		Path:   path,
-	})
-	if err != nil {
-		return model.Snapshot{}, err
-	}
-	if response.Snapshot == nil {
-		return model.Snapshot{}, fmt.Errorf("daemon returned no snapshot")
-	}
-	return *response.Snapshot, nil
+	}, snapshotOf, "snapshot")
 }
 
 func (c *Client) EnsureWorkspace(rootID, path string) (model.Workspace, error) {
-	response, err := c.call(protocol.Request{
+	return callFor(c, protocol.Request{
 		Action: protocol.ActionEnsureWorkspace,
 		RootID: rootID,
 		Path:   path,
-	})
-	if err != nil {
-		return model.Workspace{}, err
-	}
-	if response.Workspace == nil {
-		return model.Workspace{}, fmt.Errorf("daemon returned no workspace")
-	}
-	return *response.Workspace, nil
+	}, workspaceOf, "workspace")
 }
 
 func (c *Client) CreateTab(workspaceID string, columns, rows uint16) (model.Tab, error) {
 	// The daemon may predate this shell by days, so the environment and the
 	// shell to run come from here rather than from whatever the daemon
 	// inherited when it started.
-	response, err := c.call(protocol.Request{
+	return callFor(c, protocol.Request{
 		Action:      protocol.ActionCreateTab,
 		WorkspaceID: workspaceID,
 		Columns:     columns,
 		Rows:        rows,
 		Environment: os.Environ(),
 		Shell:       os.Getenv("SHELL"),
-	})
-	if err != nil {
-		return model.Tab{}, err
-	}
-	if response.Tab == nil {
-		return model.Tab{}, fmt.Errorf("daemon returned no tab")
-	}
-	return *response.Tab, nil
+	}, tabOf, "tab")
 }
 
 func (c *Client) CloseTab(tabID string) (model.Snapshot, error) {
@@ -252,14 +234,7 @@ func (c *Client) CloseTab(tabID string) (model.Snapshot, error) {
 	if !supported {
 		return model.Snapshot{}, fmt.Errorf("closing tabs requires a newer daemon; %s", protocol.Remedy)
 	}
-	response, err := c.call(protocol.Request{Action: protocol.ActionCloseTab, TabID: tabID})
-	if err != nil {
-		return model.Snapshot{}, err
-	}
-	if response.Snapshot == nil {
-		return model.Snapshot{}, fmt.Errorf("daemon returned no snapshot")
-	}
-	return *response.Snapshot, nil
+	return callFor(c, protocol.Request{Action: protocol.ActionCloseTab, TabID: tabID}, snapshotOf, "snapshot")
 }
 
 func (c *Client) Resize(tabID string, columns, rows uint16) error {
