@@ -70,11 +70,15 @@ func prepareSocket(path string) error {
 }
 
 // listenPrivately binds the unix socket so that it is never, even for an
-// instant, reachable by another user.
+// instant, reachable by another user. The socket's own directory is what makes
+// that true: Serve narrows it to 0700 before this runs, so no other user can
+// reach the name at all, whatever mode the bind leaves on it. Narrowing the
+// umask around the bind instead would say the same thing about the socket and
+// something else about every other file the process happens to create at that
+// moment — the umask is process-wide, and a daemon shares its process with a
+// TUI in development and with the whole suite under test.
 func listenPrivately(path string) (net.Listener, error) {
-	previous := syscall.Umask(0o177)
 	listener, err := net.Listen("unix", path)
-	syscall.Umask(previous)
 	if err != nil {
 		// The bind is what decides who owns the socket, not the probe in
 		// prepareSocket: two daemons starting at once can both find nothing to
