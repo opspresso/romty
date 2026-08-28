@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -453,6 +454,47 @@ func waitForTabCount(t *testing.T, backend *client.Client, workspaceID string, c
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatalf("workspace %q tab count did not become %d", workspaceID, count)
+}
+
+// A daemon shares its process with whatever else runs in it: a TUI that starts
+// one in development, and the whole of this suite under test. Narrowing the
+// umask around the socket bind narrowed every file the process created in that
+// window, and a workspace directory that lost its execute bit could no longer
+// be a shell's working directory — which reached the user as an exec failure
+// on a directory that looked fine everywhere else.
+func TestServeLeavesTheModesOfConcurrentDirectoriesAlone(t *testing.T) {
+	previous := syscall.Umask(0o022)
+	t.Cleanup(func() { syscall.Umask(previous) })
+	base := testutil.ShortTempDir(t)
+	socket := filepath.Join(base, "daemon.sock")
+	server, err := daemon.New(socket, filepath.Join(base, "state.json"), "/bin/sh")
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	server.SetLogger(testutil.QuietLogger())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- server.Serve(ctx) }()
+
+	for index := 0; index < 200; index++ {
+		directory := filepath.Join(base, fmt.Sprintf("workspace-%d", index))
+		if err := os.Mkdir(directory, 0o755); err != nil {
+			t.Fatalf("Mkdir() error = %v", err)
+		}
+		info, err := os.Stat(directory)
+		if err != nil {
+			t.Fatalf("Stat() error = %v", err)
+		}
+		if mode := info.Mode().Perm(); mode != 0o755 {
+			t.Fatalf("directory %d mode = %04o, want 0755", index, mode)
+		}
+	}
+	testutil.WaitForDaemon(t, client.New(socket))
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatalf("Serve() error = %v", err)
+	}
 }
 
 func TestCloseTabTerminatesOnlyTheSelectedSession(t *testing.T) {
