@@ -254,13 +254,16 @@ func (m *dashboard) currentWorkspaceActionTarget() (navItem, bool) {
 	return navItem{}, false
 }
 
+// gitActionByWorkspaceAction names which Git operation each palette entry
+// starts, so the palette adds an entry without repeating the Git actions.
+var gitActionByWorkspaceAction = map[workspaceAction]gitAction{
+	workspaceGitStatusAction: gitStatusAction,
+	workspaceGitFetchAction:  gitFetchAction,
+	workspaceGitPullAction:   gitPullAction,
+	workspaceGitPushAction:   gitPushAction,
+}
+
 func (m dashboard) startWorkspaceGitAction(action workspaceAction, target navItem) (tea.Model, tea.Cmd) {
-	gitActionByWorkspaceAction := map[workspaceAction]gitAction{
-		workspaceGitStatusAction: gitStatusAction,
-		workspaceGitFetchAction:  gitFetchAction,
-		workspaceGitPullAction:   gitPullAction,
-		workspaceGitPushAction:   gitPushAction,
-	}
 	gitAction, ok := gitActionByWorkspaceAction[action]
 	if !ok || !target.hasGit {
 		m.modal = noModal
