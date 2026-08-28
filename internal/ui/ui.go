@@ -1174,15 +1174,12 @@ func reattachBackoff(attempt int) time.Duration {
 	return min(backoff, maximumReattachBackoff)
 }
 
-// The item is captured here rather than read again on confirmation: a snapshot
-// arriving while the modal is open can move the cursor, and the answer has to
-// apply to the item the question named.
-func (m dashboard) confirmRemoveSelection() (tea.Model, tea.Cmd) {
-	item, ok := m.navigationItem()
-	if !ok {
-		return m, nil
-	}
-	m.removeTarget = item
+// confirmRemoveSelection asks before a root is forgotten or a workspace
+// directory is deleted. The item is captured here rather than read again on
+// confirmation: a snapshot arriving while the modal is open can move the
+// cursor, and the answer has to apply to the item the question named.
+func (m dashboard) confirmRemoveSelection(target navItem) (tea.Model, tea.Cmd) {
+	m.removeTarget = target
 	return m.openModal(removeSelectionModal)
 }
 

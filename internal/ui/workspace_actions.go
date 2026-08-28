@@ -248,8 +248,7 @@ func (m dashboard) runWorkspaceAction(action workspaceAction) (tea.Model, tea.Cm
 	case workspaceGitStatusAction, workspaceGitFetchAction, workspaceGitPullAction, workspaceGitPushAction:
 		return m.startWorkspaceGitAction(action, target)
 	case workspaceRemoveAction:
-		m.removeTarget = target
-		return m.openModal(removeSelectionModal)
+		return m.confirmRemoveSelection(target)
 	default:
 		m.modal = noModal
 		m.setError(treeError, fmt.Sprintf("unknown workspace action %d", action))

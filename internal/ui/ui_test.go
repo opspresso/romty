@@ -2960,6 +2960,17 @@ func TestDashboardLeavesTheHighFunctionKeysToTheShell(t *testing.T) {
 	}
 }
 
+// cursorItem is the tree item the removal confirmation is opened about, which
+// is what the workspace action palette captures when it opens over one.
+func cursorItem(t *testing.T, value dashboard) navItem {
+	t.Helper()
+	item, ok := value.navigationItem()
+	if !ok {
+		t.Fatal("the cursor is on no tree item to remove")
+	}
+	return item
+}
+
 // Esc has to mean no. Removing a root has no undo beyond adding it back and
 // rebuilding the tree by hand.
 func TestDashboardCancelsRemovingARoot(t *testing.T) {
@@ -2967,7 +2978,7 @@ func TestDashboardCancelsRemovingARoot(t *testing.T) {
 	backend := &fakeBackend{snapshot: snapshot}
 	value := newDashboard(backend, snapshot)
 
-	updated, _ := value.confirmRemoveSelection()
+	updated, _ := value.confirmRemoveSelection(cursorItem(t, value))
 	value = updated.(dashboard)
 	if value.modal != removeSelectionModal {
 		t.Fatalf("remove modal = %v, want the confirmation", value.modal)
@@ -2989,7 +3000,7 @@ func TestDashboardRemovesTheSelectedRoot(t *testing.T) {
 	value := newDashboard(backend, snapshot)
 	value.setNavigation(1)
 
-	updated, _ := value.confirmRemoveSelection()
+	updated, _ := value.confirmRemoveSelection(cursorItem(t, value))
 	value = updated.(dashboard)
 	updated, command := value.Update(key(tea.KeyEnter, ""))
 	value = updated.(dashboard)
@@ -3013,7 +3024,7 @@ func TestDashboardDeletesTheSelectedWorkspace(t *testing.T) {
 	value.width, value.height = 120, 40
 	value.setNavigation(1)
 
-	updated, command := value.confirmRemoveSelection()
+	updated, command := value.confirmRemoveSelection(cursorItem(t, value))
 	value = updated.(dashboard)
 	if command != nil || value.modal != removeSelectionModal {
 		t.Fatalf("remove = (command %v, modal %v), want a confirmation", command, value.modal)
@@ -3064,7 +3075,7 @@ func TestDashboardDeletesTheWorkspaceTheConfirmationNamed(t *testing.T) {
 		t.Fatalf("the cursor starts on root %q, want root-1", item.root.ID)
 	}
 
-	updated, _ := value.confirmRemoveSelection()
+	updated, _ := value.confirmRemoveSelection(cursorItem(t, value))
 	value = updated.(dashboard)
 
 	// alpha is deleted on disk, so the row the cursor remembered is gone and
@@ -3096,7 +3107,7 @@ func TestDashboardForgetsTheRootTheConfirmationNamed(t *testing.T) {
 	backend := &fakeBackend{snapshot: snapshot}
 	value := newDashboard(backend, snapshot)
 
-	updated, _ := value.confirmRemoveSelection()
+	updated, _ := value.confirmRemoveSelection(cursorItem(t, value))
 	value = updated.(dashboard)
 	updated, _ = value.Update(snapshotMsg{value: model.Snapshot{Roots: snapshot.Roots[1:]}})
 	value = updated.(dashboard)
