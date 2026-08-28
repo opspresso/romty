@@ -10,6 +10,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/opspresso/romty/internal/agenthooks"
+	"github.com/opspresso/romty/internal/display"
 	"github.com/opspresso/romty/internal/version"
 )
 
@@ -167,8 +168,8 @@ func (m dashboard) renderModal(width, height int) []string {
 	if m.modal == removeSelectionModal {
 		if m.removeTarget.isRoot {
 			return m.withModalActions(modalBox(m.styles, modalWidth, "Forget root",
-				m.styles.modalStrong.Render("Forget "+displayText(m.removeTarget.root.Name)+"?"),
-				m.styles.empty.Render(displayText(m.removeTarget.root.Path)),
+				m.styles.modalStrong.Render("Forget "+display.Text(m.removeTarget.root.Name)+"?"),
+				m.styles.empty.Render(display.Text(m.removeTarget.root.Path)),
 				"",
 				m.styles.modalBody.Render("The directory stays on disk."),
 				m.styles.errorText.Render("Its running shells will be terminated."),
@@ -179,8 +180,8 @@ func (m dashboard) renderModal(width, height int) []string {
 		// trail the two red lines in the body colour, where it read as a third
 		// consequence rather than as the thing being named.
 		return m.withModalActions(modalBox(m.styles, modalWidth, "Delete workspace",
-			m.styles.modalStrong.Render("Delete "+displayText(m.removeTarget.workspace.Name)+"?"),
-			m.styles.empty.Render(displayText(m.removeTarget.workspace.Path)),
+			m.styles.modalStrong.Render("Delete "+display.Text(m.removeTarget.workspace.Name)+"?"),
+			m.styles.empty.Render(display.Text(m.removeTarget.workspace.Path)),
 			"",
 			m.styles.errorText.Render("This permanently deletes all contents."),
 			m.styles.errorText.Render("Its running shells will be terminated."),
@@ -188,7 +189,7 @@ func (m dashboard) renderModal(width, height int) []string {
 	}
 	if m.modal == closeTabModal {
 		return m.withModalActions(modalBox(m.styles, modalWidth, "Close tab",
-			m.styles.modalStrong.Render("Close "+displayText(m.closeTabTarget.Name)+"?"),
+			m.styles.modalStrong.Render("Close "+display.Text(m.closeTabTarget.Name)+"?"),
 			"",
 			m.styles.errorText.Render("Its running shell will be terminated."),
 		))

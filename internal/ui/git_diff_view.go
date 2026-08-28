@@ -8,6 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
+	"github.com/opspresso/romty/internal/display"
 	"github.com/opspresso/romty/internal/model"
 )
 
@@ -302,13 +303,13 @@ func (m dashboard) renderGitDiffPanes(leftWidth, rightWidth, height int) []strin
 }
 
 func (m dashboard) renderGitChangedFiles(width, height int) []string {
-	title := " Changes · " + displayText(m.gitDiff.target.Name) + " "
+	title := " Changes · " + display.Text(m.gitDiff.target.Name) + " "
 	lines := []string{m.paneHeader(m.styles.paneTitleActive, title, width), ""}
 	switch {
 	case m.gitDiff.filesPending:
 		return append(lines, m.styles.empty.Render("  Loading changed files…"))
 	case m.gitDiff.err != "" && len(m.gitDiff.files) == 0:
-		return append(lines, m.styles.errorText.Render("  "+displayText(m.gitDiff.err)))
+		return append(lines, m.styles.errorText.Render("  "+display.Text(m.gitDiff.err)))
 	case len(m.gitDiff.files) == 0:
 		return append(lines, m.styles.empty.Render("  No changed files"))
 	}
@@ -332,7 +333,7 @@ func (m dashboard) renderGitChangedFiles(width, height int) []string {
 func (m dashboard) renderGitDiffTreeRow(row gitDiffTreeRow, width int) string {
 	prefix := strings.Repeat("  ", row.depth) + "  "
 	if row.directory {
-		return m.styles.navigationRoot.Render(truncate(strings.Repeat("  ", row.depth)+"▾ "+displayText(row.name)+"/", width))
+		return m.styles.navigationRoot.Render(truncate(strings.Repeat("  ", row.depth)+"▾ "+display.Text(row.name)+"/", width))
 	}
 	file := m.gitDiff.files[row.fileIndex]
 	status := gitChangedFileStatus(file)
@@ -343,7 +344,7 @@ func (m dashboard) renderGitDiffTreeRow(row gitDiffTreeRow, width int) string {
 		style = m.styles.navigationSelected
 	}
 	prefix = indicator + prefix
-	name := " " + displayText(row.name)
+	name := " " + display.Text(row.name)
 	used := lipgloss.Width(prefix) + lipgloss.Width(status)
 	if used >= width {
 		return style.Render(truncate(prefix+status+name, width))
@@ -375,7 +376,7 @@ func (m dashboard) renderGitFileDiff(width, height int) []string {
 	}
 	title := " Diff"
 	if path != "" {
-		title += " · " + displayText(path)
+		title += " · " + display.Text(path)
 	}
 	mode := "inline"
 	if m.gitDiff.split {
@@ -387,7 +388,7 @@ func (m dashboard) renderGitFileDiff(width, height int) []string {
 	case m.gitDiff.diffPending:
 		return append(lines, m.styles.empty.Render("  Loading diff…"))
 	case m.gitDiff.err != "":
-		return append(lines, m.styles.errorText.Render("  "+displayText(m.gitDiff.err)))
+		return append(lines, m.styles.errorText.Render("  "+display.Text(m.gitDiff.err)))
 	case len(m.gitDiff.files) == 0:
 		return append(lines, m.styles.empty.Render("  Select a changed file"))
 	}
@@ -403,7 +404,7 @@ func (m dashboard) renderGitFileDiff(width, height int) []string {
 	}
 	end := min(start+capacity, len(m.gitDiff.diffLines))
 	for index, line := range m.gitDiff.diffLines[start:end] {
-		lines = append(lines, m.renderGitDiffLineAt(displayText(line), start+index, width))
+		lines = append(lines, m.renderGitDiffLineAt(display.Text(line), start+index, width))
 	}
 	return lines
 }
@@ -499,13 +500,13 @@ func isNoNewlineDiffLine(line string) bool {
 
 func (m dashboard) renderGitSplitDiffRow(row gitSplitDiffRow, width int) string {
 	if row.full != "" {
-		return m.renderGitDiffLineAt(displayText(row.full), row.fullIndex, width)
+		return m.renderGitDiffLineAt(display.Text(row.full), row.fullIndex, width)
 	}
 	leftWidth := max((width-separatorWidth)/2, 1)
 	rightWidth := max(width-leftWidth-separatorWidth, 1)
 	separator := " " + m.styles.divider.Render("│") + " "
-	left := pad(m.renderGitDiffLineAt(displayText(row.left), row.leftIndex, leftWidth), leftWidth)
-	right := m.renderGitDiffLineAt(displayText(row.right), row.rightIndex, rightWidth)
+	left := pad(m.renderGitDiffLineAt(display.Text(row.left), row.leftIndex, leftWidth), leftWidth)
+	right := m.renderGitDiffLineAt(display.Text(row.right), row.rightIndex, rightWidth)
 	return left + separator + right
 }
 
@@ -539,7 +540,7 @@ func (m dashboard) renderGitDiffLineAt(line string, index, width int) string {
 		if changed {
 			style = style.Background(lineStyle.GetBackground())
 		}
-		result.WriteString(style.Render(displayText(token.value)))
+		result.WriteString(style.Render(display.Text(token.value)))
 	}
 	rendered := truncate(result.String(), width)
 	if changed {

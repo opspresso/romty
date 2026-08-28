@@ -10,6 +10,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
+	"github.com/opspresso/romty/internal/display"
 	"github.com/opspresso/romty/internal/model"
 )
 
@@ -233,7 +234,7 @@ func (m dashboard) renderStatus(width, bodyHeight int) []string {
 	switch {
 	case m.inputMode:
 		status = truncate(
-			m.styles.promptLabel.Render(" ROOT ")+" "+m.styles.promptText.Render(displayText(m.input))+m.styles.dividerActive.Render("█"),
+			m.styles.promptLabel.Render(" ROOT ")+" "+m.styles.promptText.Render(display.Text(m.input))+m.styles.dividerActive.Render("█"),
 			width,
 		)
 	case m.errorMessage != "":
@@ -241,7 +242,7 @@ func (m dashboard) renderStatus(width, bodyHeight int) []string {
 		if m.noticeMessage {
 			label, text, title = m.styles.noticeLabel, m.styles.noticeText, " NOTE "
 		}
-		status = truncate(label.Render(title)+" "+text.Render(displayText(m.errorMessage)), width)
+		status = truncate(label.Render(title)+" "+text.Render(display.Text(m.errorMessage)), width)
 	case m.tabPending || m.restorePending:
 		status = m.renderActivityStatus("OPENING", "preparing terminal", width)
 	case m.tabClosePending != "":
@@ -269,7 +270,7 @@ func (m dashboard) renderStatus(width, bodyHeight int) []string {
 			shortcut{key: "Esc", description: "cancel"},
 		)
 	case m.modal == gitActionsModal && m.gitActionPending:
-		status = m.renderActivityStatus("RUNNING", m.gitAction.label()+" in "+displayText(m.gitActionTarget.Name), width)
+		status = m.renderActivityStatus("RUNNING", m.gitAction.label()+" in "+display.Text(m.gitActionTarget.Name), width)
 	case m.modal == gitActionsModal && m.gitActionComplete:
 		shortcuts := []shortcut{
 			{key: "Enter", description: "actions"},
@@ -289,7 +290,7 @@ func (m dashboard) renderStatus(width, bodyHeight int) []string {
 		// The request is already out; no key can take it back.
 		status = m.renderActivityStatus("STOPPING", "waiting for the daemon to stop", width)
 	case m.modal == browseModal && m.browse.loading:
-		status = m.renderActivityStatus("READING", displayText(m.browse.path), width)
+		status = m.renderActivityStatus("READING", display.Text(m.browse.path), width)
 	case m.modal == browseModal:
 		status = renderShortcuts(m.styles, width,
 			shortcut{key: "↑/↓", description: "select"},
@@ -341,7 +342,7 @@ func (m dashboard) renderStatus(width, bodyHeight int) []string {
 	case m.scrollback && m.searchMode:
 		status = truncate(
 			m.styles.promptLabel.Render(" FIND ")+" "+
-				m.styles.promptText.Render(displayText(m.searchQuery))+
+				m.styles.promptText.Render(display.Text(m.searchQuery))+
 				m.styles.dividerActive.Render("█"),
 			width,
 		)
@@ -354,7 +355,7 @@ func (m dashboard) renderStatus(width, bodyHeight int) []string {
 		position := m.scrollbackPosition()
 		if len(m.searchMatches) > 0 {
 			shortcuts = append(shortcuts, shortcut{key: "n/N", description: "match"})
-			position += fmt.Sprintf("  %s %d/%d", displayText(m.searchQuery),
+			position += fmt.Sprintf("  %s %d/%d", display.Text(m.searchQuery),
 				len(m.searchMatches)-m.searchIndex, len(m.searchMatches))
 		}
 		shortcuts = append(shortcuts, shortcut{key: "Ctrl+Shift+\\", description: "exit"})
@@ -480,13 +481,13 @@ func (m dashboard) renderNavigationItem(item navItem, index, width int) []string
 		indicator = "▌"
 	}
 	branch := "-"
-	name := indicator + " " + branch + " " + displayText(item.workspace.Name)
+	name := indicator + " " + branch + " " + display.Text(item.workspace.Name)
 	style := m.styles.navigationItem
 	if item.isRoot {
-		name = indicator + "▾ " + displayText(item.root.Name)
+		name = indicator + "▾ " + display.Text(item.root.Name)
 		style = m.styles.navigationRoot
 		if item.failure != "" {
-			name = indicator + "✗ " + displayText(item.root.Name)
+			name = indicator + "✗ " + display.Text(item.root.Name)
 			style = m.styles.errorText
 		}
 	}
@@ -549,7 +550,7 @@ func renderTabBar(styles *uiStyles, tabs []model.Tab, active, width int) []strin
 func renderTabBarWithHover(styles *uiStyles, tabs []model.Tab, active, hover, closeHover, width int) []string {
 	labels := make([]string, 0, len(tabs)+1)
 	for _, tab := range tabs {
-		labels = append(labels, "  "+displayText(tab.Name)+"  × ")
+		labels = append(labels, "  "+display.Text(tab.Name)+"  × ")
 	}
 	labels = append(labels, "  +  ")
 

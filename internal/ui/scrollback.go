@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/opspresso/romty/internal/display"
 )
 
 // Scrollback mode is the only state where romty wants the wheel, and it takes
@@ -76,7 +78,7 @@ func (m dashboard) handleSearchKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd)
 		m.searchMatches = m.terminal.searchLines(query)
 		m.searchIndex = 0
 		if len(m.searchMatches) == 0 {
-			m.setNotice(terminalError, "no output matches "+displayText(query))
+			m.setNotice(terminalError, "no output matches "+display.Text(query))
 			return m, nil
 		}
 		m.clearError(terminalError)

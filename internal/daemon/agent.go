@@ -9,8 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/opspresso/romty/internal/model"
 	"golang.org/x/sys/unix"
+
+	"github.com/opspresso/romty/internal/model"
 )
 
 var foregroundProcessGroup = func(terminal *os.File) (int, error) {

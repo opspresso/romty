@@ -10,11 +10,12 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
-	"unicode"
 
 	"github.com/charmbracelet/x/term"
+
 	"github.com/opspresso/romty/internal/agenthooks"
 	"github.com/opspresso/romty/internal/client"
+	"github.com/opspresso/romty/internal/display"
 	"github.com/opspresso/romty/internal/model"
 	"github.com/opspresso/romty/internal/paths"
 	"github.com/opspresso/romty/internal/version"
@@ -156,12 +157,12 @@ func installAgentHooks(output io.Writer, theme commandTheme) error {
 			value = theme.failure("invalid")
 			failures = append(failures, fmt.Errorf("%s hooks: %w", status.Provider.DisplayName(), status.Err))
 		case agenthooks.StateCurrent:
-			value = theme.good("current") + "  " + commandText(status.Path)
+			value = theme.good("current") + "  " + display.Text(status.Path)
 		case agenthooks.StateMissing, agenthooks.StateOutdated:
 			if result, ok := byProvider[status.Provider]; ok {
-				value = theme.good(string(result.Action)) + "  " + commandText(result.Path)
+				value = theme.good(string(result.Action)) + "  " + display.Text(result.Path)
 			} else {
-				value = theme.failure("failed") + "  " + commandText(status.Path)
+				value = theme.failure("failed") + "  " + display.Text(status.Path)
 			}
 		}
 		if err := printField(output, theme, label, value); err != nil {
@@ -175,15 +176,6 @@ func installAgentHooks(output io.Writer, theme commandTheme) error {
 		return fmt.Errorf("configure agent hooks: %w", err)
 	}
 	return nil
-}
-
-func commandText(value string) string {
-	return strings.Map(func(character rune) rune {
-		if unicode.IsControl(character) {
-			return '�'
-		}
-		return character
-	}, value)
 }
 
 func printVersion(output io.Writer, theme commandTheme) error {

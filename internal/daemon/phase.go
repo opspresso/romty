@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/x/ansi"
+
 	"github.com/opspresso/romty/internal/model"
 )
 

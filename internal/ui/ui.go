@@ -9,13 +9,13 @@ import (
 	"io"
 	"strings"
 	"time"
-	"unicode"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/opspresso/romty/internal/agenthooks"
+	"github.com/opspresso/romty/internal/display"
 	"github.com/opspresso/romty/internal/model"
 	"github.com/opspresso/romty/internal/sound"
 )
@@ -1438,7 +1438,7 @@ func (m dashboard) renderNavigationGit(item navItem, indicator string, style lip
 		return style.Render(pad(prefix, width))
 	}
 
-	branch := displayText(item.git.Branch)
+	branch := display.Text(item.git.Branch)
 	if item.git.Detached {
 		revision := item.git.Revision
 		if len(revision) > 7 {
@@ -1490,15 +1490,6 @@ func onOff(value bool) string {
 		return "on"
 	}
 	return "off"
-}
-
-func displayText(value string) string {
-	return strings.Map(func(character rune) rune {
-		if unicode.IsControl(character) {
-			return '�'
-		}
-		return character
-	}, value)
 }
 
 func pad(value string, width int) string {

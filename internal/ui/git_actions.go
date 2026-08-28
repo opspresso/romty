@@ -8,6 +8,8 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/opspresso/romty/internal/display"
 )
 
 const gitActionTimeout = 2 * time.Minute
@@ -187,11 +189,11 @@ func (m dashboard) gitActionResultLines() []string {
 	lines := make([]string, 0)
 	if m.gitActionOutput != "" {
 		for _, line := range strings.Split(m.gitActionOutput, "\n") {
-			lines = append(lines, displayText(line))
+			lines = append(lines, display.Text(line))
 		}
 	}
 	if m.gitActionError != "" {
-		lines = append(lines, "Error: "+displayText(m.gitActionError))
+		lines = append(lines, "Error: "+display.Text(m.gitActionError))
 	}
 	if len(lines) == 0 {
 		return []string{"Completed successfully."}
@@ -243,8 +245,8 @@ func (m dashboard) handleGitActionsMouse(message tea.MouseMsg) (tea.Model, tea.C
 const gitActionHeaderRows = 2
 
 func (m dashboard) renderGitActionsModal(width, height int) []string {
-	target := m.styles.modalStrong.Render(displayText(m.gitActionTarget.Name)) +
-		m.styles.empty.Render("  "+displayText(m.gitActionTarget.Path))
+	target := m.styles.modalStrong.Render(display.Text(m.gitActionTarget.Name)) +
+		m.styles.empty.Render("  "+display.Text(m.gitActionTarget.Path))
 	if m.gitActionPending {
 		return modalBox(m.styles, width, "Git · "+m.gitAction.label(),
 			target,
