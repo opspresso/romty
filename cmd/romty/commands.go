@@ -235,17 +235,9 @@ func printStatus(output io.Writer, runtime paths.Paths, theme commandTheme) erro
 func summarizeSnapshot(snapshot model.Snapshot) snapshotSummary {
 	summary := snapshotSummary{roots: len(snapshot.Roots)}
 	for _, root := range snapshot.Roots {
-		addTabs(&summary, root.Tabs)
 		summary.workspaces += len(root.Directories)
-		for _, workspace := range root.Directories {
-			addTabs(&summary, workspace.Tabs)
-		}
 	}
-	return summary
-}
-
-func addTabs(summary *snapshotSummary, tabs []model.Tab) {
-	for _, tab := range tabs {
+	for tab := range snapshot.Tabs() {
 		if !tab.Running {
 			continue
 		}
@@ -259,6 +251,7 @@ func addTabs(summary *snapshotSummary, tabs []model.Tab) {
 			summary.shell++
 		}
 	}
+	return summary
 }
 
 func printList(output io.Writer, runtime paths.Paths, theme commandTheme) error {

@@ -1,5 +1,7 @@
 package model
 
+import "iter"
+
 type State struct {
 	Roots      []Root      `json:"roots"`
 	Workspaces []Workspace `json:"workspaces"`
@@ -68,6 +70,34 @@ type Tab struct {
 type Snapshot struct {
 	Revision uint64     `json:"revision"`
 	Roots    []RootView `json:"roots"`
+}
+
+// Tabs yields every tab the snapshot holds, by address, a root's own tabs
+// before those of the directories under it — the order the tree draws them.
+//
+// A snapshot keeps tabs at two levels, and four callers walked both by hand.
+// Each of them had to remember that a root holds tabs of its own; one that
+// forgets reads as working code that is simply blind to every terminal opened
+// on a root itself.
+func (s *Snapshot) Tabs() iter.Seq[*Tab] {
+	return func(yield func(*Tab) bool) {
+		for rootIndex := range s.Roots {
+			root := &s.Roots[rootIndex]
+			for index := range root.Tabs {
+				if !yield(&root.Tabs[index]) {
+					return
+				}
+			}
+			for directoryIndex := range root.Directories {
+				directory := &root.Directories[directoryIndex]
+				for index := range directory.Tabs {
+					if !yield(&directory.Tabs[index]) {
+						return
+					}
+				}
+			}
+		}
+	}
 }
 
 type RootView struct {
