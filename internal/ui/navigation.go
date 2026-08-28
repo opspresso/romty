@@ -56,6 +56,7 @@ func (m *dashboard) moveNavigation(delta int) {
 	items := m.navigationItems()
 	if len(items) == 0 {
 		m.navIndex, m.cursorPath = 0, ""
+		m.navOffset = 0
 		m.tabIndex = 0
 		return
 	}
@@ -65,6 +66,55 @@ func (m *dashboard) moveNavigation(delta int) {
 	m.navIndex = min(max(m.navIndex+delta, 0), len(items)-1)
 	m.cursorPath = items[m.navIndex].workspace.Path
 	m.syncTabCursor(runningTabs(items[m.navIndex].tabs))
+	m.ensureNavigationVisible()
+}
+
+// scrollNavigation moves the workspace viewport without changing its cursor or
+// keyboard focus. A wheel gesture is for reading another part of the tree; it
+// must not silently change which workspace Enter will open.
+func (m *dashboard) scrollNavigation(delta int) {
+	items := m.navigationItems()
+	start, _ := navigationWindow(items, m.navOffset, m.navigationCapacity())
+	start, _ = navigationWindow(items, start+delta, m.navigationCapacity())
+	m.navOffset = start
+}
+
+func (m dashboard) navigationCapacity() int {
+	return max(m.dimensions().bodyHeight-2, 0)
+}
+
+func (m *dashboard) clampNavigationOffset() {
+	start, _ := navigationWindow(m.navigationItems(), m.navOffset, m.navigationCapacity())
+	m.navOffset = start
+}
+
+// ensureNavigationVisible moves the viewport by the least number of complete
+// items needed to keep the keyboard cursor on screen. Moving inside the window
+// leaves it still; crossing an edge scrolls only that edge into view.
+func (m *dashboard) ensureNavigationVisible() {
+	items := m.navigationItems()
+	if len(items) == 0 {
+		m.navOffset = 0
+		return
+	}
+	available := m.navigationCapacity()
+	start, end := navigationWindow(items, m.navOffset, available)
+	m.navOffset = start
+	cursor := min(max(m.navIndex, 0), len(items)-1)
+	switch {
+	case cursor < start:
+		m.navOffset = cursor
+	case cursor >= end:
+		used := 0
+		for index := start; index <= cursor; index++ {
+			used += navigationRows(items[index])
+		}
+		for start < cursor && used > available {
+			used -= navigationRows(items[start])
+			start++
+		}
+		m.navOffset = start
+	}
 }
 
 func (m *dashboard) moveTab(delta int) {
@@ -252,6 +302,7 @@ func (m *dashboard) clampTabIndex() {
 // terminal — used to slide the highlight onto its neighbour without the user
 // touching a key, and Enter then opened the wrong workspace.
 func (m *dashboard) ensureWorkspaceCursor() {
+	defer m.clampNavigationOffset()
 	items := m.navigationItems()
 	if len(items) == 0 {
 		m.navIndex, m.cursorPath = 0, ""
@@ -279,6 +330,7 @@ func (m *dashboard) setNavigation(index int) {
 	if item, ok := m.navigationItem(); ok {
 		m.cursorPath = item.workspace.Path
 	}
+	m.ensureNavigationVisible()
 }
 
 // focusTerminal moves the keyboard into the terminal, if there is one still
@@ -297,8 +349,7 @@ func (m *dashboard) focusNavigation() {
 	items := m.navigationItems()
 	for index, item := range items {
 		if item.workspace.Path == m.selectedPath {
-			m.navIndex = index
-			m.cursorPath = item.workspace.Path
+			m.setNavigation(index)
 			m.syncTabCursor(runningTabs(item.tabs))
 			return
 		}
@@ -350,8 +401,7 @@ func (m *dashboard) restoreSelection() {
 			if tab.ID != tabID {
 				continue
 			}
-			m.navIndex = navIndex
-			m.cursorPath = path
+			m.setNavigation(navIndex)
 			m.tabIndex = tabIndex
 			m.selectedWorkspaceID = tab.WorkspaceID
 			m.selectedPath = path

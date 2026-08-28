@@ -266,15 +266,15 @@ func (m dashboard) handleDashboardMouse(message tea.MouseMsg) (tea.Model, tea.Cm
 	}
 
 	if wheel, ok := message.(tea.MouseWheelMsg); ok && mouse.X < view.leftWidth && mouse.Y < view.bodyHeight {
-		m.focus = leftPane
 		switch wheel.Button {
 		case tea.MouseWheelUp:
-			m.moveNavigation(-3)
+			m.scrollNavigation(-3)
 		case tea.MouseWheelDown:
-			m.moveNavigation(3)
+			m.scrollNavigation(3)
 		default:
 			return m, nil, false
 		}
+		m.hover = m.hoverTargetAt(mouse)
 		return m, nil, true
 	}
 
@@ -323,7 +323,7 @@ func (m dashboard) handleDashboardMouse(message tea.MouseMsg) (tea.Model, tea.Cm
 func (m dashboard) navigationIndexAtRow(row, height int) (int, bool) {
 	items := m.navigationItems()
 	available := max(height-2, 0)
-	start, end := navigationWindow(items, m.navIndex, available)
+	start, end := navigationWindow(items, m.navOffset, available)
 	currentRow := 2
 	for index := start; index < end; index++ {
 		nextRow := currentRow + navigationRows(items[index])

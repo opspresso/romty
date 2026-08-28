@@ -878,14 +878,41 @@ func TestDashboardMouseSelectsWorkspaceAndTab(t *testing.T) {
 	}
 }
 
-func TestDashboardMouseWheelMovesOnlyTheWorkspaceCursor(t *testing.T) {
-	value := newDashboard(&fakeBackend{}, twoRootSnapshot())
-	value.width, value.height = 120, 30
+func TestDashboardMouseWheelScrollsTheWorkspaceWithoutMovingItsCursor(t *testing.T) {
+	directories := make([]model.WorkspaceView, 0, 6)
+	for index := range 6 {
+		name := fmt.Sprintf("workspace-%02d", index)
+		directories = append(directories, model.WorkspaceView{Workspace: model.Workspace{
+			ID: name, RootID: "root-1", Name: name, Path: "/projects/" + name,
+		}})
+	}
+	value := newDashboard(&fakeBackend{}, model.Snapshot{Roots: []model.RootView{{
+		Root: model.Root{ID: "root-1", Name: "projects", Path: "/projects"}, Directories: directories,
+	}}})
+	value.width, value.height = 120, 10
+	value.focus = terminalPane
+	before := ansi.Strip(strings.Join(value.renderNavigation(value.dimensions().leftWidth, value.dimensions().bodyHeight), "\n"))
 
 	updated, command := value.Update(tea.MouseWheelMsg{X: 2, Y: 3, Button: tea.MouseWheelDown})
 	value = updated.(dashboard)
-	if value.navIndex != 1 || value.cursorPath != "/second" || command != nil {
-		t.Fatalf("workspace wheel = (index %d, path %q, command %v)", value.navIndex, value.cursorPath, command)
+	if value.navIndex != 0 || value.cursorPath != "/projects" || value.focus != terminalPane || command != nil {
+		t.Fatalf("workspace wheel = (index %d, path %q, focus %v, command %v)",
+			value.navIndex, value.cursorPath, value.focus, command)
+	}
+	after := ansi.Strip(strings.Join(value.renderNavigation(value.dimensions().leftWidth, value.dimensions().bodyHeight), "\n"))
+	if before == after || strings.Contains(after, "workspace-00") || !strings.Contains(after, "workspace-02") {
+		t.Fatalf("workspace wheel did not move the viewport:\n%s\nwant later workspaces", after)
+	}
+	if index, ok := value.navigationIndexAtRow(3, value.dimensions().bodyHeight); !ok || index != 3 {
+		t.Fatalf("visible row hit = (%d, %v), want workspace-02", index, ok)
+	}
+	if value.hover.kind != hoverNavigation || value.hover.index != 3 {
+		t.Fatalf("hover after wheel = (%v, %d), want workspace-02", value.hover.kind, value.hover.index)
+	}
+	offset := value.navOffset
+	value.ensureWorkspaceCursor()
+	if value.navOffset != offset {
+		t.Fatalf("snapshot cursor sync moved the scrolled viewport from %d to %d", offset, value.navOffset)
 	}
 }
 
@@ -4635,12 +4662,26 @@ func TestDashboardKeepsNavigationCursorVisible(t *testing.T) {
 		Directories: directories,
 	}}})
 	value.width = 120
-	value.height = 30
+	value.height = 12
 	view := value.dimensions()
 	leftWidth, bodyHeight := view.leftWidth, view.bodyHeight
 
+	// Moving inside the current page leaves the viewport still. Only the next
+	// move, which would put the cursor below it, advances by the one root row
+	// needed to make the workspace fit.
+	for range 3 {
+		value.moveNavigation(1)
+	}
+	if value.navOffset != 0 {
+		t.Fatalf("viewport moved to %d while the cursor was still visible", value.navOffset)
+	}
+	value.moveNavigation(1)
+	if value.navOffset != 1 {
+		t.Fatalf("viewport moved to %d at the lower edge, want the minimal offset 1", value.navOffset)
+	}
+
 	for _, navIndex := range []int{0, 20, len(directories)} {
-		value.navIndex = navIndex
+		value.setNavigation(navIndex)
 		lines := value.renderNavigation(leftWidth, bodyHeight)
 		if len(lines) > bodyHeight {
 			t.Fatalf("navigation at index %d rendered %d lines, want at most %d", navIndex, len(lines), bodyHeight)

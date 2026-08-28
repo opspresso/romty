@@ -146,6 +146,10 @@ type dashboard struct {
 	height   int
 	focus    pane
 	navIndex int
+	// navOffset is the first workspace tree item in the viewport. The wheel
+	// moves it without moving the cursor; keyboard navigation changes it only
+	// when the cursor would otherwise leave the screen.
+	navOffset int
 	// cursorPath is what the cursor is actually on. navIndex is only where
 	// that lands in the tree as it stands, and the tree is rebuilt on every
 	// refresh.
@@ -460,6 +464,7 @@ func (m dashboard) update(message tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = message.Width
 		m.height = message.Height
+		m.ensureNavigationVisible()
 		return m, m.resizeTerminal()
 	case tea.BackgroundColorMsg:
 		m.styles = newUIStyles(message.IsDark())

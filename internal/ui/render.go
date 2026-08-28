@@ -387,7 +387,7 @@ func (m dashboard) renderNavigation(width, height int) []string {
 	lines := []string{header, ""}
 	items := m.navigationItems()
 	available := max(height-len(lines), 0)
-	start, end := navigationWindow(items, m.navIndex, available)
+	start, end := navigationWindow(items, m.navOffset, available)
 	for index := start; index < end; index++ {
 		itemLines := m.renderNavigationItem(items[index], index, width)
 		remaining := max(height-len(lines), 0)
@@ -402,26 +402,22 @@ func (m dashboard) renderNavigation(width, height int) []string {
 	return lines
 }
 
-func navigationWindow(items []navItem, cursor, available int) (int, int) {
+func navigationWindow(items []navItem, offset, available int) (int, int) {
 	if len(items) == 0 || available <= 0 {
 		return 0, 0
 	}
-	cursor = min(max(cursor, 0), len(items)-1)
-	start := cursor
-	used := navigationRows(items[cursor])
-	for start > 0 && used+navigationRows(items[start-1]) <= available/2 {
-		start--
-		used += navigationRows(items[start])
+	lastStart := len(items) - 1
+	used := navigationRows(items[lastStart])
+	for lastStart > 0 && used+navigationRows(items[lastStart-1]) <= available {
+		lastStart--
+		used += navigationRows(items[lastStart])
 	}
+	start := min(max(offset, 0), lastStart)
 	end := start
 	used = 0
 	for end < len(items) && used+navigationRows(items[end]) <= available {
 		used += navigationRows(items[end])
 		end++
-	}
-	for end == len(items) && start > 0 && used+navigationRows(items[start-1]) <= available {
-		start--
-		used += navigationRows(items[start])
 	}
 	if end == start {
 		end++
