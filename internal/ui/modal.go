@@ -194,9 +194,28 @@ func overlayBox(base, box []string, x, y, width, height int) []string {
 		}
 		line := pad(truncate(result[row], width), width)
 		boxWidth := lipgloss.Width(boxLine)
-		result[row] = ansi.Cut(line, 0, x) + boxLine + ansi.Cut(line, x+boxWidth, width)
+		result[row] = overlayPrefix(line, x) + boxLine + overlaySuffix(line, x+boxWidth, width)
 	}
 	return result
+}
+
+// overlayPrefix and overlaySuffix keep every overlay boundary on the requested
+// terminal cell. A wide grapheme cannot be cut in half: ansi.Cut omits one that
+// crosses its right edge and includes one that crosses its left edge. Filling
+// those partial cells prevents either side from moving the box or the backdrop.
+func overlayPrefix(line string, width int) string {
+	return pad(ansi.Cut(line, 0, width), width)
+}
+
+func overlaySuffix(line string, left, right int) string {
+	width := max(right-left, 0)
+	for blank := 0; blank <= width; blank++ {
+		suffix := ansi.Cut(line, left+blank, right)
+		if lipgloss.Width(suffix) == width-blank {
+			return strings.Repeat(" ", blank) + suffix
+		}
+	}
+	return strings.Repeat(" ", width)
 }
 
 func (m dashboard) renderModal(width, height int) []string {

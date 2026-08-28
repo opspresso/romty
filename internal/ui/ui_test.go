@@ -4867,6 +4867,29 @@ func TestDashboardCentersModalOverTheDashboardItLeavesShowing(t *testing.T) {
 	}
 }
 
+func TestOverlayBoxKeepsWideBackdropAndBoxInTheirColumns(t *testing.T) {
+	for _, probe := range []struct {
+		name string
+		base string
+		want string
+	}{
+		{name: "Korean", base: "가나다라마바사아자차", want: "가 ╭──╮ 마바사아자차"},
+		{name: "mixed English and Korean", base: "ab가cd나ef다gh라마ij", want: "ab ╭──╮ ef다gh라마ij"},
+	} {
+		t.Run(probe.name, func(t *testing.T) {
+			for _, base := range []string{probe.base, lipgloss.NewStyle().Foreground(lipgloss.Color("7")).Render(probe.base)} {
+				got := overlayBox([]string{base}, []string{"╭──╮"}, 3, 0, 20, 1)[0]
+				if plain := ansi.Strip(got); plain != probe.want {
+					t.Fatalf("overlayBox() = %q, want %q", plain, probe.want)
+				}
+				if width := lipgloss.Width(got); width != 20 {
+					t.Fatalf("overlayBox() width = %d, want 20", width)
+				}
+			}
+		})
+	}
+}
+
 // Help used to answer to `?` alone, which the terminal pane forwards to the
 // shell, so the pane whose shortcuts are hardest to remember was the one with
 // no way to look them up.
