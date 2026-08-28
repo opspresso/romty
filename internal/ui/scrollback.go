@@ -1,5 +1,6 @@
 // Scrollback: entering and leaving the retained output, moving the viewport
 // through it, and finding text in it.
+
 package ui
 
 import (
@@ -7,6 +8,8 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/opspresso/romty/internal/display"
 )
 
 // Scrollback mode is the only state where romty wants the wheel, and it takes
@@ -75,7 +78,7 @@ func (m dashboard) handleSearchKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd)
 		m.searchMatches = m.terminal.searchLines(query)
 		m.searchIndex = 0
 		if len(m.searchMatches) == 0 {
-			m.setNotice(terminalError, "no output matches "+displayText(query))
+			m.setNotice(terminalError, "no output matches "+display.Text(query))
 			return m, nil
 		}
 		m.clearError(terminalError)
@@ -143,7 +146,12 @@ func pagingKey(pages int) tea.KeyPressMsg {
 }
 
 func (m *dashboard) startScrollback() bool {
-	if m.terminal == nil || m.terminal.scrollbackLen() == 0 {
+	// Scrollback is a view of the terminal, and the file view is what is on
+	// screen instead of it. Opening it there set a mode nothing drew: the file
+	// view kept rendering, romty asked the host for alternate scroll on its
+	// behalf, and closing the file view landed the user in a scrollback they
+	// never asked for.
+	if m.gitDiff.active || m.terminal == nil || m.terminal.scrollbackLen() == 0 {
 		return false
 	}
 	m.scrollback = true
@@ -156,6 +164,8 @@ func (m *dashboard) startScrollback() bool {
 // show, so an application that owns the screen is not mistaken for a bug.
 func (m dashboard) scrollbackUnavailable() string {
 	switch {
+	case m.gitDiff.active:
+		return "close the file view with Ctrl+Shift+F to scroll the terminal"
 	case m.terminal == nil:
 		return "open a terminal to scroll its output"
 	case m.terminal.altScreen():

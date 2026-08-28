@@ -1,5 +1,6 @@
 // The shortcut reference. It is data first and rendering second, so what the
 // modal shows can be checked against the key table it documents.
+
 package ui
 
 import (
@@ -91,8 +92,8 @@ func helpReference() []helpEntry {
 		{description: "Open workspace or tab", keys: []string{"Click"}},
 		{description: "Move workspace cursor", keys: []string{"Wheel over tree"}},
 		{description: "Resize workspace pane", keys: []string{"Drag divider"}},
-		{section: "CONTEXT", note: "workspace, picker, modals and prompts"},
-		{description: "Activate / submit", keys: []string{"Enter"}},
+		{section: "CONTEXT", note: "workspace, picker, Config, modals and prompts"},
+		{description: "Activate / submit / toggle", keys: []string{"Enter"}},
 		{description: "Close / cancel / leave", keys: []string{"Esc"}},
 		{description: "Type a picker path", keys: []string{"/"}},
 		{description: "Erase path character", keys: []string{"Backspace"}},

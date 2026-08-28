@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/opspresso/romty/internal/model"
 	"github.com/opspresso/romty/internal/protocol"
 )
 
@@ -155,5 +156,44 @@ func TestCapabilitiesFollowTheirIntroducedVersion(t *testing.T) {
 		if got := protocol.HasCapability(capabilities, probe.capability); got != probe.want {
 			t.Fatalf("version %d capability %q = %v, want %v", probe.version, probe.capability, got, probe.want)
 		}
+	}
+}
+
+// Both ends of the socket refuse the same payloads, so a hook that romty's own
+// command accepted can never be one the daemon then rejects.
+func TestAgentEventValidate(t *testing.T) {
+	valid := protocol.AgentEvent{Agent: model.AgentClaude, HookEvent: "Stop"}
+	long := strings.Repeat("x", protocol.MaxAgentEventMetadataBytes+1)
+
+	for _, probe := range []struct {
+		name  string
+		event protocol.AgentEvent
+		valid bool
+	}{
+		{name: "claude", event: valid, valid: true},
+		{name: "codex", event: protocol.AgentEvent{Agent: model.AgentCodex, HookEvent: "Stop"}, valid: true},
+		{name: "an event romty has no phase for", event: protocol.AgentEvent{
+			Agent: model.AgentClaude, HookEvent: "SomethingNew"}, valid: true},
+		{name: "no agent", event: protocol.AgentEvent{HookEvent: "Stop"}},
+		{name: "another program's agent", event: protocol.AgentEvent{Agent: "shell", HookEvent: "Stop"}},
+		{name: "no hook event", event: protocol.AgentEvent{Agent: model.AgentClaude}},
+		{name: "oversized session", event: protocol.AgentEvent{
+			Agent: model.AgentClaude, HookEvent: "Stop", SessionID: long}},
+		{name: "oversized tool", event: protocol.AgentEvent{
+			Agent: model.AgentClaude, HookEvent: "Stop", ToolName: long}},
+		{name: "oversized notification", event: protocol.AgentEvent{
+			Agent: model.AgentClaude, HookEvent: "Stop", NotificationType: long}},
+		{name: "oversized permission mode", event: protocol.AgentEvent{
+			Agent: model.AgentClaude, HookEvent: "Stop", PermissionMode: long}},
+	} {
+		t.Run(probe.name, func(t *testing.T) {
+			err := probe.event.Validate()
+			if probe.valid && err != nil {
+				t.Fatalf("Validate() error = %v, want the event accepted", err)
+			}
+			if !probe.valid && err == nil {
+				t.Fatal("Validate() accepted an event the daemon cannot record")
+			}
+		})
 	}
 }

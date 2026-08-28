@@ -23,7 +23,7 @@ Git metadata is rendered as `(branch*) ↑N ↓N`. `*` means the worktree has tr
 
 romty refreshes local Git state every 10 seconds. It fetches remote-tracking refs in the background at startup and every 5 minutes. `F5` refreshes local state immediately and starts another background fetch; fetches never prompt for credentials and time out without blocking the interface.
 
-Press `Ctrl`+`Shift`+`G` to open Git actions for a workspace. From the workspace pane it targets the row under the cursor; from the terminal pane or scrollback it targets the open terminal workspace. The menu provides `Status`, `Fetch`, `Pull`, and `Push`. `Pull` uses `--ff-only` so it never creates a merge commit. Commands run without interactive credential prompts, and their output or error remains in a scrollable result modal. Press `Enter` from a result to return to the action menu.
+Press `Ctrl`+`Shift`+`G` to open Git actions for a workspace. From the workspace pane it targets the row under the cursor; from the terminal pane or scrollback it targets the open terminal workspace. The menu provides `Status`, `Fetch`, `Pull`, and `Push`. `Pull` uses `--ff-only` so it never creates a merge commit. Commands run without interactive credential prompts, and their output or error remains in a scrollable result modal. That output is coloured: porcelain status letters take the same green, amber, and red the file view gives them, and a diffstat's `+` and `-` are split into additions and removals. Press `Enter` from a result to return to the action menu.
 
 Press `Ctrl`+`Shift`+`F` to toggle the file view for the same contextual workspace. Its left pane shows staged, unstaged, and untracked files as a directory tree. Added and untracked files are green, modified and renamed files are amber, and deleted or conflicted files are red. The right pane syntax-highlights recognised code files and falls back to plain text for other content or unusually large diffs. Added and removed rows use green and red background tints without replacing syntax colors. Press `F6` to switch between inline and split layouts; the last layout is restored when the view or romty is opened again. A file with both staged and unstaged edits shows both sections, and an untracked text file is compared with an empty file. Press `↑`/`↓` to select a file, use `Ctrl`+`↑`/`↓`, the mouse wheel, or the paging keys to read its diff, and press `F5` to reload the worktree.
 
@@ -67,8 +67,8 @@ Press `Ctrl`+`Shift`+`F` to toggle the file view for the same contextual workspa
 
 | Key | Action | Applies to |
 |---|---|---|
-| `↑`/`↓` | Move one item or line | Workspace, file list, picker, Help, Git, scrollback |
-| `k`/`j` | Move one item or line | Workspace, file list, picker, Help, Git |
+| `↑`/`↓` | Move one item or line | Workspace, file list, picker, Config, Help, Git, scrollback |
+| `k`/`j` | Move one item or line | Workspace, file list, picker, Config, Help, Git |
 | `←`/`→` or `h`/`l` | Select a tab, or open a picker child/parent | Workspace, picker |
 | `PgUp`/`PgDn` or `Ctrl+B`/`Ctrl+F` | Move one page | Picker, Help, Git result, file diff |
 | `Home`/`End` or `g`/`G` | Move to the first or last item/line | Picker, Help, Git result, file diff |
@@ -86,7 +86,7 @@ Press `Ctrl`+`Shift`+`F` to toggle the file view for the same contextual workspa
 
 | Key | Action |
 |---|---|
-| `Enter` | Open, run, return, submit, or confirm in the workspace, picker, Git views, and prompts |
+| `Enter` | Open, run, return, submit, confirm, or toggle a Config setting in the workspace, picker, Config, Git views, and prompts |
 | `Esc` | Close a modal or file view, cancel a prompt, or leave scrollback |
 | `Backspace` | Erase a path character |
 | `←`/`→` or `[`/`]` | Resize the workspace pane in Config |
@@ -108,9 +108,9 @@ The dashboard chrome is mouse-aware. Click a root or workspace to select and ope
 
 Mouse targets identify themselves before activation. Workspace, tab, picker, Git, Config, and dialog-action targets gain a muted background on hover, while the draggable divider changes to the accent color. Keyboard selection keeps the stronger accent treatment and is never replaced by hover.
 
-Confirmation dialogs render their Enter and Esc actions inside the box and accept clicks on those actions. Longer operations such as opening a terminal, reading a directory, running a Git action, stopping the daemon, or installing hooks show a moving one-cell activity marker; the marker stops scheduling frames when no visible work or agent animation remains.
+Modals are drawn over the dashboard rather than in place of it: the workspace tree and the terminal stay on screen around the box, redrawn in one receding tone so the box in front is what asks to be read. The box takes the width its content needs, up to a cap; Config is given half the screen because it is read rather than answered. The workspace action palette is the exception — it is anchored on the row it belongs to and leaves the tree around it as it was. Confirmation dialogs render their Enter and Esc actions inside the box and accept clicks on those actions. Longer operations such as opening a terminal, reading a directory, running a Git action, stopping the daemon, or installing hooks show a moving one-cell activity marker; the marker stops scheduling frames when no visible work or agent animation remains.
 
-Modal content is pointer-aware as well. Click a directory in the root picker to open it, click a Git action to run it, and use the wheel over a completed Git result to read longer output. Config rows toggle when clicked; use the wheel over the pane-width row for one-column adjustments.
+Modal content is pointer-aware as well. Click a directory in the root picker to open it, click a Git action to run it, and use the wheel over a completed Git result to read longer output. Config rows toggle when clicked and the row clicked becomes the one the cursor is on; use the wheel over the pane-width row for one-column adjustments.
 
 romty discovers direct child directories only. Press `F5` after a command adds or removes a child. An unreadable root is marked `✗` and listed without workspaces; other roots remain usable.
 
@@ -147,5 +147,7 @@ The wheel then scrolls scrollback on any terminal that reports the mouse, at the
 `F9` asks before stopping the daemon because this terminates every running shell. Once confirmed, shutdown cannot be cancelled.
 
 The last opened workspace and terminal tab, workspace pane width, and inline or split diff layout are saved automatically in `config.json`. Reopening romty reconnects to that tab when it is still running; a removed workspace or stopped tab falls back to the workspace list. The pane width is constrained to 18 through 40 columns and may shrink further when the terminal is narrow.
+
+Config lists each setting as a name, its value, and the key that runs it. Walk the list with `↑`/`↓` and run the row under the cursor with `Enter`; each row's own key still works from anywhere in the modal.
 
 Sound alerts are off by default. Open Config with `F3`, press `d` to toggle the embedded done sound when an agent finishes active work, `b` to toggle the embedded waiting sound when an agent begins waiting for input or approval, and `s` to test the done sound. A stable state does not play repeatedly, and the first agent snapshot after startup stays silent. Playback uses the first supported audio tool on the host running romty, so an SSH session plays on the remote host rather than the connecting device; a host without a supported player remains silent.

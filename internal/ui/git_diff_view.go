@@ -8,6 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
+	"github.com/opspresso/romty/internal/display"
 	"github.com/opspresso/romty/internal/model"
 )
 
@@ -30,6 +31,18 @@ type gitDiffView struct {
 	diffPending       bool
 	err               string
 	request           uint64
+}
+
+// clearDiff drops whatever diff is on screen. Four paths reach that state — a
+// file list that failed or arrived, a diff that was asked for, a diff that
+// failed — and setting the fields by hand at each is how one of them ends up
+// leaving the previous file's highlighting under the next file's text, or its
+// scroll offset under a diff that is shorter.
+func (v *gitDiffView) clearDiff() {
+	v.diffLines = nil
+	v.diffSyntax = nil
+	v.syntaxHighlighted = false
+	v.diffOffset = 0
 }
 
 type gitChangedFilesMsg struct {
@@ -58,16 +71,18 @@ func (m dashboard) toggleGitDiffView() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	target, ok := m.gitActionWorkspace()
-	if !ok || !target.hasGit {
-		m.setError(gitError, "selected workspace is not a Git repository")
+	if !ok {
+		m.setError(gitError, notAGitRepository)
 		return m, nil
 	}
+	// Whether the target is a repository is openGitDiffView's question, and it
+	// asks it whichever way the view is opened.
 	return m.openGitDiffView(target)
 }
 
 func (m dashboard) openGitDiffView(target navItem) (tea.Model, tea.Cmd) {
 	if !target.hasGit {
-		m.setError(gitError, "selected workspace is not a Git repository")
+		m.setError(gitError, notAGitRepository)
 		return m, nil
 	}
 	m.stopScrollback()
@@ -103,9 +118,7 @@ func (m dashboard) handleGitChangedFiles(message gitChangedFilesMsg) (tea.Model,
 	m.gitDiff.filesPending = false
 	if message.err != nil {
 		m.gitDiff.files = nil
-		m.gitDiff.diffLines = nil
-		m.gitDiff.diffSyntax = nil
-		m.gitDiff.syntaxHighlighted = false
+		m.gitDiff.clearDiff()
 		m.gitDiff.err = message.err.Error()
 		return m, nil
 	}
@@ -117,10 +130,7 @@ func (m dashboard) handleGitChangedFiles(message gitChangedFilesMsg) (tea.Model,
 			break
 		}
 	}
-	m.gitDiff.diffLines = nil
-	m.gitDiff.diffSyntax = nil
-	m.gitDiff.syntaxHighlighted = false
-	m.gitDiff.diffOffset = 0
+	m.gitDiff.clearDiff()
 	m.gitDiff.err = ""
 	if len(m.gitDiff.files) == 0 {
 		return m, nil
@@ -137,10 +147,7 @@ func (m *dashboard) loadSelectedFileDiff() tea.Cmd {
 	path := m.gitDiff.target.Path
 	file := m.gitDiff.files[m.gitDiff.fileIndex]
 	m.gitDiff.diffPending = true
-	m.gitDiff.diffLines = nil
-	m.gitDiff.diffSyntax = nil
-	m.gitDiff.syntaxHighlighted = false
-	m.gitDiff.diffOffset = 0
+	m.gitDiff.clearDiff()
 	m.gitDiff.err = ""
 	return func() tea.Msg {
 		diff, err := loadGitFileDiff(path, file)
@@ -162,9 +169,7 @@ func (m dashboard) handleGitFileDiff(message gitFileDiffMsg) (tea.Model, tea.Cmd
 	m.gitDiff.diffPending = false
 	if message.err != nil {
 		m.gitDiff.err = message.err.Error()
-		m.gitDiff.diffLines = nil
-		m.gitDiff.diffSyntax = nil
-		m.gitDiff.syntaxHighlighted = false
+		m.gitDiff.clearDiff()
 		return m, nil
 	}
 	m.gitDiff.diffLines = message.lines
@@ -292,33 +297,21 @@ func (m dashboard) maximumGitDiffOffset() int {
 }
 
 func (m dashboard) renderGitDiffPanes(leftWidth, rightWidth, height int) []string {
-	left := m.renderGitChangedFiles(leftWidth, height)
-	right := m.renderGitFileDiff(rightWidth, height)
 	separator := " " + m.styles.divider.Render("│") + " "
-	lines := make([]string, 0, height)
-	for row := range height {
-		leftLine, rightLine := "", ""
-		if row < len(left) {
-			leftLine = left[row]
-		}
-		if row < len(right) {
-			rightLine = right[row]
-		}
-		lines = append(lines, pad(truncate(leftLine, leftWidth), leftWidth)+separator+truncate(rightLine, rightWidth))
-	}
-	return lines
+	return mergePanes(
+		m.renderGitChangedFiles(leftWidth, height), m.renderGitFileDiff(rightWidth, height),
+		leftWidth, rightWidth, height,
+		func(int) string { return separator })
 }
 
 func (m dashboard) renderGitChangedFiles(width, height int) []string {
-	title := " Changes · " + displayText(m.gitDiff.target.Name) + " "
-	header := m.styles.paneTitleActive.Render(truncate(title, width))
-	header += m.styles.tabRail.Render(strings.Repeat("─", max(width-lipgloss.Width(header), 0)))
-	lines := []string{header, ""}
+	title := " Changes · " + display.Text(m.gitDiff.target.Name) + " "
+	lines := []string{m.paneHeader(m.styles.paneTitleActive, title, width), ""}
 	switch {
 	case m.gitDiff.filesPending:
 		return append(lines, m.styles.empty.Render("  Loading changed files…"))
 	case m.gitDiff.err != "" && len(m.gitDiff.files) == 0:
-		return append(lines, m.styles.errorText.Render("  "+displayText(m.gitDiff.err)))
+		return append(lines, m.styles.errorText.Render("  "+display.Text(m.gitDiff.err)))
 	case len(m.gitDiff.files) == 0:
 		return append(lines, m.styles.empty.Render("  No changed files"))
 	}
@@ -342,7 +335,7 @@ func (m dashboard) renderGitChangedFiles(width, height int) []string {
 func (m dashboard) renderGitDiffTreeRow(row gitDiffTreeRow, width int) string {
 	prefix := strings.Repeat("  ", row.depth) + "  "
 	if row.directory {
-		return m.styles.navigationRoot.Render(truncate(strings.Repeat("  ", row.depth)+"▾ "+displayText(row.name)+"/", width))
+		return m.styles.navigationRoot.Render(truncate(strings.Repeat("  ", row.depth)+"▾ "+display.Text(row.name)+"/", width))
 	}
 	file := m.gitDiff.files[row.fileIndex]
 	status := gitChangedFileStatus(file)
@@ -353,7 +346,7 @@ func (m dashboard) renderGitDiffTreeRow(row gitDiffTreeRow, width int) string {
 		style = m.styles.navigationSelected
 	}
 	prefix = indicator + prefix
-	name := " " + displayText(row.name)
+	name := " " + display.Text(row.name)
 	used := lipgloss.Width(prefix) + lipgloss.Width(status)
 	if used >= width {
 		return style.Render(truncate(prefix+status+name, width))
@@ -367,11 +360,18 @@ func (m dashboard) renderGitDiffTreeRow(row gitDiffTreeRow, width int) string {
 }
 
 func (m dashboard) gitChangedFileStyle(file gitChangedFile) lipgloss.Style {
-	status := string([]byte{file.IndexStatus, file.WorkTreeStatus})
+	return m.gitStatusStyle(file.IndexStatus, file.WorkTreeStatus)
+}
+
+// gitStatusStyle is what a porcelain status code is drawn in: gone is red,
+// new is green, changed is amber. The file view and the Git status result read
+// the same two letters, and green had better mean the same thing in both.
+func (m dashboard) gitStatusStyle(index, workTree byte) lipgloss.Style {
+	status := string([]byte{index, workTree})
 	switch {
 	case strings.Contains(status, "U"), status == "AA", status == "DD", strings.Contains(status, "D"):
 		return m.styles.diffRemoved
-	case status == "??", file.IndexStatus == 'A':
+	case status == "??", index == 'A':
 		return m.styles.diffAdded
 	default:
 		return m.styles.gitStatus
@@ -385,21 +385,19 @@ func (m dashboard) renderGitFileDiff(width, height int) []string {
 	}
 	title := " Diff"
 	if path != "" {
-		title += " · " + displayText(path)
+		title += " · " + display.Text(path)
 	}
 	mode := "inline"
 	if m.gitDiff.split {
 		mode = "split"
 	}
 	title += " · " + mode + " "
-	header := m.styles.paneTitle.Render(truncate(title, width))
-	header += m.styles.tabRail.Render(strings.Repeat("─", max(width-lipgloss.Width(header), 0)))
-	lines := []string{header, ""}
+	lines := []string{m.paneHeader(m.styles.paneTitle, title, width), ""}
 	switch {
 	case m.gitDiff.diffPending:
 		return append(lines, m.styles.empty.Render("  Loading diff…"))
 	case m.gitDiff.err != "":
-		return append(lines, m.styles.errorText.Render("  "+displayText(m.gitDiff.err)))
+		return append(lines, m.styles.errorText.Render("  "+display.Text(m.gitDiff.err)))
 	case len(m.gitDiff.files) == 0:
 		return append(lines, m.styles.empty.Render("  Select a changed file"))
 	}
@@ -415,7 +413,7 @@ func (m dashboard) renderGitFileDiff(width, height int) []string {
 	}
 	end := min(start+capacity, len(m.gitDiff.diffLines))
 	for index, line := range m.gitDiff.diffLines[start:end] {
-		lines = append(lines, m.renderGitDiffLineAt(displayText(line), start+index, width))
+		lines = append(lines, m.renderGitDiffLineAt(display.Text(line), start+index, width))
 	}
 	return lines
 }
@@ -511,13 +509,13 @@ func isNoNewlineDiffLine(line string) bool {
 
 func (m dashboard) renderGitSplitDiffRow(row gitSplitDiffRow, width int) string {
 	if row.full != "" {
-		return m.renderGitDiffLineAt(displayText(row.full), row.fullIndex, width)
+		return m.renderGitDiffLineAt(display.Text(row.full), row.fullIndex, width)
 	}
 	leftWidth := max((width-separatorWidth)/2, 1)
 	rightWidth := max(width-leftWidth-separatorWidth, 1)
 	separator := " " + m.styles.divider.Render("│") + " "
-	left := pad(m.renderGitDiffLineAt(displayText(row.left), row.leftIndex, leftWidth), leftWidth)
-	right := m.renderGitDiffLineAt(displayText(row.right), row.rightIndex, rightWidth)
+	left := pad(m.renderGitDiffLineAt(display.Text(row.left), row.leftIndex, leftWidth), leftWidth)
+	right := m.renderGitDiffLineAt(display.Text(row.right), row.rightIndex, rightWidth)
 	return left + separator + right
 }
 
@@ -551,7 +549,7 @@ func (m dashboard) renderGitDiffLineAt(line string, index, width int) string {
 		if changed {
 			style = style.Background(lineStyle.GetBackground())
 		}
-		result.WriteString(style.Render(displayText(token.value)))
+		result.WriteString(style.Render(display.Text(token.value)))
 	}
 	rendered := truncate(result.String(), width)
 	if changed {
@@ -564,9 +562,9 @@ func (m dashboard) renderGitDiffLine(line string, width int) string {
 	style := m.styles.navigationItem
 	changed := false
 	switch {
-	case strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "+++"):
+	case isAddedDiffLine(line):
 		style, changed = m.styles.diffAddedLine, true
-	case strings.HasPrefix(line, "-") && !strings.HasPrefix(line, "---"):
+	case isRemovedDiffLine(line):
 		style, changed = m.styles.diffRemovedLine, true
 	case strings.HasPrefix(line, "@@"):
 		style = m.styles.diffHunk

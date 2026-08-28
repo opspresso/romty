@@ -191,13 +191,14 @@ func TestConfigRowsDrawAndAnswerTogether(t *testing.T) {
 	value.modal = configModal
 	rows := configRows()
 
-	lines := plainRows(value.renderModal(value.width, value.dimensions().bodyHeight))
+	lines := configModalRows(t, value)
 	for index, row := range rows {
-		// One border row above the content.
-		drawn := lines[1+index]
-		label := row.label(value)
-		if !strings.Contains(drawn, label) {
-			t.Errorf("row %d draws %q, want %q", index, drawn, label)
+		drawn := lines[index]
+		if !strings.Contains(drawn, row.name) {
+			t.Errorf("row %d draws %q, want the name %q", index, drawn, row.name)
+		}
+		if text := row.text(value); text != "" && !strings.Contains(drawn, text) {
+			t.Errorf("row %d draws %q, want the value %q", index, drawn, text)
 		}
 		if !strings.Contains(drawn, row.hint) {
 			t.Errorf("row %d draws %q, want the %q key", index, drawn, row.hint)
@@ -219,12 +220,105 @@ func TestConfigRowsDrawAndAnswerTogether(t *testing.T) {
 	if _, ok := value.browseIndexAtContentRow(0); ok {
 		t.Error("the picker answered for a config row")
 	}
-	if target := value.hoverTargetAtRow(len(rows) - 1); target.kind != hoverConfigRow {
+	offset := configContentOffset(value.dimensions().bodyHeight)
+	if offset > 0 && value.hoverTargetAtRow(0).kind == hoverConfigRow {
+		t.Error("the blank row above the settings was highlighted as one")
+	}
+	if target := value.hoverTargetAtRow(offset + len(rows) - 1); target.kind != hoverConfigRow {
 		t.Errorf("last row hover = %v, want a config row", target.kind)
 	}
-	if target := value.hoverTargetAtRow(len(rows)); target.kind == hoverConfigRow {
+	if target := value.hoverTargetAtRow(offset + len(rows)); target.kind == hoverConfigRow {
 		t.Error("a row past the last setting was highlighted as one")
 	}
+}
+
+// Every other list romty draws is walked with the arrows and run with Enter.
+// Config alone asked the user to remember which letter belonged to which row,
+// and drew nothing to say which row was current.
+func TestConfigWalksAndTogglesWithTheCursor(t *testing.T) {
+	value := newDashboard(&fakeBackend{}, model.Snapshot{})
+	value.width, value.height = 120, 40
+	updated, _ := value.Update(key(tea.KeyF3, ""))
+	value = updated.(dashboard)
+	if value.modal != configModal || value.configIndex != 0 {
+		t.Fatalf("F3 = (modal %v, cursor %d), want config at its first row", value.modal, value.configIndex)
+	}
+
+	// The cursor stops at the ends rather than wrapping, as the workspace tree
+	// and the picker do.
+	updated, _ = value.Update(key(tea.KeyUp, ""))
+	value = updated.(dashboard)
+	if value.configIndex != 0 {
+		t.Fatalf("up at the first row = %d, want it to stay", value.configIndex)
+	}
+
+	// Down to "Scrollback mouse", then Enter runs the row the cursor is on.
+	updated, _ = value.Update(key(tea.KeyDown, ""))
+	value = updated.(dashboard)
+	if value.configIndex != 1 {
+		t.Fatalf("cursor = %d, want the second setting", value.configIndex)
+	}
+	updated, command := value.Update(key(tea.KeyEnter, ""))
+	value = updated.(dashboard)
+	if !value.scrollbackMouse || command == nil {
+		t.Fatalf("Enter = (scrollback mouse %v, command %v), want the setting on and saved",
+			value.scrollbackMouse, command)
+	}
+
+	// The row it is on is marked, and no other row is.
+	drawn := configModalRows(t, value)
+	marked := 0
+	for _, line := range drawn {
+		if strings.Contains(line, "▌") {
+			marked++
+		}
+	}
+	if marked != 1 {
+		t.Fatalf("config modal marks %d rows, want exactly the one the cursor is on:\n%s",
+			marked, strings.Join(drawn, "\n"))
+	}
+	if !strings.Contains(drawn[1], "▌") {
+		t.Fatalf("the mark is not on the second setting:\n%s", strings.Join(drawn, "\n"))
+	}
+
+	// Space runs the row too. Bubble Tea reports the space bar as "space", not
+	// as the literal " " a key case would otherwise be written with.
+	updated, _ = value.Update(key(tea.KeySpace, " "))
+	value = updated.(dashboard)
+	if value.scrollbackMouse {
+		t.Fatal("Space did not run the setting the cursor is on")
+	}
+
+	// End reaches the last setting and Enter runs that one instead.
+	updated, _ = value.Update(key(tea.KeyEnd, ""))
+	value = updated.(dashboard)
+	if value.configIndex != len(configRows())-1 {
+		t.Fatalf("End = %d, want the last setting", value.configIndex)
+	}
+	updated, _ = value.Update(key(tea.KeyEnter, ""))
+	value = updated.(dashboard)
+	if value.scrollbackMouse {
+		t.Fatal("Enter on the last setting toggled a different one")
+	}
+}
+
+// configModalRows are the drawn rows that carry a setting, found by the names
+// they hold rather than at a fixed offset: the box pads itself above and below
+// when the screen has the rows to spare.
+func configModalRows(t *testing.T, value dashboard) []string {
+	t.Helper()
+	drawn := plainRows(value.renderModal(value.width, value.dimensions().bodyHeight))
+	rows := configRows()
+	found := make([]string, 0, len(rows))
+	for _, line := range drawn {
+		if len(found) < len(rows) && strings.Contains(line, rows[len(found)].name) {
+			found = append(found, line)
+		}
+	}
+	if len(found) != len(rows) {
+		t.Fatalf("found %d setting rows, want %d:\n%s", len(found), len(rows), strings.Join(drawn, "\n"))
+	}
+	return found
 }
 
 // hoverTargetAtRow is what hoverTargetAt resolves for a content row of the open
@@ -233,6 +327,6 @@ func (m dashboard) hoverTargetAtRow(row int) hoverTarget {
 	width, height := max(m.width, 40), m.dimensions().bodyHeight
 	lines := m.renderModal(width, height)
 	left := max((width-lipgloss.Width(lines[0]))/2, 0) + 3
-	_, top := m.modalContentOrigin(width, height)
+	_, top := m.modalGeometry(width, height).contentOrigin()
 	return m.hoverTargetAt(tea.Mouse{X: left, Y: top + row})
 }

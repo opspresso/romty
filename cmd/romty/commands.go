@@ -7,13 +7,15 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"syscall"
-	"unicode"
 
 	"github.com/charmbracelet/x/term"
+
 	"github.com/opspresso/romty/internal/agenthooks"
 	"github.com/opspresso/romty/internal/client"
+	"github.com/opspresso/romty/internal/display"
 	"github.com/opspresso/romty/internal/model"
 	"github.com/opspresso/romty/internal/paths"
 	"github.com/opspresso/romty/internal/version"
@@ -96,6 +98,18 @@ func (t commandTheme) failure(value string) string {
 	return t.paint("31", value)
 }
 
+// failed and okay are the two sentences a doctor check writes about what it
+// inspected. Spelling them out at each call site is what left one check
+// quoting its path and another not, and "error" inside the value here and
+// beside the label there.
+func (t commandTheme) failed(reason string) string {
+	return t.failure("error " + strconv.Quote(reason))
+}
+
+func (t commandTheme) okay(detail string) string {
+	return t.good("ok") + " " + strconv.Quote(detail)
+}
+
 func (t commandTheme) agent(agent model.Agent, value string) string {
 	switch agent {
 	case model.AgentClaude:
@@ -143,12 +157,12 @@ func installAgentHooks(output io.Writer, theme commandTheme) error {
 			value = theme.failure("invalid")
 			failures = append(failures, fmt.Errorf("%s hooks: %w", status.Provider.DisplayName(), status.Err))
 		case agenthooks.StateCurrent:
-			value = theme.good("current") + "  " + commandText(status.Path)
+			value = theme.good("current") + "  " + display.Text(status.Path)
 		case agenthooks.StateMissing, agenthooks.StateOutdated:
 			if result, ok := byProvider[status.Provider]; ok {
-				value = theme.good(string(result.Action)) + "  " + commandText(result.Path)
+				value = theme.good(string(result.Action)) + "  " + display.Text(result.Path)
 			} else {
-				value = theme.failure("failed") + "  " + commandText(status.Path)
+				value = theme.failure("failed") + "  " + display.Text(status.Path)
 			}
 		}
 		if err := printField(output, theme, label, value); err != nil {
@@ -164,24 +178,26 @@ func installAgentHooks(output io.Writer, theme commandTheme) error {
 	return nil
 }
 
-func commandText(value string) string {
-	return strings.Map(func(character rune) rune {
-		if unicode.IsControl(character) {
-			return '�'
-		}
-		return character
-	}, value)
-}
-
 func printVersion(output io.Writer, theme commandTheme) error {
 	_, err := fmt.Fprintf(output, "%s %s\n", theme.label("romty"), theme.good(version.String()))
 	return err
 }
 
-func printField(output io.Writer, theme commandTheme, label, value string) error {
+func fieldLine(theme commandTheme, label, value string) string {
 	padded := fmt.Sprintf("%-*s", commandLabelWidth, label+":")
-	_, err := fmt.Fprintf(output, "%s %s\n", theme.label(padded), value)
+	return theme.label(padded) + " " + value + "\n"
+}
+
+func printField(output io.Writer, theme commandTheme, label, value string) error {
+	_, err := io.WriteString(output, fieldLine(theme, label, value))
 	return err
+}
+
+// writeField is printField for a report built in memory, where a write has no
+// failure mode. The doctor checks called printField and dropped its error,
+// which reads as an unchecked write rather than as one that cannot fail.
+func writeField(output *strings.Builder, theme commandTheme, label, value string) {
+	output.WriteString(fieldLine(theme, label, value))
 }
 
 type snapshotSummary struct {
@@ -235,17 +251,9 @@ func printStatus(output io.Writer, runtime paths.Paths, theme commandTheme) erro
 func summarizeSnapshot(snapshot model.Snapshot) snapshotSummary {
 	summary := snapshotSummary{roots: len(snapshot.Roots)}
 	for _, root := range snapshot.Roots {
-		addTabs(&summary, root.Tabs)
 		summary.workspaces += len(root.Directories)
-		for _, workspace := range root.Directories {
-			addTabs(&summary, workspace.Tabs)
-		}
 	}
-	return summary
-}
-
-func addTabs(summary *snapshotSummary, tabs []model.Tab) {
-	for _, tab := range tabs {
+	for tab := range snapshot.Tabs() {
 		if !tab.Running {
 			continue
 		}
@@ -259,6 +267,7 @@ func addTabs(summary *snapshotSummary, tabs []model.Tab) {
 			summary.shell++
 		}
 	}
+	return summary
 }
 
 func printList(output io.Writer, runtime paths.Paths, theme commandTheme) error {
@@ -319,7 +328,7 @@ func printTabs(output io.Writer, theme commandTheme, indent string, tabs []model
 func printDoctor(output io.Writer, runtime paths.Paths, theme commandTheme) error {
 	var report strings.Builder
 	problems := 0
-	printField(&report, theme, "version", version.String())
+	writeField(&report, theme, "version", version.String())
 	problems += checkRuntime(&report, theme, runtime.Directory)
 	problems += checkJSONFile(&report, theme, "state", runtime.State, &model.State{})
 	problems += checkJSONFile(&report, theme, "config", runtime.Config, &configDocument{})
@@ -341,37 +350,39 @@ func printDoctor(output io.Writer, runtime paths.Paths, theme commandTheme) erro
 func checkRuntime(output *strings.Builder, theme commandTheme, path string) int {
 	info, err := os.Lstat(path)
 	if errors.Is(err, os.ErrNotExist) {
-		printField(output, theme, "runtime", theme.warning("not created"))
+		writeField(output, theme, "runtime", theme.warning("not created"))
 		return 0
 	}
 	if err != nil {
-		printField(output, theme, "runtime", theme.failure("error "+fmt.Sprintf("%q", err.Error())))
+		writeField(output, theme, "runtime", theme.failed(err.Error()))
 		return 1
 	}
 	stat, owned := info.Sys().(*syscall.Stat_t)
-	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() || !owned || stat.Uid != uint32(os.Geteuid()) || info.Mode().Perm()&0o077 != 0 {
-		printField(output, theme, "runtime", theme.failure(fmt.Sprintf("error %q must be a private directory owned by the current user", path)))
+	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() || !owned ||
+		stat.Uid != uint32(os.Geteuid()) || info.Mode().Perm()&0o077 != 0 {
+		writeField(output, theme, "runtime",
+			theme.failed(path+" must be a private directory owned by the current user"))
 		return 1
 	}
-	printField(output, theme, "runtime", theme.good("ok")+" "+fmt.Sprintf("%q", path))
+	writeField(output, theme, "runtime", theme.okay(path))
 	return 0
 }
 
 func checkJSONFile(output *strings.Builder, theme commandTheme, label, path string, target any) int {
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
-		printField(output, theme, label, theme.warning("not created"))
+		writeField(output, theme, label, theme.warning("not created"))
 		return 0
 	}
 	if err != nil {
-		printField(output, theme, label, theme.failure("error "+fmt.Sprintf("%q", err.Error())))
+		writeField(output, theme, label, theme.failed(err.Error()))
 		return 1
 	}
 	if err := json.Unmarshal(data, target); err != nil {
-		printField(output, theme, label, theme.failure(fmt.Sprintf("error invalid JSON in %q: %q", path, err.Error())))
+		writeField(output, theme, label, theme.failed(fmt.Sprintf("invalid JSON in %s: %s", path, err)))
 		return 1
 	}
-	printField(output, theme, label, theme.good("ok")+" "+fmt.Sprintf("%q", path))
+	writeField(output, theme, label, theme.okay(path))
 	return 0
 }
 
@@ -382,10 +393,10 @@ func checkShell(output *strings.Builder, theme commandTheme) int {
 	}
 	resolved, err := exec.LookPath(shell)
 	if err != nil {
-		printField(output, theme, "shell", theme.failure("error "+fmt.Sprintf("%q", err.Error())))
+		writeField(output, theme, "shell", theme.failed(err.Error()))
 		return 1
 	}
-	printField(output, theme, "shell", theme.good("ok")+" "+fmt.Sprintf("%q", resolved))
+	writeField(output, theme, "shell", theme.okay(resolved))
 	return 0
 }
 
@@ -393,17 +404,16 @@ func checkDaemon(output *strings.Builder, theme commandTheme, socket string) int
 	backend := client.New(socket)
 	daemonProtocol, err := backend.ProtocolVersion()
 	if client.Unavailable(err) {
-		printField(output, theme, "daemon", theme.warning("stopped"))
+		writeField(output, theme, "daemon", theme.warning("stopped"))
 		return 0
 	}
+	if err == nil {
+		_, err = backend.Snapshot()
+	}
 	if err != nil {
-		printField(output, theme, "daemon", theme.failure("error "+fmt.Sprintf("%q", err.Error())))
+		writeField(output, theme, "daemon", theme.failed(err.Error()))
 		return 1
 	}
-	if _, err := backend.Snapshot(); err != nil {
-		printField(output, theme, "daemon", theme.failure("error "+fmt.Sprintf("%q", err.Error())))
-		return 1
-	}
-	printField(output, theme, "daemon", theme.good("running")+fmt.Sprintf(" (protocol: %d)", daemonProtocol))
+	writeField(output, theme, "daemon", theme.good("running")+fmt.Sprintf(" (protocol: %d)", daemonProtocol))
 	return 0
 }

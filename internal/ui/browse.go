@@ -11,6 +11,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
+
+	"github.com/opspresso/romty/internal/display"
 )
 
 // browser is the root picker's state: the directory it has open, the
@@ -215,7 +217,7 @@ func (m dashboard) handleBrowseKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd)
 }
 
 func (m dashboard) handleBrowseMouse(message tea.MouseMsg) (tea.Model, tea.Cmd, bool) {
-	row, inside := m.modalContentRow(message.Mouse(), max(m.width, 40), m.dimensions().bodyHeight)
+	row, inside := m.modalContentRowAt(message.Mouse())
 	if !inside {
 		return m, nil, false
 	}
@@ -310,11 +312,11 @@ func (m dashboard) browseCapacity() int {
 // always fits the body, the way the help modal windows its shortcuts.
 func (m dashboard) renderBrowseModal(width, height int) []string {
 	contentWidth := max(width-6, 0)
-	lines := []string{m.styles.empty.Render(shortenPath(displayText(m.browse.path), contentWidth)), ""}
+	lines := []string{m.styles.empty.Render(shortenPath(display.Text(m.browse.path), contentWidth)), ""}
 	start, capacity := m.browseWindow(height)
 	switch {
 	case m.browse.failure != "":
-		lines = append(lines, m.styles.errorText.Render(displayText(m.browse.failure)))
+		lines = append(lines, m.styles.errorText.Render(display.Text(m.browse.failure)))
 	case m.browse.loading:
 		frame := agentAnimationFrames[m.agentAnimationFrame%len(agentAnimationFrames)]
 		lines = append(lines, m.styles.empty.Render(frame+" Reading…"))
@@ -336,7 +338,7 @@ func (m dashboard) renderBrowseRow(index, width int) string {
 	name := ".  this directory"
 	marker := "  "
 	if index > 0 {
-		name = displayText(m.browse.entries[index-1])
+		name = display.Text(m.browse.entries[index-1])
 		marker = " ▸"
 	}
 	style := m.styles.modalBody

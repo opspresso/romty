@@ -1045,7 +1045,7 @@ func TestDashboardHighlightsDialogMouseTargets(t *testing.T) {
 	value.width, value.height = 100, 24
 	updated, _ := value.Update(key(tea.KeyF9, ""))
 	value = updated.(dashboard)
-	hit := value.modalActionHits(value.width, value.dimensions().bodyHeight)[0]
+	hit := value.modalActionHits(value.modalGeometry(value.width, value.dimensions().bodyHeight))[0]
 	before := value.render()
 	updated, _ = value.Update(tea.MouseMotionMsg{X: hit.left, Y: hit.row})
 	value = updated.(dashboard)
@@ -1054,11 +1054,11 @@ func TestDashboardHighlightsDialogMouseTargets(t *testing.T) {
 	}
 
 	value.modal = configModal
-	left, top := value.modalContentOrigin(value.width, value.dimensions().bodyHeight)
+	left, top := value.modalGeometry(value.width, value.dimensions().bodyHeight).contentOrigin()
 	before = value.render()
 	updated, _ = value.Update(tea.MouseMotionMsg{X: left + 2, Y: top + 2})
 	value = updated.(dashboard)
-	if value.hover.kind != hoverConfigRow || value.hover.index != 2 || value.render() == before {
+	if value.hover.kind != hoverConfigRow || value.hover.index != 1 || value.render() == before {
 		t.Fatalf("config hover = %#v", value.hover)
 	}
 }
@@ -1125,7 +1125,7 @@ func TestDashboardConfirmationActionsAreClickable(t *testing.T) {
 			t.Fatalf("confirmation dialog has no clickable %q action:\n%s", label, plain)
 		}
 	}
-	hits := value.modalActionHits(value.width, value.dimensions().bodyHeight)
+	hits := value.modalActionHits(value.modalGeometry(value.width, value.dimensions().bodyHeight))
 	if len(hits) != 2 {
 		t.Fatalf("modal action hits = %#v, want confirm and cancel", hits)
 	}
@@ -1142,7 +1142,7 @@ func TestDashboardConfirmationActionsAreClickable(t *testing.T) {
 	value.width, value.height = 100, 24
 	updated, _ = value.Update(key(tea.KeyF9, ""))
 	value = updated.(dashboard)
-	hits = value.modalActionHits(value.width, value.dimensions().bodyHeight)
+	hits = value.modalActionHits(value.modalGeometry(value.width, value.dimensions().bodyHeight))
 	cancel := hits[1]
 	updated, command = value.Update(tea.MouseClickMsg{
 		X: (cancel.left + cancel.right) / 2, Y: cancel.row, Button: tea.MouseLeft,
@@ -1948,25 +1948,69 @@ func TestDashboardNamesTheDeleteTargetBeforeItsConsequences(t *testing.T) {
 	}
 }
 
+// configRowReads reports whether the Config modal draws a setting with the
+// value given, which now sit in columns of their own rather than glued into
+// one "name: value" string.
+func configRowReads(rendered, name, value string) bool {
+	for _, line := range strings.Split(rendered, "\n") {
+		at := strings.Index(line, name)
+		if at < 0 {
+			continue
+		}
+		if strings.Contains(line[at+len(name):], value) {
+			return true
+		}
+	}
+	return false
+}
+
 func TestDashboardKeepsConfigControlsCompact(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, model.Snapshot{})
 	value.width, value.height = 100, 24
 	value.modal = configModal
 
-	lines := plainRows(value.renderModal(72, 22))
-	var body []string
-	for _, line := range lines[1 : len(lines)-1] {
+	lines := configModalRows(t, value)
+	body := make([]string, 0, len(lines))
+	for _, line := range lines {
 		body = append(body, strings.TrimSpace(strings.Trim(line, "│")))
 	}
-	want := []string{
-		fmt.Sprintf("Left pane: %d  ←/→", value.paneWidth()),
-		"Scrollback mouse: off  m",
-		"Sound on done: off  d",
-		"Sound on waiting: off  b",
-		"Test sound  s",
+	rows := configRows()
+	if len(body) != len(rows) {
+		t.Fatalf("config modal body = %q, want one row per setting", body)
 	}
-	if !slices.Equal(body, want) {
-		t.Fatalf("config modal body = %q, want each setting grouped with its keys %q", body, want)
+	// Name, then value, then the key the row advertises — each in its own
+	// column, all on the one row the setting owns.
+	for index, row := range rows {
+		name := strings.Index(body[index], row.name)
+		hint := strings.LastIndex(body[index], row.hint)
+		if name < 0 || hint <= name {
+			t.Errorf("row %d = %q, want %q then %q", index, body[index], row.name, row.hint)
+			continue
+		}
+		text := row.text(value)
+		if text == "" {
+			continue
+		}
+		if at := strings.Index(body[index][name+len(row.name):], text); at < 0 {
+			t.Errorf("row %d = %q, want %q between the name and the key", index, body[index], text)
+		}
+	}
+	// Values share a column, which is the whole point of splitting them out of
+	// the name: one glance down the box says which settings are on. Measured
+	// on the drawn line, cursor column and all, rather than on the trimmed one.
+	column := -1
+	for index, row := range rows {
+		text := row.text(value)
+		if text == "" {
+			continue
+		}
+		drawn := lines[index]
+		at := lipgloss.Width(drawn[:strings.Index(drawn, text)])
+		if column < 0 {
+			column = at
+		} else if at != column {
+			t.Errorf("row %d puts its value at column %d, want %d", index, at, column)
+		}
 	}
 
 	// Keys stay subordinate to the settings while sharing their row, so every
@@ -1997,8 +2041,8 @@ func TestDashboardTogglesScrollbackMouseFromConfig(t *testing.T) {
 		t.Fatalf("m = (scrollback mouse %v, command %v), want the setting on and saved",
 			value.scrollbackMouse, command)
 	}
-	if rendered := ansi.Strip(value.render()); !strings.Contains(rendered, "Scrollback mouse: on") {
-		t.Fatalf("config modal does not report the setting:\n%s", rendered)
+	if !configRowReads(ansi.Strip(value.render()), "Scrollback mouse", "on") {
+		t.Fatalf("config modal does not report the setting:\n%s", ansi.Strip(value.render()))
 	}
 
 	updated, _ = value.Update(key('m', "m"))
@@ -2034,14 +2078,15 @@ func TestDashboardClicksConfigControls(t *testing.T) {
 	value.width, value.height = 100, 24
 	updated, _ := value.Update(key(tea.KeyF3, ""))
 	value = updated.(dashboard)
-	left, top := value.modalContentOrigin(value.width, value.dimensions().bodyHeight)
+	left, top := value.modalGeometry(value.width, value.dimensions().bodyHeight).contentOrigin()
 
 	updated, save := value.Update(tea.MouseClickMsg{X: left + 2, Y: top + 2, Button: tea.MouseLeft})
 	value = updated.(dashboard)
-	if !value.soundOnDone || save == nil {
-		t.Fatalf("done sound click = (enabled %v, save %v)", value.soundOnDone, save)
+	if !value.scrollbackMouse || save == nil || value.configIndex != 1 {
+		t.Fatalf("scrollback mouse click = (enabled %v, save %v, cursor %d)",
+			value.scrollbackMouse, save, value.configIndex)
 	}
-	updated, soundCommand := value.Update(tea.MouseClickMsg{X: left + 2, Y: top + 4, Button: tea.MouseLeft})
+	updated, soundCommand := value.Update(tea.MouseClickMsg{X: left + 2, Y: top + 5, Button: tea.MouseLeft})
 	value = updated.(dashboard)
 	if played := commandMessage[soundPlayedMsg](t, soundCommand); played.kind != sound.Done {
 		t.Fatalf("test sound click = %q, want done", played.kind)
@@ -2960,6 +3005,17 @@ func TestDashboardLeavesTheHighFunctionKeysToTheShell(t *testing.T) {
 	}
 }
 
+// cursorItem is the tree item the removal confirmation is opened about, which
+// is what the workspace action palette captures when it opens over one.
+func cursorItem(t *testing.T, value dashboard) navItem {
+	t.Helper()
+	item, ok := value.navigationItem()
+	if !ok {
+		t.Fatal("the cursor is on no tree item to remove")
+	}
+	return item
+}
+
 // Esc has to mean no. Removing a root has no undo beyond adding it back and
 // rebuilding the tree by hand.
 func TestDashboardCancelsRemovingARoot(t *testing.T) {
@@ -2967,7 +3023,7 @@ func TestDashboardCancelsRemovingARoot(t *testing.T) {
 	backend := &fakeBackend{snapshot: snapshot}
 	value := newDashboard(backend, snapshot)
 
-	updated, _ := value.confirmRemoveSelection()
+	updated, _ := value.confirmRemoveSelection(cursorItem(t, value))
 	value = updated.(dashboard)
 	if value.modal != removeSelectionModal {
 		t.Fatalf("remove modal = %v, want the confirmation", value.modal)
@@ -2989,7 +3045,7 @@ func TestDashboardRemovesTheSelectedRoot(t *testing.T) {
 	value := newDashboard(backend, snapshot)
 	value.setNavigation(1)
 
-	updated, _ := value.confirmRemoveSelection()
+	updated, _ := value.confirmRemoveSelection(cursorItem(t, value))
 	value = updated.(dashboard)
 	updated, command := value.Update(key(tea.KeyEnter, ""))
 	value = updated.(dashboard)
@@ -3013,7 +3069,7 @@ func TestDashboardDeletesTheSelectedWorkspace(t *testing.T) {
 	value.width, value.height = 120, 40
 	value.setNavigation(1)
 
-	updated, command := value.confirmRemoveSelection()
+	updated, command := value.confirmRemoveSelection(cursorItem(t, value))
 	value = updated.(dashboard)
 	if command != nil || value.modal != removeSelectionModal {
 		t.Fatalf("remove = (command %v, modal %v), want a confirmation", command, value.modal)
@@ -3064,7 +3120,7 @@ func TestDashboardDeletesTheWorkspaceTheConfirmationNamed(t *testing.T) {
 		t.Fatalf("the cursor starts on root %q, want root-1", item.root.ID)
 	}
 
-	updated, _ := value.confirmRemoveSelection()
+	updated, _ := value.confirmRemoveSelection(cursorItem(t, value))
 	value = updated.(dashboard)
 
 	// alpha is deleted on disk, so the row the cursor remembered is gone and
@@ -3096,7 +3152,7 @@ func TestDashboardForgetsTheRootTheConfirmationNamed(t *testing.T) {
 	backend := &fakeBackend{snapshot: snapshot}
 	value := newDashboard(backend, snapshot)
 
-	updated, _ := value.confirmRemoveSelection()
+	updated, _ := value.confirmRemoveSelection(cursorItem(t, value))
 	value = updated.(dashboard)
 	updated, _ = value.Update(snapshotMsg{value: model.Snapshot{Roots: snapshot.Roots[1:]}})
 	value = updated.(dashboard)
@@ -4736,7 +4792,11 @@ func TestDashboardKeepsNavigationCursorVisible(t *testing.T) {
 	}
 }
 
-func TestDashboardCentersModalOverCoveredDashboard(t *testing.T) {
+// A modal is a box on top of romty, not a screen romty replaces itself with.
+// Blanking the body meant opening Config took the workspace tree and the
+// terminal away to show five settings, and laying the box out at the cap meant
+// covering most of the screen to say one sentence.
+func TestDashboardCentersModalOverTheDashboardItLeavesShowing(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, model.Snapshot{})
 	value.width = 100
 	value.height = 30
@@ -4747,29 +4807,52 @@ func TestDashboardCentersModalOverCoveredDashboard(t *testing.T) {
 		t.Fatalf("modal = %v, want about", value.modal)
 	}
 	rendered := value.render()
-	if !strings.Contains(rendered, "About") || !strings.Contains(rendered, "Persistent terminal workspace manager") {
+	if !strings.Contains(rendered, "About") || !strings.Contains(rendered, tagline) {
 		t.Fatalf("about modal is missing:\n%s", rendered)
 	}
+	// The dashboard is still there to be read, in the receding tone a backdrop
+	// is drawn in rather than in its own colours.
+	if !strings.Contains(ansi.Strip(rendered), " romty ") {
+		t.Fatalf("the dashboard behind the modal was blanked:\n%s", ansi.Strip(rendered))
+	}
 	if strings.Contains(rendered, value.styles.paneTitleActive.Render(" romty ")) {
-		t.Fatalf("dashboard remains visible behind the modal:\n%s", rendered)
+		t.Fatalf("the dashboard behind the modal kept its own colours:\n%s", rendered)
 	}
-	modalLines := value.renderModal(value.width, value.dimensions().bodyHeight)
-	if width := lipgloss.Width(modalLines[0]); width != 72 {
-		t.Fatalf("about modal width = %d, want 72", width)
-	}
+
 	bodyHeight := value.dimensions().bodyHeight
+	modalLines := value.renderModal(value.width, bodyHeight)
+	boxWidth := lipgloss.Width(modalLines[0])
+	if boxWidth >= value.width {
+		t.Fatalf("about modal width = %d, want less than the %d column screen", boxWidth, value.width)
+	}
+	if boxWidth < lipgloss.Width(tagline)+6 {
+		t.Fatalf("about modal width = %d, too narrow for its longest line", boxWidth)
+	}
+
 	body := strings.Split(ansi.Strip(rendered), "\n")[:bodyHeight]
 	top := (bodyHeight - len(modalLines)) / 2
-	if left := strings.Index(body[top], "╭"); left != 14 {
-		t.Fatalf("about modal left edge = %d, want 14:\n%s", left, ansi.Strip(rendered))
+	wantLeft := (value.width - boxWidth) / 2
+	// By column, not by byte: the workspace pane the box now sits on top of
+	// draws box-drawing runes of its own.
+	at := strings.Index(body[top], "╭")
+	if at < 0 {
+		t.Fatalf("about modal has no top-left corner on its first row:\n%s", ansi.Strip(rendered))
 	}
+	if left := lipgloss.Width(body[top][:at]); left != wantLeft {
+		t.Fatalf("about modal left edge = %d, want %d:\n%s", left, wantLeft, ansi.Strip(rendered))
+	}
+	// The rows the box does not reach still carry the pane divider, which is
+	// what says the dashboard is behind it rather than gone.
+	divider := 0
 	for row := range body {
-		if row >= top && row < top+len(modalLines) {
-			continue
+		if row < top || row >= top+len(modalLines) {
+			if strings.Contains(body[row], "│") {
+				divider++
+			}
 		}
-		if strings.TrimSpace(body[row]) != "" {
-			t.Fatalf("modal backdrop row %d is not blank:\n%s", row, ansi.Strip(rendered))
-		}
+	}
+	if divider == 0 {
+		t.Fatalf("no dashboard row survived beside the modal:\n%s", ansi.Strip(rendered))
 	}
 	// About is where a user reads which romty they are running, so it names
 	// the build rather than leaving a bug report to guess at it.
@@ -4779,7 +4862,7 @@ func TestDashboardCentersModalOverCoveredDashboard(t *testing.T) {
 
 	updated, _ = value.Update(key(tea.KeyEscape, ""))
 	value = updated.(dashboard)
-	if value.modal != noModal || strings.Contains(value.render(), "Persistent terminal workspace manager") {
+	if value.modal != noModal || strings.Contains(value.render(), tagline) {
 		t.Fatalf("about modal did not close:\n%s", value.render())
 	}
 }
@@ -5235,8 +5318,8 @@ func TestDashboardAdjustsAndPersistsLeftPaneWidth(t *testing.T) {
 	if err != nil {
 		t.Fatalf("loadConfig() error = %v", err)
 	}
-	if loaded.LeftWidth != 29 || !strings.Contains(value.render(), "Left pane: 29") {
-		t.Fatalf("persisted config = %#v\n%s", loaded, value.render())
+	if loaded.LeftWidth != 29 || !configRowReads(ansi.Strip(value.render()), "Left pane", "29") {
+		t.Fatalf("persisted config = %#v\n%s", loaded, ansi.Strip(value.render()))
 	}
 
 	updated, _ = value.Update(key(tea.KeyEscape, ""))

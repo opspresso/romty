@@ -45,6 +45,8 @@ type uiStyles struct {
 	modalBody           lipgloss.Style
 	modalStrong         lipgloss.Style
 	empty               lipgloss.Style
+	// backdrop is what the dashboard is redrawn in while a modal is over it.
+	backdrop lipgloss.Style
 }
 
 func newUIStyles(hasDarkBackground bool) *uiStyles {
@@ -110,6 +112,11 @@ func newUIStyles(hasDarkBackground bool) *uiStyles {
 		modalBody:   lipgloss.NewStyle().Foreground(text),
 		modalStrong: lipgloss.NewStyle().Foreground(text).Bold(true),
 		empty:       lipgloss.NewStyle().Foreground(muted),
+		// A terminal has no transparency to dim a backdrop through, so what is
+		// behind a modal is redrawn in one receding tone instead. Muted rather
+		// than the border colour: the border tone is nearly the background in
+		// the dark theme, and a backdrop should recede, not disappear.
+		backdrop: lipgloss.NewStyle().Foreground(muted),
 	}
 }
 

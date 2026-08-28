@@ -1,5 +1,6 @@
 // Workspace actions: the context palette for the highlighted root or
 // directory, including its direct terminal, Git, and removal operations.
+
 package ui
 
 import (
@@ -8,7 +9,6 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
-	"github.com/charmbracelet/x/ansi"
 )
 
 type workspaceAction int
@@ -224,7 +224,7 @@ func (m dashboard) runWorkspaceAction(action workspaceAction) (tea.Model, tea.Cm
 		tabs := runningTabs(target.tabs)
 		if len(tabs) == 0 {
 			m.modal = noModal
-			m.setNotice(terminalError, "selected workspace has no running terminal")
+			m.setNotice(terminalError, noRunningTerminal)
 			return m, nil
 		}
 		m.tabIndex = min(m.tabIndex, len(tabs)-1)
@@ -238,7 +238,7 @@ func (m dashboard) runWorkspaceAction(action workspaceAction) (tea.Model, tea.Cm
 		tabs := runningTabs(target.tabs)
 		if m.tabIndex >= len(tabs) {
 			m.modal = noModal
-			m.setNotice(terminalError, "selected workspace has no running terminal")
+			m.setNotice(terminalError, noRunningTerminal)
 			return m, nil
 		}
 		return m.confirmCloseTab(tabs[m.tabIndex], m.tabIndex)
@@ -248,8 +248,7 @@ func (m dashboard) runWorkspaceAction(action workspaceAction) (tea.Model, tea.Cm
 	case workspaceGitStatusAction, workspaceGitFetchAction, workspaceGitPullAction, workspaceGitPushAction:
 		return m.startWorkspaceGitAction(action, target)
 	case workspaceRemoveAction:
-		m.removeTarget = target
-		return m.openModal(removeSelectionModal)
+		return m.confirmRemoveSelection(target)
 	default:
 		m.modal = noModal
 		m.setError(treeError, fmt.Sprintf("unknown workspace action %d", action))
@@ -281,7 +280,7 @@ func (m dashboard) startWorkspaceGitAction(action workspaceAction, target navIte
 	gitAction, ok := gitActionByWorkspaceAction[action]
 	if !ok || !target.hasGit {
 		m.modal = noModal
-		m.setError(gitError, "selected workspace is not a Git repository")
+		m.setError(gitError, notAGitRepository)
 		return m, nil
 	}
 	m.modal = gitActionsModal
@@ -342,22 +341,12 @@ func (m dashboard) workspaceActionPopup(width, height int) (lines []string, x, y
 
 func (m dashboard) overlayWorkspaceActions(base []string, width, height int) []string {
 	popup, x, y := m.workspaceActionPopup(width, height)
-	result := append([]string(nil), base...)
-	for index, popupLine := range popup {
-		row := y + index
-		if row < 0 || row >= len(result) || row >= height {
-			continue
-		}
-		line := pad(truncate(result[row], width), width)
-		popupWidth := lipgloss.Width(popupLine)
-		result[row] = ansi.Cut(line, 0, x) + popupLine + ansi.Cut(line, x+popupWidth, width)
-	}
-	return result
+	return overlayBox(base, popup, x, y, width, height)
 }
 
 func (m dashboard) handleWorkspaceActionsMouse(message tea.MouseMsg) (tea.Model, tea.Cmd, bool) {
 	mouse := message.Mouse()
-	width, height := max(m.width, 40), m.dimensions().bodyHeight
+	width, height := m.bodySize()
 	if wheel, ok := message.(tea.MouseWheelMsg); ok {
 		popup, x, y := m.workspaceActionPopup(width, height)
 		popupWidth := 0

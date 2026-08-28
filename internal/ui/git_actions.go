@@ -4,12 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
-	"os/exec"
 	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
+
+	"github.com/opspresso/romty/internal/display"
 )
 
 const gitActionTimeout = 2 * time.Minute
@@ -93,9 +94,7 @@ func executeGitActionContext(parent context.Context, path string, action gitActi
 	}
 	ctx, cancel := context.WithTimeout(parent, gitActionTimeout)
 	defer cancel()
-	command := exec.CommandContext(ctx, "git", append([]string{"-C", path}, arguments...)...)
-	command.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GCM_INTERACTIVE=Never")
-	output, err := command.CombinedOutput()
+	output, err := gitCommand(ctx, path, gitRemoteEnvironment, arguments...).CombinedOutput()
 	value := strings.TrimSpace(string(output))
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		return value, fmt.Errorf("%s timed out after %s", action.label(), gitActionTimeout)
@@ -109,7 +108,7 @@ func (m dashboard) openGitActions() (tea.Model, tea.Cmd) {
 	}
 	target, ok := m.gitActionWorkspace()
 	if !ok || !target.hasGit {
-		m.setError(gitError, "selected workspace is not a Git repository")
+		m.setError(gitError, notAGitRepository)
 		return m, nil
 	}
 	m.modal = gitActionsModal
@@ -191,11 +190,11 @@ func (m dashboard) gitActionResultLines() []string {
 	lines := make([]string, 0)
 	if m.gitActionOutput != "" {
 		for _, line := range strings.Split(m.gitActionOutput, "\n") {
-			lines = append(lines, displayText(line))
+			lines = append(lines, display.Text(line))
 		}
 	}
 	if m.gitActionError != "" {
-		lines = append(lines, "Error: "+displayText(m.gitActionError))
+		lines = append(lines, "Error: "+display.Text(m.gitActionError))
 	}
 	if len(lines) == 0 {
 		return []string{"Completed successfully."}
@@ -215,7 +214,7 @@ func (m dashboard) scrollGitAction(delta int) (tea.Model, tea.Cmd) {
 }
 
 func (m dashboard) handleGitActionsMouse(message tea.MouseMsg) (tea.Model, tea.Cmd, bool) {
-	row, inside := m.modalContentRow(message.Mouse(), max(m.width, 40), m.dimensions().bodyHeight)
+	row, inside := m.modalContentRowAt(message.Mouse())
 	if !inside {
 		return m, nil, false
 	}
@@ -246,11 +245,11 @@ func (m dashboard) handleGitActionsMouse(message tea.MouseMsg) (tea.Model, tea.C
 // above its list, which is what separates a content row from an action index.
 const gitActionHeaderRows = 2
 
-func (m dashboard) renderGitActionsModal(width, height int) []string {
-	target := m.styles.modalStrong.Render(displayText(m.gitActionTarget.Name)) +
-		m.styles.empty.Render("  "+displayText(m.gitActionTarget.Path))
+func (m dashboard) renderGitActionsModal(maximum, height int) []string {
+	target := m.styles.modalStrong.Render(display.Text(m.gitActionTarget.Name)) +
+		m.styles.empty.Render("  "+display.Text(m.gitActionTarget.Path))
 	if m.gitActionPending {
-		return modalBox(m.styles, width, "Git · "+m.gitAction.label(),
+		return modalBoxFit(m.styles, minimumModalWidth, maximum, "Git · "+m.gitAction.label(),
 			target,
 			"",
 			m.styles.modalBody.Render("Running…"),
@@ -258,12 +257,18 @@ func (m dashboard) renderGitActionsModal(width, height int) []string {
 		)
 	}
 	if !m.gitActionComplete {
-		lines := []string{target, ""}
 		// The same highlighted bar the root picker draws. A bold row behind a
 		// chevron was the whole of the selection here, which is the least
 		// visible cursor romty has for the list whose rows push and delete.
-		contentWidth := max(width-6, 0)
+		labels := make([]string, len(gitActionChoices))
+		contentWidth := lipgloss.Width(target)
 		for index, action := range gitActionChoices {
+			labels[index] = pad(action.label(), gitActionLabelWidth) + action.description()
+			contentWidth = max(contentWidth, lipgloss.Width(labels[index])+2)
+		}
+		contentWidth = min(contentWidth, max(maximum-6, 0))
+		lines := []string{target, ""}
+		for index, label := range labels {
 			prefix := "  "
 			style := m.styles.modalBody
 			if index == m.gitActionIndex {
@@ -272,10 +277,9 @@ func (m dashboard) renderGitActionsModal(width, height int) []string {
 			} else if m.hover.kind == hoverGitAction && m.hover.index == index {
 				style = m.styles.interactiveHover
 			}
-			label := prefix + pad(action.label(), 8) + action.description()
-			lines = append(lines, style.Render(pad(truncate(label, contentWidth), contentWidth)))
+			lines = append(lines, style.Render(pad(truncate(prefix+label, contentWidth), contentWidth)))
 		}
-		return modalBox(m.styles, width, "Git actions", lines...)
+		return modalBoxFit(m.styles, minimumModalWidth, maximum, "Git actions", lines...)
 	}
 
 	result := m.gitActionResultLines()
@@ -288,14 +292,100 @@ func (m dashboard) renderGitActionsModal(width, height int) []string {
 	}
 	lines := []string{target, ""}
 	for index, line := range result[offset:end] {
-		style := m.styles.modalBody
-		if strings.HasPrefix(line, "Error: ") {
-			style = m.styles.errorText
-		}
-		if m.hover.kind == hoverGitResult && m.hover.index == index+gitActionHeaderRows {
-			style = m.styles.hovered(style)
-		}
-		lines = append(lines, style.Render(line))
+		hovered := m.hover.kind == hoverGitResult && m.hover.index == index+gitActionHeaderRows
+		lines = append(lines, m.renderGitOutputLine(line, hovered))
 	}
-	return modalBox(m.styles, width, title, lines...)
+	return modalBoxFit(m.styles, minimumModalWidth, maximum, title, lines...)
+}
+
+// gitActionLabelWidth is the column the action descriptions line up in.
+const gitActionLabelWidth = 8
+
+// renderGitOutputLine colours what git printed. A status line carries its two
+// letters in the first columns and a diffstat a run of + and -, and those are
+// what the eye is looking for; as one flat block of text they had to be read
+// rather than glanced at.
+//
+// Hovering tints the row without taking its colours away, the way the file
+// view marks the file it has open.
+func (m dashboard) renderGitOutputLine(line string, hovered bool) string {
+	paint := func(style lipgloss.Style, value string) string {
+		if hovered {
+			style = style.Background(m.styles.interactiveHover.GetBackground())
+		}
+		return style.Render(value)
+	}
+	switch {
+	case strings.HasPrefix(line, "Error: "):
+		return paint(m.styles.errorText, line)
+	case strings.HasPrefix(line, "## "):
+		// The branch header `git status --branch` prints, with its divergence
+		// in brackets: `## main...origin/main [ahead 1]`.
+		branch, divergence, found := strings.Cut(line, " [")
+		rendered := paint(m.styles.gitBranch, branch)
+		if found {
+			rendered += paint(m.styles.gitStatus, " ["+divergence)
+		}
+		return rendered
+	case isGitStatusLine(line):
+		return paint(m.gitStatusStyle(line[0], line[1]), line[:2]) + paint(m.styles.modalBody, line[2:])
+	}
+	if at := gitDiffstatMarks(line); at >= 0 {
+		return paint(m.styles.modalBody, line[:at]) + m.paintDiffstatMarks(line[at:], hovered)
+	}
+	return paint(m.styles.modalBody, line)
+}
+
+// isGitStatusLine reports whether a line is one porcelain short-format record:
+// two status letters and a space before the path.
+func isGitStatusLine(line string) bool {
+	if len(line) < 4 || line[2] != ' ' {
+		return false
+	}
+	return isGitStatusCode(line[0]) && isGitStatusCode(line[1]) && line[:2] != "  "
+}
+
+func isGitStatusCode(value byte) bool {
+	return strings.IndexByte(" MADRCU?!T", value) >= 0
+}
+
+// gitDiffstatMarks reports where a diffstat line's run of + and - begins, or
+// -1 when the line is not one. The shape is `path | 12 ++++----`, which is
+// what pull and push print for every file they moved.
+func gitDiffstatMarks(line string) int {
+	bar := strings.LastIndex(line, "|")
+	if bar < 0 {
+		return -1
+	}
+	at := -1
+	for index := bar + 1; index < len(line); index++ {
+		switch line[index] {
+		case '+', '-':
+			if at < 0 {
+				at = index
+			}
+		case ' ', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9':
+			if at >= 0 {
+				return -1
+			}
+		default:
+			return -1
+		}
+	}
+	return at
+}
+
+func (m dashboard) paintDiffstatMarks(marks string, hovered bool) string {
+	var result strings.Builder
+	for _, mark := range marks {
+		style := m.styles.diffRemoved
+		if mark == '+' {
+			style = m.styles.diffAdded
+		}
+		if hovered {
+			style = style.Background(m.styles.interactiveHover.GetBackground())
+		}
+		result.WriteString(style.Render(string(mark)))
+	}
+	return result.String()
 }

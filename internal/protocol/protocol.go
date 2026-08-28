@@ -1,3 +1,6 @@
+// Package protocol is the wire contract between a romty client and its
+// daemon: the framed messages, the revision range each side advertises, and
+// the capabilities that let one side use a feature the other may not have.
 package protocol
 
 import (
@@ -6,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 
 	"github.com/opspresso/romty/internal/model"
 )
@@ -110,6 +114,36 @@ type AgentEvent struct {
 	Background       bool        `json:"background,omitempty"`
 }
 
+// MaxAgentEventMetadataBytes bounds each metadata string a hook reports. Both
+// ends check it and neither can take the other's word for it: the hook command
+// is handed whatever the agent wrote, and the daemon is answering a socket.
+const MaxAgentEventMetadataBytes = 512
+
+// Validate reports whether an event is one the daemon can record. It is the
+// only description of that, so the check the hook command makes before it sends
+// and the one the daemon makes before it records cannot disagree about which
+// payloads are legal.
+//
+// An unrecognised hook event is not rejected here: agents add events, and one
+// romty has no phase for is nothing to fail a hook over. Only an unnamed one
+// is, because it identifies nothing at all.
+func (e AgentEvent) Validate() error {
+	if e.Agent != model.AgentClaude && e.Agent != model.AgentCodex {
+		return fmt.Errorf("unsupported agent %q", e.Agent)
+	}
+	if e.HookEvent == "" {
+		return errors.New("hook event is required")
+	}
+	for _, metadata := range []string{
+		e.SessionID, e.HookEvent, e.ToolName, e.NotificationType, e.PermissionMode,
+	} {
+		if len(metadata) > MaxAgentEventMetadataBytes {
+			return fmt.Errorf("agent event metadata is longer than %d bytes", MaxAgentEventMetadataBytes)
+		}
+	}
+	return nil
+}
+
 type Response struct {
 	Error string `json:"error,omitempty"`
 	// Version echoes the request revision so clients that predate range
@@ -152,12 +186,7 @@ func CapabilitiesForVersion(version int) []string {
 }
 
 func HasCapability(capabilities []string, target string) bool {
-	for _, capability := range capabilities {
-		if capability == target {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(capabilities, target)
 }
 
 func Write(w io.Writer, value any) error {

@@ -1,5 +1,6 @@
 // Laying the screen out and drawing it: the pane split, the workspace tree, the
 // tab rail, the status row, and the pieces of text they are all built from.
+
 package ui
 
 import (
@@ -9,6 +10,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
+	"github.com/opspresso/romty/internal/display"
 	"github.com/opspresso/romty/internal/model"
 )
 
@@ -58,6 +60,21 @@ type layout struct {
 	terminalHeight int
 }
 
+// screenWidth is the width every layout measurement starts from. Below the
+// floor the arithmetic that divides the screen between the panes starts
+// producing negative widths, so nothing measures the host's report directly.
+// It was spelled out at ten call sites, the floor unnamed in all of them.
+func (m dashboard) screenWidth() int {
+	return max(m.width, minimumScreenWidth)
+}
+
+// bodySize is the screen the modals and the pointer handlers work in: that
+// width, and the height left once the shortcut rail and the status bar have
+// taken their rows.
+func (m dashboard) bodySize() (int, int) {
+	return m.screenWidth(), m.dimensions().bodyHeight
+}
+
 // terminalOrigin is where the terminal's own first cell lands on screen, which
 // the cursor and mouse translation both need. Deriving it here keeps it tied
 // to the separator and tab bar rather than repeated as a literal.
@@ -69,7 +86,7 @@ func (l layout) terminalOrigin() (int, int) {
 // narrow layout is currently showing it. Config reads and adjusts this one,
 // because a hidden pane still has a width to come back to.
 func (m dashboard) paneWidth() int {
-	width := max(m.width, 40)
+	width := m.screenWidth()
 	leftWidth := m.leftWidth
 	if leftWidth == 0 {
 		leftWidth = min(max(width/4, minimumLeftWidth), 28)
@@ -82,7 +99,7 @@ func (m dashboard) paneWidth() int {
 // half of what the terminal could be, so focus takes it away and Ctrl+/ or F7
 // brings it back.
 func (m dashboard) navigationHidden() bool {
-	if max(m.width, 40) >= narrowLayoutWidth {
+	if m.screenWidth() >= narrowLayoutWidth {
 		return false
 	}
 	return m.focus == terminalPane && m.terminal != nil
@@ -94,7 +111,7 @@ func (m dashboard) navigationHidden() bool {
 // the view is open, and sizing the PTY to a split it never appears in made a
 // full-screen guest reflow on the way in and again on the way out.
 func (m dashboard) gitDiffLayout() layout {
-	width := max(m.width, 40)
+	width := m.screenWidth()
 	view := m.dimensions()
 	view.leftWidth = m.paneWidth()
 	view.separator = separatorWidth
@@ -103,7 +120,7 @@ func (m dashboard) gitDiffLayout() layout {
 }
 
 func (m dashboard) dimensions() layout {
-	width := max(m.width, 40)
+	width := m.screenWidth()
 	height := max(m.height, 10)
 	leftWidth, separator := m.paneWidth(), separatorWidth
 	if m.navigationHidden() {
@@ -141,7 +158,7 @@ func (m dashboard) View() tea.View {
 
 func (m dashboard) render() string {
 	view := m.dimensions()
-	width := max(m.width, 40)
+	width := m.screenWidth()
 	// Scrollback replaces the split rather than drawing over it, so the panes
 	// it hides are not built at all: rendering both meant every frame drew the
 	// workspace tree and a second terminal viewport it then threw away.
@@ -158,35 +175,57 @@ func (m dashboard) render() string {
 		lines = m.renderPanes(view.leftWidth, view.rightWidth, view.bodyHeight)
 	}
 	if m.modal == workspaceActionsModal {
+		// The action palette is anchored on the row it belongs to and is meant
+		// to read as part of the tree, so what is around it stays as it was.
 		lines = m.overlayWorkspaceActions(lines, width, view.bodyHeight)
 	} else if m.modal != noModal {
-		lines = m.overlayModal(width, view.bodyHeight)
+		lines = m.overlayModal(dimBackdrop(m.styles, lines), width, view.bodyHeight)
 	}
 	lines = append(lines, m.renderStatus(width, view.bodyHeight)...)
 	return strings.Join(lines, "\n")
 }
 
 func (m dashboard) renderPanes(leftWidth, rightWidth, bodyHeight int) []string {
-	left := m.renderNavigation(leftWidth, bodyHeight)
-	right := m.renderTerminal(rightWidth)
 	headSeparator, bodySeparator := m.paneSeparators()
-	lines := make([]string, 0, bodyHeight+2)
-	for row := 0; row < bodyHeight; row++ {
-		leftLine := ""
+	return mergePanes(
+		m.renderNavigation(leftWidth, bodyHeight), m.renderTerminal(rightWidth),
+		leftWidth, rightWidth, bodyHeight,
+		func(row int) string {
+			if row == 0 {
+				return headSeparator
+			}
+			return bodySeparator
+		})
+}
+
+// mergePanes lays two panes side by side for the height of the body, padding
+// each row of the left one out to its width so the divider stands in a column.
+// The workspace split and the file view both do this; the only difference is
+// that the split carries the focus arrow on its first row, which is why the
+// separator is asked for per row rather than given once.
+func mergePanes(left, right []string, leftWidth, rightWidth, height int, separator func(row int) string) []string {
+	lines := make([]string, 0, height)
+	for row := range height {
+		leftLine, rightLine := "", ""
 		if row < len(left) {
 			leftLine = left[row]
 		}
-		rightLine := ""
 		if row < len(right) {
 			rightLine = right[row]
 		}
-		separator := bodySeparator
-		if row == 0 {
-			separator = headSeparator
-		}
-		lines = append(lines, pad(truncate(leftLine, leftWidth), leftWidth)+separator+truncate(rightLine, rightWidth))
+		lines = append(lines,
+			pad(truncate(leftLine, leftWidth), leftWidth)+separator(row)+truncate(rightLine, rightWidth))
 	}
 	return lines
+}
+
+// paneHeader is a pane's title chip and the rule that runs from it to the
+// pane's edge. Three panes drew it, and the rule's width is a subtraction each
+// of them had to get right against a title that may have been truncated.
+func (m dashboard) paneHeader(style lipgloss.Style, title string, width int) string {
+	rendered := style.Render(truncate(title, width))
+	return rendered + m.styles.tabRail.Render(
+		strings.Repeat("─", max(width-lipgloss.Width(rendered), 0)))
 }
 
 // renderRows lays out a single full-width pane. Copy mode uses it so every row
@@ -212,7 +251,7 @@ func (m dashboard) renderStatus(width, bodyHeight int) []string {
 	switch {
 	case m.inputMode:
 		status = truncate(
-			m.styles.promptLabel.Render(" ROOT ")+" "+m.styles.promptText.Render(displayText(m.input))+m.styles.dividerActive.Render("█"),
+			m.styles.promptLabel.Render(" ROOT ")+" "+m.styles.promptText.Render(display.Text(m.input))+m.styles.dividerActive.Render("█"),
 			width,
 		)
 	case m.errorMessage != "":
@@ -220,7 +259,7 @@ func (m dashboard) renderStatus(width, bodyHeight int) []string {
 		if m.noticeMessage {
 			label, text, title = m.styles.noticeLabel, m.styles.noticeText, " NOTE "
 		}
-		status = truncate(label.Render(title)+" "+text.Render(displayText(m.errorMessage)), width)
+		status = truncate(label.Render(title)+" "+text.Render(display.Text(m.errorMessage)), width)
 	case m.tabPending || m.restorePending:
 		status = m.renderActivityStatus("OPENING", "preparing terminal", width)
 	case m.tabClosePending != "":
@@ -234,11 +273,13 @@ func (m dashboard) renderStatus(width, bodyHeight int) []string {
 	case m.modal == aboutModal:
 		status = renderShortcuts(m.styles, width, shortcut{key: "Esc", description: "close"})
 	case m.modal == configModal:
+		// The letter keys are drawn beside every row they belong to, so the
+		// rail names the moves that are the same in every list instead of
+		// listing four keycaps the modal is already showing.
 		status = renderShortcuts(m.styles, width,
-			shortcut{key: "←/→", description: "adjust width"},
-			shortcut{key: "m", description: "scrollback mouse"},
-			shortcut{key: "d/b", description: "sounds"},
-			shortcut{key: "s", description: "test"},
+			shortcut{key: "↑/↓", description: "select"},
+			shortcut{key: "Enter", description: "toggle"},
+			shortcut{key: "←/→", description: "pane width"},
 			shortcut{key: "Esc", description: "close"},
 		)
 	case m.modal == workspaceActionsModal:
@@ -248,7 +289,7 @@ func (m dashboard) renderStatus(width, bodyHeight int) []string {
 			shortcut{key: "Esc", description: "cancel"},
 		)
 	case m.modal == gitActionsModal && m.gitActionPending:
-		status = m.renderActivityStatus("RUNNING", m.gitAction.label()+" in "+displayText(m.gitActionTarget.Name), width)
+		status = m.renderActivityStatus("RUNNING", m.gitAction.label()+" in "+display.Text(m.gitActionTarget.Name), width)
 	case m.modal == gitActionsModal && m.gitActionComplete:
 		shortcuts := []shortcut{
 			{key: "Enter", description: "actions"},
@@ -268,7 +309,7 @@ func (m dashboard) renderStatus(width, bodyHeight int) []string {
 		// The request is already out; no key can take it back.
 		status = m.renderActivityStatus("STOPPING", "waiting for the daemon to stop", width)
 	case m.modal == browseModal && m.browse.loading:
-		status = m.renderActivityStatus("READING", displayText(m.browse.path), width)
+		status = m.renderActivityStatus("READING", display.Text(m.browse.path), width)
 	case m.modal == browseModal:
 		status = renderShortcuts(m.styles, width,
 			shortcut{key: "↑/↓", description: "select"},
@@ -320,7 +361,7 @@ func (m dashboard) renderStatus(width, bodyHeight int) []string {
 	case m.scrollback && m.searchMode:
 		status = truncate(
 			m.styles.promptLabel.Render(" FIND ")+" "+
-				m.styles.promptText.Render(displayText(m.searchQuery))+
+				m.styles.promptText.Render(display.Text(m.searchQuery))+
 				m.styles.dividerActive.Render("█"),
 			width,
 		)
@@ -333,7 +374,7 @@ func (m dashboard) renderStatus(width, bodyHeight int) []string {
 		position := m.scrollbackPosition()
 		if len(m.searchMatches) > 0 {
 			shortcuts = append(shortcuts, shortcut{key: "n/N", description: "match"})
-			position += fmt.Sprintf("  %s %d/%d", displayText(m.searchQuery),
+			position += fmt.Sprintf("  %s %d/%d", display.Text(m.searchQuery),
 				len(m.searchMatches)-m.searchIndex, len(m.searchMatches))
 		}
 		shortcuts = append(shortcuts, shortcut{key: "Ctrl+Shift+\\", description: "exit"})
@@ -397,9 +438,7 @@ func (m dashboard) renderNavigation(width, height int) []string {
 	if m.focus == leftPane {
 		titleStyle = m.styles.paneTitleActive
 	}
-	title := titleStyle.Render(" romty ")
-	header := title + m.styles.tabRail.Render(strings.Repeat("─", max(width-lipgloss.Width(title), 0)))
-	lines := []string{header, ""}
+	lines := []string{m.paneHeader(titleStyle, " romty ", width), ""}
 	items := m.navigationItems()
 	available := max(height-len(lines), 0)
 	start, end := navigationWindow(items, m.navOffset, available)
@@ -461,13 +500,13 @@ func (m dashboard) renderNavigationItem(item navItem, index, width int) []string
 		indicator = "▌"
 	}
 	branch := "-"
-	name := indicator + " " + branch + " " + displayText(item.workspace.Name)
+	name := indicator + " " + branch + " " + display.Text(item.workspace.Name)
 	style := m.styles.navigationItem
 	if item.isRoot {
-		name = indicator + "▾ " + displayText(item.root.Name)
+		name = indicator + "▾ " + display.Text(item.root.Name)
 		style = m.styles.navigationRoot
 		if item.failure != "" {
-			name = indicator + "✗ " + displayText(item.root.Name)
+			name = indicator + "✗ " + display.Text(item.root.Name)
 			style = m.styles.errorText
 		}
 	}
@@ -502,10 +541,7 @@ func (m dashboard) renderNavigationItem(item navItem, index, width int) []string
 }
 
 func (m dashboard) renderTerminal(width int) []string {
-	tabs := m.selectedTabs()
-	if m.focus == leftPane {
-		tabs = m.navigationTabs()
-	}
+	tabs := m.visibleTabs()
 	hover := -1
 	closeHover := -1
 	if m.hover.kind == hoverTab {
@@ -533,7 +569,7 @@ func renderTabBar(styles *uiStyles, tabs []model.Tab, active, width int) []strin
 func renderTabBarWithHover(styles *uiStyles, tabs []model.Tab, active, hover, closeHover, width int) []string {
 	labels := make([]string, 0, len(tabs)+1)
 	for _, tab := range tabs {
-		labels = append(labels, "  "+displayText(tab.Name)+"  × ")
+		labels = append(labels, "  "+display.Text(tab.Name)+"  × ")
 	}
 	labels = append(labels, "  +  ")
 

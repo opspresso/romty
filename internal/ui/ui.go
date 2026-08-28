@@ -1,3 +1,6 @@
+// Package ui is romty's dashboard: the workspace tree, the terminal it opens
+// beside it, and the state machine between them. It talks to the daemon
+// through a Backend and owns nothing that survives the TUI closing.
 package ui
 
 import (
@@ -6,13 +9,13 @@ import (
 	"io"
 	"strings"
 	"time"
-	"unicode"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/opspresso/romty/internal/agenthooks"
+	"github.com/opspresso/romty/internal/display"
 	"github.com/opspresso/romty/internal/model"
 	"github.com/opspresso/romty/internal/sound"
 )
@@ -38,6 +41,15 @@ const (
 	// take half the screen and leave the terminal unusable. Above this the
 	// split is worth its width, so the layout does not move under a desktop.
 	narrowLayoutWidth = 80
+	// minimumModalWidth and the two caps bound a modal box. The box shrinks to
+	// its content between them, so a question of one sentence is one sentence
+	// wide; the caps keep a long path or a wide diff off the screen edges.
+	minimumModalWidth     = 32
+	maximumModalWidth     = 72
+	maximumWideModalWidth = 80
+	// minimumScreenWidth is the narrowest screen romty lays out for; see
+	// screenWidth.
+	minimumScreenWidth = 40
 
 	maximumReattachAttempts = 3
 	initialReattachBackoff  = 250 * time.Millisecond
@@ -207,7 +219,10 @@ type dashboard struct {
 	terminalFullWidth bool
 	scrollOffset      int
 	helpOffset        int
-	configPath        string
+	// configIndex is the setting the Config modal's cursor is on, so it is
+	// walked and run the way every other list romty draws is.
+	configIndex int
+	configPath  string
 	// homePath is where the root picker opens, resolved once at startup.
 	homePath string
 	// browse is the root picker's state, kept on the dashboard so the modal
@@ -728,20 +743,10 @@ func (m dashboard) handleKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.inputMode {
 		return m.handleInput(message)
 	}
-	if m.shutdownPending {
-		// The daemon is already stopping; only quitting the TUI still applies.
-		if message.String() == "f4" {
-			return m.quit()
-		}
-		return m, nil
-	}
-	if m.hookInstallPending {
-		if message.String() == "f4" {
-			return m.quit()
-		}
-		return m, nil
-	}
-	if m.gitActionPending {
+	// A shutdown already asked for, a Git command already running, an installer
+	// already writing: the request is out and no key can take it back, so the
+	// only one that still applies is the one that leaves romty.
+	if m.shutdownPending || m.gitActionPending || m.hookInstallPending {
 		if message.String() == "f4" {
 			return m.quit()
 		}
@@ -819,6 +824,14 @@ func (m dashboard) quit() (tea.Model, tea.Cmd) {
 	m.result.Quit = true
 	return m, tea.Quit
 }
+
+// What the status bar says about a workspace that cannot answer the request
+// made of it. Each is raised from more than one place, and a sentence a user
+// reads twice should read the same both times.
+const (
+	notAGitRepository = "selected workspace is not a Git repository"
+	noRunningTerminal = "selected workspace has no running terminal"
+)
 
 // setError takes the status bar for one source; clearError gives it up only if
 // that source still holds it.
@@ -907,7 +920,7 @@ func (m dashboard) adjustLeftWidth(delta int) (tea.Model, tea.Cmd) {
 }
 
 func (m *dashboard) setLeftWidth(width int) {
-	maximum := min(maximumLeftWidth, max(m.width, 40)-20)
+	maximum := min(maximumLeftWidth, m.screenWidth()-20)
 	m.leftWidth = min(max(width, minimumLeftWidth), maximum)
 }
 
@@ -1184,15 +1197,12 @@ func reattachBackoff(attempt int) time.Duration {
 	return min(backoff, maximumReattachBackoff)
 }
 
-// The item is captured here rather than read again on confirmation: a snapshot
-// arriving while the modal is open can move the cursor, and the answer has to
-// apply to the item the question named.
-func (m dashboard) confirmRemoveSelection() (tea.Model, tea.Cmd) {
-	item, ok := m.navigationItem()
-	if !ok {
-		return m, nil
-	}
-	m.removeTarget = item
+// confirmRemoveSelection asks before a root is forgotten or a workspace
+// directory is deleted. The item is captured here rather than read again on
+// confirmation: a snapshot arriving while the modal is open can move the
+// cursor, and the answer has to apply to the item the question named.
+func (m dashboard) confirmRemoveSelection(target navItem) (tea.Model, tea.Cmd) {
+	m.removeTarget = target
 	return m.openModal(removeSelectionModal)
 }
 
@@ -1448,7 +1458,7 @@ func (m dashboard) renderNavigationGit(item navItem, indicator string, style lip
 		return style.Render(pad(prefix, width))
 	}
 
-	branch := displayText(item.git.Branch)
+	branch := display.Text(item.git.Branch)
 	if item.git.Detached {
 		revision := item.git.Revision
 		if len(revision) > 7 {
@@ -1500,15 +1510,6 @@ func onOff(value bool) string {
 		return "on"
 	}
 	return "off"
-}
-
-func displayText(value string) string {
-	return strings.Map(func(character rune) rune {
-		if unicode.IsControl(character) {
-			return '�'
-		}
-		return character
-	}, value)
 }
 
 func pad(value string, width int) string {

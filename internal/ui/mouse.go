@@ -1,6 +1,7 @@
 // Pointer handling: what the dashboard chrome does with a click, a drag and a
 // wheel, which target the pointer is over, and how much of the mouse is left
 // for the guest application.
+
 package ui
 
 import (
@@ -8,6 +9,7 @@ import (
 	"charm.land/lipgloss/v2"
 	uv "github.com/charmbracelet/ultraviolet"
 
+	"github.com/opspresso/romty/internal/display"
 	"github.com/opspresso/romty/internal/model"
 )
 
@@ -138,7 +140,7 @@ func (m dashboard) handleModalMouse(message tea.MouseMsg) (tea.Model, tea.Cmd, b
 		return m, nil, false
 	}
 	mouse := click.Mouse()
-	for _, hit := range m.modalActionHits(max(m.width, 40), m.dimensions().bodyHeight) {
+	for _, hit := range m.modalActionHits(m.modalGeometry(m.bodySize())) {
 		if mouse.Y == hit.row && mouse.X >= hit.left && mouse.X < hit.right {
 			updated, command := m.handleKey(tea.KeyPressMsg(tea.Key{Code: hit.action.code}))
 			return updated, command, true
@@ -148,8 +150,7 @@ func (m dashboard) handleModalMouse(message tea.MouseMsg) (tea.Model, tea.Cmd, b
 }
 
 func (m dashboard) hoverTargetAt(mouse tea.Mouse) hoverTarget {
-	width := max(m.width, 40)
-	height := m.dimensions().bodyHeight
+	width, height := m.bodySize()
 	if m.modal == workspaceActionsModal {
 		if index, ok := m.workspaceActionIndexAtMouse(mouse, width, height); ok {
 			return hoverTarget{kind: hoverWorkspaceAction, index: index}
@@ -157,12 +158,13 @@ func (m dashboard) hoverTargetAt(mouse tea.Mouse) hoverTarget {
 		return hoverTarget{}
 	}
 	if m.modal != noModal {
-		for index, hit := range m.modalActionHits(width, height) {
+		geometry := m.modalGeometry(width, height)
+		for index, hit := range m.modalActionHits(geometry) {
 			if mouse.Y == hit.row && mouse.X >= hit.left && mouse.X < hit.right {
 				return hoverTarget{kind: hoverModalAction, index: index}
 			}
 		}
-		row, inside := m.modalContentRow(mouse, width, height)
+		row, inside := geometry.contentRow(mouse)
 		if !inside {
 			return hoverTarget{}
 		}
@@ -180,8 +182,8 @@ func (m dashboard) hoverTargetAt(mouse tea.Mouse) hoverTarget {
 				return hoverTarget{kind: hoverGitAction, index: row - gitActionHeaderRows}
 			}
 		case configModal:
-			if row >= 0 && row < len(configRows()) {
-				return hoverTarget{kind: hoverConfigRow, index: row}
+			if index, ok := configIndexAtContentRow(row, height); ok {
+				return hoverTarget{kind: hoverConfigRow, index: index}
 			}
 		}
 		return hoverTarget{}
@@ -200,11 +202,7 @@ func (m dashboard) hoverTargetAt(mouse tea.Mouse) hoverTarget {
 	}
 	if mouse.Y == 0 && mouse.X >= view.leftWidth+view.separator {
 		localX := mouse.X - view.leftWidth - view.separator
-		tabs := m.selectedTabs()
-		if m.focus == leftPane {
-			tabs = m.navigationTabs()
-		}
-		if hit, ok := tabHitAtX(tabs, localX); ok {
+		if hit, ok := tabHitAtX(m.visibleTabs(), localX); ok {
 			kind := hoverTab
 			if hit.close {
 				kind = hoverTabClose
@@ -216,11 +214,13 @@ func (m dashboard) hoverTargetAt(mouse tea.Mouse) hoverTarget {
 }
 
 func (m dashboard) handleConfigMouse(message tea.MouseMsg) (tea.Model, tea.Cmd, bool) {
-	row, inside := m.modalContentRow(message.Mouse(), max(m.width, 40), m.dimensions().bodyHeight)
+	row, inside := m.modalContentRowAt(message.Mouse())
 	if !inside {
 		return m, nil, false
 	}
-	if wheel, ok := message.(tea.MouseWheelMsg); ok && row == 0 {
+	_, height := m.bodySize()
+	index, setting := configIndexAtContentRow(row, height)
+	if wheel, ok := message.(tea.MouseWheelMsg); ok && setting && index == 0 {
 		switch wheel.Button {
 		case tea.MouseWheelUp:
 			updated, command := m.adjustLeftWidth(1)
@@ -234,35 +234,28 @@ func (m dashboard) handleConfigMouse(message tea.MouseMsg) (tea.Model, tea.Cmd, 
 	if !ok || click.Button != tea.MouseLeft {
 		return m, nil, false
 	}
-	if updated, command, ok := m.runConfigRow(row); ok {
-		return updated, command, true
+	// The row clicked becomes the row the cursor is on, the way clicking a
+	// workspace or a tab moves the cursor to it.
+	if setting {
+		m.configIndex = index
+		if updated, command, ok := m.runConfigRow(index); ok {
+			return updated, command, true
+		}
 	}
 	// A click inside the box that lands on no setting is still the modal's;
 	// letting it fall through would send it to whatever is drawn behind.
 	return m, nil, true
 }
 
-func (m dashboard) modalContentOrigin(width, height int) (int, int) {
-	lines := m.renderModal(width, height)
-	if len(lines) == 0 {
-		return 0, 0
-	}
-	modalWidth := lipgloss.Width(lines[0])
-	return max((width-modalWidth)/2, 0) + 3, max((height-len(lines))/2, 0) + 1
+func configIndexAtContentRow(row, height int) (int, bool) {
+	index := row - configContentOffset(height)
+	return index, index >= 0 && index < len(configRows())
 }
 
-func (m dashboard) modalContentRow(mouse tea.Mouse, width, height int) (int, bool) {
-	lines := m.renderModal(width, height)
-	if len(lines) < 2 {
-		return 0, false
-	}
-	modalWidth := lipgloss.Width(lines[0])
-	modalLeft := max((width-modalWidth)/2, 0)
-	_, contentTop := m.modalContentOrigin(width, height)
-	row := mouse.Y - contentTop
-	inside := mouse.X >= modalLeft+1 && mouse.X < modalLeft+modalWidth-1 &&
-		row >= 0 && row < len(lines)-2
-	return row, inside
+// modalContentRowAt answers the same question for the modal that is open now,
+// at the size the body is now, which is what every mouse handler wants.
+func (m dashboard) modalContentRowAt(mouse tea.Mouse) (int, bool) {
+	return m.modalGeometry(m.bodySize()).contentRow(mouse)
 }
 
 func (m dashboard) handleDashboardMouse(message tea.MouseMsg) (tea.Model, tea.Cmd, bool) {
@@ -297,14 +290,11 @@ func (m dashboard) handleDashboardMouse(message tea.MouseMsg) (tea.Model, tea.Cm
 		return m, nil, false
 	}
 	if click.Button == tea.MouseRight && mouse.X < view.leftWidth && mouse.Y < view.bodyHeight {
-		index, ok := m.navigationIndexAtRow(mouse.Y, view.bodyHeight)
+		item, ok := m.focusNavigationRow(mouse.Y, view.bodyHeight)
 		if !ok {
 			return m, nil, true
 		}
-		m.focus = leftPane
-		m.setNavigation(index)
-		m.syncTabCursor(runningTabs(m.navigationItems()[index].tabs))
-		updated, command := m.openWorkspaceActionsAt(m.navigationItems()[index], mouse.X, mouse.Y)
+		updated, command := m.openWorkspaceActionsAt(item, mouse.X, mouse.Y)
 		return updated, command, true
 	}
 	if click.Button != tea.MouseLeft {
@@ -316,21 +306,14 @@ func (m dashboard) handleDashboardMouse(message tea.MouseMsg) (tea.Model, tea.Cm
 		return m, nil, true
 	}
 	if mouse.X < view.leftWidth && mouse.Y < view.bodyHeight {
-		index, ok := m.navigationIndexAtRow(mouse.Y, view.bodyHeight)
-		if !ok {
+		if _, ok := m.focusNavigationRow(mouse.Y, view.bodyHeight); !ok {
 			return m, nil, true
 		}
-		m.focus = leftPane
-		m.setNavigation(index)
-		m.syncTabCursor(runningTabs(m.navigationItems()[index].tabs))
 		return m, m.selectWorkspace(), true
 	}
 	if mouse.Y == 0 && mouse.X >= view.leftWidth+view.separator {
 		localX := mouse.X - view.leftWidth - view.separator
-		tabs := m.selectedTabs()
-		if m.focus == leftPane {
-			tabs = m.navigationTabs()
-		}
+		tabs := m.visibleTabs()
 		hit, ok := tabHitAtX(tabs, localX)
 		if !ok {
 			return m, nil, true
@@ -352,7 +335,10 @@ func (m dashboard) handleDashboardMouse(message tea.MouseMsg) (tea.Model, tea.Cm
 	return m, nil, false
 }
 
-func (m dashboard) navigationIndexAtRow(row, height int) (int, bool) {
+// navigationItemAtRow is the tree item drawn on a body row, and where it sits.
+// Both are wanted together: the click handlers used to ask for the index, then
+// rebuild the whole tree once more per field they read off the item.
+func (m dashboard) navigationItemAtRow(row, height int) (navItem, int, bool) {
 	items := m.navigationItems()
 	available := max(height-2, 0)
 	start, end := navigationWindow(items, m.navOffset, available)
@@ -360,11 +346,30 @@ func (m dashboard) navigationIndexAtRow(row, height int) (int, bool) {
 	for index := start; index < end; index++ {
 		nextRow := currentRow + navigationRows(items[index])
 		if row >= currentRow && row < nextRow {
-			return index, true
+			return items[index], index, true
 		}
 		currentRow = nextRow
 	}
-	return 0, false
+	return navItem{}, 0, false
+}
+
+func (m dashboard) navigationIndexAtRow(row, height int) (int, bool) {
+	_, index, ok := m.navigationItemAtRow(row, height)
+	return index, ok
+}
+
+// focusNavigationRow puts the keyboard and the cursor on the tree row under a
+// click and reports what it landed on. Opening a workspace and opening its
+// action palette both start with exactly this.
+func (m *dashboard) focusNavigationRow(row, height int) (navItem, bool) {
+	item, index, ok := m.navigationItemAtRow(row, height)
+	if !ok {
+		return navItem{}, false
+	}
+	m.focus = leftPane
+	m.setNavigation(index)
+	m.syncTabCursor(runningTabs(item.tabs))
+	return item, true
 }
 
 type tabHit struct {
@@ -377,7 +382,7 @@ func tabHitAtX(tabs []model.Tab, x int) (tabHit, bool) {
 	for index := 0; index <= len(tabs); index++ {
 		label := "  +  "
 		if index < len(tabs) {
-			label = "  " + displayText(tabs[index].Name) + "  × "
+			label = "  " + display.Text(tabs[index].Name) + "  × "
 		}
 		end := position + lipgloss.Width(label)
 		if x >= position && x < end {

@@ -88,7 +88,7 @@ func TestBrowsePickerOpensClickedDirectory(t *testing.T) {
 	home := t.TempDir()
 	makeDirectories(t, home, "alpha", "beta")
 	value := browsing(t, &fakeBackend{}, home)
-	left, top := value.modalContentOrigin(value.width, value.dimensions().bodyHeight)
+	left, top := value.modalGeometry(value.width, value.dimensions().bodyHeight).contentOrigin()
 
 	updated, command := value.Update(tea.MouseClickMsg{X: left + 2, Y: top + 4, Button: tea.MouseLeft})
 	value = updated.(dashboard)
@@ -102,7 +102,7 @@ func TestBrowsePickerHighlightsHoveredDirectory(t *testing.T) {
 	home := t.TempDir()
 	makeDirectories(t, home, "alpha", "beta")
 	value := browsing(t, &fakeBackend{}, home)
-	left, top := value.modalContentOrigin(value.width, value.dimensions().bodyHeight)
+	left, top := value.modalGeometry(value.width, value.dimensions().bodyHeight).contentOrigin()
 	before := value.render()
 
 	updated, _ := value.Update(tea.MouseMotionMsg{X: left + 2, Y: top + 4})

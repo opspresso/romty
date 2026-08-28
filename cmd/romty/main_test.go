@@ -17,6 +17,7 @@ import (
 
 	"github.com/opspresso/romty/internal/client"
 	"github.com/opspresso/romty/internal/daemon"
+	"github.com/opspresso/romty/internal/display"
 	"github.com/opspresso/romty/internal/paths"
 	"github.com/opspresso/romty/internal/protocol"
 	"github.com/opspresso/romty/internal/testutil"
@@ -326,8 +327,8 @@ func TestPrintFieldColorsThePaddedLabel(t *testing.T) {
 }
 
 func TestCommandTextReplacesControlCharacters(t *testing.T) {
-	if got, want := commandText("/tmp/\x1b[31mconfig\n"), "/tmp/�[31mconfig�"; got != want {
-		t.Fatalf("commandText() = %q, want %q", got, want)
+	if got, want := display.Text("/tmp/\x1b[31mconfig\n"), "/tmp/�[31mconfig�"; got != want {
+		t.Fatalf("display.Text() = %q, want %q", got, want)
 	}
 }
 

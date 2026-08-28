@@ -1,5 +1,6 @@
 // The workspace tree and tab cursors: what is selected, what moving does, and
 // how a selection survives a snapshot that rearranged everything under it.
+
 package ui
 
 import (
@@ -482,6 +483,18 @@ func (m dashboard) navigationTabs() []model.Tab {
 		return nil
 	}
 	return runningTabs(item.tabs)
+}
+
+// visibleTabs is the tab row that is actually on screen: the open terminal's
+// tabs, except in the workspace pane, where the cursor may sit on a workspace
+// other than the open one and the rail shows that workspace's tabs instead.
+// Drawing the rail, hit-testing a click on it and hovering it are three
+// readings of the same row, and each kept its own copy of that rule.
+func (m dashboard) visibleTabs() []model.Tab {
+	if m.focus == leftPane {
+		return m.navigationTabs()
+	}
+	return m.selectedTabs()
 }
 
 func (m dashboard) selectedTabs() []model.Tab {

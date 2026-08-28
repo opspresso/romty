@@ -1274,3 +1274,71 @@ func speakRaw(t *testing.T, socket string, request map[string]any) protocol.Resp
 	}
 	return response
 }
+
+// A workspace whose directory has already gone must still be removable. The
+// removal that deletes the directory rolls its state back when the state
+// cannot be written, which leaves romty holding a record for a path that is no
+// longer there — and every retry used to die inspecting the directory it had
+// itself deleted, so the workspace stayed in the tree naming nothing, with no
+// action able to remove it.
+func TestRemoveWorkspaceForgetsADirectoryThatIsAlreadyGone(t *testing.T) {
+	base := testutil.ShortTempDir(t)
+	root := filepath.Join(base, "projects")
+	workspacePath := filepath.Join(root, "alpha")
+	if err := os.MkdirAll(workspacePath, 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+
+	socket := filepath.Join(base, "daemon.sock")
+	server, err := daemon.New(socket, filepath.Join(base, "state.json"), "/bin/sh")
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	server.SetLogger(testutil.QuietLogger())
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- server.Serve(ctx) }()
+	defer func() { cancel(); <-done }()
+
+	backend := client.New(socket)
+	testutil.WaitForDaemon(t, backend)
+	snapshot, err := backend.AddRoot(root)
+	if err != nil {
+		t.Fatalf("AddRoot() error = %v", err)
+	}
+	rootID := snapshot.Roots[0].Root.ID
+	workspace, err := backend.EnsureWorkspace(rootID, workspacePath)
+	if err != nil {
+		t.Fatalf("EnsureWorkspace() error = %v", err)
+	}
+	if _, err := backend.CreateTab(workspace.ID, 80, 24); err != nil {
+		t.Fatalf("CreateTab() error = %v", err)
+	}
+
+	// The directory goes without romty being the one to remove it, which is
+	// the state a rolled-back removal leaves behind. The canonical path is
+	// what the daemon recorded and what a removal has to name.
+	canonical := workspace.Path
+	if err := os.RemoveAll(canonical); err != nil {
+		t.Fatalf("RemoveAll() error = %v", err)
+	}
+
+	snapshot, err = backend.RemoveWorkspace(rootID, canonical)
+	if err != nil {
+		t.Fatalf("RemoveWorkspace() on a missing directory error = %v", err)
+	}
+	for _, directory := range snapshot.Roots[0].Directories {
+		if directory.Workspace.Path == canonical {
+			t.Fatalf("the workspace is still in the tree: %#v", directory)
+		}
+	}
+	if countTabs(snapshot) != 0 {
+		t.Fatalf("tabs survived the removal: %#v", snapshot)
+	}
+
+	// The boundary still holds: a path outside the root is refused whether or
+	// not it exists.
+	if _, err := backend.RemoveWorkspace(rootID, filepath.Join(base, "outside")); err == nil {
+		t.Fatal("RemoveWorkspace() accepted a path outside the root")
+	}
+}

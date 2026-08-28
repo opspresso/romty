@@ -1,5 +1,9 @@
 // The daemon itself: its lifetime, the sessions it holds, and the agent status
 // it reports for them.
+
+// Package daemon keeps romty's shell sessions alive between TUIs. One
+// daemon owns a private unix socket, the workspace tree behind it, and a
+// PTY per terminal tab, and it outlives every client that attaches to it.
 package daemon
 
 import (
@@ -20,6 +24,15 @@ import (
 )
 
 var ErrAlreadyRunning = errors.New("romty daemon is already running")
+
+// What a client is told when a request cannot be served. Each of these is
+// raised from several places, and a sentence a user may end up searching for
+// has to read the same from every one of them.
+const (
+	errShuttingDown = "daemon is shutting down"
+	errRootNotFound = "root not found"
+	errNoSession    = "running terminal session not found"
+)
 
 // requestTimeout bounds both halves of the handshake — reading the request and
 // writing the reply — but not the session that may follow it. A local socket
@@ -203,9 +216,7 @@ func (s *Server) shutdown() {
 		sessions = append(sessions, value)
 	}
 	s.mu.Unlock()
-	for _, value := range sessions {
-		value.close()
-	}
+	closeSessions(sessions)
 	_ = os.Remove(s.socket)
 }
 
@@ -214,7 +225,7 @@ func (s *Server) resize(tabID, clientID string, columns, rows uint16) protocol.R
 	value, ok := s.sessions[tabID]
 	s.mu.Unlock()
 	if !ok {
-		return protocol.Response{Error: "running terminal session not found"}
+		return protocol.Response{Error: errNoSession}
 	}
 	if err := value.resizeFor(clientID, columns, rows); err != nil {
 		return protocol.Response{Error: err.Error()}
@@ -227,23 +238,25 @@ func (s *Server) handleAttach(connection net.Conn, request protocol.Request) {
 	value, ok := s.sessions[request.TabID]
 	s.mu.Unlock()
 	if !ok {
-		_ = replyFor(connection, request, protocol.Response{Error: "running terminal session not found"})
+		_ = replyFor(connection, request, protocol.Response{Error: errNoSession})
 		return
+	}
+	// The reply announces the exact history that follows it, so the client can
+	// consume that off-screen and treat everything after as live output. A
+	// client from before the boundary reads the two as one stream, so it is
+	// acknowledged first and the history simply follows.
+	ready := func(replayBytes int, columns, rows uint16) error {
+		return replyFor(connection, request, protocol.Response{
+			ReplayBytes: replayBytes, ReplayColumns: columns, ReplayRows: rows,
+		})
 	}
 	if !protocol.HasCapability(requestCapabilities(request), protocol.CapabilityReplayBoundary) {
 		if err := replyFor(connection, request, protocol.Response{}); err != nil {
 			return
 		}
-		if err := value.attachClientReady(connection, request.ClientID, func(int, uint16, uint16) error { return nil }); err != nil {
-			s.logger.Printf("attach to tab %s ended: %v", request.TabID, err)
-		}
-		return
+		ready = func(int, uint16, uint16) error { return nil }
 	}
-	if err := value.attachClientReady(connection, request.ClientID, func(replayBytes int, columns, rows uint16) error {
-		return replyFor(connection, request, protocol.Response{
-			ReplayBytes: replayBytes, ReplayColumns: columns, ReplayRows: rows,
-		})
-	}); err != nil {
+	if err := value.attachClientReady(connection, request.ClientID, ready); err != nil {
 		s.logger.Printf("attach to tab %s ended: %v", request.TabID, err)
 	}
 }
@@ -291,7 +304,7 @@ func (s *Server) closeTab(tabID string) protocol.Response {
 	value, ok := s.sessions[tabID]
 	s.mu.Unlock()
 	if !ok {
-		return protocol.Response{Error: "running terminal session not found"}
+		return protocol.Response{Error: errNoSession}
 	}
 	value.close()
 	return s.snapshotResponse()

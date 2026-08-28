@@ -1,5 +1,6 @@
 // Owning the daemon socket: the lock that makes one daemon the only one, and
 // the private socket it listens on.
+
 package daemon
 
 import (

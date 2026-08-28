@@ -9,6 +9,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
+	"github.com/opspresso/romty/internal/display"
 	"github.com/opspresso/romty/internal/model"
 )
 
@@ -25,7 +26,7 @@ func tabCloseSnapshot(tabs []model.Tab) (model.Snapshot, model.Workspace) {
 func tabCloseLocalX(tabs []model.Tab, want int) int {
 	position := 0
 	for index, tab := range tabs {
-		width := lipgloss.Width("  " + displayText(tab.Name) + "  × ")
+		width := lipgloss.Width("  " + display.Text(tab.Name) + "  × ")
 		if index == want {
 			return position + width - 2
 		}

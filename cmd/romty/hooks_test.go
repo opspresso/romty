@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/opspresso/romty/internal/model"
+	"github.com/opspresso/romty/internal/protocol"
 )
 
 func TestDecodeHookEventKeepsOnlyStatusMetadata(t *testing.T) {
@@ -67,7 +68,7 @@ func TestHookCommandIsSilentOutsideARomtyTab(t *testing.T) {
 }
 
 func TestDecodeHookEventRejectsOversizedMetadata(t *testing.T) {
-	payload := `{"hook_event_name":"` + strings.Repeat("x", 513) + `"}`
+	payload := `{"hook_event_name":"` + strings.Repeat("x", protocol.MaxAgentEventMetadataBytes+1) + `"}`
 	if _, err := decodeHookEvent("codex", strings.NewReader(payload)); err == nil {
 		t.Fatal("decodeHookEvent() accepted oversized metadata")
 	}

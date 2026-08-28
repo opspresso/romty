@@ -1,6 +1,7 @@
 // Agent presence and phase: the markers the tree draws, the animation that
 // keeps them moving, the sounds a transition plays, and the jump that reaches
 // the agent waiting for an answer.
+
 package ui
 
 import (
@@ -44,17 +45,8 @@ func animateAgentMarker() tea.Cmd {
 }
 
 func (m *dashboard) updateAgents(statuses map[string]model.AgentStatus) {
-	for rootIndex := range m.state.Roots {
-		root := &m.state.Roots[rootIndex]
-		for tabIndex := range root.Tabs {
-			applyAgentStatus(&root.Tabs[tabIndex], statuses)
-		}
-		for workspaceIndex := range root.Directories {
-			tabs := root.Directories[workspaceIndex].Tabs
-			for tabIndex := range tabs {
-				applyAgentStatus(&tabs[tabIndex], statuses)
-			}
-		}
+	for tab := range m.state.Tabs() {
+		applyAgentStatus(tab, statuses)
 	}
 	m.agentAnimationActive = m.hasAnimatedAgent()
 }
@@ -82,18 +74,9 @@ func (m dashboard) soundForAgentTransitions(statuses map[string]model.AgentStatu
 		}
 		return "", false
 	}
-	for _, root := range m.state.Roots {
-		for _, tab := range root.Tabs {
-			if kind, ok := changed(tab); ok {
-				return kind, true
-			}
-		}
-		for _, workspace := range root.Directories {
-			for _, tab := range workspace.Tabs {
-				if kind, ok := changed(tab); ok {
-					return kind, true
-				}
-			}
+	for tab := range m.state.Tabs() {
+		if kind, ok := changed(*tab); ok {
+			return kind, true
 		}
 	}
 	return "", false
@@ -104,18 +87,9 @@ func waitingAgentPhase(phase model.AgentPhase) bool {
 }
 
 func (m dashboard) hasAnimatedAgent() bool {
-	for _, root := range m.state.Roots {
-		for _, tab := range root.Tabs {
-			if tab.Running && animatedAgentPhase(tab.AgentPhase) {
-				return true
-			}
-		}
-		for _, workspace := range root.Directories {
-			for _, tab := range workspace.Tabs {
-				if tab.Running && animatedAgentPhase(tab.AgentPhase) {
-					return true
-				}
-			}
+	for tab := range m.state.Tabs() {
+		if tab.Running && animatedAgentPhase(tab.AgentPhase) {
+			return true
 		}
 	}
 	return false

@@ -1,3 +1,5 @@
+// Package paths resolves the files romty keeps for a user and the socket its
+// daemon listens on, and refuses a home the kernel could not put a socket in.
 package paths
 
 import (

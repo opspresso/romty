@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/creack/pty"
+
 	"github.com/opspresso/romty/internal/model"
 	"github.com/opspresso/romty/internal/protocol"
 	"github.com/opspresso/romty/internal/testutil"
