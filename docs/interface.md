@@ -27,9 +27,13 @@ Press `Ctrl`+`Shift`+`G` to open Git actions for a workspace. From the workspace
 
 Press `Ctrl`+`Shift`+`F` to toggle the file view for the same contextual workspace. Its left pane shows staged, unstaged, and untracked files as a directory tree. Added and untracked files are green, modified and renamed files are amber, and deleted or conflicted files are red. The right pane syntax-highlights recognised code files and falls back to plain text for other content or unusually large diffs. Added and removed rows use green and red background tints without replacing syntax colors. Press `F6` to switch between inline and split layouts; the last layout is restored when the view or romty is opened again. A file with both staged and unstaged edits shows both sections, and an untracked text file is compared with an empty file. Press `↑`/`↓` to select a file, use `Ctrl`+`↑`/`↓`, the mouse wheel, or the paging keys to read its diff, and press `F5` to reload the worktree.
 
+The workspace action menu also provides `All files`. It recursively lists every non-hidden regular file in the workspace, including ignored files but excluding dot-prefixed files and directories such as `.env` and `.git`, then opens the selected file read-only with syntax highlighting when its format and size are supported. Symlinks are listed neither as files nor as traversable directories. This view is also available for workspaces that are not Git repositories.
+
+Both file views allow directory rows to take the cursor. Press `Enter` to toggle the selected directory, `←` to collapse it, or `→` to expand it. Collapsed directories remain collapsed when `F5` reloads the view.
+
 ## Keyboard shortcuts
 
-`F1` through `F7` work in both panes and with regular modals open. Alternatives listed beside them are contextual; file view also assigns its own actions to `F5` and `F6`. The root path prompt owns its input until submitted or cancelled. While daemon shutdown, hook installation, or a Git command is running, only `F4` is accepted. Press `F1` for the in-app reference.
+`F1` through `F7` work in both panes and with regular modals open. Alternatives listed beside them are contextual; file view assigns its own action to `F5`, and changed-file view also assigns `F6`. The root path prompt owns its input until submitted or cancelled. While daemon shutdown, hook installation, or a Git command is running, only `F4` is accepted. Press `F1` for the in-app reference.
 
 ### Global
 
@@ -69,18 +73,20 @@ Press `Ctrl`+`Shift`+`F` to toggle the file view for the same contextual workspa
 |---|---|---|
 | `↑`/`↓` | Move one item or line | Workspace, file list, picker, Config, Help, Git, scrollback |
 | `k`/`j` | Move one item or line | Workspace, file list, picker, Config, Help, Git |
-| `←`/`→` or `h`/`l` | Select a tab, or open a picker child/parent | Workspace, picker |
-| `PgUp`/`PgDn` or `Ctrl+B`/`Ctrl+F` | Move one page | Picker, Help, Git result, file diff |
-| `Home`/`End` or `g`/`G` | Move to the first or last item/line | Picker, Help, Git result, file diff |
+| `←`/`→` or `h`/`l` | Select a tab, open a picker child/parent, or collapse/expand a file tree directory | Workspace, picker, file view |
+| `PgUp`/`PgDn` or `Ctrl+B`/`Ctrl+F` | Move one page | Picker, Help, Git result, file view |
+| `Home`/`End` or `g`/`G` | Move to the first or last item/line | Picker, Help, Git result, file view |
 | `Shift`+`PgUp`/`PgDn` | Enter scrollback or move one page | Workspace, terminal, scrollback |
-| Mouse wheel | Scroll | Help, scrollback, file diff, terminal |
+| Mouse wheel | Scroll | Help, scrollback, file view, terminal |
 
-### File diff
+### File view
 
 | Key | Action |
 |---|---|
-| `F6` | Toggle inline and split layouts |
-| `Ctrl`+`↑`/`↓` | Move through the diff one line at a time |
+| `Enter` | Toggle the selected directory |
+| `←`/`→` or `h`/`l` | Collapse or expand the selected directory |
+| `F6` | Toggle inline and split layouts for changed files |
+| `Ctrl`+`↑`/`↓` | Move through the content one line at a time |
 
 ### Context
 
@@ -122,7 +128,7 @@ Press `/` in scrollback to find text in the retained output. The query is applie
 
 Full-screen applications such as `vim`, `less`, and Claude Code use an alternate screen with no romty history. In that mode `Shift`+`PgUp`/`PgDn` is forwarded as plain `PgUp`/`PgDn` so the application can page itself, and the wheel goes to the application as well: as mouse reports when it asked for the mouse, and otherwise as three cursor keys per notch, which is what a terminal sends for alternate scroll. This does not depend on `mouse_passthrough`.
 
-On the live main screen, the mouse wheel enters scrollback and scrolls three lines per notch. Scrolling up with no history to show reports why in the status bar, so scrolling up with no response at all means the terminal is not sending wheel events and its mouse reporting setting needs checking. Because romty captures the live mouse, native selection uses the terminal bypass modifier: `Option` on macOS or `Shift` elsewhere. Scrollback releases mouse capture, so plain click-drag selects the full-width terminal output. File view captures the wheel to scroll its diff.
+On the live main screen, the mouse wheel enters scrollback and scrolls three lines per notch. Scrolling up with no history to show reports why in the status bar, so scrolling up with no response at all means the terminal is not sending wheel events and its mouse reporting setting needs checking. Because romty captures the live mouse, native selection uses the terminal bypass modifier: `Option` on macOS or `Shift` elsewhere. Scrollback releases mouse capture, so plain click-drag selects the full-width terminal output. File view captures the wheel to scroll its content.
 
 Set `mouse_passthrough` in `config.json` to let applications receive the mouse when they request it instead:
 
@@ -142,7 +148,7 @@ The wheel then scrolls scrollback on any terminal that reports the mouse, at the
 
 ## Destructive actions and config
 
-`F8` opens a compact action menu beside the highlighted row; right-clicking a workspace or root opens the same menu at the pointer. The menu offers terminal creation, closing the selected tab, changed-file review, Git status/fetch/pull/push, and removal directly when they apply. Closing a tab asks before it terminates that shell. Deleting a workspace recursively removes all of its contents. Forgetting a root removes it only from romty. Both removal actions require confirmation and terminate terminal sessions under the selected item.
+`F8` opens a compact action menu beside the highlighted row; right-clicking a workspace or root opens the same menu at the pointer. The menu offers terminal creation, closing the selected tab, read-only access to all files, changed-file review, Git status/fetch/pull/push, and removal directly when they apply. Closing a tab asks before it terminates that shell. Deleting a workspace recursively removes all of its contents. Forgetting a root removes it only from romty. Both removal actions require confirmation and terminate terminal sessions under the selected item.
 
 `F9` asks before stopping the daemon because this terminates every running shell. Once confirmed, shutdown cannot be cancelled.
 

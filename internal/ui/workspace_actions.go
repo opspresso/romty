@@ -1,5 +1,5 @@
 // Workspace actions: the context palette for the highlighted root or
-// directory, including its direct terminal, Git, and removal operations.
+// directory, including its direct terminal, file, Git, and removal operations.
 
 package ui
 
@@ -17,6 +17,7 @@ const (
 	workspaceOpenTerminalAction workspaceAction = iota
 	workspaceNewTabAction
 	workspaceCloseTabAction
+	workspaceAllFilesAction
 	workspaceFileChangesAction
 	workspaceGitStatusAction
 	workspaceGitFetchAction
@@ -29,7 +30,7 @@ type workspaceActionGroup int
 
 const (
 	workspaceTerminalGroup workspaceActionGroup = iota
-	workspaceGitGroup
+	workspaceFileGitGroup
 	workspaceDestructiveGroup
 )
 
@@ -90,7 +91,7 @@ func (m dashboard) navigationRowForIndex(want, height int) (int, bool) {
 
 func (m dashboard) workspaceActionChoices() []workspaceActionChoice {
 	target := m.workspaceActionTarget
-	choices := make([]workspaceActionChoice, 0, 8)
+	choices := make([]workspaceActionChoice, 0, 10)
 	if target.failure == "" {
 		if len(runningTabs(target.tabs)) > 0 {
 			choices = append(choices, workspaceActionChoice{
@@ -105,13 +106,18 @@ func (m dashboard) workspaceActionChoices() []workspaceActionChoice {
 				action: workspaceCloseTabAction, label: "Close tab",
 			})
 		}
+		if !target.isRoot {
+			choices = append(choices, workspaceActionChoice{
+				action: workspaceAllFilesAction, label: "All files", group: workspaceFileGitGroup,
+			})
+		}
 		if target.hasGit {
 			choices = append(choices,
-				workspaceActionChoice{action: workspaceFileChangesAction, label: "File changes", group: workspaceGitGroup},
-				workspaceActionChoice{action: workspaceGitStatusAction, label: "Git status", group: workspaceGitGroup},
-				workspaceActionChoice{action: workspaceGitFetchAction, label: "Git fetch", group: workspaceGitGroup},
-				workspaceActionChoice{action: workspaceGitPullAction, label: "Git pull", group: workspaceGitGroup},
-				workspaceActionChoice{action: workspaceGitPushAction, label: "Git push", group: workspaceGitGroup},
+				workspaceActionChoice{action: workspaceFileChangesAction, label: "File changes", group: workspaceFileGitGroup},
+				workspaceActionChoice{action: workspaceGitStatusAction, label: "Git status", group: workspaceFileGitGroup},
+				workspaceActionChoice{action: workspaceGitFetchAction, label: "Git fetch", group: workspaceFileGitGroup},
+				workspaceActionChoice{action: workspaceGitPullAction, label: "Git pull", group: workspaceFileGitGroup},
+				workspaceActionChoice{action: workspaceGitPushAction, label: "Git push", group: workspaceFileGitGroup},
 			)
 		}
 	}
@@ -245,6 +251,9 @@ func (m dashboard) runWorkspaceAction(action workspaceAction) (tea.Model, tea.Cm
 	case workspaceFileChangesAction:
 		m.modal = noModal
 		return m.openGitDiffView(target)
+	case workspaceAllFilesAction:
+		m.modal = noModal
+		return m.openAllFilesView(target)
 	case workspaceGitStatusAction, workspaceGitFetchAction, workspaceGitPullAction, workspaceGitPushAction:
 		return m.startWorkspaceGitAction(action, target)
 	case workspaceRemoveAction:

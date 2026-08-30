@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"maps"
 	"sort"
 	"strings"
 
@@ -15,12 +16,26 @@ import (
 var (
 	loadGitChangedFiles = readGitChangedFiles
 	loadGitFileDiff     = readGitFileDiff
+	loadWorkspaceFiles  = readWorkspaceFiles
+	loadWorkspaceFile   = readWorkspaceFile
+)
+
+type fileViewMode int
+
+const (
+	changedFilesView fileViewMode = iota
+	allFilesView
 )
 
 type gitDiffView struct {
 	active            bool
+	mode              fileViewMode
 	target            model.Workspace
 	files             []gitChangedFile
+	treeRows          []gitDiffTreeRow
+	treeIndex         int
+	selectedDirectory string
+	collapsed         map[string]bool
 	fileIndex         int
 	diffLines         []string
 	diffSyntax        []gitDiffLineSyntax
@@ -33,11 +48,11 @@ type gitDiffView struct {
 	request           uint64
 }
 
-// clearDiff drops whatever diff is on screen. Four paths reach that state — a
-// file list that failed or arrived, a diff that was asked for, a diff that
-// failed — and setting the fields by hand at each is how one of them ends up
-// leaving the previous file's highlighting under the next file's text, or its
-// scroll offset under a diff that is shorter.
+// clearDiff drops whatever diff or file is on screen. Four paths reach that
+// state — a file list that failed or arrived, content that was asked for, or
+// content that failed — and setting the fields by hand at each is how one ends
+// up leaving the previous file's highlighting under the next file's text, or
+// its scroll offset under content that is shorter.
 func (v *gitDiffView) clearDiff() {
 	v.diffLines = nil
 	v.diffSyntax = nil
@@ -49,6 +64,7 @@ type gitChangedFilesMsg struct {
 	path    string
 	request uint64
 	files   []gitChangedFile
+	rows    []gitDiffTreeRow
 	err     error
 }
 
@@ -94,16 +110,37 @@ func (m dashboard) openGitDiffView(target navItem) (tea.Model, tea.Cmd) {
 	return m, m.loadChangedFiles()
 }
 
+func (m dashboard) openAllFilesView(target navItem) (tea.Model, tea.Cmd) {
+	if target.isRoot || target.failure != "" {
+		return m, nil
+	}
+	m.stopScrollback()
+	m.gitDiff = gitDiffView{
+		active: true, mode: allFilesView, target: target.workspace, request: m.gitDiff.request,
+	}
+	m.clearAnyError()
+	return m, m.loadChangedFiles()
+}
+
 func (m *dashboard) loadChangedFiles() tea.Cmd {
 	m.gitDiff.request++
 	request := m.gitDiff.request
 	path := m.gitDiff.target.Path
+	mode := m.gitDiff.mode
 	m.gitDiff.filesPending = true
 	m.gitDiff.diffPending = false
 	m.gitDiff.err = ""
 	return func() tea.Msg {
-		files, err := loadGitChangedFiles(path)
-		return gitChangedFilesMsg{path: path, request: request, files: files, err: err}
+		var files []gitChangedFile
+		var err error
+		if mode == allFilesView {
+			files, err = loadWorkspaceFiles(path)
+		} else {
+			files, err = loadGitChangedFiles(path)
+		}
+		return gitChangedFilesMsg{
+			path: path, request: request, files: files, rows: gitDiffTreeRows(files), err: err,
+		}
 	}
 }
 
@@ -118,11 +155,17 @@ func (m dashboard) handleGitChangedFiles(message gitChangedFilesMsg) (tea.Model,
 	m.gitDiff.filesPending = false
 	if message.err != nil {
 		m.gitDiff.files = nil
+		m.gitDiff.treeRows = nil
 		m.gitDiff.clearDiff()
 		m.gitDiff.err = message.err.Error()
 		return m, nil
 	}
 	m.gitDiff.files = message.files
+	m.gitDiff.treeRows = visibleGitDiffTreeRows(message.rows, m.gitDiff.collapsed)
+	if len(m.gitDiff.files) > 0 && len(m.gitDiff.treeRows) == 0 {
+		m.gitDiff.treeRows = visibleGitDiffTreeRows(gitDiffTreeRows(m.gitDiff.files), m.gitDiff.collapsed)
+	}
+	selectedDirectory := m.gitDiff.selectedDirectory
 	m.gitDiff.fileIndex = 0
 	for index, file := range m.gitDiff.files {
 		if file.Path == selectedPath {
@@ -135,6 +178,22 @@ func (m dashboard) handleGitChangedFiles(message gitChangedFilesMsg) (tea.Model,
 	if len(m.gitDiff.files) == 0 {
 		return m, nil
 	}
+	if selectedDirectory != "" {
+		for index, row := range m.gitDiff.treeRows {
+			if row.directory && row.path == selectedDirectory {
+				m.gitDiff.treeIndex = index
+				m.gitDiff.fileIndex = -1
+				return m, nil
+			}
+		}
+		m.gitDiff.selectedDirectory = ""
+	}
+	for index, row := range m.gitDiff.treeRows {
+		if row.fileIndex == m.gitDiff.fileIndex {
+			m.gitDiff.treeIndex = index
+			break
+		}
+	}
 	return m, m.loadSelectedFileDiff()
 }
 
@@ -146,15 +205,27 @@ func (m *dashboard) loadSelectedFileDiff() tea.Cmd {
 	request := m.gitDiff.request
 	path := m.gitDiff.target.Path
 	file := m.gitDiff.files[m.gitDiff.fileIndex]
+	mode := m.gitDiff.mode
 	m.gitDiff.diffPending = true
 	m.gitDiff.clearDiff()
 	m.gitDiff.err = ""
 	return func() tea.Msg {
-		diff, err := loadGitFileDiff(path, file)
+		var diff string
+		var err error
+		if mode == allFilesView {
+			diff, err = loadWorkspaceFile(path, file.Path)
+		} else {
+			diff, err = loadGitFileDiff(path, file)
+		}
 		message := gitFileDiffMsg{path: path, filePath: file.Path, request: request, err: err}
 		if err == nil {
-			message.lines = normalizeGitDiffLines(diff)
-			message.syntax, message.syntaxHighlighted = highlightGitDiffSyntax(file.Path, message.lines)
+			if mode == allFilesView {
+				message.lines = normalizeWorkspaceFileLines(diff)
+				message.syntax, message.syntaxHighlighted = highlightWorkspaceFileSyntax(file.Path, message.lines)
+			} else {
+				message.lines = normalizeGitDiffLines(diff)
+				message.syntax, message.syntaxHighlighted = highlightGitDiffSyntax(file.Path, message.lines)
+			}
 		}
 		return message
 	}
@@ -223,6 +294,9 @@ func (m dashboard) handleGitDiffKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd
 	case "esc":
 		return m.toggleGitDiffView()
 	case "f6":
+		if m.gitDiff.mode == allFilesView {
+			return m, nil
+		}
 		m.gitDiff.split = !m.gitDiff.split
 		m.gitDiffSplit = m.gitDiff.split
 		m.gitDiff.diffOffset = min(m.gitDiff.diffOffset, m.maximumGitDiffOffset())
@@ -231,6 +305,12 @@ func (m dashboard) handleGitDiffKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd
 		return m.moveGitDiffFile(-1)
 	case "down", "j":
 		return m.moveGitDiffFile(1)
+	case "enter":
+		return m.toggleGitDiffDirectory()
+	case "left", "h":
+		return m.setGitDiffDirectoryCollapsed(true)
+	case "right", "l":
+		return m.setGitDiffDirectoryCollapsed(false)
 	case "ctrl+up":
 		m.scrollGitDiff(-1)
 	case "ctrl+down":
@@ -272,12 +352,74 @@ func (m dashboard) moveGitDiffFile(delta int) (tea.Model, tea.Cmd) {
 	if m.gitDiff.filesPending || len(m.gitDiff.files) == 0 {
 		return m, nil
 	}
-	next := min(max(m.gitDiff.fileIndex+delta, 0), len(m.gitDiff.files)-1)
-	if next == m.gitDiff.fileIndex {
+	m.ensureGitDiffTreeRows()
+	next := min(max(m.gitDiff.treeIndex+delta, 0), len(m.gitDiff.treeRows)-1)
+	if next == m.gitDiff.treeIndex {
 		return m, nil
 	}
-	m.gitDiff.fileIndex = next
+	m.gitDiff.treeIndex = next
+	row := m.gitDiff.treeRows[next]
+	if row.directory {
+		m.gitDiff.selectedDirectory = row.path
+		m.gitDiff.fileIndex = -1
+		m.gitDiff.diffPending = false
+		m.gitDiff.clearDiff()
+		m.gitDiff.err = ""
+		return m, nil
+	}
+	m.gitDiff.selectedDirectory = ""
+	m.gitDiff.fileIndex = row.fileIndex
 	return m, m.loadSelectedFileDiff()
+}
+
+func (m *dashboard) ensureGitDiffTreeRows() {
+	if len(m.gitDiff.treeRows) == 0 && len(m.gitDiff.files) > 0 {
+		m.gitDiff.treeRows = visibleGitDiffTreeRows(gitDiffTreeRows(m.gitDiff.files), m.gitDiff.collapsed)
+	}
+	m.gitDiff.treeIndex = min(max(m.gitDiff.treeIndex, 0), max(len(m.gitDiff.treeRows)-1, 0))
+}
+
+func (m dashboard) toggleGitDiffDirectory() (tea.Model, tea.Cmd) {
+	m.ensureGitDiffTreeRows()
+	if len(m.gitDiff.treeRows) == 0 || !m.gitDiff.treeRows[m.gitDiff.treeIndex].directory {
+		return m, nil
+	}
+	row := m.gitDiff.treeRows[m.gitDiff.treeIndex]
+	return m.setGitDiffDirectoryCollapsed(!m.gitDiff.collapsed[row.path])
+}
+
+func (m dashboard) setGitDiffDirectoryCollapsed(collapsed bool) (tea.Model, tea.Cmd) {
+	m.ensureGitDiffTreeRows()
+	if len(m.gitDiff.treeRows) == 0 {
+		return m, nil
+	}
+	row := m.gitDiff.treeRows[m.gitDiff.treeIndex]
+	if !row.directory || m.gitDiff.collapsed[row.path] == collapsed {
+		return m, nil
+	}
+	nextCollapsed := maps.Clone(m.gitDiff.collapsed)
+	if nextCollapsed == nil {
+		nextCollapsed = make(map[string]bool)
+	}
+	if collapsed {
+		nextCollapsed[row.path] = true
+	} else {
+		delete(nextCollapsed, row.path)
+	}
+	m.gitDiff.collapsed = nextCollapsed
+	m.gitDiff.treeRows = visibleGitDiffTreeRows(gitDiffTreeRows(m.gitDiff.files), nextCollapsed)
+	for index, candidate := range m.gitDiff.treeRows {
+		if candidate.directory && candidate.path == row.path {
+			m.gitDiff.treeIndex = index
+			break
+		}
+	}
+	m.gitDiff.selectedDirectory = row.path
+	m.gitDiff.fileIndex = -1
+	m.gitDiff.diffPending = false
+	m.gitDiff.clearDiff()
+	m.gitDiff.err = ""
+	return m, nil
 }
 
 func (m *dashboard) scrollGitDiff(delta int) {
@@ -290,7 +432,7 @@ func (m dashboard) gitDiffPageSize() int {
 
 func (m dashboard) maximumGitDiffOffset() int {
 	lineCount := len(m.gitDiff.diffLines)
-	if m.gitDiff.split {
+	if m.gitDiff.mode == changedFilesView && m.gitDiff.split {
 		lineCount = len(splitGitDiffRows(m.gitDiff.diffLines))
 	}
 	return max(lineCount-m.gitDiffPageSize(), 0)
@@ -305,25 +447,26 @@ func (m dashboard) renderGitDiffPanes(leftWidth, rightWidth, height int) []strin
 }
 
 func (m dashboard) renderGitChangedFiles(width, height int) []string {
-	title := " Changes · " + display.Text(m.gitDiff.target.Name) + " "
+	title, loading, empty := " Changes · ", "  Loading changed files…", "  No changed files"
+	if m.gitDiff.mode == allFilesView {
+		title, loading, empty = " Files · ", "  Loading files…", "  No files"
+	}
+	title += display.Text(m.gitDiff.target.Name) + " "
 	lines := []string{m.paneHeader(m.styles.paneTitleActive, title, width), ""}
 	switch {
 	case m.gitDiff.filesPending:
-		return append(lines, m.styles.empty.Render("  Loading changed files…"))
+		return append(lines, m.styles.empty.Render(loading))
 	case m.gitDiff.err != "" && len(m.gitDiff.files) == 0:
 		return append(lines, m.styles.errorText.Render("  "+display.Text(m.gitDiff.err)))
 	case len(m.gitDiff.files) == 0:
-		return append(lines, m.styles.empty.Render("  No changed files"))
+		return append(lines, m.styles.empty.Render(empty))
 	}
-	rows := gitDiffTreeRows(m.gitDiff.files)
+	rows := m.gitDiff.treeRows
+	if len(rows) == 0 {
+		rows = gitDiffTreeRows(m.gitDiff.files)
+	}
 	available := max(height-len(lines), 0)
-	selectedRow := 0
-	for index, row := range rows {
-		if row.fileIndex == m.gitDiff.fileIndex {
-			selectedRow = index
-			break
-		}
-	}
+	selectedRow := min(max(m.gitDiff.treeIndex, 0), max(len(rows)-1, 0))
 	start := min(max(selectedRow-available/2, 0), max(len(rows)-available, 0))
 	end := min(start+available, len(rows))
 	for _, row := range rows[start:end] {
@@ -335,10 +478,23 @@ func (m dashboard) renderGitChangedFiles(width, height int) []string {
 func (m dashboard) renderGitDiffTreeRow(row gitDiffTreeRow, width int) string {
 	prefix := strings.Repeat("  ", row.depth) + "  "
 	if row.directory {
-		return m.styles.navigationRoot.Render(truncate(strings.Repeat("  ", row.depth)+"▾ "+display.Text(row.name)+"/", width))
+		indicator, marker := " ", "▾ "
+		style := m.styles.navigationRoot
+		if m.gitDiff.collapsed[row.path] {
+			marker = "▸ "
+		}
+		if row.path == m.gitDiff.selectedDirectory {
+			indicator = "▌"
+			style = m.styles.navigationSelected
+		}
+		line := indicator + strings.Repeat("  ", row.depth) + marker + display.Text(row.name) + "/"
+		return style.Render(pad(truncate(line, width), width))
 	}
 	file := m.gitDiff.files[row.fileIndex]
-	status := gitChangedFileStatus(file)
+	status := ""
+	if m.gitDiff.mode == changedFilesView {
+		status = gitChangedFileStatus(file)
+	}
 	indicator := " "
 	style := m.styles.navigationItem
 	if row.fileIndex == m.gitDiff.fileIndex {
@@ -384,26 +540,40 @@ func (m dashboard) renderGitFileDiff(width, height int) []string {
 		path = m.gitDiff.files[m.gitDiff.fileIndex].Path
 	}
 	title := " Diff"
+	if m.gitDiff.mode == allFilesView {
+		title = " File"
+	}
 	if path != "" {
 		title += " · " + display.Text(path)
 	}
-	mode := "inline"
-	if m.gitDiff.split {
-		mode = "split"
+	if m.gitDiff.mode == changedFilesView {
+		mode := "inline"
+		if m.gitDiff.split {
+			mode = "split"
+		}
+		title += " · " + mode
 	}
-	title += " · " + mode + " "
+	title += " "
 	lines := []string{m.paneHeader(m.styles.paneTitle, title, width), ""}
 	switch {
 	case m.gitDiff.diffPending:
-		return append(lines, m.styles.empty.Render("  Loading diff…"))
+		message := "  Loading diff…"
+		if m.gitDiff.mode == allFilesView {
+			message = "  Loading file…"
+		}
+		return append(lines, m.styles.empty.Render(message))
 	case m.gitDiff.err != "":
 		return append(lines, m.styles.errorText.Render("  "+display.Text(m.gitDiff.err)))
-	case len(m.gitDiff.files) == 0:
-		return append(lines, m.styles.empty.Render("  Select a changed file"))
+	case len(m.gitDiff.files) == 0 || m.gitDiff.fileIndex < 0 || m.gitDiff.fileIndex >= len(m.gitDiff.files):
+		message := "  Select a changed file"
+		if m.gitDiff.mode == allFilesView {
+			message = "  Select a file"
+		}
+		return append(lines, m.styles.empty.Render(message))
 	}
 	capacity := max(height-len(lines), 0)
 	start := min(m.gitDiff.diffOffset, m.maximumGitDiffOffset())
-	if m.gitDiff.split {
+	if m.gitDiff.mode == changedFilesView && m.gitDiff.split {
 		rows := splitGitDiffRows(m.gitDiff.diffLines)
 		end := min(start+capacity, len(rows))
 		for _, row := range rows[start:end] {
@@ -413,9 +583,28 @@ func (m dashboard) renderGitFileDiff(width, height int) []string {
 	}
 	end := min(start+capacity, len(m.gitDiff.diffLines))
 	for index, line := range m.gitDiff.diffLines[start:end] {
-		lines = append(lines, m.renderGitDiffLineAt(display.Text(line), start+index, width))
+		if m.gitDiff.mode == allFilesView {
+			lines = append(lines, m.renderWorkspaceFileLineAt(display.Text(line), start+index, width))
+		} else {
+			lines = append(lines, m.renderGitDiffLineAt(display.Text(line), start+index, width))
+		}
 	}
 	return lines
+}
+
+func (m dashboard) renderWorkspaceFileLineAt(line string, index, width int) string {
+	if !m.gitDiff.syntaxHighlighted || index < 0 || index >= len(m.gitDiff.diffSyntax) {
+		return m.styles.navigationItem.Render(truncate(line, width))
+	}
+	tokens := m.gitDiff.diffSyntax[index].new
+	if !m.gitDiff.diffSyntax[index].newHighlighted || gitSyntaxText(tokens) != line {
+		return m.styles.navigationItem.Render(truncate(line, width))
+	}
+	var result strings.Builder
+	for _, token := range tokens {
+		result.WriteString(m.gitSyntaxStyle(token.kind).Render(display.Text(token.value)))
+	}
+	return truncate(result.String(), width)
 }
 
 type gitSplitDiffRow struct {
@@ -587,6 +776,7 @@ type gitDiffTreeNode struct {
 
 type gitDiffTreeRow struct {
 	name      string
+	path      string
 	depth     int
 	directory bool
 	fileIndex int
@@ -610,11 +800,11 @@ func gitDiffTreeRows(files []gitChangedFile) []gitDiffTreeRow {
 		}
 	}
 	rows := make([]gitDiffTreeRow, 0, len(files)*2)
-	appendGitDiffTreeRows(root, 0, &rows)
+	appendGitDiffTreeRows(root, "", 0, &rows)
 	return rows
 }
 
-func appendGitDiffTreeRows(node *gitDiffTreeNode, depth int, rows *[]gitDiffTreeRow) {
+func appendGitDiffTreeRows(node *gitDiffTreeNode, parent string, depth int, rows *[]gitDiffTreeRow) {
 	names := make([]string, 0, len(node.children))
 	for name := range node.children {
 		names = append(names, name)
@@ -622,14 +812,36 @@ func appendGitDiffTreeRows(node *gitDiffTreeNode, depth int, rows *[]gitDiffTree
 	sort.Strings(names)
 	for _, name := range names {
 		child := node.children[name]
+		path := name
+		if parent != "" {
+			path = parent + "/" + name
+		}
 		directory := len(child.children) > 0
 		if directory {
-			*rows = append(*rows, gitDiffTreeRow{name: child.name, depth: depth, directory: true, fileIndex: -1})
-			appendGitDiffTreeRows(child, depth+1, rows)
+			*rows = append(*rows, gitDiffTreeRow{name: child.name, path: path, depth: depth, directory: true, fileIndex: -1})
+			appendGitDiffTreeRows(child, path, depth+1, rows)
 			continue
 		}
-		*rows = append(*rows, gitDiffTreeRow{name: child.name, depth: depth, fileIndex: child.fileIndex})
+		*rows = append(*rows, gitDiffTreeRow{name: child.name, path: path, depth: depth, fileIndex: child.fileIndex})
 	}
+}
+
+func visibleGitDiffTreeRows(rows []gitDiffTreeRow, collapsed map[string]bool) []gitDiffTreeRow {
+	visible := make([]gitDiffTreeRow, 0, len(rows))
+	hiddenBelow := -1
+	for _, row := range rows {
+		if hiddenBelow >= 0 {
+			if row.depth > hiddenBelow {
+				continue
+			}
+			hiddenBelow = -1
+		}
+		visible = append(visible, row)
+		if row.directory && collapsed[row.path] {
+			hiddenBelow = row.depth
+		}
+	}
+	return visible
 }
 
 func gitChangedFileStatus(file gitChangedFile) string {

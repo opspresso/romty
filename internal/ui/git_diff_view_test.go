@@ -71,6 +71,106 @@ func TestDashboardTogglesGitDiffViewForContextWorkspace(t *testing.T) {
 	}
 }
 
+func TestDashboardLoadsAndRendersEveryWorkspaceFile(t *testing.T) {
+	workspace := model.Workspace{ID: "workspace-1", RootID: "root-1", Name: "alpha", Path: "/projects/alpha"}
+	snapshot := model.Snapshot{Roots: []model.RootView{{
+		Root:        model.Root{ID: "root-1", Name: "projects", Path: "/projects"},
+		Directories: []model.WorkspaceView{{Workspace: workspace}},
+	}}}
+	previousFiles, previousFile := loadWorkspaceFiles, loadWorkspaceFile
+	t.Cleanup(func() { loadWorkspaceFiles, loadWorkspaceFile = previousFiles, previousFile })
+	loadWorkspaceFiles = func(path string) ([]gitChangedFile, error) {
+		if path != workspace.Path {
+			t.Fatalf("workspace files path = %q, want %q", path, workspace.Path)
+		}
+		return []gitChangedFile{{Path: "README.md"}, {Path: "internal/ui/view.go"}}, nil
+	}
+	loadWorkspaceFile = func(path, filePath string) (string, error) {
+		if path != workspace.Path || filePath != "README.md" {
+			t.Fatalf("workspace file target = (%q, %q), want (%q, README.md)", path, filePath, workspace.Path)
+		}
+		return "# Alpha\n", nil
+	}
+
+	value := newDashboard(&fakeBackend{}, snapshot)
+	value.setNavigation(1)
+	target, _ := value.navigationItem()
+	updated, filesCommand := value.openAllFilesView(target)
+	value = updated.(dashboard)
+	updated, fileCommand := value.Update(filesCommand())
+	value = updated.(dashboard)
+	updated, _ = value.Update(fileCommand())
+	value = updated.(dashboard)
+
+	rendered := ansi.Strip(value.render())
+	for _, fragment := range []string{"Files · alpha", "README.md", "▾ internal/", "view.go", "File · README.md", "# Alpha"} {
+		if !strings.Contains(rendered, fragment) {
+			t.Fatalf("workspace file view does not contain %q:\n%s", fragment, rendered)
+		}
+	}
+}
+
+func TestDashboardCollapsesAndExpandsFileTreeDirectories(t *testing.T) {
+	files := []gitChangedFile{
+		{Path: "internal/ui/first.go", IndexStatus: ' ', WorkTreeStatus: 'M'},
+		{Path: "internal/ui/second.go", IndexStatus: ' ', WorkTreeStatus: 'M'},
+		{Path: "README.md", IndexStatus: ' ', WorkTreeStatus: 'M'},
+	}
+	value := newDashboard(&fakeBackend{}, model.Snapshot{})
+	value.gitDiff = gitDiffView{
+		active: true, files: files, treeRows: gitDiffTreeRows(files),
+		fileIndex: -1, treeIndex: 2,
+	}
+
+	updated, command := value.Update(key(tea.KeyEnter, ""))
+	value = updated.(dashboard)
+	if command != nil || !value.gitDiff.collapsed["internal/ui"] || len(value.gitDiff.treeRows) != 3 {
+		t.Fatalf("collapse directory = (command %v, state %#v)", command, value.gitDiff)
+	}
+	rendered := ansi.Strip(strings.Join(value.renderGitChangedFiles(40, 10), "\n"))
+	if !strings.Contains(rendered, "▸ ui/") || strings.Contains(rendered, "first.go") {
+		t.Fatalf("collapsed tree is incomplete:\n%s", rendered)
+	}
+
+	updated, command = value.Update(key(tea.KeyRight, ""))
+	value = updated.(dashboard)
+	if command != nil || value.gitDiff.collapsed["internal/ui"] || len(value.gitDiff.treeRows) != 5 {
+		t.Fatalf("expand directory = (command %v, state %#v)", command, value.gitDiff)
+	}
+	rendered = ansi.Strip(strings.Join(value.renderGitChangedFiles(40, 10), "\n"))
+	if !strings.Contains(rendered, "▾ ui/") || !strings.Contains(rendered, "first.go") {
+		t.Fatalf("expanded tree is incomplete:\n%s", rendered)
+	}
+
+	updated, command = value.Update(key(tea.KeyDown, ""))
+	value = updated.(dashboard)
+	if command == nil || value.gitDiff.fileIndex != 0 || value.gitDiff.selectedDirectory != "" {
+		t.Fatalf("move from directory to file = (command %v, state %#v)", command, value.gitDiff)
+	}
+	updated, command = value.Update(key(tea.KeyUp, ""))
+	value = updated.(dashboard)
+	if command != nil || value.gitDiff.fileIndex != -1 || value.gitDiff.selectedDirectory != "internal/ui" {
+		t.Fatalf("move from file to directory = (command %v, state %#v)", command, value.gitDiff)
+	}
+
+	updated, command = value.Update(key(tea.KeyLeft, ""))
+	value = updated.(dashboard)
+	if command != nil || !value.gitDiff.collapsed["internal/ui"] {
+		t.Fatalf("collapse directory with Left = (command %v, state %#v)", command, value.gitDiff)
+	}
+
+	value.gitDiff.filesPending = true
+	value.gitDiff.request = 1
+	updated, command = value.Update(gitChangedFilesMsg{
+		path: "", request: 1, files: files, rows: gitDiffTreeRows(files),
+	})
+	value = updated.(dashboard)
+	if command != nil || !value.gitDiff.collapsed["internal/ui"] || len(value.gitDiff.treeRows) != 3 ||
+		value.gitDiff.selectedDirectory != "internal/ui" {
+		t.Fatalf("refresh collapsed directory = (command %v, state %#v)", command, value.gitDiff)
+	}
+}
+
 func TestDashboardExpandsTabsInLoadedGitDiff(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, model.Snapshot{})
 	value.width = 100

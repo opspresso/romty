@@ -349,15 +349,19 @@ func (m dashboard) renderStatus(width, bodyHeight int) []string {
 		rail = renderShortcutRail(m.styles, width,
 			shortcut{key: "Ctrl+Shift+F", description: "close file view"},
 		)
-		status = renderShortcuts(m.styles, width,
-			shortcut{key: "↑/↓", description: "file"},
-			shortcut{key: "F6", description: "layout"},
+		shortcuts := []shortcut{{key: "↑/↓", description: "item"}}
+		shortcuts = append(shortcuts, shortcut{key: "←/→/Enter", description: "folder"})
+		if m.gitDiff.mode == changedFilesView {
+			shortcuts = append(shortcuts, shortcut{key: "F6", description: "layout"})
+		}
+		shortcuts = append(shortcuts,
 			shortcut{key: "Ctrl+↑/↓", description: "line"},
-			shortcut{key: "PgUp/PgDn", description: "diff"},
+			shortcut{key: "PgUp/PgDn", description: "page"},
 			shortcut{key: "Home/End", description: "first/last"},
 			shortcut{key: "F5", description: "refresh"},
 			shortcut{key: "Esc", description: "close"},
 		)
+		status = renderShortcuts(m.styles, width, shortcuts...)
 	case m.scrollback && m.searchMode:
 		status = truncate(
 			m.styles.promptLabel.Render(" FIND ")+" "+
