@@ -45,3 +45,33 @@ func TestTextKeepsTheRuneCount(t *testing.T) {
 		t.Fatal("Text left a control character standing")
 	}
 }
+
+// Byte scanners that react to C1 control bytes ask Multibyte first, because
+// every C1 byte also occurs as a continuation byte inside ordinary text.
+func TestMultibyteGroupsCharactersAndLeavesOtherBytesAlone(t *testing.T) {
+	for _, probe := range []struct {
+		name   string
+		value  string
+		length int
+		split  bool
+	}{
+		{name: "ASCII", value: "a", length: 0},
+		{name: "a two-byte character", value: "é", length: 2},
+		// "서" is EC 84 9C: its last byte is the C1 string terminator.
+		{name: "a three-byte character", value: "서", length: 3},
+		{name: "a four-byte character", value: "😀", length: 4},
+		{name: "a stray continuation byte", value: "\x9c", length: 0},
+		{name: "a C1 introducer", value: "\x9b", length: 0},
+		{name: "a lead byte before ASCII", value: "\xecab", length: 0},
+		{name: "a character cut in half", value: "\xec\x84", length: 3, split: true},
+		{name: "a lone lead byte", value: "\xec", length: 3, split: true},
+	} {
+		t.Run(probe.name, func(t *testing.T) {
+			length, split := display.Multibyte([]byte(probe.value), 0)
+			if length != probe.length || split != probe.split {
+				t.Fatalf("Multibyte(%q) = %d, %v, want %d, %v",
+					probe.value, length, split, probe.length, probe.split)
+			}
+		})
+	}
+}
