@@ -58,6 +58,8 @@ type Server struct {
 	// error that is not written there leaves no trace at all.
 	logger *log.Logger
 
+	resume *resumeStore
+
 	mu            sync.Mutex
 	value         model.State
 	revision      uint64
@@ -92,9 +94,12 @@ func New(socket, statePath, shell string) (*Server, error) {
 		shell = "/bin/sh"
 	}
 	return &Server{
-		socket:        socket,
-		store:         store,
-		shell:         shell,
+		socket: socket,
+		store:  store,
+		shell:  shell,
+		// Beside the state file rather than named by paths.Resolve, so every
+		// caller that could already build a daemon keeps being able to.
+		resume:        &resumeStore{directory: filepath.Join(filepath.Dir(statePath), "resume")},
 		logger:        log.New(os.Stderr, "romty: ", log.LstdFlags),
 		value:         value,
 		sessions:      make(map[string]*session),
@@ -146,6 +151,7 @@ func (s *Server) Serve(ctx context.Context) error {
 	if err := s.removeStaleTabs(); err != nil {
 		return err
 	}
+	s.resume.discardStale(time.Now())
 	if err := prepareSocket(s.socket); err != nil {
 		return err
 	}
@@ -215,9 +221,49 @@ func (s *Server) shutdown() {
 	for _, value := range s.sessions {
 		sessions = append(sessions, value)
 	}
+	saves := s.resumeSnapshotsLocked()
 	s.mu.Unlock()
+	for _, value := range saves {
+		if err := s.resume.save(value.id, value.meta, value.recording()); err != nil {
+			s.logger.Printf("save session for tab %s: %v", value.id, err)
+		}
+	}
 	closeSessions(sessions)
 	_ = os.Remove(s.socket)
+}
+
+type resumeSave struct {
+	id        string
+	meta      resumeSnapshot
+	recording func() []byte
+}
+
+// resumeSnapshotsLocked names what the stopping daemon saves for the next
+// one: each running tab's workspace, its agent's identity, and — read after
+// the server lock is released, because it can be megabytes — its recording.
+func (s *Server) resumeSnapshotsLocked() []resumeSave {
+	saves := make([]resumeSave, 0, len(s.sessions))
+	now := time.Now()
+	for _, tab := range s.value.Tabs {
+		value, ok := s.sessions[tab.ID]
+		if !ok {
+			continue
+		}
+		runtime := s.agentStatuses[tab.ID]
+		saves = append(saves, resumeSave{
+			id: tab.ID,
+			meta: resumeSnapshot{
+				Format:         1,
+				WorkspaceID:    tab.WorkspaceID,
+				TabName:        tab.Name,
+				Agent:          runtime.Agent,
+				AgentSessionID: runtime.SessionID,
+				SavedAt:        now,
+			},
+			recording: value.snapshotRecording,
+		})
+	}
+	return saves
 }
 
 func (s *Server) resize(tabID, clientID string, columns, rows uint16) protocol.Response {

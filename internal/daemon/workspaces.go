@@ -316,6 +316,12 @@ func (s *Server) createTab(request protocol.Request) protocol.Response {
 		return protocol.Response{Error: err.Error()}
 	}
 	s.mu.Unlock()
+	// Before the reply, so the attach that follows it replays the restored
+	// output rather than racing it. The stopping daemon saved by workspace;
+	// each new tab here consumes one snapshot, oldest tab name first.
+	if meta, recording, ok := s.resume.take(workspaceID); ok {
+		value.restore(recording, resumeCommand(meta.Agent, meta.AgentSessionID))
+	}
 	return protocol.Response{Tab: &tab}
 }
 

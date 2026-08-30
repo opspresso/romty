@@ -10,7 +10,7 @@ Website: [romty.dev](https://romty.dev)
 
 AI coding agents often need more time and compute than a laptop can reliably provide. romty is designed to run on an always-on workstation at home or at the office, beside the repositories and tools the agents use. Connect to that machine over Tailscale and SSH, start romty and an agent, then disconnect without terminating the terminal session. The next SSH login can reopen the same romty workspace and continue from its retained output.
 
-Tailscale and SSH provide access to the machine; romty does not expose a network service. Its client and daemon communicate through a private Unix socket on that host. Sessions survive SSH disconnects and TUI exits, but not a machine shutdown or an explicit `romty stop`.
+Tailscale and SSH provide access to the machine; romty does not expose a network service. Its client and daemon communicate through a private Unix socket on that host. Sessions survive SSH disconnects and TUI exits, but not a machine shutdown or an explicit `romty stop`. A stop does save each running tab's output and agent session: the first tabs opened in that workspace afterwards replay the saved output and, when Claude Code or Codex was running, start with its resume command already typed at the prompt.
 
 ```text
 laptop -> Tailscale -> SSH -> always-on machine -> romty -> AI coding agent
@@ -23,6 +23,7 @@ laptop -> Tailscale -> SSH -> always-on machine -> romty -> AI coding agent
 - Restore up to 8 MiB of recent output, and browse and search 10,000 lines of scrollback.
 - Open full-width scrollback for native terminal selection and copying, with light or dark colors.
 - Show Claude Code and Codex working and waiting states from their own output, and every phase through optional hooks.
+- Save every tab's output and agent session across `romty stop`, and offer them back — output replayed, resume command pre-typed — in the workspace's next tabs.
 - Use function-key navigation that remains reliable with an active IME.
 
 ## Install
