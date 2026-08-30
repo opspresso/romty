@@ -416,6 +416,17 @@ func (m dashboard) mouseMode() tea.MouseMode {
 		}
 		return tea.MouseModeNone
 	}
+	// While the keyboard is in the terminal the user is typing at the guest,
+	// and every pointer move the host reports would cross the wire of an SSH
+	// session for hover highlights nobody is looking at. Button events still
+	// carry clicks, drags and the wheel, so the chrome stays clickable; a
+	// guest that asked for more through passthrough gets what it asked for.
+	if m.focus == terminalPane {
+		if m.guestOwnsMouse() {
+			return m.terminal.guestMouseMode()
+		}
+		return tea.MouseModeCellMotion
+	}
 	// Motion is what the hover highlights are drawn from, so romty asks for it
 	// even while passthrough hands the buttons to the guest. forwardMouse then
 	// keeps the motion a guest never asked for to itself.

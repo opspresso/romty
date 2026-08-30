@@ -1389,8 +1389,9 @@ func TestDashboardScrollsTerminalHistory(t *testing.T) {
 	history := value.terminal.scrollbackLen()
 
 	// The live screen captures the wheel so it can enter scrollback directly.
-	if value.View().MouseMode != tea.MouseModeAllMotion {
-		t.Fatalf("mouse mode outside scrollback = %v, want all motion", value.View().MouseMode)
+	// Button events are enough for that; terminal focus asks for no motion.
+	if value.View().MouseMode != tea.MouseModeCellMotion {
+		t.Fatalf("mouse mode outside scrollback = %v, want button events", value.View().MouseMode)
 	}
 	live := plainRows(value.terminal.renderViewport(0))
 
@@ -1452,7 +1453,7 @@ func TestDashboardScrollsTerminalHistory(t *testing.T) {
 
 	updated, command = value.Update(key(tea.KeyEscape, ""))
 	value = updated.(dashboard)
-	if value.scrollback || value.scrollOffset != 0 || value.View().MouseMode != tea.MouseModeAllMotion {
+	if value.scrollback || value.scrollOffset != 0 || value.View().MouseMode != tea.MouseModeCellMotion {
 		t.Fatalf("Esc = (scrollback %v, offset %d, mouse %v), want live wheel capture restored",
 			value.scrollback, value.scrollOffset, value.View().MouseMode)
 	}
@@ -2177,7 +2178,7 @@ func TestDashboardKeepsMouseWithTheHostUnlessPassthroughIsOn(t *testing.T) {
 	if value.terminal.guestMouseMode() != tea.MouseModeAllMotion {
 		t.Fatalf("guest mouse mode = %v, want all motion", value.terminal.guestMouseMode())
 	}
-	if value.View().MouseMode != tea.MouseModeAllMotion {
+	if value.View().MouseMode != tea.MouseModeCellMotion {
 		t.Fatalf("mouse mode = %v, want romty to capture the live wheel", value.View().MouseMode)
 	}
 	updated, _ := value.Update(tea.MouseWheelMsg{X: 40, Y: 6, Button: tea.MouseWheelUp})
@@ -3634,8 +3635,8 @@ func TestDashboardCapturesLiveMouseWheelAndUsesKeyboardFocus(t *testing.T) {
 	value.terminal = terminal
 	value.focus = terminalPane
 
-	if view := value.View(); view.MouseMode != tea.MouseModeAllMotion {
-		t.Fatalf("initial mouse mode = %v, want all motion", view.MouseMode)
+	if view := value.View(); view.MouseMode != tea.MouseModeCellMotion {
+		t.Fatalf("initial mouse mode = %v, want button events", view.MouseMode)
 	}
 	if rendered := value.render(); strings.Contains(rendered, "Ctrl+G") || strings.Contains(rendered, "mouse focus") {
 		t.Fatalf("mouse focus mode is still advertised:\n%s", rendered)
