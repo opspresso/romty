@@ -27,6 +27,10 @@ type embeddedTerminal struct {
 	// guestMouse holds the mouse tracking modes the guest application asked
 	// for. romty only mirrors them to the host when passthrough is enabled.
 	guestMouse map[ansi.DECMode]bool
+	// titles removes window-title sequences before the emulator parses them,
+	// because the emulator reads the 0x9C inside characters such as "서" as
+	// the C1 string terminator and prints the rest of the title as text.
+	titles titleScrubber
 }
 
 type terminalOutputMsg struct {
@@ -144,7 +148,7 @@ func (t *embeddedTerminal) read() tea.Cmd {
 }
 
 func (t *embeddedTerminal) writeOutput(data []byte) {
-	_, _ = t.emulator.Write(data)
+	_, _ = t.emulator.Write(t.titles.scrub(data))
 }
 
 func (t *embeddedTerminal) sendKey(message tea.KeyPressMsg) {

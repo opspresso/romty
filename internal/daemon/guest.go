@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+
+	"github.com/opspresso/romty/internal/display"
 )
 
 // Terminal modes are sticky: a guest sets one once and it stays set for the
@@ -59,6 +61,9 @@ type guestTracker struct {
 	// carry holds a sequence cut in half by a chunk boundary, since the PTY
 	// hands over whatever happens to have arrived.
 	carry []byte
+	// skip counts the continuation bytes of a character the last chunk cut,
+	// so the C1-looking bytes among them are not read as introducers.
+	skip int
 }
 
 func newGuestTracker() *guestTracker {
@@ -71,7 +76,27 @@ func (t *guestTracker) observe(data []byte) {
 		scan = append(t.carry, data...)
 		t.carry = nil
 	}
-	for index := 0; index < len(scan); {
+	index := 0
+	for t.skip > 0 && index < len(scan) {
+		if scan[index]&0xc0 != 0x80 {
+			t.skip = 0
+			break
+		}
+		index++
+		t.skip--
+	}
+	for index < len(scan) {
+		// A multibyte character is stepped over whole: the C1 introducers
+		// below all occur as continuation bytes inside ordinary text, and
+		// reading one there starts tracking a sequence the guest never sent.
+		if length, split := display.Multibyte(scan, index); length > 0 {
+			if split {
+				t.skip = length - (len(scan) - index)
+				return
+			}
+			index += length
+			continue
+		}
 		if scan[index] == escape {
 			if index+1 >= len(scan) {
 				t.hold(scan[index:], modeCarryLimit)
@@ -248,7 +273,18 @@ const (
 // of ST, or the single C1 terminator — and reports the body between the
 // introducer and it.
 func scanTitleSequence(data []byte, body int) (end int, content string, state titleState) {
-	for cursor := body; cursor < len(data); cursor++ {
+	for cursor := body; cursor < len(data); {
+		// 0x9C inside a character — "서" ends in it — is the title's own
+		// text, not the C1 terminator, so the character is stepped over
+		// whole; one the chunk cut in half means the terminator is not
+		// here yet either.
+		if length, split := display.Multibyte(data, cursor); length > 0 {
+			if split {
+				return 0, "", titleSplit
+			}
+			cursor += length
+			continue
+		}
 		switch data[cursor] {
 		case bell, stringTerminator:
 			return cursor + 1, string(data[body:cursor]), titleComplete
@@ -261,6 +297,7 @@ func scanTitleSequence(data []byte, body int) (end int, content string, state ti
 			}
 			return cursor + 2, string(data[body:cursor]), titleComplete
 		}
+		cursor++
 	}
 	return 0, "", titleSplit
 }

@@ -323,3 +323,37 @@ func TestStripQueriesFindsAQueryBehindAnAbandonedString(t *testing.T) {
 		})
 	}
 }
+
+// Every C1 control byte also occurs as a continuation byte inside ordinary
+// text: "욛" ends in 0x9B, the single-byte CSI, and digits after it would
+// scan as a device status report to drop. UTF-8 text must pass unread while
+// the same bytes standing alone keep being stripped.
+func TestStripQueriesLeavesTextWhoseBytesLookLikeC1Controls(t *testing.T) {
+	for _, probe := range []struct {
+		name    string
+		history string
+		want    string
+	}{
+		{
+			name:    "a character ending in the CSI byte before digits",
+			history: "욛6n rest",
+			want:    "욛6n rest",
+		},
+		{
+			name:    "a title whose characters carry the ST byte",
+			history: "\x1b]0;✳ 문서 개선\x07\x1b]52;c;?\x07",
+			want:    "\x1b]0;✳ 문서 개선\x07",
+		},
+		{
+			name:    "a bare C1 query is still a query",
+			history: "before\x9b6nafter",
+			want:    "beforeafter",
+		},
+	} {
+		t.Run(probe.name, func(t *testing.T) {
+			if got := string(stripQueries([]byte(probe.history))); got != probe.want {
+				t.Fatalf("stripQueries(%q) = %q, want %q", probe.history, got, probe.want)
+			}
+		})
+	}
+}

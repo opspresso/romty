@@ -249,3 +249,42 @@ func TestModeTrackerBoundsWhatItHoldsBack(t *testing.T) {
 		t.Fatalf("carry = %d bytes, want at most %d", len(tracker.carry), modeCarryLimit)
 	}
 }
+
+// "✳" and "서" both carry 0x9C, the C1 string terminator, in their UTF-8
+// bytes. Read byte-wise that ends the title mid-character; the tracker must
+// keep the whole line an agent names its state with.
+func TestGuestTrackerReadsTitlesWithC1BytesInside(t *testing.T) {
+	tracker := newGuestTracker()
+	tracker.observe([]byte("\x1b]0;✳ 문서 개선\x07"))
+	if tracker.title != "✳ 문서 개선" {
+		t.Fatalf("title = %q, want %q", tracker.title, "✳ 문서 개선")
+	}
+}
+
+// A chunk boundary can cut a character in half, leaving its continuation
+// bytes — C1 bytes among them — at the head of the next chunk. Those must
+// not be read as introducers, and what follows must still be tracked.
+func TestGuestTrackerSurvivesACharacterCutByAChunk(t *testing.T) {
+	value := []byte("문서\x1b]2;서\x07\x1b[?1049h")
+	for cut := 0; cut <= len(value); cut++ {
+		tracker := newGuestTracker()
+		tracker.observe(value[:cut])
+		tracker.observe(value[cut:])
+		if tracker.title != "서" {
+			t.Fatalf("cut at %d: title = %q, want %q", cut, tracker.title, "서")
+		}
+		if !tracker.set[1049] {
+			t.Fatalf("cut at %d: alternate screen not tracked", cut)
+		}
+	}
+}
+
+// "욛" ends in 0x9B, the single-byte CSI. A mode sequence's worth of ASCII
+// after it must stay text rather than become a mode the guest never set.
+func TestGuestTrackerIgnoresModesInsideText(t *testing.T) {
+	tracker := newGuestTracker()
+	tracker.observe([]byte("욛?1049h"))
+	if len(tracker.restore()) != 0 {
+		t.Fatalf("restore = %q, want nothing tracked", tracker.restore())
+	}
+}

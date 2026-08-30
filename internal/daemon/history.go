@@ -1,6 +1,10 @@
 package daemon
 
-import "bytes"
+import (
+	"bytes"
+
+	"github.com/opspresso/romty/internal/display"
+)
 
 const (
 	escape = 0x1b
@@ -35,6 +39,17 @@ func stripQueries(history []byte) []byte {
 	var filtered []byte
 	copied := 0
 	for index := 0; index < len(history); {
+		// A multibyte character is stepped over whole, because the C1
+		// introducers this scanner reacts to all occur as continuation bytes
+		// inside ordinary text — "웛" ends in the CSI byte 0x9B, and digits
+		// after it would otherwise scan as a query to drop.
+		if length, split := display.Multibyte(history, index); length > 0 {
+			if split {
+				break
+			}
+			index += length
+			continue
+		}
 		end, drop := scanner.scanSequence(history, index)
 		if end == index {
 			index++
@@ -140,7 +155,16 @@ func (s *historyScanner) scanOperatingSystemCommand(data []byte, index, body int
 	if s.noBellOrTerminator {
 		return index, false
 	}
-	for cursor := body; cursor < len(data); cursor++ {
+	for cursor := body; cursor < len(data); {
+		// 0x9C inside a character — "서" ends in it — is text, not the C1
+		// string terminator, so the character is stepped over whole.
+		if length, split := display.Multibyte(data, cursor); length > 0 {
+			if split {
+				break
+			}
+			cursor += length
+			continue
+		}
 		if data[cursor] == bell || data[cursor] == stringTerminator {
 			return cursor + 1, isQueryPayload(data[body:cursor])
 		}
@@ -155,6 +179,7 @@ func (s *historyScanner) scanOperatingSystemCommand(data []byte, index, body int
 			// clipboard read hides from a filter that keeps looking for a BEL.
 			return cursor, false
 		}
+		cursor++
 	}
 	// Neither terminator exists in the rest of the buffer, so a string
 	// terminator alone cannot either.
@@ -194,7 +219,14 @@ func (s *historyScanner) scanDeviceControlString(data []byte, index, body int) (
 	if s.noStringTerminator {
 		return index, false
 	}
-	for cursor := body; cursor < len(data); cursor++ {
+	for cursor := body; cursor < len(data); {
+		if length, split := display.Multibyte(data, cursor); length > 0 {
+			if split {
+				break
+			}
+			cursor += length
+			continue
+		}
 		if data[cursor] == stringTerminator {
 			// DECRQSS, the request for a setting's current value.
 			return cursor + 1, bytes.HasPrefix(data[body:cursor], []byte("$q"))
@@ -206,6 +238,7 @@ func (s *historyScanner) scanDeviceControlString(data []byte, index, body int) (
 			// Abandoned at the ESC, for the same reason an OSC is.
 			return cursor, false
 		}
+		cursor++
 	}
 	s.noStringTerminator = true
 	return index, false
