@@ -429,6 +429,15 @@ func (m dashboard) Init() tea.Cmd {
 	// notch into arrow keys romty cannot tell from typed ones. Only scrollback
 	// wants them, so the mode is off until it opens.
 	commands := []tea.Cmd{tea.RequestBackgroundColor, m.refreshAgents(), m.initialGitStatus(), altScrollCommand(false)}
+	// Bubble Tea only asks terminals it can name for synchronized output and
+	// skips SSH sessions outright — but an SSH session is where romty lives.
+	// Asked blind, a terminal that supports the mode reports it and every
+	// frame is then drawn atomically, which is what stops a remote terminal
+	// from showing half-painted frames and a blinking cursor; one that does
+	// not says so or stays silent, and nothing changes. Unicode core rides
+	// along the same way it does upstream, so a terminal that measures
+	// graphemes is taken at its word about the widths romty lays out.
+	commands = append(commands, tea.Raw(ansi.RequestModeSynchronizedOutput+ansi.RequestModeUnicodeCore))
 	if m.restorePending {
 		commands = append(commands, m.openSelectedTerminal())
 	}
