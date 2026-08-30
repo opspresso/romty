@@ -342,6 +342,9 @@ func (m *dashboard) focusTerminal() {
 		return
 	}
 	m.focus = terminalPane
+	// Terminal focus stops the pointer motion that hover is drawn from, so a
+	// highlight left standing here would outlive the pointer that made it.
+	m.hover = hoverTarget{}
 	m.syncTabCursor(m.selectedTabs())
 }
 
