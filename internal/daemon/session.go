@@ -394,6 +394,32 @@ func (s *session) recentOutput(count int) ([]byte, string) {
 	return s.history.tail(count), s.guest.title
 }
 
+// snapshotRecording is the whole recording as a copy of its own, which is
+// what a stopping daemon writes to disk for the next one.
+func (s *session) snapshotRecording() []byte {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.history.bytes()
+}
+
+// restore hands a fresh session what the previous daemon saved for its
+// workspace: the recording, replayed to whoever attaches, and the agent's
+// resume command typed at the prompt without a newline — continuing is one
+// Enter, declining is one Ctrl+C. The recording goes straight into history
+// rather than through broadcast: the guest tracker must not adopt modes a
+// dead shell set, and there is no client yet to send it to.
+func (s *session) restore(recording []byte, command string) {
+	if len(recording) > 0 {
+		s.mu.Lock()
+		s.history.append(recording)
+		s.history.append([]byte(resumeMarker))
+		s.mu.Unlock()
+	}
+	if command != "" {
+		_ = s.write([]byte(command))
+	}
+}
+
 func (s *session) write(data []byte) error {
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()

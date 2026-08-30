@@ -306,6 +306,16 @@ func (s *Server) createTab(request protocol.Request) protocol.Response {
 		s.mu.Unlock()
 		return protocol.Response{Error: err.Error()}
 	}
+	// Restored before the tab is announced anywhere — the stopping daemon
+	// saved by workspace, and each new tab consumes one snapshot. After the
+	// registration below a second client could learn the tab from a snapshot
+	// and attach while the restore was still being written, and a replay
+	// copied before the preload never shows it: history is filled directly,
+	// not broadcast. The lock is already held across starting the shell for
+	// the same reason; reading one snapshot costs less than that.
+	if meta, recording, ok := s.resume.take(workspaceID); ok {
+		value.restore(recording, resumeCommand(meta.Agent, meta.AgentSessionID))
+	}
 	previous := cloneState(s.value)
 	s.value.Tabs = append(s.value.Tabs, tab)
 	s.sessions[tab.ID] = value

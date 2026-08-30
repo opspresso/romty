@@ -1342,3 +1342,114 @@ func TestRemoveWorkspaceForgetsADirectoryThatIsAlreadyGone(t *testing.T) {
 		t.Fatal("RemoveWorkspace() accepted a path outside the root")
 	}
 }
+
+// `romty stop` is for upgrades, and what it must not cost is the work in
+// flight: the stopping daemon saves each running tab's recording and agent
+// identity, and the next daemon hands both back to the first tab created in
+// that workspace — the old output replayed behind a marker, and the agent's
+// resume command already typed at the prompt.
+func TestStopSavesSessionsAndTheNextDaemonRestoresThem(t *testing.T) {
+	base := testutil.ShortTempDir(t)
+	socket := filepath.Join(base, "daemon.sock")
+	statePath := filepath.Join(base, "state.json")
+	workspacePath := filepath.Join(base, "alpha")
+	if err := os.MkdirAll(workspacePath, 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+
+	serve := func() (*client.Client, func()) {
+		server, err := daemon.New(socket, statePath, "/bin/sh")
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+		server.SetLogger(testutil.QuietLogger())
+		ctx, cancel := context.WithCancel(context.Background())
+		done := make(chan error, 1)
+		go func() { done <- server.Serve(ctx) }()
+		backend := client.New(socket)
+		testutil.WaitForDaemon(t, backend)
+		return backend, func() {
+			cancel()
+			if err := <-done; err != nil {
+				t.Errorf("Serve() error = %v", err)
+			}
+		}
+	}
+
+	backend, stop := serve()
+	snapshot, err := backend.AddRoot(base)
+	if err != nil {
+		t.Fatalf("AddRoot() error = %v", err)
+	}
+	workspace, err := backend.EnsureWorkspace(snapshot.Roots[0].Root.ID, workspacePath)
+	if err != nil {
+		t.Fatalf("EnsureWorkspace() error = %v", err)
+	}
+	tab, err := backend.CreateTab(workspace.ID, 80, 24)
+	if err != nil {
+		t.Fatalf("CreateTab() error = %v", err)
+	}
+	const sessionID = "0123abcd-89ef-4567-0123-456789abcdef"
+	if err := backend.ReportAgentEvent(tab.ID, protocol.AgentEvent{
+		Agent: model.AgentClaude, HookEvent: "SessionStart", SessionID: sessionID,
+	}); err != nil {
+		t.Fatalf("ReportAgentEvent() error = %v", err)
+	}
+	connection, reader, err := backend.OpenAttach(tab.ID)
+	if err != nil {
+		t.Fatalf("OpenAttach() error = %v", err)
+	}
+	writeCommand(t, connection, `echo RESUME''PROOF`)
+	readUntil(t, connection, reader, "RESUMEPROOF")
+	connection.Close()
+	stop()
+
+	backend, stop = serve()
+	defer stop()
+	restored, err := backend.CreateTab(workspace.ID, 80, 24)
+	if err != nil {
+		t.Fatalf("CreateTab() after restart error = %v", err)
+	}
+	connection, reader, err = backend.OpenAttach(restored.ID)
+	if err != nil {
+		t.Fatalf("OpenAttach() after restart error = %v", err)
+	}
+	defer connection.Close()
+	// The replay carries the saved output, then the marker, and the fresh
+	// shell echoes the pre-typed resume command when it reads its input. One
+	// accumulating read, because a single chunk can carry all three: reading
+	// until each in turn would swallow the next with the current one.
+	if err := connection.SetReadDeadline(time.Now().Add(3 * time.Second)); err != nil {
+		t.Fatalf("SetReadDeadline() error = %v", err)
+	}
+	var restoredOutput strings.Builder
+	buffer := make([]byte, 4096)
+	for !strings.Contains(restoredOutput.String(), "claude --resume "+sessionID) {
+		count, err := reader.Read(buffer)
+		if err != nil {
+			t.Fatalf("read restored output: %v; output = %q", err, restoredOutput.String())
+		}
+		restoredOutput.Write(buffer[:count])
+	}
+	output := restoredOutput.String()
+	proof := strings.Index(output, "RESUMEPROOF")
+	marker := strings.Index(output, "restored from the previous romty session")
+	if proof < 0 || marker < proof {
+		t.Fatalf("restored output out of order (proof %d, marker %d):\n%q", proof, marker, output)
+	}
+
+	third, err := backend.CreateTab(workspace.ID, 80, 24)
+	if err != nil {
+		t.Fatalf("third CreateTab() error = %v", err)
+	}
+	thirdConnection, thirdReader, err := backend.OpenAttach(third.ID)
+	if err != nil {
+		t.Fatalf("third OpenAttach() error = %v", err)
+	}
+	defer thirdConnection.Close()
+	writeCommand(t, thirdConnection, `echo FRESH''TAB`)
+	readUntil(t, thirdConnection, thirdReader, "FRESHTAB")
+	if _, err := os.Stat(filepath.Join(base, "resume", tab.ID+".json")); !os.IsNotExist(err) {
+		t.Fatalf("consumed snapshot still on disk: %v", err)
+	}
+}

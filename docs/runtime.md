@@ -4,7 +4,7 @@
 
 romty can keep AI coding sessions on an always-on macOS or Linux machine while the operator moves between laptops or locations. Install and run romty on the machine that owns the repositories and compute. Reach that machine through a private network such as Tailscale, log in with SSH, and run `romty` inside the SSH session.
 
-Closing SSH or exiting the TUI with `F4` leaves the daemon, PTYs, shells, and agent processes running on that machine. A later SSH login under the same Unix user can run `romty` again and reopen the live tabs with retained output. The host must remain powered on, and `romty stop` intentionally terminates every managed shell.
+Closing SSH or exiting the TUI with `F4` leaves the daemon, PTYs, shells, and agent processes running on that machine. A later SSH login under the same Unix user can run `romty` again and reopen the live tabs with retained output. The host must remain powered on, and `romty stop` intentionally terminates every managed shell — saving each tab's output and agent session first, so the next daemon can replay the output and pre-type the agent's resume command in that workspace's next tabs.
 
 ```text
 local laptop
