@@ -82,7 +82,7 @@ func TestTitleScrubberRemovesTitleSequences(t *testing.T) {
 // terminator, or a single character can be cut anywhere. Scrubbing the two
 // halves must reach the same conclusion as scrubbing the whole.
 func TestTitleScrubberSurvivesEveryChunkBoundary(t *testing.T) {
-	value := []byte("한글 text\x1b]0;✳ 문서 개선\a middle \x9d2;서\x9c\x1b[31m붉은\x1b]8;;x\x1b\\ end")
+	value := []byte("한글 text\x1b]0;✳ 문서 개선\a middle \x9d2;서\x9c\x1b]1;t\x1b\\\x1b[31m붉은\x1b]8;;x\x1b\\ end")
 	var whole titleScrubber
 	want := string(whole.scrub(value))
 	for cut := 0; cut <= len(value); cut++ {
