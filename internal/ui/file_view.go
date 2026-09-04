@@ -27,11 +27,8 @@ func readWorkspaceFiles(path string) ([]gitChangedFile, error) {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if filePath != path && strings.HasPrefix(entry.Name(), ".") {
-			if entry.IsDir() {
-				return filepath.SkipDir
-			}
-			return nil
+		if filePath != path && entry.IsDir() && strings.HasPrefix(entry.Name(), ".") {
+			return filepath.SkipDir
 		}
 		if entry.IsDir() || !entry.Type().IsRegular() {
 			return nil

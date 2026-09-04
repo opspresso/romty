@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-func TestReadWorkspaceFilesExcludesHiddenEntries(t *testing.T) {
+func TestReadWorkspaceFilesIncludesDotFilesAndExcludesDotDirectories(t *testing.T) {
 	workspace := t.TempDir()
 	for name, content := range map[string]string{
 		"README.md":                 "project\n",
@@ -36,7 +36,7 @@ func TestReadWorkspaceFilesExcludesHiddenEntries(t *testing.T) {
 	for index, file := range files {
 		paths[index] = file.Path
 	}
-	want := []string{"README.md", "node_modules/pkg/index.js", "src/main.go"}
+	want := []string{".env", "README.md", "node_modules/pkg/index.js", "src/.generated.go", "src/main.go"}
 	if !slices.Equal(paths, want) {
 		t.Fatalf("workspace files = %#v, want %#v", paths, want)
 	}

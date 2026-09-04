@@ -99,14 +99,74 @@ func TestDashboardLoadsAndRendersEveryWorkspaceFile(t *testing.T) {
 	value = updated.(dashboard)
 	updated, fileCommand := value.Update(filesCommand())
 	value = updated.(dashboard)
+	if fileCommand == nil || value.gitDiff.fileIndex != 0 || !value.gitDiff.collapsed["internal"] {
+		t.Fatalf("initial all-files tree = (command %v, state %#v), want README.md loading with directories collapsed",
+			fileCommand, value.gitDiff)
+	}
 	updated, _ = value.Update(fileCommand())
 	value = updated.(dashboard)
 
 	rendered := ansi.Strip(value.render())
-	for _, fragment := range []string{"Files · alpha", "README.md", "▾ internal/", "view.go", "File · README.md", "# Alpha"} {
+	for _, fragment := range []string{"Files · alpha", "▸ internal/", "README.md", "File · README.md", "# Alpha"} {
 		if !strings.Contains(rendered, fragment) {
 			t.Fatalf("workspace file view does not contain %q:\n%s", fragment, rendered)
 		}
+	}
+	if strings.Contains(rendered, "view.go") {
+		t.Fatalf("workspace file view started with internal expanded:\n%s", rendered)
+	}
+}
+
+func TestAllFilesTreeSortsDirectoriesBeforeFiles(t *testing.T) {
+	files := []gitChangedFile{
+		{Path: "alpha.txt"},
+		{Path: "zeta/last.txt"},
+		{Path: "beta/first.txt"},
+		{Path: "omega.txt"},
+	}
+
+	rows := fileViewTreeRows(files, allFilesView)
+	want := []string{"beta", "beta/first.txt", "zeta", "zeta/last.txt", "alpha.txt", "omega.txt"}
+	if len(rows) != len(want) {
+		t.Fatalf("all-files rows = %#v, want paths %q", rows, want)
+	}
+	for index, path := range want {
+		if rows[index].path != path {
+			t.Fatalf("all-files row %d = %q, want %q", index, rows[index].path, path)
+		}
+	}
+
+	changedRows := fileViewTreeRows(files, changedFilesView)
+	if changedRows[0].path != "alpha.txt" {
+		t.Fatalf("changed-files first row = %q, want existing name order", changedRows[0].path)
+	}
+}
+
+func TestAllFilesTreePreservesExpandedDirectoriesOnRefresh(t *testing.T) {
+	files := []gitChangedFile{{Path: "internal/ui/view.go"}, {Path: "README.md"}}
+	rows := fileViewTreeRows(files, allFilesView)
+	value := newDashboard(&fakeBackend{}, model.Snapshot{})
+	value.gitDiff = gitDiffView{
+		active: true, mode: allFilesView, filesPending: true, request: 1,
+	}
+
+	updated, command := value.Update(gitChangedFilesMsg{path: "", request: 1, files: files, rows: rows})
+	value = updated.(dashboard)
+	if command != nil || !value.gitDiff.collapsed["internal"] || !value.gitDiff.collapsed["internal/ui"] {
+		t.Fatalf("initial collapsed directories = (command %v, collapsed %v)", command, value.gitDiff.collapsed)
+	}
+	updated, _ = value.Update(key(tea.KeyRight, ""))
+	value = updated.(dashboard)
+	if value.gitDiff.collapsed["internal"] {
+		t.Fatalf("expanded directory remains collapsed: %v", value.gitDiff.collapsed)
+	}
+
+	value.gitDiff.filesPending = true
+	value.gitDiff.request = 2
+	updated, _ = value.Update(gitChangedFilesMsg{path: "", request: 2, files: files, rows: rows})
+	value = updated.(dashboard)
+	if value.gitDiff.collapsed["internal"] || !value.gitDiff.collapsed["internal/ui"] {
+		t.Fatalf("refresh changed expanded state: %v", value.gitDiff.collapsed)
 	}
 }
 
@@ -275,6 +335,45 @@ func TestDashboardNavigatesAndScrollsGitDiffView(t *testing.T) {
 	}
 	if value.View().MouseMode != tea.MouseModeCellMotion {
 		t.Fatalf("file view mouse mode = %v, want cell motion", value.View().MouseMode)
+	}
+}
+
+func TestDashboardUsesMouseInFileTree(t *testing.T) {
+	previousFile := loadWorkspaceFile
+	t.Cleanup(func() { loadWorkspaceFile = previousFile })
+	loadWorkspaceFile = func(_ string, filePath string) (string, error) {
+		return filePath, nil
+	}
+	files := []gitChangedFile{
+		{Path: "folder/inside.txt"},
+		{Path: "root.txt"},
+		{Path: "tail.txt"},
+	}
+	value := newDashboard(&fakeBackend{}, model.Snapshot{})
+	value.width = 80
+	value.height = 10
+	value.gitDiff = gitDiffView{
+		active: true, mode: allFilesView, target: model.Workspace{Path: "/workspace"},
+		files: files, treeRows: visibleGitDiffTreeRows(fileViewTreeRows(files, allFilesView), map[string]bool{"folder": true}),
+		collapsed: map[string]bool{"folder": true}, fileIndex: -1, selectedDirectory: "folder",
+	}
+
+	updated, command := value.Update(tea.MouseClickMsg{X: 2, Y: 2, Button: tea.MouseLeft})
+	value = updated.(dashboard)
+	if command != nil || value.gitDiff.collapsed["folder"] || len(value.gitDiff.treeRows) != 4 {
+		t.Fatalf("folder click = (command %v, state %#v), want expanded", command, value.gitDiff)
+	}
+
+	updated, command = value.Update(tea.MouseClickMsg{X: 2, Y: 3, Button: tea.MouseLeft})
+	value = updated.(dashboard)
+	if command == nil || value.gitDiff.fileIndex != 0 {
+		t.Fatalf("file click = (command %v, state %#v), want inside.txt loading", command, value.gitDiff)
+	}
+
+	updated, command = value.Update(tea.MouseWheelMsg{X: 2, Y: 3, Button: tea.MouseWheelDown})
+	value = updated.(dashboard)
+	if command == nil || value.gitDiff.fileIndex != 2 {
+		t.Fatalf("file-tree wheel = (command %v, state %#v), want tail.txt loading", command, value.gitDiff)
 	}
 }
 

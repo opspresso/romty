@@ -139,7 +139,7 @@ func (m *dashboard) loadChangedFiles() tea.Cmd {
 			files, err = loadGitChangedFiles(path)
 		}
 		return gitChangedFilesMsg{
-			path: path, request: request, files: files, rows: gitDiffTreeRows(files), err: err,
+			path: path, request: request, files: files, rows: fileViewTreeRows(files, mode), err: err,
 		}
 	}
 }
@@ -161,9 +161,17 @@ func (m dashboard) handleGitChangedFiles(message gitChangedFilesMsg) (tea.Model,
 		return m, nil
 	}
 	m.gitDiff.files = message.files
+	if m.gitDiff.mode == allFilesView && m.gitDiff.collapsed == nil {
+		m.gitDiff.collapsed = make(map[string]bool)
+		for _, row := range message.rows {
+			if row.directory {
+				m.gitDiff.collapsed[row.path] = true
+			}
+		}
+	}
 	m.gitDiff.treeRows = visibleGitDiffTreeRows(message.rows, m.gitDiff.collapsed)
 	if len(m.gitDiff.files) > 0 && len(m.gitDiff.treeRows) == 0 {
-		m.gitDiff.treeRows = visibleGitDiffTreeRows(gitDiffTreeRows(m.gitDiff.files), m.gitDiff.collapsed)
+		m.gitDiff.treeRows = visibleGitDiffTreeRows(fileViewTreeRows(m.gitDiff.files, m.gitDiff.mode), m.gitDiff.collapsed)
 	}
 	selectedDirectory := m.gitDiff.selectedDirectory
 	m.gitDiff.fileIndex = 0
@@ -188,11 +196,23 @@ func (m dashboard) handleGitChangedFiles(message gitChangedFilesMsg) (tea.Model,
 		}
 		m.gitDiff.selectedDirectory = ""
 	}
+	selectedFileVisible := false
 	for index, row := range m.gitDiff.treeRows {
 		if row.fileIndex == m.gitDiff.fileIndex {
 			m.gitDiff.treeIndex = index
+			selectedFileVisible = true
 			break
 		}
+	}
+	if !selectedFileVisible && len(m.gitDiff.treeRows) > 0 {
+		row := m.gitDiff.treeRows[0]
+		m.gitDiff.treeIndex = 0
+		if row.directory {
+			m.gitDiff.selectedDirectory = row.path
+			m.gitDiff.fileIndex = -1
+			return m, nil
+		}
+		m.gitDiff.fileIndex = row.fileIndex
 	}
 	return m, m.loadSelectedFileDiff()
 }
@@ -328,17 +348,46 @@ func (m dashboard) handleGitDiffKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd
 }
 
 func (m dashboard) handleGitDiffMouse(message tea.MouseMsg) (tea.Model, tea.Cmd) {
-	wheel, ok := message.(tea.MouseWheelMsg)
-	if !ok || wheel.X < m.gitDiffLayout().leftWidth+separatorWidth {
+	mouse := message.Mouse()
+	view := m.gitDiffLayout()
+	if mouse.Y < 0 || mouse.Y >= view.bodyHeight {
 		return m, nil
 	}
-	switch wheel.Button {
-	case tea.MouseWheelUp:
-		m.scrollGitDiff(-3)
-	case tea.MouseWheelDown:
-		m.scrollGitDiff(3)
+	if wheel, ok := message.(tea.MouseWheelMsg); ok {
+		if mouse.X >= 0 && mouse.X < view.leftWidth {
+			switch wheel.Button {
+			case tea.MouseWheelUp:
+				return m.moveGitDiffFile(-3)
+			case tea.MouseWheelDown:
+				return m.moveGitDiffFile(3)
+			}
+			return m, nil
+		}
+		if mouse.X >= view.leftWidth+view.separator {
+			switch wheel.Button {
+			case tea.MouseWheelUp:
+				m.scrollGitDiff(-3)
+			case tea.MouseWheelDown:
+				m.scrollGitDiff(3)
+			}
+		}
+		return m, nil
 	}
-	return m, nil
+	click, ok := message.(tea.MouseClickMsg)
+	if !ok || click.Button != tea.MouseLeft || mouse.X < 0 || mouse.X >= view.leftWidth {
+		return m, nil
+	}
+	m.ensureGitDiffTreeRows()
+	index, ok := m.gitDiffTreeIndexAtRow(mouse.Y, view.bodyHeight)
+	if !ok {
+		return m, nil
+	}
+	row := m.gitDiff.treeRows[index]
+	if row.directory {
+		m.gitDiff.treeIndex = index
+		return m.toggleGitDiffDirectory()
+	}
+	return m.moveGitDiffFile(index - m.gitDiff.treeIndex)
 }
 
 func gitDiffViewSetting(split bool) string {
@@ -374,7 +423,7 @@ func (m dashboard) moveGitDiffFile(delta int) (tea.Model, tea.Cmd) {
 
 func (m *dashboard) ensureGitDiffTreeRows() {
 	if len(m.gitDiff.treeRows) == 0 && len(m.gitDiff.files) > 0 {
-		m.gitDiff.treeRows = visibleGitDiffTreeRows(gitDiffTreeRows(m.gitDiff.files), m.gitDiff.collapsed)
+		m.gitDiff.treeRows = visibleGitDiffTreeRows(fileViewTreeRows(m.gitDiff.files, m.gitDiff.mode), m.gitDiff.collapsed)
 	}
 	m.gitDiff.treeIndex = min(max(m.gitDiff.treeIndex, 0), max(len(m.gitDiff.treeRows)-1, 0))
 }
@@ -407,7 +456,7 @@ func (m dashboard) setGitDiffDirectoryCollapsed(collapsed bool) (tea.Model, tea.
 		delete(nextCollapsed, row.path)
 	}
 	m.gitDiff.collapsed = nextCollapsed
-	m.gitDiff.treeRows = visibleGitDiffTreeRows(gitDiffTreeRows(m.gitDiff.files), nextCollapsed)
+	m.gitDiff.treeRows = visibleGitDiffTreeRows(fileViewTreeRows(m.gitDiff.files, m.gitDiff.mode), nextCollapsed)
 	for index, candidate := range m.gitDiff.treeRows {
 		if candidate.directory && candidate.path == row.path {
 			m.gitDiff.treeIndex = index
@@ -463,16 +512,29 @@ func (m dashboard) renderGitChangedFiles(width, height int) []string {
 	}
 	rows := m.gitDiff.treeRows
 	if len(rows) == 0 {
-		rows = gitDiffTreeRows(m.gitDiff.files)
+		rows = fileViewTreeRows(m.gitDiff.files, m.gitDiff.mode)
 	}
-	available := max(height-len(lines), 0)
-	selectedRow := min(max(m.gitDiff.treeIndex, 0), max(len(rows)-1, 0))
-	start := min(max(selectedRow-available/2, 0), max(len(rows)-available, 0))
-	end := min(start+available, len(rows))
+	start, end := gitDiffTreeWindow(rows, m.gitDiff.treeIndex, height)
 	for _, row := range rows[start:end] {
 		lines = append(lines, m.renderGitDiffTreeRow(row, width))
 	}
 	return lines
+}
+
+func (m dashboard) gitDiffTreeIndexAtRow(row, height int) (int, bool) {
+	if row < 2 {
+		return 0, false
+	}
+	start, end := gitDiffTreeWindow(m.gitDiff.treeRows, m.gitDiff.treeIndex, height)
+	index := start + row - 2
+	return index, index >= start && index < end
+}
+
+func gitDiffTreeWindow(rows []gitDiffTreeRow, selectedRow, height int) (start, end int) {
+	available := max(height-2, 0)
+	selectedRow = min(max(selectedRow, 0), max(len(rows)-1, 0))
+	start = min(max(selectedRow-available/2, 0), max(len(rows)-available, 0))
+	return start, min(start+available, len(rows))
 }
 
 func (m dashboard) renderGitDiffTreeRow(row gitDiffTreeRow, width int) string {
@@ -783,6 +845,14 @@ type gitDiffTreeRow struct {
 }
 
 func gitDiffTreeRows(files []gitChangedFile) []gitDiffTreeRow {
+	return buildFileViewTreeRows(files, false)
+}
+
+func fileViewTreeRows(files []gitChangedFile, mode fileViewMode) []gitDiffTreeRow {
+	return buildFileViewTreeRows(files, mode == allFilesView)
+}
+
+func buildFileViewTreeRows(files []gitChangedFile, directoriesFirst bool) []gitDiffTreeRow {
 	root := &gitDiffTreeNode{fileIndex: -1, children: make(map[string]*gitDiffTreeNode)}
 	for fileIndex, file := range files {
 		parts := strings.Split(file.Path, "/")
@@ -800,16 +870,23 @@ func gitDiffTreeRows(files []gitChangedFile) []gitDiffTreeRow {
 		}
 	}
 	rows := make([]gitDiffTreeRow, 0, len(files)*2)
-	appendGitDiffTreeRows(root, "", 0, &rows)
+	appendGitDiffTreeRows(root, "", 0, directoriesFirst, &rows)
 	return rows
 }
 
-func appendGitDiffTreeRows(node *gitDiffTreeNode, parent string, depth int, rows *[]gitDiffTreeRow) {
+func appendGitDiffTreeRows(node *gitDiffTreeNode, parent string, depth int, directoriesFirst bool, rows *[]gitDiffTreeRow) {
 	names := make([]string, 0, len(node.children))
 	for name := range node.children {
 		names = append(names, name)
 	}
-	sort.Strings(names)
+	sort.Slice(names, func(i, j int) bool {
+		leftDirectory := len(node.children[names[i]].children) > 0
+		rightDirectory := len(node.children[names[j]].children) > 0
+		if directoriesFirst && leftDirectory != rightDirectory {
+			return leftDirectory
+		}
+		return names[i] < names[j]
+	})
 	for _, name := range names {
 		child := node.children[name]
 		path := name
@@ -819,7 +896,7 @@ func appendGitDiffTreeRows(node *gitDiffTreeNode, parent string, depth int, rows
 		directory := len(child.children) > 0
 		if directory {
 			*rows = append(*rows, gitDiffTreeRow{name: child.name, path: path, depth: depth, directory: true, fileIndex: -1})
-			appendGitDiffTreeRows(child, path, depth+1, rows)
+			appendGitDiffTreeRows(child, path, depth+1, directoriesFirst, rows)
 			continue
 		}
 		*rows = append(*rows, gitDiffTreeRow{name: child.name, path: path, depth: depth, fileIndex: child.fileIndex})
