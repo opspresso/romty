@@ -1109,6 +1109,8 @@ func (m dashboard) handleOpenedTerminal(message terminalOpenedMsg) (tea.Model, t
 	m.focus = terminalPane
 	// A terminal that opened supersedes any complaint about terminals.
 	m.clearError(terminalError)
+	// Size only after focus hides the navigation pane on a phone. Resizing the
+	// replay to the temporary split first would erase its right-hand cells.
 	commands := []tea.Cmd{m.terminal.read(), m.resizeTerminal()}
 	if m.rememberSelection(message.tabID) && m.configPath != "" {
 		commands = append(commands, m.saveConfig())

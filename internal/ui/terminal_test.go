@@ -64,6 +64,7 @@ func TestZshPartialLineMarkerNeedsItsRecordedWidth(t *testing.T) {
 		memoryStream: newMemoryStream(""), columns: recordedWidth, rows: 6,
 	}
 	restored := newEmbeddedTerminalWithReplay("restored", stream, replay, 40, 6)
+	restored.resize(40, 6)
 	restoredScreen := strings.Join(restored.render(), "\n")
 	restored.close()
 

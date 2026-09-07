@@ -5679,3 +5679,43 @@ func TestDashboardOrdersInFlightResizes(t *testing.T) {
 		t.Fatalf("PTY columns = %d, want latest viewport width 32", backend.columns)
 	}
 }
+
+func TestDashboardPreservesReplayRightEdgeWhenOpeningOnPhone(t *testing.T) {
+	for _, width := range []int{32, 60, 79, 120} {
+		for _, alternate := range []bool{false, true} {
+			t.Run(fmt.Sprintf("width=%d/alternate=%t", width, alternate), func(t *testing.T) {
+				workspace := model.Workspace{ID: "workspace-1", RootID: "root-1", Name: "alpha", Path: "/projects/alpha"}
+				tab := model.Tab{ID: "tab-1", WorkspaceID: workspace.ID, Name: "1", Running: true}
+				snapshot := model.Snapshot{Roots: []model.RootView{{
+					Root:        model.Root{ID: "root-1", Name: "projects", Path: "/projects"},
+					Directories: []model.WorkspaceView{{Workspace: workspace, Tabs: []model.Tab{tab}}},
+				}}}
+				value := newDashboard(&fakeBackend{snapshot: snapshot}, snapshot)
+				value.width, value.height = width, 24
+				value.selectedWorkspaceID, value.selectedPath = workspace.ID, workspace.Path
+				value.setNavigation(1)
+				columns, rows := value.terminalSize()
+				if width < narrowLayoutWidth {
+					columns = uint16(width)
+				}
+				replay := "LEFT" + strings.Repeat(" ", int(columns)-len("LEFTRIGHT")) + "RIGHT"
+				if alternate {
+					replay = "\x1b[?1049h" + replay
+				}
+				// Check both initial selection and reopening an attached workspace.
+				for range 2 {
+					stream := replaySizedMemoryStream{memoryStream: newMemoryStream(""), columns: columns, rows: rows}
+					updated, _ := value.Update(terminalOpenedMsg{tabID: tab.ID, stream: stream, replay: []byte(replay)})
+					value = updated.(dashboard)
+					t.Cleanup(value.closeTerminal)
+					if got := value.terminal.render()[0]; !strings.Contains(got, "RIGHT") {
+						t.Fatalf("restored first row lost its right edge: %q", got)
+					}
+					if got, _ := value.terminal.size(); got != columns {
+						t.Fatalf("terminal columns = %d, want %d", got, columns)
+					}
+				}
+			})
+		}
+	}
+}

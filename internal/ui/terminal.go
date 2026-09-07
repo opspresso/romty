@@ -75,13 +75,16 @@ func newEmbeddedTerminal(id string, stream io.ReadWriteCloser, width, height int
 	return terminal
 }
 
+// newEmbeddedTerminalWithReplay restores at the recorded size. The caller must
+// apply its final layout after attaching the terminal and setting focus: an
+// intermediate shrink discards cells that a later expansion cannot recover.
 func newEmbeddedTerminalWithReplay(
 	id string,
 	stream io.ReadWriteCloser,
 	replay []byte,
-	width, height int,
+	fallbackWidth, fallbackHeight int,
 ) *embeddedTerminal {
-	replayWidth, replayHeight := width, height
+	replayWidth, replayHeight := fallbackWidth, fallbackHeight
 	if sized, ok := stream.(replaySizer); ok {
 		columns, rows := sized.ReplaySize()
 		if columns > 0 && rows > 0 {
@@ -90,9 +93,6 @@ func newEmbeddedTerminalWithReplay(
 	}
 	terminal := newEmbeddedTerminal(id, stream, replayWidth, replayHeight)
 	terminal.writeOutput(replay)
-	if replayWidth != width || replayHeight != height {
-		terminal.resize(width, height)
-	}
 	return terminal
 }
 
