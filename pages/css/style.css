@@ -532,6 +532,9 @@ pre {
 
 .markers .working {
   display: inline-block;
+  flex: 0 0 1ch;
+  width: 1ch;
+  text-align: center;
 }
 
 .markers .working::before {
