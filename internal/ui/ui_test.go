@@ -5604,3 +5604,160 @@ func TestDashboardResizesToTheSizeOnScreenWhateverTheOrder(t *testing.T) {
 			backend.createdColumns, backend.createdRows, wantColumns, wantRows)
 	}
 }
+
+func TestDashboardFitsPhoneTerminalWidth(t *testing.T) {
+	for _, width := range []int{1, 10, 20, 24, 32, 39, 40, 60, 79} {
+		t.Run(fmt.Sprint(width), func(t *testing.T) {
+			value := narrowDashboard(t, width)
+			for _, focus := range []pane{terminalPane, leftPane} {
+				value.focus = focus
+				commandMessages(value.resizeTerminal())
+				view := value.dimensions()
+				if got := view.leftWidth + view.separator + view.rightWidth; got != width {
+					t.Errorf("layout width = %d, want %d", got, width)
+				}
+				if focus == terminalPane {
+					columns, _ := value.terminal.size()
+					if int(columns) != width {
+						t.Errorf("terminal columns = %d, want %d", columns, width)
+					}
+				}
+				for row, line := range strings.Split(value.render(), "\n") {
+					if got := lipgloss.Width(line); got > width {
+						t.Errorf("row %d width = %d, exceeds %d", row, got, width)
+					}
+				}
+			}
+		})
+	}
+}
+
+type delayedResizeBackend struct {
+	*fakeBackend
+	started chan struct{}
+	release chan struct{}
+	mu      sync.Mutex
+	columns uint16
+}
+
+func (b *delayedResizeBackend) Resize(_ string, columns, _ uint16) error {
+	if columns == 120 {
+		close(b.started)
+		<-b.release
+	}
+	b.mu.Lock()
+	b.columns = columns
+	b.mu.Unlock()
+	return nil
+}
+
+func TestDashboardOrdersInFlightResizes(t *testing.T) {
+	backend := &delayedResizeBackend{fakeBackend: &fakeBackend{}, started: make(chan struct{}), release: make(chan struct{})}
+	value := narrowDashboard(t, 160)
+	value.backend = backend
+	value.leftWidth = 37
+	// Start a wide request before the viewport shrinks, and delay its response.
+	updated, wide := value.Update(tea.WindowSizeMsg{Width: 160, Height: 24})
+	value = updated.(dashboard)
+	wideDone := make(chan struct{})
+	go func() { commandMessages(wide); close(wideDone) }()
+	<-backend.started
+	updated, narrow := value.Update(tea.WindowSizeMsg{Width: 32, Height: 24})
+	value = updated.(dashboard)
+	narrowDone := make(chan struct{})
+	go func() { commandMessages(narrow); close(narrowDone) }()
+	select {
+	case <-narrowDone:
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(backend.release)
+	<-wideDone
+	<-narrowDone
+	backend.mu.Lock()
+	defer backend.mu.Unlock()
+	if backend.columns != 32 {
+		t.Fatalf("PTY columns = %d, want latest viewport width 32", backend.columns)
+	}
+}
+
+func TestDashboardPreservesReplayRightEdgeWhenOpeningOnPhone(t *testing.T) {
+	for _, width := range []int{32, 60, 79, 120} {
+		for _, alternate := range []bool{false, true} {
+			t.Run(fmt.Sprintf("width=%d/alternate=%t", width, alternate), func(t *testing.T) {
+				workspace := model.Workspace{ID: "workspace-1", RootID: "root-1", Name: "alpha", Path: "/projects/alpha"}
+				tab := model.Tab{ID: "tab-1", WorkspaceID: workspace.ID, Name: "1", Running: true}
+				snapshot := model.Snapshot{Roots: []model.RootView{{
+					Root:        model.Root{ID: "root-1", Name: "projects", Path: "/projects"},
+					Directories: []model.WorkspaceView{{Workspace: workspace, Tabs: []model.Tab{tab}}},
+				}}}
+				value := newDashboard(&fakeBackend{snapshot: snapshot}, snapshot)
+				value.width, value.height = width, 24
+				value.selectedWorkspaceID, value.selectedPath = workspace.ID, workspace.Path
+				value.setNavigation(1)
+				columns, rows := value.terminalSize()
+				if width < narrowLayoutWidth {
+					columns = uint16(width)
+				}
+				replay := "LEFT" + strings.Repeat(" ", int(columns)-len("LEFTRIGHT")) + "RIGHT"
+				if alternate {
+					replay = "\x1b[?1049h" + replay
+				}
+				// Check both initial selection and reopening an attached workspace.
+				for range 2 {
+					stream := replaySizedMemoryStream{memoryStream: newMemoryStream(""), columns: columns, rows: rows}
+					updated, _ := value.Update(terminalOpenedMsg{tabID: tab.ID, stream: stream, replay: []byte(replay)})
+					value = updated.(dashboard)
+					t.Cleanup(value.closeTerminal)
+					if got := value.terminal.render()[0]; !strings.Contains(got, "RIGHT") {
+						t.Fatalf("restored first row lost its right edge: %q", got)
+					}
+					if got, _ := value.terminal.size(); got != columns {
+						t.Fatalf("terminal columns = %d, want %d", got, columns)
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestDashboardOrdersResizesAcrossReattachments(t *testing.T) {
+	backend := &delayedResizeBackend{fakeBackend: &fakeBackend{}, started: make(chan struct{}), release: make(chan struct{})}
+	value := narrowDashboard(t, 160)
+	value.backend, value.leftWidth = backend, 37
+	wide := value.resizeTerminal()
+	wideDone := make(chan struct{})
+	go func() { wide(); close(wideDone) }()
+	<-backend.started
+	// Reattaching the same tab creates a new emulator while the previous
+	// attachment's resize can still be in flight on another connection.
+	stale := value.resizeTerminal()
+	value.closeTerminal()
+	value.width = 32
+	value.terminal = newEmbeddedTerminal("tab-1", newMemoryStream(""), 32, 20)
+	t.Cleanup(value.closeTerminal)
+	narrow := value.resizeTerminal()
+	narrowDone := make(chan struct{})
+	go func() { narrow(); close(narrowDone) }()
+	select {
+	case <-narrowDone:
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(backend.release)
+	<-wideDone
+	<-narrowDone
+	backend.mu.Lock()
+	columns := backend.columns
+	backend.mu.Unlock()
+	if columns != 32 {
+		t.Fatalf("reattached PTY columns = %d, want 32", columns)
+	}
+	// A queued command from the closed emulator must not resize its replacement.
+	if message := stale(); message != nil {
+		t.Fatalf("closed terminal resize returned %v", message)
+	}
+	backend.mu.Lock()
+	defer backend.mu.Unlock()
+	if backend.columns != 32 {
+		t.Fatalf("stale command changed PTY columns to %d", backend.columns)
+	}
+}

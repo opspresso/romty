@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"sync"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -47,9 +48,6 @@ const (
 	minimumModalWidth     = 32
 	maximumModalWidth     = 72
 	maximumWideModalWidth = 80
-	// minimumScreenWidth is the narrowest screen romty lays out for; see
-	// screenWidth.
-	minimumScreenWidth = 40
 
 	maximumReattachAttempts = 3
 	initialReattachBackoff  = 250 * time.Millisecond
@@ -152,6 +150,9 @@ type dashboard struct {
 	backend Backend
 	state   model.Snapshot
 	result  Result
+	// Shared across model copies and terminal replacements so an old
+	// attachment's resize cannot arrive after its replacement's size.
+	resizeMu *sync.Mutex
 	// snapshotOrder breaks ties between snapshots of the same daemon state,
 	// such as two directory refreshes that complete in reverse order.
 	snapshotOrder    uint64
@@ -402,6 +403,7 @@ func newDashboard(backend Backend, initial model.Snapshot) dashboard {
 func newDashboardWithConfig(backend Backend, initial model.Snapshot, configPath string, config Config) dashboard {
 	value := dashboard{
 		backend:          backend,
+		resizeMu:         &sync.Mutex{},
 		state:            initial,
 		width:            80,
 		height:           24,
@@ -929,7 +931,7 @@ func (m dashboard) adjustLeftWidth(delta int) (tea.Model, tea.Cmd) {
 }
 
 func (m *dashboard) setLeftWidth(width int) {
-	maximum := min(maximumLeftWidth, m.screenWidth()-20)
+	maximum := max(min(maximumLeftWidth, m.screenWidth()-20), 0)
 	m.leftWidth = min(max(width, minimumLeftWidth), maximum)
 }
 
@@ -1112,6 +1114,8 @@ func (m dashboard) handleOpenedTerminal(message terminalOpenedMsg) (tea.Model, t
 	m.focus = terminalPane
 	// A terminal that opened supersedes any complaint about terminals.
 	m.clearError(terminalError)
+	// Size only after focus hides the navigation pane on a phone. Resizing the
+	// replay to the temporary split first would erase its right-hand cells.
 	commands := []tea.Cmd{m.terminal.read(), m.resizeTerminal()}
 	if m.rememberSelection(message.tabID) && m.configPath != "" {
 		commands = append(commands, m.saveConfig())
@@ -1444,8 +1448,13 @@ func (m dashboard) resizeTerminal() tea.Cmd {
 	m.terminal.resize(int(columns), int(rows))
 	terminal := m.terminal
 	return func() tea.Msg {
-		// The size is read here, not captured above, so a resize that lost the
-		// race still tells the daemon what is on screen.
+		// Serialize the whole round trip before reading the latest size. Reading
+		// it alone cannot stop an older in-flight request from arriving last.
+		m.resizeMu.Lock()
+		defer m.resizeMu.Unlock()
+		if terminal.closed.Load() {
+			return nil
+		}
 		columns, rows := terminal.size()
 		if err := m.backend.Resize(terminal.id, columns, rows); err != nil {
 			return resizeFailedMsg{tabID: terminal.id, err: err}

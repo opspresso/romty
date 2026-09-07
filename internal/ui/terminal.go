@@ -5,6 +5,7 @@ import (
 	"io"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"unicode"
 
 	tea "charm.land/bubbletea/v2"
@@ -21,6 +22,7 @@ type embeddedTerminal struct {
 	inputDone chan struct{}
 	inputMu   sync.Mutex
 	inputErr  error
+	closed    atomic.Bool
 	// applicationKeypad mirrors DECKPAM so keypad navigation and operators
 	// keep the mode the guest requested.
 	applicationKeypad bool
@@ -74,13 +76,16 @@ func newEmbeddedTerminal(id string, stream io.ReadWriteCloser, width, height int
 	return terminal
 }
 
+// newEmbeddedTerminalWithReplay restores at the recorded size. The caller must
+// apply its final layout after attaching the terminal and setting focus: an
+// intermediate shrink discards cells that a later expansion cannot recover.
 func newEmbeddedTerminalWithReplay(
 	id string,
 	stream io.ReadWriteCloser,
 	replay []byte,
-	width, height int,
+	fallbackWidth, fallbackHeight int,
 ) *embeddedTerminal {
-	replayWidth, replayHeight := width, height
+	replayWidth, replayHeight := fallbackWidth, fallbackHeight
 	if sized, ok := stream.(replaySizer); ok {
 		columns, rows := sized.ReplaySize()
 		if columns > 0 && rows > 0 {
@@ -89,9 +94,6 @@ func newEmbeddedTerminalWithReplay(
 	}
 	terminal := newEmbeddedTerminal(id, stream, replayWidth, replayHeight)
 	terminal.writeOutput(replay)
-	if replayWidth != width || replayHeight != height {
-		terminal.resize(width, height)
-	}
 	return terminal
 }
 
@@ -473,13 +475,8 @@ func (t *embeddedTerminal) resize(width, height int) {
 	t.emulator.Resize(width, height)
 }
 
-// size is what the emulator is showing right now, which is what the guest has
-// to be told. A resize command reads it when it runs rather than carrying the
-// size it was made with: dragging a window makes a burst of them, each on its
-// own goroutine, and nothing orders their round trips to the daemon. Every one
-// of them then reports the size that is on screen, so whichever lands last
-// leaves the PTY agreeing with the emulator rather than a size the window had
-// on the way past.
+// size is the current viewport. Resize commands read it while holding the
+// dashboard's resize lock so their round trips cannot leave the PTY stale.
 func (t *embeddedTerminal) size() (uint16, uint16) {
 	return clampSize(t.emulator.Width()), clampSize(t.emulator.Height())
 }
@@ -570,6 +567,7 @@ func (t *embeddedTerminal) cursorPosition() uv.Position {
 // actually different.
 func (t *embeddedTerminal) close() {
 	t.closeOnce.Do(func() {
+		t.closed.Store(true)
 		_ = t.stream.Close()
 		if closer, ok := t.emulator.InputPipe().(io.Closer); ok {
 			_ = closer.Close()
