@@ -489,6 +489,7 @@ func (m dashboard) maximumGitDiffOffset() int {
 
 func (m dashboard) renderGitDiffPanes(leftWidth, rightWidth, height int) []string {
 	separator := " " + m.styles.divider.Render("│") + " "
+	separator = truncate(separator, m.gitDiffLayout().separator)
 	return mergePanes(
 		m.renderGitChangedFiles(leftWidth, height), m.renderGitFileDiff(rightWidth, height),
 		leftWidth, rightWidth, height,

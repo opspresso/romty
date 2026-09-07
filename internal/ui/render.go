@@ -60,12 +60,13 @@ type layout struct {
 	terminalHeight int
 }
 
-// screenWidth is the width every layout measurement starts from. Below the
-// floor the arithmetic that divides the screen between the panes starts
-// producing negative widths, so nothing measures the host's report directly.
-// It was spelled out at ten call sites, the floor unnamed in all of them.
+// screenWidth uses the host's actual columns, including phone screens below
+// 40 columns. The fallback only applies before the first window size arrives.
 func (m dashboard) screenWidth() int {
-	return max(m.width, minimumScreenWidth)
+	if m.width <= 0 {
+		return 40
+	}
+	return m.width
 }
 
 // bodySize is the screen the modals and the pointer handlers work in: that
@@ -91,7 +92,7 @@ func (m dashboard) paneWidth() int {
 	if leftWidth == 0 {
 		leftWidth = min(max(width/4, minimumLeftWidth), 28)
 	}
-	return min(leftWidth, width-20)
+	return max(min(leftWidth, width-20), 0)
 }
 
 // navigationHidden reports whether the terminal has the whole screen. The
@@ -114,15 +115,15 @@ func (m dashboard) gitDiffLayout() layout {
 	width := m.screenWidth()
 	view := m.dimensions()
 	view.leftWidth = m.paneWidth()
-	view.separator = separatorWidth
-	view.rightWidth = max(width-view.leftWidth-separatorWidth, 17)
+	view.separator = min(separatorWidth, width-1)
+	view.rightWidth = width - view.leftWidth - view.separator
 	return view
 }
 
 func (m dashboard) dimensions() layout {
 	width := m.screenWidth()
 	height := max(m.height, 10)
-	leftWidth, separator := m.paneWidth(), separatorWidth
+	leftWidth, separator := m.paneWidth(), min(separatorWidth, width-1)
 	if m.navigationHidden() {
 		leftWidth, separator = 0, 0
 	}
@@ -130,7 +131,7 @@ func (m dashboard) dimensions() layout {
 	return layout{
 		leftWidth:      leftWidth,
 		separator:      separator,
-		rightWidth:     max(width-leftWidth-separator, 17),
+		rightWidth:     width - leftWidth - separator,
 		bodyHeight:     bodyHeight,
 		terminalHeight: max(bodyHeight-terminalTop, 1),
 	}
@@ -182,19 +183,23 @@ func (m dashboard) render() string {
 		lines = m.overlayModal(dimBackdrop(m.styles, lines), width, view.bodyHeight)
 	}
 	lines = append(lines, m.renderStatus(width, view.bodyHeight)...)
+	for index, line := range lines {
+		lines[index] = truncate(line, width)
+	}
 	return strings.Join(lines, "\n")
 }
 
 func (m dashboard) renderPanes(leftWidth, rightWidth, bodyHeight int) []string {
 	headSeparator, bodySeparator := m.paneSeparators()
+	separator := m.dimensions().separator
 	return mergePanes(
 		m.renderNavigation(leftWidth, bodyHeight), m.renderTerminal(rightWidth),
 		leftWidth, rightWidth, bodyHeight,
 		func(row int) string {
 			if row == 0 {
-				return headSeparator
+				return truncate(headSeparator, separator)
 			}
-			return bodySeparator
+			return truncate(bodySeparator, separator)
 		})
 }
 

@@ -5604,3 +5604,78 @@ func TestDashboardResizesToTheSizeOnScreenWhateverTheOrder(t *testing.T) {
 			backend.createdColumns, backend.createdRows, wantColumns, wantRows)
 	}
 }
+
+func TestDashboardFitsPhoneTerminalWidth(t *testing.T) {
+	for _, width := range []int{1, 10, 20, 24, 32, 39, 40, 60, 79} {
+		t.Run(fmt.Sprint(width), func(t *testing.T) {
+			value := narrowDashboard(t, width)
+			for _, focus := range []pane{terminalPane, leftPane} {
+				value.focus = focus
+				commandMessages(value.resizeTerminal())
+				view := value.dimensions()
+				if got := view.leftWidth + view.separator + view.rightWidth; got != width {
+					t.Errorf("layout width = %d, want %d", got, width)
+				}
+				if focus == terminalPane {
+					columns, _ := value.terminal.size()
+					if int(columns) != width {
+						t.Errorf("terminal columns = %d, want %d", columns, width)
+					}
+				}
+				for row, line := range strings.Split(value.render(), "\n") {
+					if got := lipgloss.Width(line); got > width {
+						t.Errorf("row %d width = %d, exceeds %d", row, got, width)
+					}
+				}
+			}
+		})
+	}
+}
+
+type delayedResizeBackend struct {
+	*fakeBackend
+	started chan struct{}
+	release chan struct{}
+	mu      sync.Mutex
+	columns uint16
+}
+
+func (b *delayedResizeBackend) Resize(_ string, columns, _ uint16) error {
+	if columns == 120 {
+		close(b.started)
+		<-b.release
+	}
+	b.mu.Lock()
+	b.columns = columns
+	b.mu.Unlock()
+	return nil
+}
+
+func TestDashboardOrdersInFlightResizes(t *testing.T) {
+	backend := &delayedResizeBackend{fakeBackend: &fakeBackend{}, started: make(chan struct{}), release: make(chan struct{})}
+	value := narrowDashboard(t, 160)
+	value.backend = backend
+	value.leftWidth = 37
+	// Start a wide request before the viewport shrinks, and delay its response.
+	updated, wide := value.Update(tea.WindowSizeMsg{Width: 160, Height: 24})
+	value = updated.(dashboard)
+	wideDone := make(chan struct{})
+	go func() { commandMessages(wide); close(wideDone) }()
+	<-backend.started
+	updated, narrow := value.Update(tea.WindowSizeMsg{Width: 32, Height: 24})
+	value = updated.(dashboard)
+	narrowDone := make(chan struct{})
+	go func() { commandMessages(narrow); close(narrowDone) }()
+	select {
+	case <-narrowDone:
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(backend.release)
+	<-wideDone
+	<-narrowDone
+	backend.mu.Lock()
+	defer backend.mu.Unlock()
+	if backend.columns != 32 {
+		t.Fatalf("PTY columns = %d, want latest viewport width 32", backend.columns)
+	}
+}

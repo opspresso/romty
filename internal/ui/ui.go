@@ -47,9 +47,6 @@ const (
 	minimumModalWidth     = 32
 	maximumModalWidth     = 72
 	maximumWideModalWidth = 80
-	// minimumScreenWidth is the narrowest screen romty lays out for; see
-	// screenWidth.
-	minimumScreenWidth = 40
 
 	maximumReattachAttempts = 3
 	initialReattachBackoff  = 250 * time.Millisecond
@@ -929,7 +926,7 @@ func (m dashboard) adjustLeftWidth(delta int) (tea.Model, tea.Cmd) {
 }
 
 func (m *dashboard) setLeftWidth(width int) {
-	maximum := min(maximumLeftWidth, m.screenWidth()-20)
+	maximum := max(min(maximumLeftWidth, m.screenWidth()-20), 0)
 	m.leftWidth = min(max(width, minimumLeftWidth), maximum)
 }
 
@@ -1444,8 +1441,10 @@ func (m dashboard) resizeTerminal() tea.Cmd {
 	m.terminal.resize(int(columns), int(rows))
 	terminal := m.terminal
 	return func() tea.Msg {
-		// The size is read here, not captured above, so a resize that lost the
-		// race still tells the daemon what is on screen.
+		// Serialize the whole round trip before reading the latest size. Reading
+		// it alone cannot stop an older in-flight request from arriving last.
+		terminal.resizeMu.Lock()
+		defer terminal.resizeMu.Unlock()
 		columns, rows := terminal.size()
 		if err := m.backend.Resize(terminal.id, columns, rows); err != nil {
 			return resizeFailedMsg{tabID: terminal.id, err: err}
