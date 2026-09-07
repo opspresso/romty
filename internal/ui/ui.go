@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"sync"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -149,6 +150,9 @@ type dashboard struct {
 	backend Backend
 	state   model.Snapshot
 	result  Result
+	// Shared across model copies and terminal replacements so an old
+	// attachment's resize cannot arrive after its replacement's size.
+	resizeMu *sync.Mutex
 	// snapshotOrder breaks ties between snapshots of the same daemon state,
 	// such as two directory refreshes that complete in reverse order.
 	snapshotOrder    uint64
@@ -399,6 +403,7 @@ func newDashboard(backend Backend, initial model.Snapshot) dashboard {
 func newDashboardWithConfig(backend Backend, initial model.Snapshot, configPath string, config Config) dashboard {
 	value := dashboard{
 		backend:          backend,
+		resizeMu:         &sync.Mutex{},
 		state:            initial,
 		width:            80,
 		height:           24,
@@ -1445,8 +1450,11 @@ func (m dashboard) resizeTerminal() tea.Cmd {
 	return func() tea.Msg {
 		// Serialize the whole round trip before reading the latest size. Reading
 		// it alone cannot stop an older in-flight request from arriving last.
-		terminal.resizeMu.Lock()
-		defer terminal.resizeMu.Unlock()
+		m.resizeMu.Lock()
+		defer m.resizeMu.Unlock()
+		if terminal.closed.Load() {
+			return nil
+		}
 		columns, rows := terminal.size()
 		if err := m.backend.Resize(terminal.id, columns, rows); err != nil {
 			return resizeFailedMsg{tabID: terminal.id, err: err}

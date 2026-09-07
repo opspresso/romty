@@ -5719,3 +5719,45 @@ func TestDashboardPreservesReplayRightEdgeWhenOpeningOnPhone(t *testing.T) {
 		}
 	}
 }
+
+func TestDashboardOrdersResizesAcrossReattachments(t *testing.T) {
+	backend := &delayedResizeBackend{fakeBackend: &fakeBackend{}, started: make(chan struct{}), release: make(chan struct{})}
+	value := narrowDashboard(t, 160)
+	value.backend, value.leftWidth = backend, 37
+	wide := value.resizeTerminal()
+	wideDone := make(chan struct{})
+	go func() { wide(); close(wideDone) }()
+	<-backend.started
+	// Reattaching the same tab creates a new emulator while the previous
+	// attachment's resize can still be in flight on another connection.
+	stale := value.resizeTerminal()
+	value.closeTerminal()
+	value.width = 32
+	value.terminal = newEmbeddedTerminal("tab-1", newMemoryStream(""), 32, 20)
+	t.Cleanup(value.closeTerminal)
+	narrow := value.resizeTerminal()
+	narrowDone := make(chan struct{})
+	go func() { narrow(); close(narrowDone) }()
+	select {
+	case <-narrowDone:
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(backend.release)
+	<-wideDone
+	<-narrowDone
+	backend.mu.Lock()
+	columns := backend.columns
+	backend.mu.Unlock()
+	if columns != 32 {
+		t.Fatalf("reattached PTY columns = %d, want 32", columns)
+	}
+	// A queued command from the closed emulator must not resize its replacement.
+	if message := stale(); message != nil {
+		t.Fatalf("closed terminal resize returned %v", message)
+	}
+	backend.mu.Lock()
+	defer backend.mu.Unlock()
+	if backend.columns != 32 {
+		t.Fatalf("stale command changed PTY columns to %d", backend.columns)
+	}
+}

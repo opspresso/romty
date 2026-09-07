@@ -5,6 +5,7 @@ import (
 	"io"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"unicode"
 
 	tea "charm.land/bubbletea/v2"
@@ -21,7 +22,7 @@ type embeddedTerminal struct {
 	inputDone chan struct{}
 	inputMu   sync.Mutex
 	inputErr  error
-	resizeMu  sync.Mutex
+	closed    atomic.Bool
 	// applicationKeypad mirrors DECKPAM so keypad navigation and operators
 	// keep the mode the guest requested.
 	applicationKeypad bool
@@ -474,8 +475,8 @@ func (t *embeddedTerminal) resize(width, height int) {
 	t.emulator.Resize(width, height)
 }
 
-// size is the current viewport. Resize commands read it while holding resizeMu
-// so their round trips cannot leave the PTY at an earlier viewport's size.
+// size is the current viewport. Resize commands read it while holding the
+// dashboard's resize lock so their round trips cannot leave the PTY stale.
 func (t *embeddedTerminal) size() (uint16, uint16) {
 	return clampSize(t.emulator.Width()), clampSize(t.emulator.Height())
 }
@@ -566,6 +567,7 @@ func (t *embeddedTerminal) cursorPosition() uv.Position {
 // actually different.
 func (t *embeddedTerminal) close() {
 	t.closeOnce.Do(func() {
+		t.closed.Store(true)
 		_ = t.stream.Close()
 		if closer, ok := t.emulator.InputPipe().(io.Closer); ok {
 			_ = closer.Close()
