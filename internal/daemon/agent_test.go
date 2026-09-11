@@ -17,11 +17,14 @@ func TestProcessAgentsRecogniseClaudeCodeAndCodex(t *testing.T) {
   303 node /usr/local/lib/node_modules/@openai/codex/bin/codex.js
   404 vim codex-notes.md
   505 /opt/homebrew/bin/opencode
+  606 node /home/me/scripts/opencode-notes.js
+  707 bun /usr/local/bin/opencode
 `)
 	want := map[int]model.Agent{
 		202: model.AgentClaude,
 		303: model.AgentCodex,
 		505: model.AgentOpenCode,
+		707: model.AgentOpenCode,
 	}
 
 	if got := processAgents(output); !reflect.DeepEqual(got, want) {

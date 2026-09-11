@@ -135,8 +135,19 @@ func TestInstallCreatesOpenCodePluginAndHonorsConfigDirectory(t *testing.T) {
 	directory := filepath.Join(t.TempDir(), "custom-opencode")
 	t.Setenv("OPENCODE_CONFIG_DIR", directory)
 	previousFind := findRomtyExecutable
+	previousExecutables := findExecutable
 	findRomtyExecutable = func() (string, error) { return "/usr/local/bin/romty", nil }
-	t.Cleanup(func() { findRomtyExecutable = previousFind })
+	// Detect consults PATH, which does not hold opencode on a clean machine.
+	findExecutable = func(name string) (string, error) {
+		if name == "opencode" {
+			return "/usr/local/bin/opencode", nil
+		}
+		return "", errors.New("not found")
+	}
+	t.Cleanup(func() {
+		findRomtyExecutable = previousFind
+		findExecutable = previousExecutables
+	})
 
 	path := filepath.Join(directory, "plugins", "romty.js")
 	results, err := Install([]Provider{ProviderOpenCode})
