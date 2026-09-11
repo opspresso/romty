@@ -60,7 +60,7 @@ See the [interface guide](interface.md) for the complete key map.
 | `romty version` | Show the client version |
 | `romty help` | Show command-line help |
 | `romty doctor` | Check runtime permissions, JSON files, the shell, and daemon compatibility |
-| `romty hooks` | Detect Claude Code and Codex, then install or update their status hooks |
+| `romty hooks` | Detect Claude Code, Codex, and OpenCode, then install or update their status hooks |
 | `romty list` | List roots, workspaces, and running terminal sessions |
 | `romty stop` | Stop the daemon and every running terminal session |
 

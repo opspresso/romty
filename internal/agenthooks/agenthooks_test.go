@@ -17,6 +17,7 @@ func TestDetectReportsOnlyAvailableAgentsAsPending(t *testing.T) {
 	t.Setenv("HOME", home)
 	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	t.Setenv("CODEX_HOME", "")
+	t.Setenv("OPENCODE_CONFIG_DIR", "")
 	previousFind := findExecutable
 	previousHome := userHomeDirectory
 	findExecutable = func(name string) (string, error) {
@@ -32,8 +33,9 @@ func TestDetectReportsOnlyAvailableAgentsAsPending(t *testing.T) {
 	})
 
 	statuses := Detect()
-	if len(statuses) != 2 || statuses[0].State != StateMissing || statuses[1].State != StateUnavailable {
-		t.Fatalf("Detect() = %#v, want missing Claude and unavailable Codex", statuses)
+	if len(statuses) != 3 || statuses[0].State != StateMissing ||
+		statuses[1].State != StateUnavailable || statuses[2].State != StateUnavailable {
+		t.Fatalf("Detect() = %#v, want missing Claude and unavailable Codex and OpenCode", statuses)
 	}
 	if got := Pending(statuses); !slices.Equal(got, []Provider{ProviderClaude}) {
 		t.Fatalf("Pending() = %v, want Claude", got)
@@ -125,6 +127,78 @@ func TestInstallCreatesCodexHooksAndHonorsCodexHome(t *testing.T) {
 	}
 	if count := strings.Count(string(data), `hook codex"`); count != len(definitions[1].events) {
 		t.Fatalf("Codex hook count = %d, want %d", count, len(definitions[1].events))
+	}
+}
+
+func TestInstallCreatesOpenCodePluginAndHonorsConfigDirectory(t *testing.T) {
+	useReleaseBuild(t)
+	directory := filepath.Join(t.TempDir(), "custom-opencode")
+	t.Setenv("OPENCODE_CONFIG_DIR", directory)
+	previousFind := findRomtyExecutable
+	findRomtyExecutable = func() (string, error) { return "/usr/local/bin/romty", nil }
+	t.Cleanup(func() { findRomtyExecutable = previousFind })
+
+	path := filepath.Join(directory, "plugins", "romty.js")
+	results, err := Install([]Provider{ProviderOpenCode})
+	if err != nil {
+		t.Fatalf("Install() error = %v", err)
+	}
+	if len(results) != 1 || results[0].Action != ActionInstalled || results[0].Path != path {
+		t.Fatalf("Install() = %#v", results)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	if !strings.Contains(text, pluginMarker) || !strings.Contains(text, `const romty = "/usr/local/bin/romty"`) {
+		t.Fatalf("plugin does not name the running romty:\n%s", text)
+	}
+
+	// A second install of the same build is idempotent.
+	before := append([]byte(nil), data...)
+	results, err = Install([]Provider{ProviderOpenCode})
+	if err != nil || len(results) != 1 || results[0].Action != ActionUnchanged {
+		t.Fatalf("second Install() = (%#v, %v), want unchanged", results, err)
+	}
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(before, after) {
+		t.Fatal("idempotent Install() rewrote the current plugin")
+	}
+
+	// Moving romty makes the plugin name a stale path, which is an update.
+	findRomtyExecutable = func() (string, error) { return "/opt/romty", nil }
+	statuses := Detect()
+	if len(statuses) != 3 || statuses[2].Provider != ProviderOpenCode || statuses[2].State != StateOutdated {
+		t.Fatalf("Detect() = %#v, want OpenCode outdated", statuses)
+	}
+}
+
+func TestOpenCodePluginRefusesToOverwriteAForeignFile(t *testing.T) {
+	useReleaseBuild(t)
+	directory := filepath.Join(t.TempDir(), "opencode")
+	t.Setenv("OPENCODE_CONFIG_DIR", directory)
+	path := filepath.Join(directory, "plugins", "romty.js")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	foreign := []byte("export const Mine = async () => ({})\n")
+	if err := os.WriteFile(path, foreign, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := Install([]Provider{ProviderOpenCode}); err == nil || !strings.Contains(err.Error(), "not a romty-managed file") {
+		t.Fatalf("Install() error = %v, want a refusal", err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(got, foreign) {
+		t.Fatal("Install() overwrote a file it did not write")
 	}
 }
 
@@ -236,8 +310,9 @@ func TestDevelopmentBuildDoesNotInspectOrInstallHooks(t *testing.T) {
 	})
 
 	statuses := Detect()
-	if len(statuses) != 2 || statuses[0].State != StateDevelopment || statuses[1].State != StateDevelopment {
-		t.Fatalf("Detect() = %#v, want development state for both agents", statuses)
+	if len(statuses) != 3 || statuses[0].State != StateDevelopment ||
+		statuses[1].State != StateDevelopment || statuses[2].State != StateDevelopment {
+		t.Fatalf("Detect() = %#v, want development state for every agent", statuses)
 	}
 	if pending := Pending(statuses); len(pending) != 0 {
 		t.Fatalf("Pending() = %v, want no development hooks", pending)
