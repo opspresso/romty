@@ -134,6 +134,11 @@ func TestResumeCommandInterpolatesOnlyWellFormedSessionIDs(t *testing.T) {
 			want:      "codex resume 0123abcd-89ef-4567-0123-456789abcdef"},
 		{name: "codex without a session", agent: model.AgentCodex,
 			want: "codex resume"},
+		{name: "opencode with a session", agent: model.AgentOpenCode,
+			sessionID: "0123abcd-89ef-4567-0123-456789abcdef",
+			want:      "opencode --session 0123abcd-89ef-4567-0123-456789abcdef"},
+		{name: "opencode without a session", agent: model.AgentOpenCode,
+			want: "opencode --continue"},
 		{name: "no agent", want: ""},
 	} {
 		t.Run(probe.name, func(t *testing.T) {

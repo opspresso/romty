@@ -38,8 +38,14 @@ func Write(path string, value any) error {
 	if err != nil {
 		return fmt.Errorf("encode %s: %w", name, err)
 	}
-	data = append(data, '\n')
+	return WriteBytes(path, append(data, '\n'))
+}
 
+// WriteBytes replaces the file at path with data atomically. It carries the
+// same guarantees as Write, for romty's generated files that are not JSON — the
+// OpenCode plugin is JavaScript and cannot go through the JSON encoder.
+func WriteBytes(path string, data []byte) error {
+	name := filepath.Base(path)
 	directory := filepath.Dir(path)
 	if err := os.MkdirAll(directory, 0o700); err != nil {
 		return fmt.Errorf("create %s directory: %w", name, err)

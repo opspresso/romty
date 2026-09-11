@@ -1,6 +1,6 @@
 # Agent status hooks
 
-romty identifies foreground Claude Code and Codex processes without configuration, and reads a phase back from what the agent last drew. Hooks replace that reading with the agent's own report:
+romty identifies foreground Claude Code, Codex, and OpenCode processes without configuration, and reads a phase back from what the agent last drew. Hooks replace that reading with the agent's own report:
 
 | Marker | Meaning |
 |---|---|
@@ -25,11 +25,11 @@ A hooked Claude Code session also reports what it has spent. romty reads the cou
 
 Both are the agent's own numbers. romty never estimates them, and never converts them to a share of a context window — a transcript records no window size, so a percentage could only come from a table of model limits that would go stale as models change. A tab shows no reading when the transcript cannot be read.
 
-The reading needs the session identifier, which only a hook reports: two tabs running an agent in the same directory cannot otherwise be told apart. Codex records its counters differently and is not read yet.
+The reading needs the session identifier, which only a hook reports: two tabs running an agent in the same directory cannot otherwise be told apart. Codex and OpenCode record their counters differently and are not read yet.
 
 ## Install or update
 
-When the TUI starts, romty looks for `claude`, `claude-code`, and `codex` on `PATH`. If a detected agent has missing or outdated romty hooks, the TUI opens a confirmation dialog. Press `Enter` to install or update every listed provider, or `Esc` to leave the files unchanged for that run.
+When the TUI starts, romty looks for `claude`, `claude-code`, `codex`, and `opencode` on `PATH`. If a detected agent has missing or outdated romty hooks, the TUI opens a confirmation dialog. Press `Enter` to install or update every listed provider, or `Esc` to leave the files unchanged for that run.
 
 Hook installation is available only from a tagged release binary, including binaries installed from a tagged Go module. Development binaries produced by local `go run`, `go build`, or `go install` commands neither offer installation in the TUI nor write hook settings through `romty hooks`. This prevents temporary Go build-cache paths from becoming persistent hook commands.
 
@@ -43,17 +43,20 @@ The command reports `installed`, `updated`, or `current` for each detected provi
 
 - Claude Code user hooks to `${CLAUDE_CONFIG_DIR:-~/.claude}/settings.json`
 - Codex user hooks to `${CODEX_HOME:-~/.codex}/hooks.json`
+- an OpenCode plugin to `${OPENCODE_CONFIG_DIR:-~/.config/opencode}/plugins/romty.js`
 
-Installation structurally merges JSON instead of replacing the document. Existing settings, unrelated hooks, and unknown fields remain. romty normalizes only command handlers that invoke `romty hook claude` or `romty hook codex`, removes obsolete duplicates, and adds any missing lifecycle events. Writes are atomic and preserve a settings-file symlink by updating its target. Malformed JSON or an incompatible `hooks` value is reported and left unchanged.
+Claude Code and Codex are configured by structurally merging JSON instead of replacing the document. Existing settings, unrelated hooks, and unknown fields remain. romty normalizes only command handlers that invoke `romty hook claude` or `romty hook codex`, removes obsolete duplicates, and adds any missing lifecycle events. Malformed JSON or an incompatible `hooks` value is reported and left unchanged.
+
+OpenCode has no JSON hook settings; its plugin API is the extension point. romty generates the whole plugin file, which bridges OpenCode's lifecycle events to `romty hook opencode`. A `plugins/romty.js` that romty did not write is refused rather than overwritten. All writes are atomic and preserve a settings-file symlink by updating its target.
 
 Installed handlers use the absolute path of the current romty executable so an untrusted working directory or modified `PATH` cannot substitute another command. Re-run `romty hooks` after moving a manually installed romty binary; the installer updates an old executable path.
 
 Claude Code can disable all hooks with `disableAllHooks`, and Codex can set `[features].hooks = false`. romty does not override either explicit opt-out. Codex hooks are otherwise enabled by default. See the official [Claude Code hooks reference](https://code.claude.com/docs/en/hooks) and [Codex hooks documentation](https://learn.chatgpt.com/docs/hooks) for precedence and policy controls.
 
-Claude Code applies direct user-settings edits automatically, subject to its workspace trust rules. Codex requires review and trust for a new or changed non-managed hook; open `/hooks` in Codex after installation. Restart an already running agent session if it does not pick up the new hook configuration.
+Claude Code applies direct user-settings edits automatically, subject to its workspace trust rules. Codex requires review and trust for a new or changed non-managed hook; open `/hooks` in Codex after installation. OpenCode loads plugins only at startup, so restart it to pick up the plugin. Restart an already running agent session if it does not pick up the new hook configuration.
 
 ## Verify
 
-Start Claude Code or Codex in a newly created romty tab and submit a prompt. The marker should animate through `◐` `◓` `◑` `◒`, then settle on `○` when the agent is ready for another prompt. An input request should use `▲`, a permission request should use `■`, and a stopped error should use `★`. `romty list` reports the same phase as `claude/idle`, `codex/waiting_approval`, and similar values.
+Start Claude Code, Codex, or OpenCode in a newly created romty tab and submit a prompt. The marker should animate through `◐` `◓` `◑` `◒`, then settle on `○` when the agent is ready for another prompt. An input request should use `▲`, a permission request should use `■`, and a stopped error should use `★`. `romty list` reports the same phase as `claude/idle`, `codex/waiting_approval`, and similar values.
 
 Optional embedded sound alerts use these same phase transitions. Enable them in the `F3` Config dialog; `d` controls completed work, `b` controls waiting for input or approval, and `s` tests the done sound.

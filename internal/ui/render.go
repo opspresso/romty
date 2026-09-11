@@ -26,6 +26,8 @@ func openTabMarkers(styles *uiStyles, base lipgloss.Style, tabs []model.Tab, ani
 			style = style.Foreground(styles.agentClaude.GetForeground())
 		case model.AgentCodex:
 			style = style.Foreground(styles.agentCodex.GetForeground())
+		case model.AgentOpenCode:
+			style = style.Foreground(styles.agentOpenCode.GetForeground())
 		}
 		marker := "●"
 		switch tab.AgentPhase {

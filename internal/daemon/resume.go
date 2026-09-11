@@ -156,6 +156,11 @@ func resumeCommand(agent model.Agent, sessionID string) string {
 			return "codex resume " + sessionID
 		}
 		return "codex resume"
+	case model.AgentOpenCode:
+		if known {
+			return "opencode --session " + sessionID
+		}
+		return "opencode --continue"
 	}
 	return ""
 }

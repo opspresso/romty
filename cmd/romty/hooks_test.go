@@ -55,6 +55,32 @@ func TestDecodeHookEventDetectsBackgroundWork(t *testing.T) {
 	}
 }
 
+func TestDecodeHookEventAcceptsOpenCode(t *testing.T) {
+	event, err := decodeHookEvent("opencode", strings.NewReader(`{
+		"session_id":"ses-1",
+		"hook_event_name":"PermissionRequest"
+	}`))
+	if err != nil {
+		t.Fatalf("decodeHookEvent() error = %v", err)
+	}
+	if event.Agent != model.AgentOpenCode || event.SessionID != "ses-1" ||
+		event.HookEvent != "PermissionRequest" {
+		t.Fatalf("decodeHookEvent() = %#v", event)
+	}
+}
+
+func TestHookCommandAcceptsOpenCode(t *testing.T) {
+	t.Setenv("ROMTY_TAB_ID", "")
+	var output bytes.Buffer
+	if err := runCommandWithInput([]string{"hook", "opencode"}, &output,
+		strings.NewReader(`{"hook_event_name":"Stop"}`)); err != nil {
+		t.Fatalf("hook opencode error = %v", err)
+	}
+	if output.Len() != 0 {
+		t.Fatalf("hook opencode output = %q, want none", output.String())
+	}
+}
+
 func TestHookCommandIsSilentOutsideARomtyTab(t *testing.T) {
 	t.Setenv("ROMTY_TAB_ID", "")
 	t.Setenv("ROMTY_HOME", strings.Repeat("too-deep/", 200))

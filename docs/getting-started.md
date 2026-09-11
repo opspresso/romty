@@ -60,7 +60,7 @@ See the [interface guide](interface.md) for the complete key map.
 | `romty version` | Show the client version |
 | `romty help` | Show command-line help |
 | `romty doctor` | Check runtime permissions, JSON files, the shell, and daemon compatibility |
-| `romty hooks` | Detect Claude Code and Codex, then install or update their status hooks |
+| `romty hooks` | Detect Claude Code, Codex, and OpenCode, then install or update their status hooks |
 | `romty list` | List roots, workspaces, and running terminal sessions |
 | `romty stop` | Stop the daemon and every running terminal session |
 
@@ -68,4 +68,4 @@ See the [interface guide](interface.md) for the complete key map.
 
 `--version` and `-v` are aliases for `version`; `--help` and `-h` are aliases for `help`. Command output uses color on a terminal, stays plain when redirected or piped, and honors `NO_COLOR`.
 
-`romty stop` is intended for explicit use outside a romty terminal. It stops the daemon and every shell it owns; stopping an unavailable daemon succeeds without output. Before the shells go, the daemon saves each running tab's recorded output and agent session under `resume/` in the runtime directory. The next daemon offers a saved snapshot back through the first tab created in its workspace: the old output replays behind a `── restored from the previous romty session ──` marker, and when Claude Code or Codex was running, the matching `claude --resume` or `codex resume` command is typed at the prompt — Enter continues the conversation, Ctrl+C declines. Unconsumed snapshots are discarded after seven days.
+`romty stop` is intended for explicit use outside a romty terminal. It stops the daemon and every shell it owns; stopping an unavailable daemon succeeds without output. Before the shells go, the daemon saves each running tab's recorded output and agent session under `resume/` in the runtime directory. The next daemon offers a saved snapshot back through the first tab created in its workspace: the old output replays behind a `── restored from the previous romty session ──` marker, and when Claude Code, Codex, or OpenCode was running, the matching `claude --resume`, `codex resume`, or `opencode --continue` command is typed at the prompt — Enter continues the conversation, Ctrl+C declines. Unconsumed snapshots are discarded after seven days.

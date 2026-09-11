@@ -95,17 +95,37 @@ func commandAgent(command string) model.Agent {
 		return model.AgentClaude
 	case name == "codex" || strings.HasPrefix(name, "codex-"):
 		return model.AgentCodex
+	case name == "opencode" || strings.HasPrefix(name, "opencode-"):
+		return model.AgentOpenCode
 	}
 
 	if name != "node" && name != "nodejs" && name != "bun" && name != "deno" {
 		return ""
 	}
-	script := strings.ToLower(strings.Join(fields[1:], " "))
+	arguments := fields[1:]
+	script := strings.ToLower(strings.Join(arguments, " "))
 	switch {
 	case strings.Contains(script, "@anthropic-ai/claude-code"):
 		return model.AgentClaude
 	case strings.Contains(script, "@openai/codex"):
 		return model.AgentCodex
+	case strings.Contains(script, "opencode-ai") || runsExecutable(arguments, "opencode"):
+		return model.AgentOpenCode
 	}
 	return ""
+}
+
+// runsExecutable reports whether any argument names the executable, ignoring a
+// script extension: `node /usr/local/bin/opencode` and `bun opencode.ts` both
+// name it, while `node opencode-notes.js` — a file that merely mentions it —
+// does not.
+func runsExecutable(arguments []string, name string) bool {
+	for _, argument := range arguments {
+		base := filepath.Base(argument)
+		base = strings.TrimSuffix(base, filepath.Ext(base))
+		if strings.EqualFold(base, name) {
+			return true
+		}
+	}
+	return false
 }

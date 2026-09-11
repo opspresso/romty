@@ -34,7 +34,7 @@ func runCommand(arguments []string, output io.Writer) error {
 func runCommandWithInput(arguments []string, output io.Writer, input io.Reader) error {
 	if len(arguments) == 2 && arguments[0] == "hook" {
 		switch arguments[1] {
-		case "claude", "codex":
+		case "claude", "codex", "opencode":
 			runHookCommand(arguments[1], input)
 			return nil
 		default:

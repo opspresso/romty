@@ -27,8 +27,9 @@ type Workspace struct {
 type Agent string
 
 const (
-	AgentClaude Agent = "claude"
-	AgentCodex  Agent = "codex"
+	AgentClaude   Agent = "claude"
+	AgentCodex    Agent = "codex"
+	AgentOpenCode Agent = "opencode"
 )
 
 type AgentPhase string
