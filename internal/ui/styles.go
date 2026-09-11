@@ -12,6 +12,7 @@ type uiStyles struct {
 	interactiveHover    lipgloss.Style
 	agentClaude         lipgloss.Style
 	agentCodex          lipgloss.Style
+	agentOpenCode       lipgloss.Style
 	gitBranch           lipgloss.Style
 	gitStatus           lipgloss.Style
 	gitConflict         lipgloss.Style
@@ -75,6 +76,7 @@ func newUIStyles(hasDarkBackground bool) *uiStyles {
 		interactiveHover:    lipgloss.NewStyle().Foreground(text).Background(hoverSurface),
 		agentClaude:         lipgloss.NewStyle().Foreground(lipgloss.Color("#D97757")),
 		agentCodex:          lipgloss.NewStyle().Foreground(lipgloss.Color("#3B82F6")),
+		agentOpenCode:       lipgloss.NewStyle().Foreground(lipgloss.Color("#10B981")),
 		gitBranch:           lipgloss.NewStyle().Foreground(muted),
 		gitStatus:           lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B")),
 		gitConflict:         lipgloss.NewStyle().Foreground(errorColor),

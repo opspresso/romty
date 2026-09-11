@@ -22,7 +22,7 @@ laptop -> Tailscale -> SSH -> always-on machine -> romty -> AI coding agent
 - Keep multiple terminal tabs alive independently of the TUI.
 - Restore up to 8 MiB of recent output, and browse and search 10,000 lines of scrollback.
 - Open full-width scrollback for native terminal selection and copying, with light or dark colors.
-- Show Claude Code and Codex working and waiting states from their own output, and every phase through optional hooks.
+- Show Claude Code, Codex, and OpenCode working and waiting states from their own output, and every Claude Code and Codex phase through optional hooks.
 - Save every tab's output and agent session across `romty stop`, and offer them back — output replayed, resume command pre-typed — in the workspace's next tabs.
 - Use function-key navigation that remains reliable with an active IME.
 

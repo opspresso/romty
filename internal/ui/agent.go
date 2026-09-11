@@ -62,7 +62,7 @@ func applyAgentStatus(tab *model.Tab, statuses map[string]model.AgentStatus) {
 func (m dashboard) soundForAgentTransitions(statuses map[string]model.AgentStatus) (sound.Kind, bool) {
 	changed := func(tab model.Tab) (sound.Kind, bool) {
 		status, ok := statuses[tab.ID]
-		if !ok || status.Agent != model.AgentClaude && status.Agent != model.AgentCodex {
+		if !ok || status.Agent != model.AgentClaude && status.Agent != model.AgentCodex && status.Agent != model.AgentOpenCode {
 			return "", false
 		}
 		if m.soundOnDone && animatedAgentPhase(tab.AgentPhase) &&

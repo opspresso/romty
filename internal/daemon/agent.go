@@ -95,6 +95,8 @@ func commandAgent(command string) model.Agent {
 		return model.AgentClaude
 	case name == "codex" || strings.HasPrefix(name, "codex-"):
 		return model.AgentCodex
+	case name == "opencode" || strings.HasPrefix(name, "opencode-"):
+		return model.AgentOpenCode
 	}
 
 	if name != "node" && name != "nodejs" && name != "bun" && name != "deno" {
@@ -106,6 +108,8 @@ func commandAgent(command string) model.Agent {
 		return model.AgentClaude
 	case strings.Contains(script, "@openai/codex"):
 		return model.AgentCodex
+	case strings.Contains(script, "opencode"):
+		return model.AgentOpenCode
 	}
 	return ""
 }

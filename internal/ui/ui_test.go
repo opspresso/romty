@@ -4312,18 +4312,20 @@ func TestOpenTabMarkersUseAgentColorsAndPhaseShapes(t *testing.T) {
 		{Running: true, Agent: model.AgentClaude, AgentPhase: model.AgentPhaseWaitingApproval},
 		{Running: true, Agent: model.AgentCodex, AgentPhase: model.AgentPhaseError},
 		{Running: true, Agent: model.AgentClaude, AgentPhase: model.AgentPhaseWorking},
+		{Running: true, Agent: model.AgentOpenCode, AgentPhase: model.AgentPhaseIdle},
 		{Running: true},
 	}
 
 	base := value.styles.navigationSelected
-	markers := openTabMarkers(value.styles, base, tabs, 2)
+	markers := openTabMarkers(value.styles, base, tabs, 6)
 	claude := base.Foreground(value.styles.agentClaude.GetForeground()).Render("○")
 	codex := base.Foreground(value.styles.agentCodex.GetForeground()).Render("▲")
 	approval := base.Foreground(value.styles.agentClaude.GetForeground()).Render("■")
 	failure := base.Foreground(value.styles.agentCodex.GetForeground()).Render("★")
 	working := base.Foreground(value.styles.agentClaude.GetForeground()).Render("◑")
+	opencode := base.Foreground(value.styles.agentOpenCode.GetForeground()).Render("○")
 	plain := base.Render("●")
-	if markers != claude+codex+approval+failure+working+plain {
+	if markers != claude+codex+approval+failure+working+opencode+plain {
 		t.Fatalf("open tab markers = %q, want agent colors and phase shapes", markers)
 	}
 }

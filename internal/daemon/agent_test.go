@@ -16,10 +16,12 @@ func TestProcessAgentsRecogniseClaudeCodeAndCodex(t *testing.T) {
   202 /Users/me/.local/bin/claude
   303 node /usr/local/lib/node_modules/@openai/codex/bin/codex.js
   404 vim codex-notes.md
+  505 /opt/homebrew/bin/opencode
 `)
 	want := map[int]model.Agent{
 		202: model.AgentClaude,
 		303: model.AgentCodex,
+		505: model.AgentOpenCode,
 	}
 
 	if got := processAgents(output); !reflect.DeepEqual(got, want) {
@@ -30,10 +32,12 @@ func TestProcessAgentsRecogniseClaudeCodeAndCodex(t *testing.T) {
 func TestProcessAgentsRecogniseNativeAgentExecutables(t *testing.T) {
 	output := []byte(`  101 /opt/homebrew/bin/claude-code --resume
   202 /Users/me/.cache/codex-aarch64-apple-darwin
+  303 /opt/homebrew/bin/opencode --continue
 `)
 	want := map[int]model.Agent{
 		101: model.AgentClaude,
 		202: model.AgentCodex,
+		303: model.AgentOpenCode,
 	}
 
 	if got := processAgents(output); !reflect.DeepEqual(got, want) {
@@ -44,12 +48,13 @@ func TestProcessAgentsRecogniseNativeAgentExecutables(t *testing.T) {
 func TestSessionAgentsMatchTabsByForegroundProcessGroup(t *testing.T) {
 	claudePTY := new(os.File)
 	codexPTY := new(os.File)
-	groups := map[*os.File]int{claudePTY: 101, codexPTY: 202}
+	opencodePTY := new(os.File)
+	groups := map[*os.File]int{claudePTY: 101, codexPTY: 202, opencodePTY: 303}
 	previousGroup := foregroundProcessGroup
 	previousList := runProcessList
 	foregroundProcessGroup = func(terminal *os.File) (int, error) { return groups[terminal], nil }
 	runProcessList = func(context.Context) ([]byte, error) {
-		return []byte("101 claude\n202 codex\n"), nil
+		return []byte("101 claude\n202 codex\n303 opencode\n"), nil
 	}
 	t.Cleanup(func() {
 		foregroundProcessGroup = previousGroup
@@ -59,10 +64,12 @@ func TestSessionAgentsMatchTabsByForegroundProcessGroup(t *testing.T) {
 	sessions := map[string]*session{
 		"tab-1": newSessionForTest(claudePTY),
 		"tab-2": newSessionForTest(codexPTY),
+		"tab-3": newSessionForTest(opencodePTY),
 	}
 	want := map[string]model.Agent{
 		"tab-1": model.AgentClaude,
 		"tab-2": model.AgentCodex,
+		"tab-3": model.AgentOpenCode,
 	}
 	if got := sessionAgents(sessions); !reflect.DeepEqual(got, want) {
 		t.Fatalf("sessionAgents() = %#v, want %#v", got, want)

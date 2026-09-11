@@ -1,6 +1,6 @@
 # Agent status hooks
 
-romty identifies foreground Claude Code and Codex processes without configuration, and reads a phase back from what the agent last drew. Hooks replace that reading with the agent's own report:
+romty identifies foreground Claude Code, Codex, and OpenCode processes without configuration, and reads a phase back from what the agent last drew. Claude Code and Codex hooks replace that reading with the agent's own report; OpenCode has no hook system yet and always reports from its own output:
 
 | Marker | Meaning |
 |---|---|
@@ -25,7 +25,7 @@ A hooked Claude Code session also reports what it has spent. romty reads the cou
 
 Both are the agent's own numbers. romty never estimates them, and never converts them to a share of a context window — a transcript records no window size, so a percentage could only come from a table of model limits that would go stale as models change. A tab shows no reading when the transcript cannot be read.
 
-The reading needs the session identifier, which only a hook reports: two tabs running an agent in the same directory cannot otherwise be told apart. Codex records its counters differently and is not read yet.
+The reading needs the session identifier, which only a hook reports: two tabs running an agent in the same directory cannot otherwise be told apart. Codex and OpenCode record their counters differently and are not read yet.
 
 ## Install or update
 
@@ -55,5 +55,7 @@ Claude Code applies direct user-settings edits automatically, subject to its wor
 ## Verify
 
 Start Claude Code or Codex in a newly created romty tab and submit a prompt. The marker should animate through `◐` `◓` `◑` `◒`, then settle on `○` when the agent is ready for another prompt. An input request should use `▲`, a permission request should use `■`, and a stopped error should use `★`. `romty list` reports the same phase as `claude/idle`, `codex/waiting_approval`, and similar values.
+
+OpenCode has no hook to install, so it reports only from its own output: its marker animates while it works and settles on `▲` or `■` when it asks, with no `○`, `★`, or ledger reading.
 
 Optional embedded sound alerts use these same phase transitions. Enable them in the `F3` Config dialog; `d` controls completed work, `b` controls waiting for input or approval, and `s` tests the done sound.

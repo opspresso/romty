@@ -172,6 +172,7 @@ func TestAgentEventValidate(t *testing.T) {
 	}{
 		{name: "claude", event: valid, valid: true},
 		{name: "codex", event: protocol.AgentEvent{Agent: model.AgentCodex, HookEvent: "Stop"}, valid: true},
+		{name: "opencode", event: protocol.AgentEvent{Agent: model.AgentOpenCode, HookEvent: "Stop"}, valid: true},
 		{name: "an event romty has no phase for", event: protocol.AgentEvent{
 			Agent: model.AgentClaude, HookEvent: "SomethingNew"}, valid: true},
 		{name: "no agent", event: protocol.AgentEvent{HookEvent: "Stop"}},
