@@ -71,6 +71,27 @@ func TestReadWorkspaceFileRejectsReplacedParent(t *testing.T) {
 	}
 }
 
+func TestReadWorkspaceFileRejectsReplacedWorkspace(t *testing.T) {
+	parent := t.TempDir()
+	workspace := filepath.Join(parent, "workspace")
+	outside := filepath.Join(parent, "outside")
+	writeDiffFile(t, workspace, "file.txt", "inside")
+	writeDiffFile(t, outside, "file.txt", "outside")
+	files, err := readWorkspaceFiles(workspace)
+	if err != nil || len(files) != 1 {
+		t.Fatalf("list files: %v, %v", files, err)
+	}
+	if err := os.Rename(workspace, filepath.Join(parent, "moved")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, workspace); err != nil {
+		t.Fatal(err)
+	}
+	if content, err := readWorkspaceFile(workspace, files[0].Path); err == nil || content != "" {
+		t.Fatalf("replaced workspace escaped its root: content %q, error %v", content, err)
+	}
+}
+
 func TestReadWorkspaceFileRejectsOversizedFile(t *testing.T) {
 	workspace := t.TempDir()
 	file, err := os.Create(filepath.Join(workspace, "large.log"))

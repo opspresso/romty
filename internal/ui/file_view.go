@@ -67,6 +67,17 @@ func readWorkspaceFile(path, filePath string) (string, error) {
 		return "", fmt.Errorf("open workspace: %w", err)
 	}
 	defer root.Close()
+	openedRoot, err := root.Stat(".")
+	if err != nil {
+		return "", fmt.Errorf("inspect workspace: %w", err)
+	}
+	currentRoot, err := os.Lstat(path)
+	if err != nil {
+		return "", fmt.Errorf("inspect workspace: %w", err)
+	}
+	if !currentRoot.IsDir() || !os.SameFile(openedRoot, currentRoot) {
+		return "", fmt.Errorf("read workspace file: workspace changed while opening")
+	}
 	info, err := root.Lstat(relative)
 	if err != nil {
 		return "", fmt.Errorf("read workspace file: %w", err)
