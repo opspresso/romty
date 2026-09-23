@@ -128,11 +128,12 @@ func (s *Server) removeWorkspace(rootID, path string) protocol.Response {
 	if !ok {
 		return protocol.Response{Error: errRootNotFound}
 	}
-	workspacePath, err := removableWorkspacePath(root, path)
+	directory, workspacePath, err := openWorkspaceForRemoval(root, path)
 	if err != nil {
 		return protocol.Response{Error: err.Error()}
 	}
-	if err := os.RemoveAll(workspacePath); err != nil {
+	defer directory.Close()
+	if err := directory.RemoveAll(filepath.Base(workspacePath)); err != nil {
 		return protocol.Response{Error: fmt.Sprintf("delete workspace: %v", err)}
 	}
 
@@ -154,6 +155,31 @@ func (s *Server) removeWorkspace(rootID, path string) protocol.Response {
 	s.mu.Unlock()
 	closeSessions(sessions)
 	return s.snapshotResponse()
+}
+
+// Keep the validated root open through deletion. Resolving the absolute path
+// again for RemoveAll would let a replaced root redirect a destructive action.
+func openWorkspaceForRemoval(root model.Root, path string) (*os.Root, string, error) {
+	directory, err := os.OpenRoot(root.Path)
+	if err != nil {
+		return nil, "", fmt.Errorf("open workspace root: %w", err)
+	}
+	workspacePath, err := removableWorkspacePath(root, path)
+	if err == nil {
+		var opened, current os.FileInfo
+		opened, err = directory.Stat(".")
+		if err == nil {
+			current, err = os.Lstat(root.Path)
+		}
+		if err == nil && (!current.IsDir() || !os.SameFile(opened, current)) {
+			err = fmt.Errorf("workspace root changed while opening")
+		}
+	}
+	if err != nil {
+		directory.Close()
+		return nil, "", err
+	}
+	return directory, workspacePath, nil
 }
 
 func removableWorkspacePath(root model.Root, path string) (string, error) {
