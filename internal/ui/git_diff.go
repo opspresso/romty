@@ -22,8 +22,8 @@ type gitChangedFile struct {
 func readGitChangedFiles(path string) ([]gitChangedFile, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), gitDiffTimeout)
 	defer cancel()
-	output, err := gitCommand(ctx, path, gitReadEnvironment,
-		"status", "--porcelain=v1", "-z", "--untracked-files=all").Output()
+	output, err := gitStdout(ctx, path, gitReadEnvironment,
+		"status", "--porcelain=v1", "-z", "--untracked-files=all")
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		return nil, fmt.Errorf("read changed files timed out after %s", gitDiffTimeout)
 	}
@@ -74,14 +74,14 @@ func readGitFileDiff(path string, file gitChangedFile) (string, error) {
 		paths = append([]string{file.OldPath}, paths...)
 	}
 	if file.IndexStatus == '?' && file.WorkTreeStatus == '?' {
-		output, err := runGitDiff(path, true, "diff", "--no-index", "--no-ext-diff", "--no-color", "--", "/dev/null", file.Path)
+		output, err := runGitDiff(path, true, "--no-index", "--", "/dev/null", file.Path)
 		if err != nil {
 			return "", fmt.Errorf("read untracked file diff: %w", err)
 		}
 		return diffSection("Untracked file", output), nil
 	}
 	if file.IndexStatus != ' ' {
-		arguments := append([]string{"diff", "--cached", "--no-ext-diff", "--no-color", "--"}, paths...)
+		arguments := append([]string{"--cached", "--"}, paths...)
 		output, err := runGitDiff(path, false, arguments...)
 		if err != nil {
 			return "", fmt.Errorf("read staged diff: %w", err)
@@ -91,7 +91,7 @@ func readGitFileDiff(path string, file gitChangedFile) (string, error) {
 		}
 	}
 	if file.WorkTreeStatus != ' ' {
-		arguments := append([]string{"diff", "--no-ext-diff", "--no-color", "--"}, paths...)
+		arguments := append([]string{"--"}, paths...)
 		output, err := runGitDiff(path, false, arguments...)
 		if err != nil {
 			return "", fmt.Errorf("read unstaged diff: %w", err)
@@ -109,7 +109,8 @@ func readGitFileDiff(path string, file gitChangedFile) (string, error) {
 func runGitDiff(path string, allowDifferenceExit bool, arguments ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), gitDiffTimeout)
 	defer cancel()
-	output, err := gitCommand(ctx, path, gitReadEnvironment, arguments...).CombinedOutput()
+	arguments = append([]string{"--literal-pathspecs", "diff", "--no-ext-diff", "--no-textconv", "--no-color"}, arguments...)
+	output, err := gitCombinedOutput(ctx, path, gitReadEnvironment, arguments...)
 	value := strings.TrimRight(string(output), "\n")
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		return value, fmt.Errorf("git diff timed out after %s", gitDiffTimeout)

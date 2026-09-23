@@ -35,6 +35,7 @@ func TestDashboardHighlightsCodeDiffsInBothLayouts(t *testing.T) {
 		active:            true,
 		files:             []gitChangedFile{{Path: "main.go", WorkTreeStatus: 'M'}},
 		diffLines:         lines,
+		splitRows:         splitGitDiffRows(lines),
 		diffSyntax:        syntax,
 		syntaxHighlighted: true,
 	}

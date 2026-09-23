@@ -49,7 +49,7 @@ func (m dashboard) handleModalKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 		return m.handleWorkspaceActionKey(message)
 	case gitActionsModal:
 		if m.gitActionComplete {
-			page := max(modalCapacity(m.dimensions().bodyHeight)-3, 1)
+			page := max(gitActionResultCapacity(m.dimensions().bodyHeight)-1, 1)
 			switch message.String() {
 			case "enter":
 				m = m.resetGitActionResult()
@@ -219,9 +219,32 @@ func overlaySuffix(line string, left, right int) string {
 }
 
 func (m dashboard) renderModal(width, height int) []string {
+	lines := m.renderModalBody(width, height)
+	if !m.modalCanClose() || len(lines) == 0 {
+		return lines
+	}
+	boxWidth := lipgloss.Width(lines[0])
+	if boxWidth < 5 {
+		return lines
+	}
+	style := m.styles.modalTitle
+	if m.hover.kind == hoverModalClose {
+		style = m.styles.interactiveHover
+	}
+	lines[0] = overlayPrefix(lines[0], boxWidth-4) + style.Render(" × ") + m.styles.modalBorder.Render("╮")
+	return lines
+}
+
+func (m dashboard) modalCanClose() bool {
+	return m.modal != noModal && m.modal != workspaceActionsModal &&
+		!m.shutdownPending && !m.hookInstallPending && !m.gitActionPending
+}
+
+func (m dashboard) renderModalBody(width, height int) []string {
 	// modalWidth is the cap the box may grow to, not the width it takes.
-	modalWidth := min(max(width-4, minimumModalWidth), maximumModalWidth)
-	wide := min(max(width-4, minimumModalWidth), maximumWideModalWidth)
+	available := min(max(width-4, 6), width)
+	modalWidth := min(available, maximumModalWidth)
+	wide := min(available, maximumWideModalWidth)
 	if m.modal == helpModal {
 		// Help and the picker are wide by nature — a key column and a
 		// description, a path — so they take the wider cap outright.
@@ -493,6 +516,11 @@ func (g modalGeometry) contentOrigin() (int, int) {
 	return g.left + 3, g.top + 1
 }
 
+func (g modalGeometry) closeContains(mouse tea.Mouse) bool {
+	return g.width >= 5 && mouse.Y == g.top &&
+		mouse.X >= g.left+g.width-4 && mouse.X < g.left+g.width-1
+}
+
 // contentRow is the modal's own row number for a screen position, and whether
 // the position is inside the box at all. Row zero is the first line under the
 // top border.
@@ -518,7 +546,10 @@ func (m dashboard) modalActionHits(geometry modalGeometry) []modalActionHit {
 	for _, action := range actions {
 		segment := m.renderModalAction(action, false)
 		segmentWidth := lipgloss.Width(segment)
-		hits = append(hits, modalActionHit{action: action, left: left, right: left + segmentWidth, row: row})
+		right := min(left+segmentWidth, geometry.left+geometry.width-3)
+		if left < right {
+			hits = append(hits, modalActionHit{action: action, left: left, right: right, row: row})
+		}
 		left += segmentWidth + 2
 	}
 	return hits
@@ -553,9 +584,9 @@ func modalBoxFit(styles *uiStyles, minimum, maximum int, title string, values ..
 }
 
 func modalBox(styles *uiStyles, width int, title string, values ...string) []string {
-	interior := width - 2
+	interior := max(width-2, 0)
 	lines := make([]string, 0, len(values)+2)
-	title = " " + title + " "
+	title = truncate(" "+title+" ", max(width-3, 0))
 	topFill := max(width-lipgloss.Width(title)-3, 0)
 	lines = append(lines,
 		styles.modalBorder.Render("╭─")+
@@ -569,7 +600,9 @@ func modalBox(styles *uiStyles, width int, title string, values ...string) []str
 }
 
 func modalContentLine(styles *uiStyles, width int, value string) string {
-	contentWidth := max(width-6, 0)
+	padding := min(2, max((width-2)/2, 0))
+	space := strings.Repeat(" ", padding)
+	contentWidth := max(width-2-2*padding, 0)
 	content := pad(truncate(value, contentWidth), contentWidth)
-	return styles.modalBorder.Render("│") + "  " + content + "  " + styles.modalBorder.Render("│")
+	return styles.modalBorder.Render("│") + space + content + space + styles.modalBorder.Render("│")
 }

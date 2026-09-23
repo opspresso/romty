@@ -160,7 +160,7 @@ func (m *dashboard) moveWorkspaceAction(delta int) {
 		m.workspaceActionIndex, m.workspaceActionOffset = 0, 0
 		return
 	}
-	m.workspaceActionIndex = (m.workspaceActionIndex + delta + len(choices)) % len(choices)
+	m.workspaceActionIndex = ((m.workspaceActionIndex+delta)%len(choices) + len(choices)) % len(choices)
 	m.ensureWorkspaceActionVisible()
 }
 
@@ -297,10 +297,7 @@ func (m dashboard) startWorkspaceGitAction(action workspaceAction, target navIte
 	m.gitActionIndex = int(gitAction)
 	m.gitAction = gitAction
 	m.gitActionPending = false
-	m.gitActionComplete = false
-	m.gitActionOutput = ""
-	m.gitActionError = ""
-	m.gitActionOffset = 0
+	m = m.resetGitActionResult()
 	m.gitActionReturn = workspaceActionsModal
 	m.clearAnyError()
 	return m.startGitAction()

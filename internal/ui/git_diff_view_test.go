@@ -487,6 +487,7 @@ func TestDashboardTogglesInlineAndSplitGitDiff(t *testing.T) {
 		files:     []gitChangedFile{{Path: "file.txt", IndexStatus: ' ', WorkTreeStatus: 'M'}},
 		diffLines: []string{"@@ -1 +1 @@", "-old", "+new"},
 	}
+	value.gitDiff.splitRows = splitGitDiffRows(value.gitDiff.diffLines)
 
 	inline := ansi.Strip(value.render())
 	if !strings.Contains(inline, "Diff · file.txt · inline") {
@@ -508,6 +509,34 @@ func TestDashboardTogglesInlineAndSplitGitDiff(t *testing.T) {
 	value = updated.(dashboard)
 	if value.gitDiff.split {
 		t.Fatal("a second F6 did not restore inline view")
+	}
+}
+
+func TestSplitDiffReplacesAndClearsPreparedRows(t *testing.T) {
+	value := newDashboard(&fakeBackend{}, model.Snapshot{})
+	value.width, value.height = 100, 10
+	value.gitDiff = gitDiffView{
+		active: true, split: true, target: model.Workspace{Path: "/workspace"},
+		files: []gitChangedFile{{Path: "file.txt"}}, request: 1,
+	}
+	for _, text := range []string{"first", "second"} {
+		updated, _ := value.Update(gitFileDiffMsg{
+			path: "/workspace", filePath: "file.txt", request: value.gitDiff.request,
+			lines: []string{"@@ -1 +1 @@", "-old", "+" + text},
+		})
+		value = updated.(dashboard)
+		rendered := ansi.Strip(strings.Join(value.renderGitFileDiff(80, 8), "\n"))
+		if !lineContainsInOrder(rendered, "-old", "│", "+"+text) || value.maximumGitDiffOffset() != 0 {
+			t.Fatalf("prepared split rows did not follow new content:\n%s", rendered)
+		}
+		if text == "second" && strings.Contains(rendered, "+first") {
+			t.Fatal("split view retained the previous result")
+		}
+		value.gitDiff.request++
+	}
+	value.gitDiff.clearDiff()
+	if len(value.gitDiff.splitRows) != 0 || value.maximumGitDiffOffset() != 0 {
+		t.Fatal("clearing the diff retained split content")
 	}
 }
 

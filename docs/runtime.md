@@ -60,6 +60,8 @@ The runtime directory and Unix socket are private to the current user. Access to
 
 The runtime directory must be owned by the current user and cannot be a symbolic link. romty narrows it to mode `0700` and `daemon.log` to mode `0600`. It rejects a socket owned by another user or accessible by group or other users, and a log that is not a singly linked regular file owned by the current user.
 
+Workspace deletion keeps the validated root directory open and removes only its direct child through that directory handle. Replacing the root path after validation cannot redirect deletion to another directory.
+
 Use `romty doctor` to check permissions, file formats, the shell, and daemon compatibility without starting the daemon. Inspect `daemon.log` when the detached daemon cannot report a failure to the TUI.
 
 ## Architecture

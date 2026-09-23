@@ -91,7 +91,7 @@ func helpReference() []helpEntry {
 		{description: "Scroll content one line", keys: []string{"Ctrl+↑/↓"}},
 		{section: "MOUSE", note: "dashboard chrome"},
 		{description: "Open workspace or tab", keys: []string{"Click"}},
-		{description: "Move workspace cursor", keys: []string{"Wheel over tree"}},
+		{description: "Scroll workspace list", keys: []string{"Wheel over tree"}},
 		{description: "Resize workspace pane", keys: []string{"Drag divider"}},
 		{section: "CONTEXT", note: "workspace, picker, Config, modals and prompts"},
 		{description: "Activate / submit / toggle", keys: []string{"Enter"}},
