@@ -22,8 +22,8 @@ type gitChangedFile struct {
 func readGitChangedFiles(path string) ([]gitChangedFile, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), gitDiffTimeout)
 	defer cancel()
-	output, err := gitCommand(ctx, path, gitReadEnvironment,
-		"status", "--porcelain=v1", "-z", "--untracked-files=all").Output()
+	output, err := gitStdout(ctx, path, gitReadEnvironment,
+		"status", "--porcelain=v1", "-z", "--untracked-files=all")
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		return nil, fmt.Errorf("read changed files timed out after %s", gitDiffTimeout)
 	}

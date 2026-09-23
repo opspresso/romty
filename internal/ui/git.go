@@ -58,8 +58,8 @@ func readGitState(path string, fetch bool) (gitState, bool) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), gitCommandTimeout)
 	defer cancel()
-	output, err := gitCommand(ctx, path, gitReadEnvironment,
-		"status", "--porcelain=v2", "--branch", "--untracked-files=normal").Output()
+	output, err := gitStdout(ctx, path, gitReadEnvironment,
+		"status", "--porcelain=v2", "--branch", "--untracked-files=normal")
 	if err != nil {
 		return gitState{}, false
 	}
