@@ -3,10 +3,12 @@ package ui
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"syscall"
 	"time"
 
 	"charm.land/lipgloss/v2"
@@ -15,6 +17,8 @@ import (
 )
 
 const workspaceFileTimeout = 10 * time.Second
+
+const maximumWorkspaceFileBytes = 8 << 20
 
 func readWorkspaceFiles(path string) ([]gitChangedFile, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), workspaceFileTimeout)
@@ -58,17 +62,42 @@ func readWorkspaceFile(path, filePath string) (string, error) {
 		strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
 		return "", fmt.Errorf("read workspace file: invalid path %q", filePath)
 	}
-	fullPath := filepath.Join(path, relative)
-	info, err := os.Lstat(fullPath)
+	root, err := os.OpenRoot(path)
+	if err != nil {
+		return "", fmt.Errorf("open workspace: %w", err)
+	}
+	defer root.Close()
+	info, err := root.Lstat(relative)
 	if err != nil {
 		return "", fmt.Errorf("read workspace file: %w", err)
 	}
 	if !info.Mode().IsRegular() {
 		return "", fmt.Errorf("read workspace file: %q is not a regular file", filePath)
 	}
-	content, err := os.ReadFile(fullPath)
+	// Anchor path resolution to the workspace even if a parent is replaced
+	// after listing. Nonblocking open also lets us reject a raced-in FIFO.
+	file, err := root.OpenFile(relative, os.O_RDONLY|syscall.O_NONBLOCK, 0)
 	if err != nil {
 		return "", fmt.Errorf("read workspace file: %w", err)
+	}
+	defer file.Close()
+	opened, err := file.Stat()
+	if err != nil {
+		return "", fmt.Errorf("inspect workspace file: %w", err)
+	}
+	if !opened.Mode().IsRegular() || !os.SameFile(info, opened) {
+		return "", fmt.Errorf("read workspace file: %q changed while opening", filePath)
+	}
+	if opened.Size() > maximumWorkspaceFileBytes {
+		return "", fmt.Errorf("read workspace file: exceeds %d MiB preview limit", maximumWorkspaceFileBytes>>20)
+	}
+	// The file can grow after Stat, so enforce the limit on the read as well.
+	content, err := io.ReadAll(io.LimitReader(file, maximumWorkspaceFileBytes+1))
+	if err != nil {
+		return "", fmt.Errorf("read workspace file: %w", err)
+	}
+	if len(content) > maximumWorkspaceFileBytes {
+		return "", fmt.Errorf("read workspace file: exceeds %d MiB preview limit", maximumWorkspaceFileBytes>>20)
 	}
 	return string(content), nil
 }

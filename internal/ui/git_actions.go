@@ -94,7 +94,7 @@ func executeGitActionContext(parent context.Context, path string, action gitActi
 	}
 	ctx, cancel := context.WithTimeout(parent, gitActionTimeout)
 	defer cancel()
-	output, err := gitCommand(ctx, path, gitRemoteEnvironment, arguments...).CombinedOutput()
+	output, err := gitCombinedOutput(ctx, path, gitRemoteEnvironment, arguments...)
 	value := strings.TrimSpace(string(output))
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		return value, fmt.Errorf("%s timed out after %s", action.label(), gitActionTimeout)

@@ -52,6 +52,40 @@ func TestReadWorkspaceFileReturnsContents(t *testing.T) {
 	}
 }
 
+func TestReadWorkspaceFileRejectsReplacedParent(t *testing.T) {
+	workspace, outside := t.TempDir(), t.TempDir()
+	writeDiffFile(t, workspace, "nested/file.txt", "inside")
+	writeDiffFile(t, outside, "file.txt", "outside")
+	files, err := readWorkspaceFiles(workspace)
+	if err != nil || len(files) != 1 {
+		t.Fatalf("list files: %v, %v", files, err)
+	}
+	if err := os.Rename(filepath.Join(workspace, "nested"), filepath.Join(workspace, "original")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(workspace, "nested")); err != nil {
+		t.Fatal(err)
+	}
+	if content, err := readWorkspaceFile(workspace, files[0].Path); err == nil || content != "" {
+		t.Fatalf("replaced parent escaped workspace: content %q, error %v", content, err)
+	}
+}
+
+func TestReadWorkspaceFileRejectsOversizedFile(t *testing.T) {
+	workspace := t.TempDir()
+	file, err := os.Create(filepath.Join(workspace, "large.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	if err := file.Truncate((8 << 20) + 1); err != nil {
+		t.Fatal(err)
+	}
+	if content, err := readWorkspaceFile(workspace, "large.log"); err == nil || content != "" {
+		t.Fatalf("oversized file returned %d bytes, error %v", len(content), err)
+	}
+}
+
 func TestHighlightWorkspaceFileSyntax(t *testing.T) {
 	lines := normalizeWorkspaceFileLines("package main\n\n\tfunc main() {}\n")
 	syntax, highlighted := highlightWorkspaceFileSyntax("main.go", lines)

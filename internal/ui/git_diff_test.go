@@ -103,6 +103,36 @@ func TestReadGitFileDiffShowsUntrackedFile(t *testing.T) {
 	}
 }
 
+func TestReadGitFileDiffDoesNotRunTextconv(t *testing.T) {
+	repository := initializeDiffRepository(t)
+	writeDiffFile(t, repository, ".gitattributes", "*.txt diff=romty-test\n")
+	writeDiffFile(t, repository, "converter.sh", "printf invoked > converter-ran\ncat \"$1\"\n")
+	runGit(t, "-C", repository, "config", "diff.romty-test.textconv", "sh ./converter.sh")
+	writeDiffFile(t, repository, "modified.txt", "after\n")
+	diff, err := readGitFileDiff(repository, gitChangedFile{Path: "modified.txt", IndexStatus: ' ', WorkTreeStatus: 'M'})
+	if err != nil || !strings.Contains(diff, "+after") {
+		t.Fatalf("read diff: %q, %v", diff, err)
+	}
+	if _, err := os.Stat(filepath.Join(repository, "converter-ran")); !os.IsNotExist(err) {
+		t.Fatalf("read-only diff ran the textconv command: %v", err)
+	}
+}
+
+func TestReadGitFileDiffTreatsFilenameLiterally(t *testing.T) {
+	repository := initializeDiffRepository(t)
+	for _, name := range []string{"[ab].txt", "a.txt"} {
+		writeDiffFile(t, repository, name, "before\n")
+	}
+	runGit(t, "-C", repository, "add", ".")
+	runGit(t, "-C", repository, "-c", "user.name=romty", "-c", "user.email=romty@example.com", "commit", "-m", "filenames")
+	writeDiffFile(t, repository, "[ab].txt", "selected\n")
+	writeDiffFile(t, repository, "a.txt", "unselected\n")
+	diff, err := readGitFileDiff(repository, gitChangedFile{Path: "[ab].txt", IndexStatus: ' ', WorkTreeStatus: 'M'})
+	if err != nil || !strings.Contains(diff, "+selected") || strings.Contains(diff, "+unselected") {
+		t.Fatalf("filename interpreted as a pattern: %q, %v", diff, err)
+	}
+}
+
 func initializeDiffRepository(t *testing.T) string {
 	t.Helper()
 	repository := t.TempDir()
