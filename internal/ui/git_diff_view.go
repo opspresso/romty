@@ -38,6 +38,7 @@ type gitDiffView struct {
 	collapsed         map[string]bool
 	fileIndex         int
 	diffLines         []string
+	splitRows         []gitSplitDiffRow
 	diffSyntax        []gitDiffLineSyntax
 	diffOffset        int
 	split             bool
@@ -55,6 +56,7 @@ type gitDiffView struct {
 // its scroll offset under content that is shorter.
 func (v *gitDiffView) clearDiff() {
 	v.diffLines = nil
+	v.splitRows = nil
 	v.diffSyntax = nil
 	v.syntaxHighlighted = false
 	v.diffOffset = 0
@@ -264,6 +266,11 @@ func (m dashboard) handleGitFileDiff(message gitFileDiffMsg) (tea.Model, tea.Cmd
 		return m, nil
 	}
 	m.gitDiff.diffLines = message.lines
+	if m.gitDiff.mode == changedFilesView {
+		// The pairing depends on content, not the viewport or theme. Build it
+		// once per accepted result and reuse it for scrolling and rendering.
+		m.gitDiff.splitRows = splitGitDiffRows(message.lines)
+	}
 	m.gitDiff.diffSyntax = message.syntax
 	m.gitDiff.syntaxHighlighted = message.syntaxHighlighted
 	m.gitDiff.err = ""
@@ -482,7 +489,7 @@ func (m dashboard) gitDiffPageSize() int {
 func (m dashboard) maximumGitDiffOffset() int {
 	lineCount := len(m.gitDiff.diffLines)
 	if m.gitDiff.mode == changedFilesView && m.gitDiff.split {
-		lineCount = len(splitGitDiffRows(m.gitDiff.diffLines))
+		lineCount = len(m.gitDiff.splitRows)
 	}
 	return max(lineCount-m.gitDiffPageSize(), 0)
 }
@@ -637,7 +644,7 @@ func (m dashboard) renderGitFileDiff(width, height int) []string {
 	capacity := max(height-len(lines), 0)
 	start := min(m.gitDiff.diffOffset, m.maximumGitDiffOffset())
 	if m.gitDiff.mode == changedFilesView && m.gitDiff.split {
-		rows := splitGitDiffRows(m.gitDiff.diffLines)
+		rows := m.gitDiff.splitRows
 		end := min(start+capacity, len(rows))
 		for _, row := range rows[start:end] {
 			lines = append(lines, m.renderGitSplitDiffRow(row, width))
