@@ -139,6 +139,7 @@ const (
 	hoverTabClose
 	hoverDivider
 	hoverModalAction
+	hoverModalClose
 	hoverBrowseRow
 	hoverWorkspaceAction
 	hoverGitAction
@@ -520,6 +521,9 @@ func (m dashboard) update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = message.Width
 		m.height = message.Height
 		m.ensureNavigationVisible()
+		if m.modal == workspaceActionsModal {
+			m.ensureWorkspaceActionVisible()
+		}
 		return m, m.resizeTerminal()
 	case tea.BackgroundColorMsg:
 		m.styles = newUIStyles(message.IsDark())
@@ -527,6 +531,10 @@ func (m dashboard) update(message tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyPressMsg:
 		return m.handleKey(message)
 	case tea.MouseClickMsg, tea.MouseReleaseMsg, tea.MouseWheelMsg, tea.MouseMotionMsg:
+		if m.inputMode {
+			m.hover = hoverTarget{}
+			return m, nil
+		}
 		mouse := message.(tea.MouseMsg)
 		m.hover = m.hoverTargetAt(mouse.Mouse())
 		if m.modal != noModal {
@@ -554,6 +562,10 @@ func (m dashboard) update(message tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.PasteMsg:
 		if m.inputMode {
 			m.input += message.Content
+		} else if m.modal != noModal || m.shutdownPending || m.gitActionPending || m.hookInstallPending {
+			return m, nil
+		} else if m.scrollback && m.searchMode {
+			m.searchQuery += message.Content
 		} else if m.scrollback && m.terminal != nil {
 			m.stopScrollback()
 			m.terminal.paste(message.Content)

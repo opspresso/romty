@@ -304,8 +304,8 @@ func (m dashboard) addBrowseSelection() (tea.Model, tea.Cmd) {
 // browseCapacity is how many rows the picker shows at once, which is what a
 // page key moves by.
 func (m dashboard) browseCapacity() int {
-	// The path line and the blank under it take two of the box's rows.
-	return max(modalCapacity(m.dimensions().bodyHeight)-2, 1)
+	_, capacity := m.browseWindow(m.dimensions().bodyHeight)
+	return capacity
 }
 
 // renderBrowseModal windows the directory list around the cursor so the box

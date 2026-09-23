@@ -117,6 +117,12 @@ func (m dashboard) translateMouse(mouse tea.Mouse) (uv.Mouse, bool) {
 }
 
 func (m dashboard) handleModalMouse(message tea.MouseMsg) (tea.Model, tea.Cmd, bool) {
+	if click, ok := message.(tea.MouseClickMsg); ok && click.Button == tea.MouseLeft && m.modalCanClose() {
+		if m.modalGeometry(m.bodySize()).closeContains(click.Mouse()) {
+			updated, command := m.handleKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEscape}))
+			return updated, command, true
+		}
+	}
 	switch m.modal {
 	case browseModal:
 		if updated, command, handled := m.handleBrowseMouse(message); handled {
@@ -159,6 +165,9 @@ func (m dashboard) hoverTargetAt(mouse tea.Mouse) hoverTarget {
 	}
 	if m.modal != noModal {
 		geometry := m.modalGeometry(width, height)
+		if m.modalCanClose() && geometry.closeContains(mouse) {
+			return hoverTarget{kind: hoverModalClose}
+		}
 		for index, hit := range m.modalActionHits(geometry) {
 			if mouse.Y == hit.row && mouse.X >= hit.left && mouse.X < hit.right {
 				return hoverTarget{kind: hoverModalAction, index: index}

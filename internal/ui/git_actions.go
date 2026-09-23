@@ -116,10 +116,7 @@ func (m dashboard) openGitActions() (tea.Model, tea.Cmd) {
 	m.gitActionIndex = 0
 	m.gitAction = gitStatusAction
 	m.gitActionPending = false
-	m.gitActionComplete = false
-	m.gitActionOutput = ""
-	m.gitActionError = ""
-	m.gitActionOffset = 0
+	m = m.resetGitActionResult()
 	m.gitActionReturn = noModal
 	m.clearAnyError()
 	return m, nil
@@ -203,8 +200,12 @@ func (m dashboard) gitActionResultLines() []string {
 }
 
 func (m dashboard) maximumGitActionOffset(height int) int {
-	capacity := max(modalCapacity(height)-2, 1)
+	capacity := gitActionResultCapacity(height)
 	return max(len(m.gitActionResultLines())-capacity, 0)
+}
+
+func gitActionResultCapacity(height int) int {
+	return max(modalCapacity(height)-gitActionHeaderRows, 1)
 }
 
 func (m dashboard) scrollGitAction(delta int) (tea.Model, tea.Cmd) {
@@ -283,7 +284,7 @@ func (m dashboard) renderGitActionsModal(maximum, height int) []string {
 	}
 
 	result := m.gitActionResultLines()
-	capacity := max(modalCapacity(height)-2, 1)
+	capacity := gitActionResultCapacity(height)
 	offset := min(max(m.gitActionOffset, 0), max(len(result)-capacity, 0))
 	end := min(offset+capacity, len(result))
 	title := "Git · " + m.gitAction.label()

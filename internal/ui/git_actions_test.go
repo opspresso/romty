@@ -150,6 +150,50 @@ func TestDashboardScrollsGitActionResult(t *testing.T) {
 	}
 }
 
+func TestDashboardClosesGitResultWithMouse(t *testing.T) {
+	for _, output := range []string{"Already up to date.", strings.Repeat("output\n", 40)} {
+		for _, failure := range []string{"", "exit status 1"} {
+			value := newDashboard(&fakeBackend{}, model.Snapshot{})
+			value.width, value.height = 80, 10
+			value.modal = gitActionsModal
+			value.gitAction = gitPullAction
+			value.gitActionComplete = true
+			value.gitActionTarget = model.Workspace{Name: "alpha", Path: "/projects/alpha"}
+			value.gitActionOutput = output
+			value.gitActionError = failure
+			updated, _ := value.Update(key(tea.KeyEnd, ""))
+			value = updated.(dashboard)
+			geometry := value.modalGeometry(value.bodySize())
+			if len(geometry.lines) > value.dimensions().bodyHeight {
+				t.Fatal("Git result exceeds the available height")
+			}
+			for row, line := range geometry.lines {
+				plain := ansi.Strip(line)
+				column := strings.Index(plain, "×")
+				if column < 0 {
+					continue
+				}
+				x := geometry.left + lipgloss.Width(plain[:column])
+				y := geometry.top + row
+				updated, _ = value.Update(tea.MouseMotionMsg{X: x, Y: y})
+				value = updated.(dashboard)
+				if value.hover.kind != hoverModalClose {
+					t.Fatal("Close button does not respond to hover")
+				}
+				updated, command := value.Update(tea.MouseClickMsg{X: x, Y: y, Button: tea.MouseLeft})
+				value = updated.(dashboard)
+				if command != nil || value.modal != noModal {
+					t.Fatal("Clicking Close did not dismiss the Git result")
+				}
+				break
+			}
+			if value.modal != noModal {
+				t.Fatal("No visible Close button in the Git result")
+			}
+		}
+	}
+}
+
 func TestDashboardClicksAndScrollsGitActions(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, model.Snapshot{})
 	value.width, value.height = 100, 12
