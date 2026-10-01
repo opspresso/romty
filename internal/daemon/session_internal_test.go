@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"bytes"
 	"errors"
 	"io"
 	"net"
@@ -9,6 +10,27 @@ import (
 	"testing"
 	"time"
 )
+
+func TestSessionTracksOnlyLiveOutputAsAgentActivity(t *testing.T) {
+	value := newSessionForTest(nil)
+	value.restore([]byte("saved output\r\n"), "")
+	_, _, lastOutput := value.recentOutput(phaseHintBytes)
+	if !lastOutput.IsZero() {
+		t.Fatal("restoring recorded output renewed activity")
+	}
+
+	before := time.Now()
+	value.broadcast([]byte("\x1b[8;4H•"))
+	output, _, lastOutput := value.recentOutput(phaseHintBytes)
+	if lastOutput.Before(before) || lastOutput.After(time.Now()) || !bytes.HasSuffix(output, []byte("\x1b[8;4H•")) {
+		t.Fatalf("live output did not renew activity: last output = %v", lastOutput)
+	}
+	value.broadcast(nil)
+	_, _, afterEmpty := value.recentOutput(phaseHintBytes)
+	if afterEmpty != lastOutput {
+		t.Fatal("empty output renewed activity")
+	}
+}
 
 func TestSessionReleasesThePTYWhenTheShellExits(t *testing.T) {
 	exited := make(chan struct{})

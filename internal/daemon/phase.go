@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/x/ansi"
 
@@ -24,6 +25,10 @@ import (
 // recording holds megabytes; what an agent last drew is the final screen or
 // two, and reading further back only finds prompts that were answered long ago.
 const phaseHintBytes = 4 << 10
+
+// An unhooked agent's redraws are an activity signal, not a lifecycle report.
+// Let a few missed frames pass before treating silence as idle.
+const agentActivityTimeout = 5 * time.Second
 
 // phaseSignal is one phrase an agent draws and the phase it means.
 type phaseSignal struct {
@@ -93,6 +98,21 @@ func inferAgentPhase(output []byte, title string) (model.AgentPhase, bool) {
 	// Only when the output is silent: a title is sticky, so it can outlive the
 	// state it named, while output that says nothing cannot be stale.
 	return lastSignal(strings.ToLower(title), titleSignals)
+}
+
+// TUI updates often replace only a spinner or elapsed time, leaving the
+// interrupt hint on screen but outside the recording tail. Live output keeps
+// work visible; silence expires the estimate so an old hint cannot keep an
+// idle agent animating. Explicit input and approval prompts still take priority.
+func inferAgentPhaseWithActivity(output []byte, title string, lastOutput, at time.Time) (model.AgentPhase, bool) {
+	phase, found := inferAgentPhase(output, title)
+	if found && phase != model.AgentPhaseWorking || lastOutput.IsZero() {
+		return phase, found
+	}
+	if at.Sub(lastOutput) < agentActivityTimeout {
+		return model.AgentPhaseWorking, true
+	}
+	return model.AgentPhaseIdle, true
 }
 
 // lastSignal is the phase of the signal that appears latest in text.

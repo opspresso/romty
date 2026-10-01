@@ -50,6 +50,9 @@ const (
 type AgentStatus struct {
 	Agent Agent      `json:"agent"`
 	Phase AgentPhase `json:"phase"`
+	// Estimated phases come from terminal output. An estimated idle stops the
+	// animation but does not establish that work completed.
+	Estimated bool `json:"estimated,omitempty"`
 	// ContextTokens is what the agent's newest request carried into the model,
 	// and CostUSD what the session has cost, both as the agent recorded them in
 	// its own transcript. Zero means romty had nothing to read: the counters

@@ -49,6 +49,9 @@ type session struct {
 	mu      sync.Mutex
 	writeMu sync.Mutex
 	history recording
+	// Live output includes TUI spinner redraws even when the phase hint is
+	// no longer in history's tail. Replayed history does not renew activity.
+	lastOutputAt time.Time
 	// modes survives the recording being trimmed, so a mode the guest set
 	// long ago is still restored to a reattaching client.
 	guest      *guestTracker
@@ -173,6 +176,9 @@ func (s *session) broadcast(data []byte) {
 	s.mu.Lock()
 	s.guest.observe(data)
 	s.history.append(data)
+	if len(data) > 0 {
+		s.lastOutputAt = time.Now()
+	}
 	stalled := make([]net.Conn, 0)
 	for connection, attached := range s.clients {
 		if attached.live {
@@ -385,13 +391,12 @@ func (s *session) mostRecentClient() net.Conn {
 	return selected
 }
 
-// recentOutput is the end of the recording together with the window title the
-// guest last set: the two things a phase can be read back from when no hook
-// has reported one.
-func (s *session) recentOutput(count int) ([]byte, string) {
+// recentOutput includes when live output last arrived, so partial redraws can
+// report activity even after the original phase hint left the recording tail.
+func (s *session) recentOutput(count int) ([]byte, string, time.Time) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.history.tail(count), s.guest.title
+	return s.history.tail(count), s.guest.title, s.lastOutputAt
 }
 
 // snapshotRecording is the whole recording as a copy of its own, which is

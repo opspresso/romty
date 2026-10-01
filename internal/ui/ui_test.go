@@ -2,6 +2,7 @@ package ui
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"image/color"
@@ -2136,6 +2137,43 @@ func TestDashboardDoesNotSoundOnTheFirstAgentSnapshot(t *testing.T) {
 	}
 	if kind, ok := playedSound(command); ok {
 		t.Fatalf("first agent snapshot played %q", kind)
+	}
+}
+
+func TestDashboardDoesNotSoundForEstimatedIdle(t *testing.T) {
+	value := newDashboardWithConfig(&fakeBackend{}, model.Snapshot{Roots: []model.RootView{{
+		Root: model.Root{ID: "root-1"},
+		Tabs: []model.Tab{{ID: "tab-1", Running: true, Agent: model.AgentCodex, AgentPhase: model.AgentPhaseWorking}},
+	}}}, "", Config{SoundOnDone: true, SoundOnWaiting: true})
+	value.agentSoundReady = true
+
+	var statuses map[string]model.AgentStatus
+	if err := json.Unmarshal([]byte(`{"tab-1":{"agent":"codex","phase":"idle","estimated":true}}`), &statuses); err != nil {
+		t.Fatalf("Unmarshal() error = %v", err)
+	}
+	updated, command := value.Update(agentSnapshotMsg{value: statuses})
+	value = updated.(dashboard)
+	if kind, ok := playedSound(command); ok {
+		t.Fatalf("estimated idle played %q, want no completion sound", kind)
+	}
+	if value.state.Roots[0].Tabs[0].AgentPhase != model.AgentPhaseIdle || value.hasAnimatedAgent() {
+		t.Fatal("estimated idle did not stop the marker animation")
+	}
+
+	statuses["tab-1"] = model.AgentStatus{Agent: model.AgentCodex, Phase: model.AgentPhaseWorking, Estimated: true}
+	updated, _ = value.Update(agentSnapshotMsg{value: statuses})
+	value = updated.(dashboard)
+	statuses["tab-1"] = model.AgentStatus{Agent: model.AgentCodex, Phase: model.AgentPhaseIdle}
+	updated, command = value.Update(agentSnapshotMsg{value: statuses})
+	value = updated.(dashboard)
+	if kind, ok := playedSound(command); !ok || kind != sound.Done {
+		t.Fatalf("hooked completion sound = (%q, %v), want done", kind, ok)
+	}
+
+	statuses["tab-1"] = model.AgentStatus{Agent: model.AgentCodex, Phase: model.AgentPhaseWaitingApproval, Estimated: true}
+	_, command = value.Update(agentSnapshotMsg{value: statuses})
+	if kind, ok := playedSound(command); !ok || kind != sound.Waiting {
+		t.Fatalf("estimated approval sound = (%q, %v), want waiting", kind, ok)
 	}
 }
 

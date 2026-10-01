@@ -399,6 +399,7 @@ func (s *Server) agentStatusesSnapshot() map[string]model.AgentStatus {
 		default:
 			if phase, ok := inferred[tabID]; ok {
 				status.Phase = phase
+				status.Estimated = true
 			}
 		}
 		result[tabID] = status
@@ -415,6 +416,7 @@ func inferPhases(
 	reported map[string]agentRuntime,
 ) map[string]model.AgentPhase {
 	phases := make(map[string]model.AgentPhase)
+	at := time.Now()
 	for tabID, agent := range agents {
 		if reported[tabID].Agent == agent {
 			continue
@@ -423,8 +425,8 @@ func inferPhases(
 		if !ok {
 			continue
 		}
-		output, title := value.recentOutput(phaseHintBytes)
-		if phase, ok := inferAgentPhase(output, title); ok {
+		output, title, lastOutput := value.recentOutput(phaseHintBytes)
+		if phase, ok := inferAgentPhaseWithActivity(output, title, lastOutput, at); ok {
 			phases[tabID] = phase
 		}
 	}

@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/opspresso/romty/internal/model"
 	"github.com/opspresso/romty/internal/protocol"
@@ -109,9 +110,9 @@ func TestAgentStatusInfersAPhaseOnlyWhereNoHookHasSpoken(t *testing.T) {
 
 	hookedSession := newSessionForTest(hooked)
 	// The same approval prompt is on both screens.
-	hookedSession.history.append([]byte("Bash(git push)\r\n  Do you want to proceed?\r\n"))
+	hookedSession.broadcast([]byte("Bash(git push)\r\n  Do you want to proceed?\r\n"))
 	unhookedSession := newSessionForTest(unhooked)
-	unhookedSession.history.append([]byte("Bash(git push)\r\n  Do you want to proceed?\r\n"))
+	unhookedSession.broadcast([]byte("Bash(git push)\r\n  Do you want to proceed?\r\n"))
 	titledSession := newSessionForTest(titled)
 	titledSession.guest.observe([]byte("\x1b]2;codex — Action required\x07"))
 
@@ -129,8 +130,8 @@ func TestAgentStatusInfersAPhaseOnlyWhereNoHookHasSpoken(t *testing.T) {
 		// The hook says idle even though the screen still shows the prompt it
 		// answered.
 		"tab-1": {Agent: model.AgentClaude, Phase: model.AgentPhaseIdle},
-		"tab-2": {Agent: model.AgentClaude, Phase: model.AgentPhaseWaitingApproval},
-		"tab-3": {Agent: model.AgentCodex, Phase: model.AgentPhaseWaitingApproval},
+		"tab-2": {Agent: model.AgentClaude, Phase: model.AgentPhaseWaitingApproval, Estimated: true},
+		"tab-3": {Agent: model.AgentCodex, Phase: model.AgentPhaseWaitingApproval, Estimated: true},
 	}
 	if got := server.agentStatusesSnapshot(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("agentStatusesSnapshot() = %#v, want %#v", got, want)
@@ -235,6 +236,44 @@ func TestAgentStatusLeavesAnUnreadableScreenUnknown(t *testing.T) {
 	if got := server.agentStatusesSnapshot(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("agentStatusesSnapshot() = %#v, want %#v", got, want)
 	}
+}
+
+func TestAgentPhaseRecognizesActivityAfterPartialRedraws(t *testing.T) {
+	previousGroup := foregroundProcessGroup
+	previousList := runProcessList
+	foregroundProcessGroup = func(*os.File) (int, error) { return 101, nil }
+	runProcessList = func(context.Context) ([]byte, error) { return []byte("101 codex\n"), nil }
+	t.Cleanup(func() {
+		foregroundProcessGroup = previousGroup
+		runProcessList = previousList
+	})
+
+	value := newSessionForTest(new(os.File))
+	server := &Server{
+		sessions:      map[string]*session{"tab-1": value},
+		agentStatuses: make(map[string]agentRuntime),
+	}
+	value.broadcast([]byte("Working (1s • esc to interrupt)\r\n"))
+	// A TUI redraws the spinner and elapsed time without repeating the hint.
+	value.broadcast([]byte(strings.Repeat("\x1b[8;4H•\x1b[8;16H2s", phaseHintBytes)))
+	if _, found := inferAgentPhase(value.history.tail(phaseHintBytes), ""); found {
+		t.Fatal("partial redraw still contains a phase hint")
+	}
+	assertStatus := func(want model.AgentStatus) {
+		t.Helper()
+		if got := server.agentStatusesSnapshot()["tab-1"]; got != want {
+			t.Fatalf("status = %#v, want %#v", got, want)
+		}
+	}
+	assertStatus(model.AgentStatus{Agent: model.AgentCodex, Phase: model.AgentPhaseWorking, Estimated: true})
+	value.mu.Lock()
+	value.lastOutputAt = time.Now().Add(-agentActivityTimeout)
+	value.mu.Unlock()
+	assertStatus(model.AgentStatus{Agent: model.AgentCodex, Phase: model.AgentPhaseIdle, Estimated: true})
+	if response := server.recordAgentEvent("tab-1", &protocol.AgentEvent{Agent: model.AgentCodex, HookEvent: "Stop"}); response.Error != "" {
+		t.Fatalf("Stop hook error = %v", response.Error)
+	}
+	assertStatus(model.AgentStatus{Agent: model.AgentCodex, Phase: model.AgentPhaseIdle})
 }
 
 func TestAgentStatusUsesForegroundProcessAsPresenceAuthority(t *testing.T) {
