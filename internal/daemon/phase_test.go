@@ -3,6 +3,7 @@ package daemon
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/opspresso/romty/internal/model"
 )
@@ -97,5 +98,36 @@ func TestPhaseHintReadsOnlyTheEndOfTheRecording(t *testing.T) {
 	value.append([]byte(strings.Repeat("build output\r\n", phaseHintBytes)))
 	if phase, found := inferAgentPhase(value.tail(phaseHintBytes), ""); found {
 		t.Fatalf("phase = %q, want the old prompt scrolled out of reach", phase)
+	}
+}
+
+func TestInferredAgentActivityExpiresAndResumes(t *testing.T) {
+	start := time.Unix(1_000, 0)
+	for _, testCase := range []struct {
+		name       string
+		output     string
+		title      string
+		lastOutput time.Time
+		at         time.Time
+		want       model.AgentPhase
+		found      bool
+	}{
+		{name: "no live output", at: start},
+		{name: "partial redraw", output: "\x1b[8;4H•", lastOutput: start, at: start.Add(time.Second), want: model.AgentPhaseWorking, found: true},
+		{name: "brief silence", lastOutput: start, at: start.Add(agentActivityTimeout - time.Nanosecond), want: model.AgentPhaseWorking, found: true},
+		{name: "silence reaches deadline", lastOutput: start, at: start.Add(agentActivityTimeout), want: model.AgentPhaseIdle, found: true},
+		{name: "old interrupt hint expires", output: "esc to interrupt", lastOutput: start, at: start.Add(time.Minute), want: model.AgentPhaseIdle, found: true},
+		{name: "later redraw resumes activity", output: "\x1b[8;16H60s", lastOutput: start.Add(time.Minute), at: start.Add(time.Minute + time.Second), want: model.AgentPhaseWorking, found: true},
+		{name: "approval during redraw", output: "Do you want to proceed?", lastOutput: start, at: start, want: model.AgentPhaseWaitingApproval, found: true},
+		{name: "approval survives silence", output: "Do you want to proceed?", lastOutput: start, at: start.Add(time.Minute), want: model.AgentPhaseWaitingApproval, found: true},
+		{name: "input survives silence", output: "Press Enter to confirm", lastOutput: start, at: start.Add(time.Minute), want: model.AgentPhaseWaitingInput, found: true},
+		{name: "approval title during redraw", title: "codex — Action required", lastOutput: start, at: start, want: model.AgentPhaseWaitingApproval, found: true},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			phase, found := inferAgentPhaseWithActivity([]byte(testCase.output), testCase.title, testCase.lastOutput, testCase.at)
+			if phase != testCase.want || found != testCase.found {
+				t.Fatalf("phase = (%q, %v), want (%q, %v)", phase, found, testCase.want, testCase.found)
+			}
+		})
 	}
 }

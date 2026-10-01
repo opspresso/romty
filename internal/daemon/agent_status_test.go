@@ -109,9 +109,9 @@ func TestAgentStatusInfersAPhaseOnlyWhereNoHookHasSpoken(t *testing.T) {
 
 	hookedSession := newSessionForTest(hooked)
 	// The same approval prompt is on both screens.
-	hookedSession.history.append([]byte("Bash(git push)\r\n  Do you want to proceed?\r\n"))
+	hookedSession.broadcast([]byte("Bash(git push)\r\n  Do you want to proceed?\r\n"))
 	unhookedSession := newSessionForTest(unhooked)
-	unhookedSession.history.append([]byte("Bash(git push)\r\n  Do you want to proceed?\r\n"))
+	unhookedSession.broadcast([]byte("Bash(git push)\r\n  Do you want to proceed?\r\n"))
 	titledSession := newSessionForTest(titled)
 	titledSession.guest.observe([]byte("\x1b]2;codex — Action required\x07"))
 
@@ -234,6 +234,24 @@ func TestAgentStatusLeavesAnUnreadableScreenUnknown(t *testing.T) {
 	want := map[string]model.AgentStatus{"tab-1": {Agent: model.AgentClaude, Phase: model.AgentPhaseUnknown}}
 	if got := server.agentStatusesSnapshot(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("agentStatusesSnapshot() = %#v, want %#v", got, want)
+	}
+}
+
+func TestAgentPhaseRecognizesActivityAfterPartialRedraws(t *testing.T) {
+	value := newSessionForTest(nil)
+	value.broadcast([]byte("Working (1s • esc to interrupt)\r\n"))
+	// A TUI redraws the spinner and elapsed time without repeating the hint.
+	value.broadcast([]byte(strings.Repeat("\x1b[8;4H•\x1b[8;16H2s", phaseHintBytes)))
+	if _, found := inferAgentPhase(value.history.tail(phaseHintBytes), ""); found {
+		t.Fatal("partial redraw still contains a phase hint")
+	}
+	got := inferPhases(
+		map[string]*session{"tab-1": value},
+		map[string]model.Agent{"tab-1": model.AgentCodex},
+		nil,
+	)
+	if got["tab-1"] != model.AgentPhaseWorking {
+		t.Fatalf("phase after partial redraws = %q, want working", got["tab-1"])
 	}
 }
 

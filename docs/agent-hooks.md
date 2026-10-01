@@ -15,9 +15,9 @@ The hook command reads JSON from standard input and sends only the tab ID, provi
 
 ## Without hooks
 
-An agent that has no romty hook installed still reports a phase, read from the last 4 KiB of its terminal output and the window title it set. An approval prompt names the choices it accepts and a generating agent says how to interrupt it, so those phrases stand in for a hook. Only `working`, `waiting for input`, and `waiting for permission` are recognised this way; `thinking`, `planning`, `compacting`, `idle`, and `error` need a hook.
+An agent whose hooks have not reported a phase still reports an estimated phase. romty reads the last 4 KiB of its terminal output and the window title it set for input and approval prompts. Live terminal output, including spinner and elapsed-time redraws, reports `working` even when the original interrupt hint is no longer in that output window. After five seconds without output, the estimate becomes `idle`. Each new output renews the interval, so continued redraws keep long-running work animated. An explicit input or approval prompt remains waiting through silence. `thinking`, `planning`, `compacting`, `background`, and `error` need a hook.
 
-The newest phrase in the output wins, so an agent that answered a prompt and went back to work reports work again. The window title is consulted only when the output says nothing, because a title is sticky and can outlive the state it named. A hook always wins over both, and no phase is guessed for a tab whose agent has drawn nothing recognisable.
+The newest phrase in the output wins, so an agent that answered a prompt and went back to work reports work again. The window title is consulted only when the output says nothing, because a title is sticky and can outlive the state it named. A hook always wins over these estimates, so a hooked agent can keep reporting work through a silent tool call. Replayed output does not renew activity, and a tab with no live output or recognisable hint keeps an unknown phase. A silent unhooked agent may still be working; install and trust its hooks for authoritative phases.
 
 ## Token and cost readings
 
