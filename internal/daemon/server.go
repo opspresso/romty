@@ -399,6 +399,7 @@ func (s *Server) agentStatusesSnapshot() map[string]model.AgentStatus {
 		default:
 			if phase, ok := inferred[tabID]; ok {
 				status.Phase = phase
+				status.Estimated = true
 			}
 		}
 		result[tabID] = status

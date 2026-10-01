@@ -59,4 +59,4 @@ Claude Code applies direct user-settings edits automatically, subject to its wor
 
 Start Claude Code, Codex, or OpenCode in a newly created romty tab and submit a prompt. The marker should animate through `◐` `◓` `◑` `◒`, then settle on `○` when the agent is ready for another prompt. An input request should use `▲`, a permission request should use `■`, and a stopped error should use `★`. `romty list` reports the same phase as `claude/idle`, `codex/waiting_approval`, and similar values.
 
-Optional embedded sound alerts use these same phase transitions. Enable them in the `F3` Config dialog; `d` controls completed work, `b` controls waiting for input or approval, and `s` tests the done sound.
+Optional embedded sound alerts use these same phase transitions. Completion sounds require a hook-reported `idle` or `error`; an `idle` estimated from silence only stops the animation. Input and approval prompts can play a waiting sound even when detected without hooks. Enable alerts in the `F3` Config dialog; `d` controls completed work, `b` controls waiting for input or approval, and `s` tests the done sound.

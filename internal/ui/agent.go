@@ -65,7 +65,7 @@ func (m dashboard) soundForAgentTransitions(statuses map[string]model.AgentStatu
 		if !ok || status.Agent != model.AgentClaude && status.Agent != model.AgentCodex && status.Agent != model.AgentOpenCode {
 			return "", false
 		}
-		if m.soundOnDone && animatedAgentPhase(tab.AgentPhase) &&
+		if m.soundOnDone && !status.Estimated && animatedAgentPhase(tab.AgentPhase) &&
 			(status.Phase == model.AgentPhaseIdle || status.Phase == model.AgentPhaseError) {
 			return sound.Done, true
 		}
