@@ -340,7 +340,7 @@ func (s *Server) createTab(request protocol.Request) protocol.Response {
 	// not broadcast. The lock is already held across starting the shell for
 	// the same reason; reading one snapshot costs less than that.
 	if meta, recording, ok := s.resume.take(workspaceID); ok {
-		value.restore(recording, meta.command())
+		value.restore(recording, resumeCommand(meta.Agent, meta.AgentSessionID))
 	}
 	previous := cloneState(s.value)
 	s.value.Tabs = append(s.value.Tabs, tab)
@@ -368,6 +368,8 @@ func (s *Server) snapshot() model.Snapshot {
 		status := statuses[value.Tabs[index].ID]
 		value.Tabs[index].Agent = status.Agent
 		value.Tabs[index].AgentPhase = status.Phase
+		value.Tabs[index].AgentSessionID = status.SessionID
+		value.Tabs[index].AgentTurnID = status.TurnID
 		value.Tabs[index].AgentContextTokens = status.ContextTokens
 		value.Tabs[index].AgentCostUSD = status.CostUSD
 	}

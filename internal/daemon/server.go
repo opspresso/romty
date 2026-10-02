@@ -14,9 +14,11 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
+	"github.com/opspresso/romty/internal/codexstate"
 	"github.com/opspresso/romty/internal/model"
 	"github.com/opspresso/romty/internal/protocol"
 	"github.com/opspresso/romty/internal/state"
@@ -78,7 +80,9 @@ type Server struct {
 	connections chan struct{}
 	attachments chan struct{}
 
-	usage *usage.Reader
+	usage       *usage.Reader
+	codex       codexStatusReader
+	codexErrors map[string]string
 }
 
 func New(socket, statePath, shell string) (*Server, error) {
@@ -109,6 +113,7 @@ func New(socket, statePath, shell string) (*Server, error) {
 		connections:   make(chan struct{}, maxActiveConnections),
 		attachments:   make(chan struct{}, maxTerminalAttachments),
 		usage:         usage.NewReader(),
+		codex:         codexstate.NewReader(),
 	}, nil
 }
 
@@ -118,6 +123,9 @@ func (s *Server) SetLogger(logger *log.Logger) {
 }
 
 func (s *Server) Serve(ctx context.Context) error {
+	if s.codex != nil {
+		defer s.codex.Close()
+	}
 	directory := filepath.Dir(s.socket)
 	if err := os.MkdirAll(directory, 0o700); err != nil {
 		return fmt.Errorf("create socket directory: %w", err)
@@ -250,6 +258,15 @@ func (s *Server) resumeSnapshotsLocked() []resumeSave {
 			continue
 		}
 		runtime := s.agentStatuses[tab.ID]
+		if runtime.Agent == model.AgentCodex {
+			title, _ := value.agentIdentity()
+			prefix := codexstate.SessionPrefix(title)
+			if prefix == "" {
+				runtime = agentRuntime{}
+			} else if !strings.HasPrefix(runtime.SessionID, prefix) {
+				runtime.SessionID = ""
+			}
+		}
 		saves = append(saves, resumeSave{
 			id: tab.ID,
 			meta: resumeSnapshot{
@@ -258,7 +275,6 @@ func (s *Server) resumeSnapshotsLocked() []resumeSave {
 				TabName:        tab.Name,
 				Agent:          runtime.Agent,
 				AgentSessionID: runtime.SessionID,
-				AgentSource:    runtime.Source,
 				SavedAt:        now,
 			},
 			recording: value.snapshotRecording,
@@ -380,20 +396,49 @@ func (s *Server) agentStatusesSnapshot() map[string]model.AgentStatus {
 	s.mu.Unlock()
 
 	agents := sessionAgents(sessions)
+	native := s.readCodexStatuses(sessions, agents)
 	inferred := inferPhases(sessions, agents, reported)
 	ledgers := s.sessionUsage(reported, workspaces)
 
 	result := make(map[string]model.AgentStatus, len(agents))
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	for tabID, runtime := range s.agentStatuses {
+		if runtime.Agent != model.AgentCodex {
+			continue
+		}
+		if session := s.sessions[tabID]; session != nil {
+			title, _ := session.agentIdentity()
+			prefix := codexstate.SessionPrefix(title)
+			if prefix == "" || !strings.HasPrefix(runtime.SessionID, prefix) {
+				delete(s.agentStatuses, tabID)
+			}
+		}
+	}
 	for tabID, agent := range agents {
 		if _, ok := s.sessions[tabID]; !ok {
 			continue
 		}
 		status := model.AgentStatus{Agent: agent, Phase: model.AgentPhaseUnknown}
+		if agent == model.AgentCodex {
+			title, _ := sessions[tabID].agentIdentity()
+			prefix := codexstate.SessionPrefix(title)
+			if report, ok := native[tabID]; ok && report.prefix == prefix {
+				value := report.state
+				s.agentStatuses[tabID] = agentRuntime{AgentStatus: value.AgentStatus, SessionID: value.SessionID, TurnID: value.TurnID}
+			} else if current, ok := s.agentStatuses[tabID]; ok && current.Agent == model.AgentCodex {
+				if prefix == "" || !strings.HasPrefix(current.SessionID, prefix) {
+					delete(s.agentStatuses, tabID)
+				} else if current.Source == "runtime" {
+					current.Phase, current.Active = model.AgentPhaseUnknown, false
+					s.agentStatuses[tabID] = current
+				}
+			}
+		}
 		switch runtime, ok := s.agentStatuses[tabID]; {
 		case ok && runtime.Agent == agent:
 			status = runtime.AgentStatus
+			status.SessionID, status.TurnID = runtime.SessionID, runtime.TurnID
 			if ledger, ok := ledgers[tabID]; ok {
 				status.ContextTokens, status.CostUSD = ledger.ContextTokens, ledger.CostUSD
 			}

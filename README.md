@@ -22,7 +22,7 @@ laptop -> Tailscale -> SSH -> always-on machine -> romty -> AI coding agent
 - Keep multiple terminal tabs alive independently of the TUI.
 - Restore up to 8 MiB of recent output, and browse and search 10,000 lines of scrollback.
 - Open full-width scrollback for native terminal selection and copying, with light or dark colors.
-- Distinguish agent work, questions, approvals, completion, and interruption through native Codex events and provider hooks.
+- Distinguish agent work, questions, approvals, completion, and interruption through native Codex state and provider hooks.
 - Save every tab's output and agent session across `romty stop`, and offer them back — output replayed, resume command pre-typed — in the workspace's next tabs.
 - Use function-key navigation that remains reliable with an active IME.
 
@@ -48,7 +48,7 @@ romty
 
 Press `F2` to add a root directory. Use `↑`/`↓` to select a root or workspace, `←`/`→` to select a terminal tab or `+`, and `Enter` to open it. Closing the TUI with `F4` leaves its shell sessions running.
 
-Inside a tab, use `romty codex` for native Codex lifecycle status. For Claude Code and OpenCode, install the [agent hooks](docs/agent-hooks.md).
+Inside a tab, run `codex`, `claude`, or `opencode` normally. The [agent status setup](docs/agent-hooks.md) connects their lifecycle reports to the tab.
 
 Use `romty stop` outside the TUI when you intend to stop the daemon and every running shell.
 

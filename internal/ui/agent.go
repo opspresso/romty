@@ -55,6 +55,8 @@ func applyAgentStatus(tab *model.Tab, statuses map[string]model.AgentStatus) {
 	status := statuses[tab.ID]
 	tab.Agent = status.Agent
 	tab.AgentPhase = status.Phase
+	tab.AgentSessionID = status.SessionID
+	tab.AgentTurnID = status.TurnID
 	tab.AgentContextTokens = status.ContextTokens
 	tab.AgentCostUSD = status.CostUSD
 }
@@ -65,7 +67,10 @@ func (m dashboard) soundForAgentTransitions(statuses map[string]model.AgentStatu
 		if !ok || status.Agent != model.AgentClaude && status.Agent != model.AgentCodex && status.Agent != model.AgentOpenCode {
 			return "", false
 		}
-		if m.soundOnDone && !status.Estimated && tab.AgentPhase != status.Phase &&
+		changedTurn := status.TurnID != "" && tab.AgentTurnID != "" && status.TurnID != tab.AgentTurnID
+		if m.soundOnDone && !status.Estimated && (tab.AgentPhase != status.Phase || changedTurn) &&
+			status.Agent == tab.Agent &&
+			(tab.AgentSessionID == "" || status.SessionID == tab.AgentSessionID) &&
 			tab.AgentPhase != model.AgentPhaseUnknown && tab.AgentPhase != "" &&
 			(status.Phase == model.AgentPhaseCompleted || status.Phase == model.AgentPhaseError) {
 			return sound.Done, true

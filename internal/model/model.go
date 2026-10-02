@@ -57,8 +57,10 @@ type AgentStatus struct {
 	// animation but does not establish that work completed.
 	Estimated bool `json:"estimated,omitempty"`
 	// Source identifies the lifecycle authority, not terminal activity.
-	Source string `json:"source,omitempty"`
-	Active bool   `json:"active,omitempty"`
+	Source    string `json:"source,omitempty"`
+	Active    bool   `json:"active,omitempty"`
+	SessionID string `json:"session_id,omitempty"`
+	TurnID    string `json:"turn_id,omitempty"`
 	// ContextTokens is what the agent's newest request carried into the model,
 	// and CostUSD what the session has cost, both as the agent recorded them in
 	// its own transcript. Zero means romty had nothing to read: the counters
@@ -68,12 +70,14 @@ type AgentStatus struct {
 }
 
 type Tab struct {
-	ID          string     `json:"id"`
-	WorkspaceID string     `json:"workspace_id"`
-	Name        string     `json:"name"`
-	Running     bool       `json:"running"`
-	Agent       Agent      `json:"agent,omitempty"`
-	AgentPhase  AgentPhase `json:"agent_phase,omitempty"`
+	ID             string     `json:"id"`
+	WorkspaceID    string     `json:"workspace_id"`
+	Name           string     `json:"name"`
+	Running        bool       `json:"running"`
+	Agent          Agent      `json:"agent,omitempty"`
+	AgentPhase     AgentPhase `json:"agent_phase,omitempty"`
+	AgentSessionID string     `json:"agent_session_id,omitempty"`
+	AgentTurnID    string     `json:"agent_turn_id,omitempty"`
 	// AgentContextTokens and AgentCostUSD mirror the agent's own counters; see
 	// AgentStatus.
 	AgentContextTokens int     `json:"agent_context_tokens,omitempty"`

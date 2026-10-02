@@ -61,30 +61,6 @@ func TestProtocolVersionReportsAnOutdatedDaemon(t *testing.T) {
 	}
 }
 
-func TestNativeStatusRequiresACompatibleDaemon(t *testing.T) {
-	socket := filepath.Join(testutil.ShortTempDir(t), "daemon.sock")
-	listener, err := net.Listen("unix", socket)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer listener.Close()
-	if err := os.Chmod(socket, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	done := make(chan error, 1)
-	go func() { done <- answerNegotiation(listener, 6, 1) }()
-	err = New(socket).ReportAgentEvent("tab", protocol.AgentEvent{
-		Agent: model.AgentCodex, SessionID: "session", HookEvent: "RuntimeStatus",
-		Runtime: &model.AgentStatus{Agent: model.AgentCodex, Source: "runtime", Phase: model.AgentPhaseIdle},
-	})
-	if err == nil || !strings.Contains(err.Error(), "native agent status") {
-		t.Fatalf("old daemon accepted native status: %v", err)
-	}
-	if err := <-done; err != nil {
-		t.Fatal(err)
-	}
-}
-
 // The daemon answers ping and shutdown whatever version asked, and this side
 // has to accept those answers. It did not, and the two calls that carry the
 // remedy were exactly the two that could not reach it: ping reported a

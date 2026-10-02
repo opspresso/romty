@@ -48,10 +48,12 @@ func TestAgentHookEventsMapToPhases(t *testing.T) {
 func TestAgentLifecycleRejectsOtherTurnsAndSubagents(t *testing.T) {
 	for _, agent := range []model.Agent{model.AgentCodex, model.AgentClaude} {
 		t.Run(string(agent), func(t *testing.T) {
-			server := &Server{sessions: map[string]*session{"tab": nil}, agentStatuses: make(map[string]agentRuntime)}
+			value := newSessionForTest(nil)
+			value.guest.title = "01234567-89ab-7000-8000-12345... | project"
+			server := &Server{sessions: map[string]*session{"tab": value}, agentStatuses: make(map[string]agentRuntime)}
 			report := func(event protocol.AgentEvent, want model.AgentPhase) {
 				t.Helper()
-				event.Agent, event.SessionID = agent, "parent"
+				event.Agent, event.SessionID = agent, "01234567-89ab-7000-8000-123456789abc"
 				if response := server.recordAgentEvent("tab", &event); response.Error != "" {
 					t.Fatal(response.Error)
 				}
@@ -107,7 +109,7 @@ func TestAgentStatusIgnoresAnOldSessionEnd(t *testing.T) {
 func TestAgentStatusRequiresARunningTab(t *testing.T) {
 	server := &Server{sessions: make(map[string]*session), agentStatuses: make(map[string]agentRuntime)}
 	response := server.recordAgentEvent("missing", &protocol.AgentEvent{
-		Agent: model.AgentCodex, HookEvent: "SessionStart",
+		Agent: model.AgentClaude, HookEvent: "SessionStart",
 	})
 	if response.Error == "" {
 		t.Fatal("agent event for a missing tab succeeded")
@@ -154,47 +156,6 @@ func TestQuestionRemainsPendingWhileOtherToolsFinish(t *testing.T) {
 	report("ElicitationResult", "", "")
 	if got := s.agentStatuses["tab"].Phase; got != model.AgentPhaseThinking {
 		t.Fatalf("all elicitations resolved: %s", got)
-	}
-}
-
-func TestNativeStatusWinsOverSharedDaemonHooksAndDisconnectClearsIt(t *testing.T) {
-	s := &Server{sessions: map[string]*session{"tab": nil, "old-daemon-tab": nil}, agentStatuses: make(map[string]agentRuntime)}
-	s.recordAgentEvent("old-daemon-tab", &protocol.AgentEvent{Agent: model.AgentCodex, SessionID: "correct", HookEvent: "PreToolUse"})
-	status := &model.AgentStatus{Agent: model.AgentCodex, Phase: model.AgentPhaseWaitingInput, Source: "runtime", Active: true}
-	s.recordAgentEvent("tab", &protocol.AgentEvent{Agent: model.AgentCodex, SessionID: "correct", HookEvent: "RuntimeStatus", Runtime: status})
-	if _, ok := s.agentStatuses["old-daemon-tab"]; ok {
-		t.Fatal("native binding did not clear misrouted hooks")
-	}
-	s.recordAgentEvent("old-daemon-tab", &protocol.AgentEvent{Agent: model.AgentCodex, SessionID: "correct", HookEvent: "PreToolUse"})
-	if _, ok := s.agentStatuses["old-daemon-tab"]; ok {
-		t.Fatal("shared-daemon hook changed the wrong tab")
-	}
-	s.recordAgentEvent("tab", &protocol.AgentEvent{Agent: model.AgentCodex, SessionID: "wrong", HookEvent: "SessionStart"})
-	if got := s.agentStatuses["tab"]; got.SessionID != "correct" || got.Phase != model.AgentPhaseWaitingInput {
-		t.Fatalf("hook replaced native identity: %+v", got)
-	}
-	s.recordAgentEvent("tab", &protocol.AgentEvent{Agent: model.AgentCodex, SessionID: "old", HookEvent: "RuntimeDisconnected", Runtime: status})
-	if _, ok := s.agentStatuses["tab"]; !ok {
-		t.Fatal("stale disconnect cleared current connection")
-	}
-	s.recordAgentEvent("tab", &protocol.AgentEvent{Agent: model.AgentCodex, SessionID: "correct", HookEvent: "RuntimeDisconnected", Runtime: status})
-	if _, ok := s.agentStatuses["tab"]; ok {
-		t.Fatal("disconnect left a latched native phase")
-	}
-}
-
-func TestNativeReconnectRejectsLateEventsFromThePreviousConnection(t *testing.T) {
-	s := &Server{sessions: map[string]*session{"tab": nil}, agentStatuses: make(map[string]agentRuntime)}
-	event := protocol.AgentEvent{Agent: model.AgentCodex, SessionID: "session", HookEvent: "RuntimeStatus", RuntimeID: "bridge", RuntimeGeneration: 2,
-		Runtime: &model.AgentStatus{Agent: model.AgentCodex, Phase: model.AgentPhaseCompleted, Source: "runtime"}}
-	s.recordAgentEvent("tab", &event)
-	event.RuntimeGeneration = 1
-	event.Runtime.Phase = model.AgentPhaseWorking
-	s.recordAgentEvent("tab", &event)
-	event.HookEvent = "RuntimeDisconnected"
-	s.recordAgentEvent("tab", &event)
-	if got := s.agentStatuses["tab"]; got.Phase != model.AgentPhaseCompleted || got.RuntimeGeneration != 2 {
-		t.Fatalf("stale connection replaced current status: %+v", got)
 	}
 }
 
@@ -307,7 +268,7 @@ func TestAgentStatusReportsTheLedgerOnlyForAHookedSession(t *testing.T) {
 	want := map[string]model.AgentStatus{
 		"tab-1": {
 			Agent: model.AgentClaude, Phase: model.AgentPhaseWorking,
-			ContextTokens: 2 + 1288 + 342813, CostUSD: 1.25,
+			ContextTokens: 2 + 1288 + 342813, CostUSD: 1.25, SessionID: "session-1",
 		},
 		// No hook, so no session to name a transcript with.
 		"tab-2": {Agent: model.AgentClaude, Phase: model.AgentPhaseUnknown},
@@ -387,7 +348,7 @@ func TestAgentStatusDoesNotGuessCodexLifecycleFromRedraws(t *testing.T) {
 	if response := server.recordAgentEvent("tab-1", &protocol.AgentEvent{Agent: model.AgentCodex, HookEvent: "Stop"}); response.Error != "" {
 		t.Fatalf("Stop hook error = %v", response.Error)
 	}
-	assertStatus(model.AgentStatus{Agent: model.AgentCodex, Phase: model.AgentPhaseStopped})
+	assertStatus(model.AgentStatus{Agent: model.AgentCodex, Phase: model.AgentPhaseUnknown})
 }
 
 func TestAgentStatusUsesForegroundProcessAsPresenceAuthority(t *testing.T) {

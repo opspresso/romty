@@ -32,7 +32,7 @@ type hookInput struct {
 
 func runHookCommand(provider string, input io.Reader) {
 	tabID := os.Getenv("ROMTY_TAB_ID")
-	if tabID == "" {
+	if tabID == "" && provider != "codex" {
 		return
 	}
 	event, err := decodeHookEvent(provider, input)

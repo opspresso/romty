@@ -3,6 +3,8 @@ package daemon
 import (
 	"strings"
 
+	"github.com/opspresso/romty/internal/codexstate"
+
 	"github.com/opspresso/romty/internal/model"
 	"github.com/opspresso/romty/internal/protocol"
 )
@@ -13,12 +15,10 @@ type agentRuntime struct {
 	TurnID              string
 	PendingTools        map[string]model.AgentPhase
 	PendingElicitations int
-	RuntimeID           string
-	RuntimeGeneration   uint64
 }
 
 func (s *Server) recordAgentEvent(tabID string, event *protocol.AgentEvent) protocol.Response {
-	if tabID == "" || event == nil {
+	if event == nil || tabID == "" && event.Agent != model.AgentCodex {
 		return protocol.Response{Error: "tab and agent event are required"}
 	}
 	if err := event.Validate(); err != nil {
@@ -29,32 +29,6 @@ func (s *Server) recordAgentEvent(tabID string, event *protocol.AgentEvent) prot
 	if event.AgentID != "" {
 		return protocol.Response{}
 	}
-	if event.Runtime != nil {
-		s.mu.Lock()
-		defer s.mu.Unlock()
-		if _, ok := s.sessions[tabID]; !ok {
-			return protocol.Response{Error: errNoSession}
-		}
-		current := s.agentStatuses[tabID]
-		if event.RuntimeID != "" && current.RuntimeID == event.RuntimeID && event.RuntimeGeneration < current.RuntimeGeneration {
-			return protocol.Response{}
-		}
-		if event.HookEvent == "RuntimeDisconnected" {
-			if current.Source == "runtime" && current.SessionID == event.SessionID && current.RuntimeID == event.RuntimeID && current.RuntimeGeneration == event.RuntimeGeneration {
-				delete(s.agentStatuses, tabID)
-			}
-			return protocol.Response{}
-		}
-		// A shared Codex daemon can have delivered this thread's hooks to a
-		// different tab before its native connection established the binding.
-		for otherTab, other := range s.agentStatuses {
-			if otherTab != tabID && other.Agent == event.Agent && other.SessionID == event.SessionID && other.Source != "runtime" {
-				delete(s.agentStatuses, otherTab)
-			}
-		}
-		s.agentStatuses[tabID] = agentRuntime{AgentStatus: *event.Runtime, SessionID: event.SessionID, TurnID: event.TurnID, RuntimeID: event.RuntimeID, RuntimeGeneration: event.RuntimeGeneration}
-		return protocol.Response{}
-	}
 
 	phase, terminal, recognized := phaseForAgentEvent(*event)
 	if !recognized {
@@ -63,16 +37,37 @@ func (s *Server) recordAgentEvent(tabID string, event *protocol.AgentEvent) prot
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for _, other := range s.agentStatuses {
-		if event.SessionID != "" && other.Source == "runtime" && other.Agent == event.Agent && other.SessionID == event.SessionID {
+	if event.Agent == model.AgentCodex {
+		if len(event.SessionID) != 36 || codexstate.SessionPrefix(event.SessionID) != event.SessionID {
 			return protocol.Response{}
 		}
+		// Shared-daemon hook environments do not identify a terminal. Route
+		// only by the session identity emitted by that terminal's own TUI.
+		matched := ""
+		for id, session := range s.sessions {
+			if session == nil {
+				continue
+			}
+			title, _ := session.agentIdentity()
+			prefix := codexstate.SessionPrefix(title)
+			if prefix != "" && strings.HasPrefix(event.SessionID, prefix) {
+				if matched != "" {
+					return protocol.Response{}
+				}
+				matched = id
+			}
+		}
+		if matched == "" {
+			return protocol.Response{}
+		}
+		tabID = matched
 	}
+
 	if _, ok := s.sessions[tabID]; !ok {
 		return protocol.Response{Error: errNoSession}
 	}
 	current, exists := s.agentStatuses[tabID]
-	if exists && current.Source == "runtime" && current.Agent == event.Agent {
+	if exists && current.Source == "runtime" && current.Agent == event.Agent && current.SessionID == event.SessionID && current.Phase != model.AgentPhaseUnknown {
 		return protocol.Response{}
 	}
 	if terminal {
@@ -82,7 +77,7 @@ func (s *Server) recordAgentEvent(tabID string, event *protocol.AgentEvent) prot
 		}
 		return protocol.Response{}
 	}
-	if event.HookEvent == "SessionStart" || !exists {
+	if event.HookEvent == "SessionStart" || !exists || event.Agent == model.AgentCodex && current.SessionID != event.SessionID {
 		current = agentRuntime{
 			AgentStatus: model.AgentStatus{Agent: event.Agent, Phase: phase},
 			SessionID:   event.SessionID,
@@ -105,6 +100,7 @@ func (s *Server) recordAgentEvent(tabID string, event *protocol.AgentEvent) prot
 		return protocol.Response{}
 	}
 	current.Phase = phase
+	current.Source = ""
 	if event.HookEvent == "UserPromptSubmit" {
 		current.PendingTools = nil
 		current.PendingElicitations = 0

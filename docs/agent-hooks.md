@@ -17,20 +17,19 @@ These states describe the agent runtime. A question written only in ordinary res
 
 ## Codex native status
 
-Start Codex inside a romty tab with:
+Run `codex`, `codex resume`, and other Codex commands with their usual arguments. The command, executable, `PATH`, working directory, authentication, and execution policy stay under Codex's control.
 
-```sh
-romty codex
-romty codex resume <session-id>
-```
+The existing `romty hooks` setup adds `thread-id` to `tui.terminal_title` in `${CODEX_HOME:-~/.codex}/config.toml`. It preserves existing title items, comments and other settings. An explicitly empty title list stays disabled. Restart Codex after setup to pick up the identity field. If a profile or command-line override replaces the title items, include `thread-id` in that selection too.
 
-This requires a Codex CLI with `app-server daemon`, `app-server proxy`, and `--remote unix://` support (verified against 0.160.0), plus romty protocol 7. Codex retains its own terminal UI and shared app-server. A private local socket observes that terminal's native WebSocket connection and forwards its bytes unchanged. It does not store conversation content or answer approval requests. A slow romty status receiver does not block Codex traffic.
+The TUI emits this identifier in its window title; romty already tracks titles without displaying them. Codex 0.160.0 shortens that title item, so romty resolves it only when it uniquely matches a loaded session. It never selects a session by working directory, transcript recency, or a guessed task description.
 
-The bridge binds thread IDs from the terminal's start/resume/fork responses. It uses `thread/status/changed` for active work, pending answers, and pending approvals, and `turn/completed` for completion, interruption, or failure. Tool completion, `Stop` hooks, status redraws, and periods without output do not complete a turn. Pending async questions remain visible even after a turn ends. An active goal stays in background work between continuation turns; a blocked or paused goal does not count as completed. Connection loss invalidates the status instead of keeping the last spinner running.
+romty polls the local app-server's read-only APIs: `thread/loaded/list`, `thread/read`, `thread/turns/list` with `itemsView: notLoaded`, and `thread/goal/get`. Runtime flags identify pending questions and approvals. The latest turn metadata distinguishes completion, interruption, and failure. An active goal stays in background work between turns; a paused or blocked goal does not count as completed. No prompts, commands, approval decisions, resumes, or daemon-start requests are sent by the status reader.
 
-Codex's shared app-server can inherit `ROMTY_TAB_ID` from the terminal that originally started the server. Hooks executed by that server cannot reliably identify a different terminal that connected later. Native status avoids this environment-based routing. Running plain `codex --no-daemon` can use the hook path, but `Stop` remains provisional. Plain `codex` without a working lifecycle channel shows an unavailable status; romty does not guess from redraws.
+The API and title metadata are verified against Codex 0.160.0. A missing identity, ambiguous match, unavailable server, or unsupported API produces an unavailable state rather than a guessed completion. Standalone sessions can use correctly bound hooks when the shared server cannot report them. The reader uses the `CODEX_HOME` inherited when the terminal tab was created.
 
-See the official [Codex app-server events](https://learn.chatgpt.com/docs/app-server) and [Codex hooks](https://learn.chatgpt.com/docs/hooks).
+Codex's shared app-server can inherit `ROMTY_TAB_ID` from the terminal that originally started it. Codex hooks therefore route by their session ID and the TUI's title identity, not that inherited tab ID. This also works when the shared server started outside romty and has no tab ID at all.
+
+See the official [Codex app-server API](https://learn.chatgpt.com/docs/app-server) and [Codex hooks](https://learn.chatgpt.com/docs/hooks).
 
 ## Claude Code hooks
 
@@ -67,7 +66,7 @@ romty hooks
 The command reports `installed`, `updated`, or `current` for each detected provider and `not found` for unavailable providers. It writes:
 
 - Claude Code user hooks to `${CLAUDE_CONFIG_DIR:-~/.claude}/settings.json`
-- Codex user hooks to `${CODEX_HOME:-~/.codex}/hooks.json`
+- Codex user hooks to `${CODEX_HOME:-~/.codex}/hooks.json`, and the session ID title item to `config.toml` in the same directory
 - an OpenCode plugin to `${OPENCODE_CONFIG_DIR:-~/.config/opencode}/plugins/romty.js`
 
 Claude Code and Codex are configured by structurally merging JSON instead of replacing the document. Existing settings, unrelated hooks, and unknown fields remain. romty normalizes only command handlers that invoke `romty hook claude` or `romty hook codex`, removes obsolete duplicates, and adds any missing lifecycle events. Malformed JSON or an incompatible `hooks` value is reported and left unchanged.
@@ -82,6 +81,6 @@ Claude Code applies direct user-settings edits automatically, subject to its wor
 
 ## Verify
 
-Start `romty codex`, or a hooked Claude Code/OpenCode session, in a new tab. Submit a prompt, answer a question, approve a tool, and interrupt a separate turn. Check both the tab marker and the status rail. `romty list` reports the same phase, including `working`, `waiting_input`, `waiting_approval`, `stopped`, `completed`, `interrupted`, and `unknown`.
+Start `codex`, `claude`, or `opencode` normally in a new tab after setup. Submit a prompt, answer a question, approve a tool, and interrupt a separate turn. Check both the tab marker and the status rail. `romty list` reports the same phase, including `working`, `waiting_input`, `waiting_approval`, `stopped`, `completed`, `interrupted`, and `unknown`.
 
 Completion sounds require confirmed `completed` or `error` transitions. `idle`, provisional `stopped`, interruption, and unavailable status do not play them. Enable alerts in the `F3` Config dialog; `d` controls completion alerts, `b` controls input/approval alerts, and `s` tests the done sound.

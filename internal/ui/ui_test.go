@@ -2164,6 +2164,23 @@ func TestDashboardSeparatesProvisionalStopInterruptionAndCompletion(t *testing.T
 	}
 }
 
+func TestCompletionSoundTracksSessionAndTurnIdentity(t *testing.T) {
+	value := newDashboardWithConfig(&fakeBackend{}, model.Snapshot{Roots: []model.RootView{{
+		Root: model.Root{ID: "root"}, Tabs: []model.Tab{{ID: "tab", Running: true, Agent: model.AgentCodex, AgentPhase: model.AgentPhaseCompleted, AgentSessionID: "session", AgentTurnID: "old"}},
+	}}}, "", Config{SoundOnDone: true})
+	for _, testCase := range []struct {
+		session, turn string
+		want          bool
+	}{
+		{"session", "old", false}, {"session", "new", true}, {"another-session", "new", false},
+	} {
+		_, got := value.soundForAgentTransitions(map[string]model.AgentStatus{"tab": {Agent: model.AgentCodex, Phase: model.AgentPhaseCompleted, SessionID: testCase.session, TurnID: testCase.turn}})
+		if got != testCase.want {
+			t.Fatalf("session=%s turn=%s sound=%v", testCase.session, testCase.turn, got)
+		}
+	}
+}
+
 func TestDashboardDoesNotSoundForEstimatedIdle(t *testing.T) {
 	value := newDashboardWithConfig(&fakeBackend{}, model.Snapshot{Roots: []model.RootView{{
 		Root: model.Root{ID: "root-1"},

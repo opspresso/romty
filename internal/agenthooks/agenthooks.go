@@ -183,6 +183,14 @@ func inspect(value definition) Status {
 	if value.plugin {
 		return inspectPlugin(value)
 	}
+	titleChanged := false
+	if value.provider == ProviderCodex {
+		titlePath, _, changed, err := codexTitleConfiguration()
+		if err != nil {
+			return Status{Provider: value.provider, State: StateInvalid, Path: titlePath, Err: err}
+		}
+		titleChanged = changed
+	}
 	path, err := configurationPath(value)
 	if err != nil {
 		return Status{Provider: value.provider, State: StateInvalid, Err: err}
@@ -208,12 +216,21 @@ func inspect(value definition) Status {
 	} else if changed {
 		state = StateOutdated
 	}
+	if titleChanged && state == StateCurrent {
+		state = StateOutdated
+	}
 	return Status{Provider: value.provider, State: state, Path: path}
 }
 
 func install(value definition) (Result, error) {
 	if value.plugin {
 		return installPlugin(value)
+	}
+	// Validate both files before changing either one.
+	if value.provider == ProviderCodex {
+		if _, _, _, err := codexTitleConfiguration(); err != nil {
+			return Result{}, err
+		}
 	}
 	path, err := configurationPath(value)
 	if err != nil {
@@ -246,6 +263,15 @@ func install(value definition) (Result, error) {
 		if owned == 0 {
 			action = ActionInstalled
 		} else {
+			action = ActionUpdated
+		}
+	}
+	if value.provider == ProviderCodex {
+		titleChanged, err := installCodexTitle()
+		if err != nil {
+			return Result{}, err
+		}
+		if titleChanged && action == ActionUnchanged {
 			action = ActionUpdated
 		}
 	}

@@ -39,7 +39,6 @@ var commands = []command{
 	{name: "help", description: "Show this help"},
 	{name: "doctor", description: "Check the local romty environment"},
 	{name: "hooks", description: "Install or update agent status hooks"},
-	{name: "codex", description: "Run Codex with native lifecycle status (inside a tab)"},
 	{name: "list", description: "List roots, workspaces, and sessions"},
 	{name: "stop", description: "Stop the daemon and all running sessions", destructive: true},
 }
