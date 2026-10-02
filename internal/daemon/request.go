@@ -92,6 +92,9 @@ func checkClientCapability(request protocol.Request) error {
 		required = protocol.CapabilityAgents
 	case protocol.ActionAgentStatuses, protocol.ActionAgentEvent:
 		required = protocol.CapabilityAgentStatus
+		if request.AgentEvent != nil && request.AgentEvent.Runtime != nil {
+			required = protocol.CapabilityAgentRuntime
+		}
 	case protocol.ActionRemoveWorkspace:
 		required = protocol.CapabilityRemoveWorkspace
 	case protocol.ActionCloseTab:

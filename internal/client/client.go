@@ -153,7 +153,14 @@ func (c *Client) AgentStatuses() (map[string]model.AgentStatus, error) {
 }
 
 func (c *Client) ReportAgentEvent(tabID string, event protocol.AgentEvent) error {
-	supported, err := c.supports(protocol.CapabilityAgentStatus)
+	capability := protocol.CapabilityAgentStatus
+	if event.Runtime != nil {
+		capability = protocol.CapabilityAgentRuntime
+	}
+	supported, err := c.supports(capability)
+	if err == nil && !supported && event.Runtime != nil {
+		return fmt.Errorf("daemon does not support native agent status; %s", protocol.Remedy)
+	}
 	if err != nil || !supported {
 		return err
 	}

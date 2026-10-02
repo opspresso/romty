@@ -41,7 +41,7 @@ Keep field meanings and stream framing stable within a protocol revision. Additi
 
 Raise `MinimumVersion` only when retaining an older wire contract is unsafe. Breaking field semantics or framing require a new revision and an adapter for every revision still in the supported range.
 
-Protocols 1 through 6 are currently supported. Foreground agent detection requires protocol 2, ordered snapshot revisions require 3, workspace removal requires 4, bounded initial replay plus hook-derived agent phases require 5, and closing an individual tab requires 6.
+Protocols 1 through 7 are currently supported. Foreground agent detection requires protocol 2, ordered snapshot revisions require 3, workspace removal requires 4, bounded initial replay plus hook-derived agent phases require 5, closing an individual tab requires 6, and native Codex lifecycle status requires 7.
 
 ## Website and documentation
 

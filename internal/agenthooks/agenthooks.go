@@ -101,7 +101,7 @@ var definitions = []definition{
 		filename:    "hooks.json",
 		events: []string{
 			"SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse",
-			"PermissionRequest", "PreCompact", "PostCompact", "Stop", "SessionEnd",
+			"PermissionRequest", "PreCompact", "PostCompact", "Stop", "Interrupt", "SessionEnd",
 		},
 	},
 	{

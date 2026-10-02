@@ -9,6 +9,17 @@ import (
 	"github.com/opspresso/romty/internal/model"
 )
 
+func TestNativeCodexResumeKeepsLifecycleBridge(t *testing.T) {
+	meta := resumeSnapshot{Agent: model.AgentCodex, AgentSource: "runtime", AgentSessionID: "0123abcd-89ef-4567-0123-456789abcdef"}
+	if got := meta.command(); got != "romty codex resume "+meta.AgentSessionID {
+		t.Fatalf("native resume = %q", got)
+	}
+	meta.AgentSessionID = "bad;command"
+	if got := meta.command(); got != "romty codex resume" {
+		t.Fatalf("unsafe native resume = %q", got)
+	}
+}
+
 func TestResumeStoreTakesNewestStopThenLowestTabName(t *testing.T) {
 	store := &resumeStore{directory: t.TempDir()}
 	older := time.Now().Add(-time.Hour)

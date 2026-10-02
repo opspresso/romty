@@ -18,7 +18,7 @@ import (
 // speak. Ping advertises the range so peers choose the highest overlap instead
 // of requiring the same build on both sides.
 const (
-	Version        = 6
+	Version        = 7
 	MinimumVersion = 1
 )
 
@@ -29,6 +29,7 @@ const (
 	CapabilityReplayBoundary   = "replay_boundary"
 	CapabilityAgentStatus      = "agent_status"
 	CapabilityCloseTab         = "close_tab"
+	CapabilityAgentRuntime     = "agent_runtime"
 )
 
 var capabilities = []struct {
@@ -41,6 +42,7 @@ var capabilities = []struct {
 	{name: CapabilityReplayBoundary, since: 5},
 	{name: CapabilityAgentStatus, since: 5},
 	{name: CapabilityCloseTab, since: 6},
+	{name: CapabilityAgentRuntime, since: 7},
 }
 
 const (
@@ -105,13 +107,19 @@ type Request struct {
 // intentionally has no prompt, transcript, tool input, tool output, or model
 // response fields.
 type AgentEvent struct {
-	Agent            model.Agent `json:"agent"`
-	SessionID        string      `json:"session_id,omitempty"`
-	HookEvent        string      `json:"hook_event"`
-	ToolName         string      `json:"tool_name,omitempty"`
-	NotificationType string      `json:"notification_type,omitempty"`
-	PermissionMode   string      `json:"permission_mode,omitempty"`
-	Background       bool        `json:"background,omitempty"`
+	Agent             model.Agent        `json:"agent"`
+	SessionID         string             `json:"session_id,omitempty"`
+	TurnID            string             `json:"turn_id,omitempty"`
+	AgentID           string             `json:"agent_id,omitempty"`
+	ToolUseID         string             `json:"tool_use_id,omitempty"`
+	Runtime           *model.AgentStatus `json:"runtime,omitempty"`
+	RuntimeID         string             `json:"runtime_id,omitempty"`
+	RuntimeGeneration uint64             `json:"runtime_generation,omitempty"`
+	HookEvent         string             `json:"hook_event"`
+	ToolName          string             `json:"tool_name,omitempty"`
+	NotificationType  string             `json:"notification_type,omitempty"`
+	PermissionMode    string             `json:"permission_mode,omitempty"`
+	Background        bool               `json:"background,omitempty"`
 }
 
 // MaxAgentEventMetadataBytes bounds each metadata string a hook reports. Both
@@ -135,10 +143,25 @@ func (e AgentEvent) Validate() error {
 		return errors.New("hook event is required")
 	}
 	for _, metadata := range []string{
-		e.SessionID, e.HookEvent, e.ToolName, e.NotificationType, e.PermissionMode,
+		e.SessionID, e.TurnID, e.AgentID, e.ToolUseID, e.RuntimeID, e.HookEvent, e.ToolName, e.NotificationType, e.PermissionMode,
 	} {
 		if len(metadata) > MaxAgentEventMetadataBytes {
 			return fmt.Errorf("agent event metadata is longer than %d bytes", MaxAgentEventMetadataBytes)
+		}
+	}
+	if e.Runtime != nil {
+		if e.HookEvent != "RuntimeStatus" && e.HookEvent != "RuntimeDisconnected" {
+			return errors.New("invalid runtime event")
+		}
+		if e.Agent != model.AgentCodex || e.SessionID == "" || e.Runtime.Agent != e.Agent || e.Runtime.Source != "runtime" || e.Runtime.Estimated {
+			return errors.New("invalid runtime identity")
+		}
+		switch e.Runtime.Phase {
+		case model.AgentPhaseUnknown, model.AgentPhaseIdle, model.AgentPhaseWorking, model.AgentPhaseStopped, model.AgentPhaseBackground,
+			model.AgentPhaseWaitingInput, model.AgentPhaseWaitingApproval,
+			model.AgentPhaseCompleted, model.AgentPhaseInterrupted, model.AgentPhaseError:
+		default:
+			return errors.New("invalid runtime phase")
 		}
 	}
 	return nil

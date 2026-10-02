@@ -28,9 +28,11 @@ func TestAgentHookEventsMapToPhases(t *testing.T) {
 		{name: "codex question tool", event: protocol.AgentEvent{HookEvent: "PreToolUse", ToolName: "request_user_input"}, want: model.AgentPhaseWaitingInput},
 		{name: "permission", event: protocol.AgentEvent{HookEvent: "PermissionRequest"}, want: model.AgentPhaseWaitingApproval},
 		{name: "notification permission", event: protocol.AgentEvent{HookEvent: "Notification", NotificationType: "permission_prompt"}, want: model.AgentPhaseWaitingApproval},
-		{name: "notification input", event: protocol.AgentEvent{HookEvent: "Notification", NotificationType: "idle_prompt"}, want: model.AgentPhaseWaitingInput},
+		{name: "idle notification", event: protocol.AgentEvent{HookEvent: "Notification", NotificationType: "idle_prompt"}, want: model.AgentPhaseCompleted},
+		{name: "notification input", event: protocol.AgentEvent{HookEvent: "Notification", NotificationType: "agent_needs_input"}, want: model.AgentPhaseWaitingInput},
 		{name: "compact", event: protocol.AgentEvent{HookEvent: "PreCompact"}, want: model.AgentPhaseCompacting},
-		{name: "stop", event: protocol.AgentEvent{HookEvent: "Stop"}, want: model.AgentPhaseIdle},
+		{name: "stop", event: protocol.AgentEvent{HookEvent: "Stop"}, want: model.AgentPhaseStopped},
+		{name: "interrupt", event: protocol.AgentEvent{HookEvent: "Interrupt"}, want: model.AgentPhaseInterrupted},
 		{name: "background", event: protocol.AgentEvent{HookEvent: "Stop", Background: true}, want: model.AgentPhaseBackground},
 		{name: "failure", event: protocol.AgentEvent{HookEvent: "StopFailure"}, want: model.AgentPhaseError},
 	} {
@@ -39,6 +41,35 @@ func TestAgentHookEventsMapToPhases(t *testing.T) {
 			if !recognized || terminal || got != testCase.want {
 				t.Fatalf("phaseForAgentEvent() = (%q, %v, %v), want (%q, false, true)", got, terminal, recognized, testCase.want)
 			}
+		})
+	}
+}
+
+func TestAgentLifecycleRejectsOtherTurnsAndSubagents(t *testing.T) {
+	for _, agent := range []model.Agent{model.AgentCodex, model.AgentClaude} {
+		t.Run(string(agent), func(t *testing.T) {
+			server := &Server{sessions: map[string]*session{"tab": nil}, agentStatuses: make(map[string]agentRuntime)}
+			report := func(event protocol.AgentEvent, want model.AgentPhase) {
+				t.Helper()
+				event.Agent, event.SessionID = agent, "parent"
+				if response := server.recordAgentEvent("tab", &event); response.Error != "" {
+					t.Fatal(response.Error)
+				}
+				if got := server.agentStatuses["tab"].Phase; got != want {
+					t.Fatalf("%+v: phase = %s, want %s", event, got, want)
+				}
+			}
+			report(protocol.AgentEvent{HookEvent: "UserPromptSubmit", TurnID: "one"}, model.AgentPhaseThinking)
+			report(protocol.AgentEvent{HookEvent: "PreToolUse", TurnID: "one"}, model.AgentPhaseWorking)
+			report(protocol.AgentEvent{HookEvent: "Stop", TurnID: "one", AgentID: "child"}, model.AgentPhaseWorking)
+			report(protocol.AgentEvent{HookEvent: "Stop", TurnID: "one"}, model.AgentPhaseStopped)
+			report(protocol.AgentEvent{HookEvent: "PreToolUse", TurnID: "one", AgentID: "child"}, model.AgentPhaseStopped)
+			report(protocol.AgentEvent{HookEvent: "SessionStart", AgentID: "child"}, model.AgentPhaseStopped)
+			report(protocol.AgentEvent{HookEvent: "UserPromptSubmit", TurnID: "two"}, model.AgentPhaseThinking)
+			report(protocol.AgentEvent{HookEvent: "Stop", TurnID: "one"}, model.AgentPhaseThinking)
+			report(protocol.AgentEvent{HookEvent: "PermissionRequest", TurnID: "two"}, model.AgentPhaseWaitingApproval)
+			report(protocol.AgentEvent{HookEvent: "PostToolUse", TurnID: "two"}, model.AgentPhaseThinking)
+			report(protocol.AgentEvent{HookEvent: "Interrupt", TurnID: "two"}, model.AgentPhaseInterrupted)
 		})
 	}
 }
@@ -83,9 +114,92 @@ func TestAgentStatusRequiresARunningTab(t *testing.T) {
 	}
 }
 
-// A hook is the agent's own account of itself, so it wins over anything read
-// back off the screen. Where no hook has spoken, the screen is all romty has.
-func TestAgentStatusInfersAPhaseOnlyWhereNoHookHasSpoken(t *testing.T) {
+func TestQuestionRemainsPendingWhileOtherToolsFinish(t *testing.T) {
+	s := &Server{sessions: map[string]*session{"tab": nil}, agentStatuses: make(map[string]agentRuntime)}
+	report := func(hook, tool, id string) {
+		t.Helper()
+		if r := s.recordAgentEvent("tab", &protocol.AgentEvent{Agent: model.AgentClaude, SessionID: "session", TurnID: "prompt", HookEvent: hook, ToolName: tool, ToolUseID: id}); r.Error != "" {
+			t.Fatal(r.Error)
+		}
+	}
+	report("PreToolUse", "AskUserQuestion", "question")
+	report("PreToolUse", "Bash", "build")
+	report("PostToolUse", "Bash", "build")
+	if got := s.agentStatuses["tab"].Phase; got != model.AgentPhaseWaitingInput {
+		t.Fatalf("unrelated tool cleared the question: %s", got)
+	}
+	report("PostToolUse", "AskUserQuestion", "question")
+	if got := s.agentStatuses["tab"].Phase; got != model.AgentPhaseThinking {
+		t.Fatalf("answered question did not resume: %s", got)
+	}
+	report("Stop", "", "")
+	if got := s.agentStatuses["tab"].Phase; got != model.AgentPhaseStopped {
+		t.Fatalf("Stop must be provisional: %s", got)
+	}
+	report("PostToolUse", "Bash", "build")
+	if got := s.agentStatuses["tab"].Phase; got != model.AgentPhaseStopped {
+		t.Fatalf("late tool result restarted the response: %s", got)
+	}
+	report("PreToolUse", "Bash", "continuation")
+	if got := s.agentStatuses["tab"].Phase; got != model.AgentPhaseWorking {
+		t.Fatalf("blocked Stop did not continue: %s", got)
+	}
+	report("Elicitation", "", "")
+	report("Elicitation", "", "")
+	report("PostToolUse", "Bash", "parallel")
+	report("ElicitationResult", "", "")
+	if got := s.agentStatuses["tab"].Phase; got != model.AgentPhaseWaitingInput {
+		t.Fatalf("another elicitation is still pending: %s", got)
+	}
+	report("ElicitationResult", "", "")
+	if got := s.agentStatuses["tab"].Phase; got != model.AgentPhaseThinking {
+		t.Fatalf("all elicitations resolved: %s", got)
+	}
+}
+
+func TestNativeStatusWinsOverSharedDaemonHooksAndDisconnectClearsIt(t *testing.T) {
+	s := &Server{sessions: map[string]*session{"tab": nil, "old-daemon-tab": nil}, agentStatuses: make(map[string]agentRuntime)}
+	s.recordAgentEvent("old-daemon-tab", &protocol.AgentEvent{Agent: model.AgentCodex, SessionID: "correct", HookEvent: "PreToolUse"})
+	status := &model.AgentStatus{Agent: model.AgentCodex, Phase: model.AgentPhaseWaitingInput, Source: "runtime", Active: true}
+	s.recordAgentEvent("tab", &protocol.AgentEvent{Agent: model.AgentCodex, SessionID: "correct", HookEvent: "RuntimeStatus", Runtime: status})
+	if _, ok := s.agentStatuses["old-daemon-tab"]; ok {
+		t.Fatal("native binding did not clear misrouted hooks")
+	}
+	s.recordAgentEvent("old-daemon-tab", &protocol.AgentEvent{Agent: model.AgentCodex, SessionID: "correct", HookEvent: "PreToolUse"})
+	if _, ok := s.agentStatuses["old-daemon-tab"]; ok {
+		t.Fatal("shared-daemon hook changed the wrong tab")
+	}
+	s.recordAgentEvent("tab", &protocol.AgentEvent{Agent: model.AgentCodex, SessionID: "wrong", HookEvent: "SessionStart"})
+	if got := s.agentStatuses["tab"]; got.SessionID != "correct" || got.Phase != model.AgentPhaseWaitingInput {
+		t.Fatalf("hook replaced native identity: %+v", got)
+	}
+	s.recordAgentEvent("tab", &protocol.AgentEvent{Agent: model.AgentCodex, SessionID: "old", HookEvent: "RuntimeDisconnected", Runtime: status})
+	if _, ok := s.agentStatuses["tab"]; !ok {
+		t.Fatal("stale disconnect cleared current connection")
+	}
+	s.recordAgentEvent("tab", &protocol.AgentEvent{Agent: model.AgentCodex, SessionID: "correct", HookEvent: "RuntimeDisconnected", Runtime: status})
+	if _, ok := s.agentStatuses["tab"]; ok {
+		t.Fatal("disconnect left a latched native phase")
+	}
+}
+
+func TestNativeReconnectRejectsLateEventsFromThePreviousConnection(t *testing.T) {
+	s := &Server{sessions: map[string]*session{"tab": nil}, agentStatuses: make(map[string]agentRuntime)}
+	event := protocol.AgentEvent{Agent: model.AgentCodex, SessionID: "session", HookEvent: "RuntimeStatus", RuntimeID: "bridge", RuntimeGeneration: 2,
+		Runtime: &model.AgentStatus{Agent: model.AgentCodex, Phase: model.AgentPhaseCompleted, Source: "runtime"}}
+	s.recordAgentEvent("tab", &event)
+	event.RuntimeGeneration = 1
+	event.Runtime.Phase = model.AgentPhaseWorking
+	s.recordAgentEvent("tab", &event)
+	event.HookEvent = "RuntimeDisconnected"
+	s.recordAgentEvent("tab", &event)
+	if got := s.agentStatuses["tab"]; got.Phase != model.AgentPhaseCompleted || got.RuntimeGeneration != 2 {
+		t.Fatalf("stale connection replaced current status: %+v", got)
+	}
+}
+
+// Terminal output cannot establish Codex/Claude lifecycle state.
+func TestAgentStatusRequiresLifecycleReportsForCodexAndClaude(t *testing.T) {
 	hooked, unhooked := new(os.File), new(os.File)
 	titled := new(os.File)
 	previousGroup := foregroundProcessGroup
@@ -130,8 +244,8 @@ func TestAgentStatusInfersAPhaseOnlyWhereNoHookHasSpoken(t *testing.T) {
 		// The hook says idle even though the screen still shows the prompt it
 		// answered.
 		"tab-1": {Agent: model.AgentClaude, Phase: model.AgentPhaseIdle},
-		"tab-2": {Agent: model.AgentClaude, Phase: model.AgentPhaseWaitingApproval, Estimated: true},
-		"tab-3": {Agent: model.AgentCodex, Phase: model.AgentPhaseWaitingApproval, Estimated: true},
+		"tab-2": {Agent: model.AgentClaude, Phase: model.AgentPhaseUnknown},
+		"tab-3": {Agent: model.AgentCodex, Phase: model.AgentPhaseUnknown},
 	}
 	if got := server.agentStatusesSnapshot(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("agentStatusesSnapshot() = %#v, want %#v", got, want)
@@ -238,7 +352,7 @@ func TestAgentStatusLeavesAnUnreadableScreenUnknown(t *testing.T) {
 	}
 }
 
-func TestAgentPhaseRecognizesActivityAfterPartialRedraws(t *testing.T) {
+func TestAgentStatusDoesNotGuessCodexLifecycleFromRedraws(t *testing.T) {
 	previousGroup := foregroundProcessGroup
 	previousList := runProcessList
 	foregroundProcessGroup = func(*os.File) (int, error) { return 101, nil }
@@ -265,15 +379,15 @@ func TestAgentPhaseRecognizesActivityAfterPartialRedraws(t *testing.T) {
 			t.Fatalf("status = %#v, want %#v", got, want)
 		}
 	}
-	assertStatus(model.AgentStatus{Agent: model.AgentCodex, Phase: model.AgentPhaseWorking, Estimated: true})
+	assertStatus(model.AgentStatus{Agent: model.AgentCodex, Phase: model.AgentPhaseUnknown})
 	value.mu.Lock()
 	value.lastOutputAt = time.Now().Add(-agentActivityTimeout)
 	value.mu.Unlock()
-	assertStatus(model.AgentStatus{Agent: model.AgentCodex, Phase: model.AgentPhaseIdle, Estimated: true})
+	assertStatus(model.AgentStatus{Agent: model.AgentCodex, Phase: model.AgentPhaseUnknown})
 	if response := server.recordAgentEvent("tab-1", &protocol.AgentEvent{Agent: model.AgentCodex, HookEvent: "Stop"}); response.Error != "" {
 		t.Fatalf("Stop hook error = %v", response.Error)
 	}
-	assertStatus(model.AgentStatus{Agent: model.AgentCodex, Phase: model.AgentPhaseIdle})
+	assertStatus(model.AgentStatus{Agent: model.AgentCodex, Phase: model.AgentPhaseStopped})
 }
 
 func TestAgentStatusUsesForegroundProcessAsPresenceAuthority(t *testing.T) {

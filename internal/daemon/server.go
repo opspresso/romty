@@ -258,6 +258,7 @@ func (s *Server) resumeSnapshotsLocked() []resumeSave {
 				TabName:        tab.Name,
 				Agent:          runtime.Agent,
 				AgentSessionID: runtime.SessionID,
+				AgentSource:    runtime.Source,
 				SavedAt:        now,
 			},
 			recording: value.snapshotRecording,
@@ -392,7 +393,7 @@ func (s *Server) agentStatusesSnapshot() map[string]model.AgentStatus {
 		status := model.AgentStatus{Agent: agent, Phase: model.AgentPhaseUnknown}
 		switch runtime, ok := s.agentStatuses[tabID]; {
 		case ok && runtime.Agent == agent:
-			status.Phase = runtime.Phase
+			status = runtime.AgentStatus
 			if ledger, ok := ledgers[tabID]; ok {
 				status.ContextTokens, status.CostUSD = ledger.ContextTokens, ledger.CostUSD
 			}
@@ -419,6 +420,11 @@ func inferPhases(
 	at := time.Now()
 	for tabID, agent := range agents {
 		if reported[tabID].Agent == agent {
+			continue
+		}
+		// Terminal redraws do not establish whether a turn is active, awaiting
+		// an answer, or complete. These providers expose lifecycle channels.
+		if agent == model.AgentCodex || agent == model.AgentClaude {
 			continue
 		}
 		value, ok := sessions[tabID]

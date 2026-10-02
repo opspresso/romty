@@ -65,8 +65,9 @@ func (m dashboard) soundForAgentTransitions(statuses map[string]model.AgentStatu
 		if !ok || status.Agent != model.AgentClaude && status.Agent != model.AgentCodex && status.Agent != model.AgentOpenCode {
 			return "", false
 		}
-		if m.soundOnDone && !status.Estimated && animatedAgentPhase(tab.AgentPhase) &&
-			(status.Phase == model.AgentPhaseIdle || status.Phase == model.AgentPhaseError) {
+		if m.soundOnDone && !status.Estimated && tab.AgentPhase != status.Phase &&
+			tab.AgentPhase != model.AgentPhaseUnknown && tab.AgentPhase != "" &&
+			(status.Phase == model.AgentPhaseCompleted || status.Phase == model.AgentPhaseError) {
 			return sound.Done, true
 		}
 		if m.soundOnWaiting && !waitingAgentPhase(tab.AgentPhase) && waitingAgentPhase(status.Phase) {
@@ -186,6 +187,35 @@ func (m dashboard) agentLedger() string {
 		parts = append(parts, fmt.Sprintf("$%.2f", tab.AgentCostUSD))
 	}
 	return strings.Join(parts, "  ")
+}
+
+func (m dashboard) agentStatusNote() string {
+	tab, ok := m.openTab()
+	if !ok || tab.Agent == "" {
+		return ""
+	}
+	label := map[model.AgentPhase]string{
+		model.AgentPhaseUnknown:         "Status unavailable",
+		model.AgentPhaseThinking:        "Thinking",
+		model.AgentPhaseWorking:         "Working",
+		model.AgentPhasePlanning:        "Planning",
+		model.AgentPhaseCompacting:      "Compacting",
+		model.AgentPhaseBackground:      "Background work",
+		model.AgentPhaseIdle:            "Ready",
+		model.AgentPhaseStopped:         "Stopped · completion unconfirmed",
+		model.AgentPhaseCompleted:       "Completed",
+		model.AgentPhaseInterrupted:     "Interrupted",
+		model.AgentPhaseWaitingInput:    "Needs your answer",
+		model.AgentPhaseWaitingApproval: "Needs your approval",
+		model.AgentPhaseError:           "Failed",
+	}[tab.AgentPhase]
+	if ledger := m.agentLedger(); ledger != "" {
+		if label == "" {
+			return ledger
+		}
+		return label + "  " + ledger
+	}
+	return label
 }
 
 // formatTokens abbreviates a count so it keeps its width as it grows, the way

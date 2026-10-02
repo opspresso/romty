@@ -2107,7 +2107,7 @@ func TestDashboardSoundsOnceForAgentTransitions(t *testing.T) {
 	}}}, "", Config{SoundOnDone: true, SoundOnWaiting: true})
 	value.agentSoundReady = true
 
-	idle := map[string]model.AgentStatus{"tab-1": {Agent: model.AgentCodex, Phase: model.AgentPhaseIdle}}
+	idle := map[string]model.AgentStatus{"tab-1": {Agent: model.AgentCodex, Phase: model.AgentPhaseCompleted}}
 	updated, command := value.Update(agentSnapshotMsg{value: idle})
 	value = updated.(dashboard)
 	if kind, ok := playedSound(command); !ok || kind != sound.Done {
@@ -2140,6 +2140,30 @@ func TestDashboardDoesNotSoundOnTheFirstAgentSnapshot(t *testing.T) {
 	}
 }
 
+func TestDashboardSeparatesProvisionalStopInterruptionAndCompletion(t *testing.T) {
+	for _, phase := range []model.AgentPhase{model.AgentPhaseStopped, model.AgentPhaseInterrupted, model.AgentPhaseIdle, model.AgentPhaseUnknown, model.AgentPhaseCompleted} {
+		t.Run(string(phase), func(t *testing.T) {
+			value := newDashboardWithConfig(&fakeBackend{}, model.Snapshot{Roots: []model.RootView{{
+				Root: model.Root{ID: "root"}, Tabs: []model.Tab{{ID: "tab", Running: true, Agent: model.AgentCodex, AgentPhase: model.AgentPhaseWorking}},
+			}}}, "", Config{SoundOnDone: true})
+			value.agentSoundReady = true
+			updated, command := value.Update(agentSnapshotMsg{value: map[string]model.AgentStatus{"tab": {Agent: model.AgentCodex, Phase: phase}}})
+			value = updated.(dashboard)
+			if value.hasAnimatedAgent() {
+				t.Fatal("terminal/non-authoritative state still animates")
+			}
+			_, played := playedSound(command)
+			if played != (phase == model.AgentPhaseCompleted) {
+				t.Fatalf("%s: completion sound = %v", phase, played)
+			}
+			want := map[model.AgentPhase]string{model.AgentPhaseStopped: "○", model.AgentPhaseInterrupted: "□", model.AgentPhaseIdle: "○", model.AgentPhaseUnknown: "●", model.AgentPhaseCompleted: "✓"}[phase]
+			if got := ansi.Strip(openTabMarkers(value.styles, value.styles.navigationSelected, value.state.Roots[0].Tabs, 1)); got != want {
+				t.Fatalf("marker = %s, want %s", got, want)
+			}
+		})
+	}
+}
+
 func TestDashboardDoesNotSoundForEstimatedIdle(t *testing.T) {
 	value := newDashboardWithConfig(&fakeBackend{}, model.Snapshot{Roots: []model.RootView{{
 		Root: model.Root{ID: "root-1"},
@@ -2163,7 +2187,7 @@ func TestDashboardDoesNotSoundForEstimatedIdle(t *testing.T) {
 	statuses["tab-1"] = model.AgentStatus{Agent: model.AgentCodex, Phase: model.AgentPhaseWorking, Estimated: true}
 	updated, _ = value.Update(agentSnapshotMsg{value: statuses})
 	value = updated.(dashboard)
-	statuses["tab-1"] = model.AgentStatus{Agent: model.AgentCodex, Phase: model.AgentPhaseIdle}
+	statuses["tab-1"] = model.AgentStatus{Agent: model.AgentCodex, Phase: model.AgentPhaseCompleted}
 	updated, command = value.Update(agentSnapshotMsg{value: statuses})
 	value = updated.(dashboard)
 	if kind, ok := playedSound(command); !ok || kind != sound.Done {

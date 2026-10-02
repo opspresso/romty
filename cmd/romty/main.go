@@ -32,6 +32,9 @@ func runCommand(arguments []string, output io.Writer) error {
 }
 
 func runCommandWithInput(arguments []string, output io.Writer, input io.Reader) error {
+	if len(arguments) > 0 && arguments[0] == "codex" {
+		return runCodex(arguments[1:], input, output)
+	}
 	if len(arguments) == 2 && arguments[0] == "hook" {
 		switch arguments[1] {
 		case "claude", "codex", "opencode":

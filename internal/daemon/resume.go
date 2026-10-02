@@ -48,7 +48,16 @@ type resumeSnapshot struct {
 	TabName        string      `json:"tab_name"`
 	Agent          model.Agent `json:"agent,omitempty"`
 	AgentSessionID string      `json:"agent_session_id,omitempty"`
+	AgentSource    string      `json:"agent_source,omitempty"`
 	SavedAt        time.Time   `json:"saved_at"`
+}
+
+func (s resumeSnapshot) command() string {
+	command := resumeCommand(s.Agent, s.AgentSessionID)
+	if s.Agent == model.AgentCodex && s.AgentSource == "runtime" {
+		return "romty " + command
+	}
+	return command
 }
 
 func (s *resumeStore) metaPath(id string) string {

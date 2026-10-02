@@ -45,6 +45,9 @@ const (
 	AgentPhaseWaitingApproval AgentPhase = "waiting_approval"
 	AgentPhaseBackground      AgentPhase = "background"
 	AgentPhaseError           AgentPhase = "error"
+	AgentPhaseCompleted       AgentPhase = "completed"
+	AgentPhaseInterrupted     AgentPhase = "interrupted"
+	AgentPhaseStopped         AgentPhase = "stopped"
 )
 
 type AgentStatus struct {
@@ -53,6 +56,9 @@ type AgentStatus struct {
 	// Estimated phases come from terminal output. An estimated idle stops the
 	// animation but does not establish that work completed.
 	Estimated bool `json:"estimated,omitempty"`
+	// Source identifies the lifecycle authority, not terminal activity.
+	Source string `json:"source,omitempty"`
+	Active bool   `json:"active,omitempty"`
 	// ContextTokens is what the agent's newest request carried into the model,
 	// and CostUSD what the session has cost, both as the agent recorded them in
 	// its own transcript. Zero means romty had nothing to read: the counters
