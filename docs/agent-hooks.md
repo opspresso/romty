@@ -66,7 +66,7 @@ romty hooks
 The command reports `installed`, `updated`, or `current` for each detected provider and `not found` for unavailable providers. It writes:
 
 - Claude Code user hooks to `${CLAUDE_CONFIG_DIR:-~/.claude}/settings.json`
-- Codex user hooks to `${CODEX_HOME:-~/.codex}/hooks.json`, and the session ID title item to `config.toml` in the same directory
+- Codex user hooks to `${CODEX_HOME:-~/.codex}/hooks.json`, and the `thread-id` title item to `tui.terminal_title` in `config.toml` in the same directory
 - an OpenCode plugin to `${OPENCODE_CONFIG_DIR:-~/.config/opencode}/plugins/romty.js`
 
 Claude Code and Codex are configured by structurally merging JSON instead of replacing the document. Existing settings, unrelated hooks, and unknown fields remain. romty normalizes only command handlers that invoke `romty hook claude` or `romty hook codex`, removes obsolete duplicates, and adds any missing lifecycle events. Malformed JSON or an incompatible `hooks` value is reported and left unchanged.
