@@ -34,8 +34,12 @@ func openTabMarkers(styles *uiStyles, base lipgloss.Style, tabs []model.Tab, ani
 		case model.AgentPhaseThinking, model.AgentPhaseWorking, model.AgentPhasePlanning,
 			model.AgentPhaseCompacting, model.AgentPhaseBackground:
 			marker = agentAnimationFrames[animationFrame%len(agentAnimationFrames)]
-		case model.AgentPhaseIdle:
+		case model.AgentPhaseIdle, model.AgentPhaseStopped:
 			marker = "○"
+		case model.AgentPhaseCompleted:
+			marker = "✓"
+		case model.AgentPhaseInterrupted:
+			marker = "□"
 		case model.AgentPhaseWaitingInput:
 			marker = "▲"
 		case model.AgentPhaseWaitingApproval:
@@ -408,7 +412,7 @@ func (m dashboard) renderStatus(width, bodyHeight int) []string {
 			// rail carries what the row cannot.
 			contextShortcuts = []shortcut{{key: "Ctrl+/", description: "navigation"}}
 		}
-		rail = renderShortcutRailNote(m.styles, width, m.agentLedger(), contextShortcuts...)
+		rail = renderShortcutRailNote(m.styles, width, m.agentStatusNote(), contextShortcuts...)
 		status = renderShortcuts(m.styles, width,
 			shortcut{key: "F1", description: "help"},
 			shortcut{key: "F2", description: "add root"},

@@ -1,23 +1,47 @@
 # Agent status hooks
 
-romty identifies foreground Claude Code, Codex, and OpenCode processes without configuration, and reads a phase back from what the agent last drew. Hooks replace that reading with the agent's own report:
+romty identifies foreground Claude Code, Codex, and OpenCode processes. Lifecycle events determine what those processes are doing; terminal output and silence do not establish Codex or Claude Code completion.
+
+These states describe the agent runtime. A question written only in ordinary response text has no structured input-request event, and finishing a response is not independent verification that a build or deployment succeeded. romty does not classify the prose to invent those outcomes.
 
 | Marker | Meaning |
 |---|---|
-| `●` | Agent detected with an unknown phase |
-| `◐` `◓` `◑` `◒` | Thinking, running a tool, planning, compacting, or running background work |
-| `○` | Idle and ready for the next prompt |
-| `▲` | Waiting for user input |
-| `■` | Waiting for permission approval |
-| `★` | Stopped with an error |
+| `●` | Agent detected; lifecycle status unavailable |
+| `◐` `◓` `◑` `◒` | Thinking, running tools, planning, compacting, or continuing background work |
+| `○` | Ready, or response stopped without confirmed final completion; the status rail distinguishes them |
+| `✓` | Confirmed completion |
+| `□` | Interrupted |
+| `▲` | Needs your answer |
+| `■` | Needs your approval |
+| `★` | Failed |
 
-The hook command reads JSON from standard input and sends only the tab ID, provider, session ID, event name, tool name, notification type, permission mode, and whether background work remains. It does not send or retain prompts, transcripts, tool inputs, tool outputs, or assistant messages. It writes nothing to standard output or standard error and exits successfully when it is outside a romty tab, the daemon is unavailable, or the running daemon predates hook support.
+## Codex native status
 
-## Without hooks
+Run `codex`, `codex resume`, and other Codex commands with their usual arguments. The command, executable, `PATH`, working directory, authentication, and execution policy stay under Codex's control.
 
-An agent whose hooks have not reported a phase still reports an estimated phase. romty reads the last 4 KiB of its terminal output and the window title it set for input and approval prompts. Live terminal output, including spinner and elapsed-time redraws, reports `working` even when the original interrupt hint is no longer in that output window. After five seconds without output, the estimate becomes `idle`. Each new output renews the interval, so continued redraws keep long-running work animated. An explicit input or approval prompt remains waiting through silence. `thinking`, `planning`, `compacting`, `background`, and `error` need a hook.
+The existing `romty hooks` setup adds `thread-id` to `tui.terminal_title` in `${CODEX_HOME:-~/.codex}/config.toml`. It preserves existing title items, comments and other settings. An explicitly empty title list stays disabled. Restart Codex after setup to pick up the identity field. If a profile or command-line override replaces the title items, include `thread-id` in that selection too.
 
-The newest phrase in the output wins, so an agent that answered a prompt and went back to work reports work again. The window title is consulted only when the output says nothing, because a title is sticky and can outlive the state it named. A hook always wins over these estimates, so a hooked agent can keep reporting work through a silent tool call. Replayed output does not renew activity, and a tab with no live output or recognisable hint keeps an unknown phase. A silent unhooked agent may still be working; install and trust its hooks for authoritative phases.
+The TUI emits this identifier in its window title; romty already tracks titles without displaying them. Codex 0.160.0 shortens that title item, so romty resolves it only when it uniquely matches a loaded session. It never selects a session by working directory, transcript recency, or a guessed task description.
+
+romty polls the local app-server's read-only APIs: `thread/loaded/list`, `thread/read`, `thread/turns/list` with `itemsView: notLoaded`, and `thread/goal/get`. Runtime flags identify pending questions and approvals. The latest turn metadata distinguishes completion, interruption, and failure. An active goal stays in background work between turns; a paused or blocked goal does not count as completed. No prompts, commands, approval decisions, resumes, or daemon-start requests are sent by the status reader.
+
+The API and title metadata are verified against Codex 0.160.0. A missing identity, ambiguous match, unavailable server, or unsupported API produces an unavailable state rather than a guessed completion. Standalone sessions can use correctly bound hooks when the shared server cannot report them. The reader uses the `CODEX_HOME` inherited when the terminal tab was created.
+
+Codex's shared app-server can inherit `ROMTY_TAB_ID` from the terminal that originally started it. Codex hooks therefore route by their session ID and the TUI's title identity, not that inherited tab ID. This also works when the shared server started outside romty and has no tab ID at all.
+
+See the official [Codex app-server API](https://learn.chatgpt.com/docs/app-server) and [Codex hooks](https://learn.chatgpt.com/docs/hooks).
+
+## Claude Code hooks
+
+Install and trust the hooks described below. `UserPromptSubmit` begins work. `AskUserQuestion`, `PermissionRequest`, and MCP elicitation identify separate user interactions. Tool-use IDs keep an unanswered question visible while other parallel tools finish. Session, prompt/turn, and subagent IDs prevent unrelated events from changing the main agent's state.
+
+`Stop` means the response reached its stop hooks. Another hook can continue the same turn, so romty shows `stopped` without a completion sound until a definitive completion notification arrives. Claude Code's `idle_prompt` notification confirms that it finished responding; Claude sends it after about 60 seconds only if the user has not typed. `StopFailure` reports failure. Scheduled future cron wakeups alone do not mean work is currently running.
+
+Claude Code's public hooks do not expose every final transition immediately: for example, a user interrupt need not emit `Stop`, and a blocking Stop hook can continue work. romty does not claim that this hook-only path proves immediate final task completion. Without hooks it shows status unavailable. See the [Claude Code hooks reference](https://code.claude.com/docs/en/hooks).
+
+The hook command sends only tab, provider, session, turn/prompt, subagent and tool-use identifiers, event name, tool name, notification type, permission mode, and whether background work remains. It does not send or retain prompts, transcripts, tool inputs, tool outputs, or assistant messages. It is silent outside a romty tab or when the daemon is unavailable.
+
+OpenCode uses its plugin's lifecycle events. Its terminal-output fallback remains an estimate and never confirms completion.
 
 ## Token and cost readings
 
@@ -42,7 +66,7 @@ romty hooks
 The command reports `installed`, `updated`, or `current` for each detected provider and `not found` for unavailable providers. It writes:
 
 - Claude Code user hooks to `${CLAUDE_CONFIG_DIR:-~/.claude}/settings.json`
-- Codex user hooks to `${CODEX_HOME:-~/.codex}/hooks.json`
+- Codex user hooks to `${CODEX_HOME:-~/.codex}/hooks.json`, and the `thread-id` title item to `tui.terminal_title` in `config.toml` in the same directory
 - an OpenCode plugin to `${OPENCODE_CONFIG_DIR:-~/.config/opencode}/plugins/romty.js`
 
 Claude Code and Codex are configured by structurally merging JSON instead of replacing the document. Existing settings, unrelated hooks, and unknown fields remain. romty normalizes only command handlers that invoke `romty hook claude` or `romty hook codex`, removes obsolete duplicates, and adds any missing lifecycle events. Malformed JSON or an incompatible `hooks` value is reported and left unchanged.
@@ -57,6 +81,6 @@ Claude Code applies direct user-settings edits automatically, subject to its wor
 
 ## Verify
 
-Start Claude Code, Codex, or OpenCode in a newly created romty tab and submit a prompt. The marker should animate through `◐` `◓` `◑` `◒`, then settle on `○` when the agent is ready for another prompt. An input request should use `▲`, a permission request should use `■`, and a stopped error should use `★`. `romty list` reports the same phase as `claude/idle`, `codex/waiting_approval`, and similar values.
+Start `codex`, `claude`, or `opencode` normally in a new tab after setup. Submit a prompt, answer a question, approve a tool, and interrupt a separate turn. Check both the tab marker and the status rail. `romty list` reports the same phase, including `working`, `waiting_input`, `waiting_approval`, `stopped`, `completed`, `interrupted`, and `unknown`.
 
-Optional embedded sound alerts use these same phase transitions. Completion sounds require a hook-reported `idle` or `error`; an `idle` estimated from silence only stops the animation. Input and approval prompts can play a waiting sound even when detected without hooks. Enable alerts in the `F3` Config dialog; `d` controls completed work, `b` controls waiting for input or approval, and `s` tests the done sound.
+Completion sounds require confirmed `completed` or `error` transitions. `idle`, provisional `stopped`, interruption, and unavailable status do not play them. Enable alerts in the `F3` Config dialog; `d` controls completion alerts, `b` controls input/approval alerts, and `s` tests the done sound.

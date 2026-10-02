@@ -180,6 +180,9 @@ func TestAgentEventValidate(t *testing.T) {
 		{name: "no hook event", event: protocol.AgentEvent{Agent: model.AgentClaude}},
 		{name: "oversized session", event: protocol.AgentEvent{
 			Agent: model.AgentClaude, HookEvent: "Stop", SessionID: long}},
+		{name: "oversized turn", event: protocol.AgentEvent{Agent: model.AgentCodex, HookEvent: "Stop", TurnID: long}},
+		{name: "oversized subagent", event: protocol.AgentEvent{Agent: model.AgentClaude, HookEvent: "Stop", AgentID: long}},
+		{name: "oversized tool identity", event: protocol.AgentEvent{Agent: model.AgentClaude, HookEvent: "Stop", ToolUseID: long}},
 		{name: "oversized tool", event: protocol.AgentEvent{
 			Agent: model.AgentClaude, HookEvent: "Stop", ToolName: long}},
 		{name: "oversized notification", event: protocol.AgentEvent{

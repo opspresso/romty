@@ -9,17 +9,9 @@ import (
 	"github.com/opspresso/romty/internal/model"
 )
 
-// Agents report their phase through hooks, which the user has to install and
-// the agent has to be willing to run. Without them romty knows an agent is
-// there — its process is the foreground group on the PTY — but not whether it
-// is working or has stopped to ask something, which is the half a notification
-// needs.
-//
-// What an agent draws says the same thing the user reads off the screen: an
-// approval prompt names the choices, and a generating agent says how to
-// interrupt it. Reading that back is a guess and never overrules a hook, but a
-// guess is what turns "an agent is here" into "an agent is waiting for you" on
-// a machine where no hook is installed.
+// Terminal-derived phases are a compatibility fallback for OpenCode. Codex
+// and Claude Code require lifecycle events; redraws and silence cannot prove
+// whether their work is active, awaiting a response, or complete.
 
 // phaseHintBytes is how much of the end of the recording is read back. The
 // recording holds megabytes; what an agent last drew is the final screen or

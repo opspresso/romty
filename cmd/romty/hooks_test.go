@@ -29,6 +29,7 @@ func TestDecodeHookEventKeepsOnlyStatusMetadata(t *testing.T) {
 		t.Fatalf("decodeHookEvent() error = %v", err)
 	}
 	if event.Agent != model.AgentClaude || event.SessionID != "session-1" ||
+		event.TurnID != "prompt-1" ||
 		event.HookEvent != "PreToolUse" ||
 		event.ToolName != "Bash" || event.PermissionMode != "plan" {
 		t.Fatalf("decodeHookEvent() = %#v", event)
@@ -39,6 +40,25 @@ func TestDecodeHookEventKeepsOnlyStatusMetadata(t *testing.T) {
 	}
 	if bytes.Contains(encoded, []byte(secret)) || bytes.Contains(encoded, []byte("transcript")) {
 		t.Fatalf("sanitized event retained hook content: %s", encoded)
+	}
+}
+
+func TestDecodeHookEventKeepsLifecycleIdentity(t *testing.T) {
+	event, err := decodeHookEvent("codex", strings.NewReader(`{
+		"hook_event_name":"Interrupt", "turn_id":"turn-1", "agent_id":"child-1"
+	}`))
+	if err != nil || event.TurnID != "turn-1" || event.AgentID != "child-1" {
+		t.Fatalf("decode lifecycle = %+v, %v", event, err)
+	}
+}
+
+func TestScheduledWakeupDoesNotKeepCompletedTurnWorking(t *testing.T) {
+	event, err := decodeHookEvent("claude", strings.NewReader(`{
+		"hook_event_name":"Stop", "background_tasks":[],
+		"session_crons":[{"id":"tomorrow", "schedule":"0 9 * * *"}]
+	}`))
+	if err != nil || event.Background {
+		t.Fatalf("scheduled wakeup is not running work: %+v, %v", event, err)
 	}
 }
 

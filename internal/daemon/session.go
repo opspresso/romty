@@ -5,6 +5,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -52,6 +53,7 @@ type session struct {
 	// Live output includes TUI spinner redraws even when the phase hint is
 	// no longer in history's tail. Replayed history does not renew activity.
 	lastOutputAt time.Time
+	codexHome    string
 	// modes survives the recording being trimmed, so a mode the guest set
 	// long ago is still restored to a reattaching client.
 	guest      *guestTracker
@@ -105,20 +107,47 @@ func startSession(id, directory, shell string, environment []string, columns, ro
 	}
 
 	value := &session{
-		id:       id,
-		pty:      terminal,
-		columns:  columns,
-		rows:     rows,
-		command:  command,
-		onExit:   onExit,
-		readDone: make(chan struct{}),
-		exitDone: make(chan struct{}),
-		guest:    newGuestTracker(),
-		clients:  make(map[net.Conn]*attachment),
+		id:        id,
+		pty:       terminal,
+		columns:   columns,
+		rows:      rows,
+		command:   command,
+		onExit:    onExit,
+		readDone:  make(chan struct{}),
+		exitDone:  make(chan struct{}),
+		guest:     newGuestTracker(),
+		clients:   make(map[net.Conn]*attachment),
+		codexHome: sessionCodexHome(environment, directory),
 	}
 	go value.read()
 	go value.wait()
 	return value, nil
+}
+
+func sessionCodexHome(environment []string, directory string) string {
+	home, _ := os.UserHomeDir()
+	codexHome := ""
+	for _, entry := range environment {
+		if value, ok := strings.CutPrefix(entry, "HOME="); ok && value != "" {
+			home = value
+		}
+		if value, ok := strings.CutPrefix(entry, "CODEX_HOME="); ok {
+			codexHome = value
+		}
+	}
+	if codexHome == "" {
+		codexHome = filepath.Join(home, ".codex")
+	}
+	if !filepath.IsAbs(codexHome) {
+		codexHome = filepath.Join(directory, codexHome)
+	}
+	return filepath.Clean(codexHome)
+}
+
+func (s *session) agentIdentity() (string, string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.guest.title, s.codexHome
 }
 
 // read drains the PTY master until it is exhausted, and owns closing it. The

@@ -17,6 +17,10 @@ const maxHookInputBytes = 1 << 20
 
 type hookInput struct {
 	SessionID        string `json:"session_id"`
+	TurnID           string `json:"turn_id"`
+	PromptID         string `json:"prompt_id"`
+	AgentID          string `json:"agent_id"`
+	ToolUseID        string `json:"tool_use_id"`
 	HookEvent        string `json:"hook_event_name"`
 	ToolName         string `json:"tool_name"`
 	NotificationType string `json:"notification_type"`
@@ -24,12 +28,11 @@ type hookInput struct {
 	BackgroundTasks  []struct {
 		Status string `json:"status"`
 	} `json:"background_tasks"`
-	SessionCrons []struct{} `json:"session_crons"`
 }
 
 func runHookCommand(provider string, input io.Reader) {
 	tabID := os.Getenv("ROMTY_TAB_ID")
-	if tabID == "" {
+	if tabID == "" && provider != "codex" {
 		return
 	}
 	event, err := decodeHookEvent(provider, input)
@@ -61,7 +64,7 @@ func decodeHookEvent(provider string, input io.Reader) (protocol.AgentEvent, err
 		}
 		return protocol.AgentEvent{}, trailingErr
 	}
-	background := len(value.SessionCrons) > 0
+	background := false
 	for _, task := range value.BackgroundTasks {
 		switch strings.ToLower(task.Status) {
 		case "running", "pending", "in_progress":
@@ -71,11 +74,17 @@ func decodeHookEvent(provider string, input io.Reader) (protocol.AgentEvent, err
 	event := protocol.AgentEvent{
 		Agent:            model.Agent(provider),
 		SessionID:        value.SessionID,
+		TurnID:           value.TurnID,
+		AgentID:          value.AgentID,
+		ToolUseID:        value.ToolUseID,
 		HookEvent:        value.HookEvent,
 		ToolName:         value.ToolName,
 		NotificationType: value.NotificationType,
 		PermissionMode:   value.PermissionMode,
 		Background:       background,
+	}
+	if event.Agent == model.AgentClaude {
+		event.TurnID = value.PromptID
 	}
 	// Refused here as well as at the daemon, so a payload the daemon would not
 	// record never costs a connection: a hook runs on the agent's critical

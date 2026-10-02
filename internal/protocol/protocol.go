@@ -107,6 +107,9 @@ type Request struct {
 type AgentEvent struct {
 	Agent            model.Agent `json:"agent"`
 	SessionID        string      `json:"session_id,omitempty"`
+	TurnID           string      `json:"turn_id,omitempty"`
+	AgentID          string      `json:"agent_id,omitempty"`
+	ToolUseID        string      `json:"tool_use_id,omitempty"`
 	HookEvent        string      `json:"hook_event"`
 	ToolName         string      `json:"tool_name,omitempty"`
 	NotificationType string      `json:"notification_type,omitempty"`
@@ -135,7 +138,7 @@ func (e AgentEvent) Validate() error {
 		return errors.New("hook event is required")
 	}
 	for _, metadata := range []string{
-		e.SessionID, e.HookEvent, e.ToolName, e.NotificationType, e.PermissionMode,
+		e.SessionID, e.TurnID, e.AgentID, e.ToolUseID, e.HookEvent, e.ToolName, e.NotificationType, e.PermissionMode,
 	} {
 		if len(metadata) > MaxAgentEventMetadataBytes {
 			return fmt.Errorf("agent event metadata is longer than %d bytes", MaxAgentEventMetadataBytes)

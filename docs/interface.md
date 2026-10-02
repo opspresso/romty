@@ -6,13 +6,15 @@ The left pane shows roots, their direct child workspaces, Git state, and one mar
 
 Below 80 columns the workspace pane takes half the screen from the terminal, so focusing the terminal hides it and gives the terminal the full width. `Ctrl`+`/` or `F7` brings it back and moves the focus with it. The layout and terminal use the actual reported width even below 40 columns. At 80 columns and above both panes stay on screen, and focus never resizes the terminal. A terminal that speaks the Kitty keyboard protocol reports `Ctrl`+`/` as itself; every other terminal, including phone SSH clients, sends it as `Ctrl`+`_`, and romty accepts both.
 
-Claude Code markers are orange, Codex markers are blue, and OpenCode markers are green. Foreground process detection supplies the color without configuration, and the agent's recent output supplies a working or waiting phase. [Agent status hooks](agent-hooks.md) replace that reading with the agent's own report and add the phases it cannot show:
+Claude Code markers are orange, Codex markers are blue, and OpenCode markers are green. Foreground process detection supplies the color. [Native Codex status and agent hooks](agent-hooks.md) supply lifecycle phases; Codex and Claude Code remain unknown without a reporting channel:
 
 | Marker | Meaning |
 |---|---|
 | `●` | Agent detected with an unknown phase |
 | `◐` `◓` `◑` `◒` | Thinking, working, planning, compacting, or running background work |
-| `○` | Idle and ready for another prompt |
+| `○` | Ready, or stopped without confirmed completion (see the status rail) |
+| `✓` | Confirmed completion |
+| `□` | Interrupted |
 | `▲` | Waiting for user input |
 | `■` | Waiting for permission approval |
 | `★` | Stopped with an error |
