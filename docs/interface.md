@@ -1,35 +1,78 @@
 # Interface
 
+This guide describes the romty TUI: its panes, agent markers, Git views, keyboard shortcuts, scrollback, mouse behavior, and settings. Press `F1` in romty for the in-app key reference.
+
 ## Workspace tree and terminal pane
 
 The left pane shows roots, their direct child workspaces, Git state, and one marker for each running terminal tab. The right pane contains the selected tab rail and embedded terminal. The divider arrow points toward the focused pane.
 
 Below 80 columns the workspace pane takes half the screen from the terminal, so focusing the terminal hides it and gives the terminal the full width. `Ctrl`+`/` or `F7` brings it back and moves the focus with it. The layout and terminal use the actual reported width even below 40 columns. At 80 columns and above both panes stay on screen, and focus never resizes the terminal. A terminal that speaks the Kitty keyboard protocol reports `Ctrl`+`/` as itself; every other terminal, including phone SSH clients, sends it as `Ctrl`+`_`, and romty accepts both.
 
-Claude Code markers are orange, Codex markers are blue, and OpenCode markers are green. Foreground process detection supplies the color. [Native Codex status and agent hooks](agent-hooks.md) supply lifecycle phases; Codex and Claude Code remain unknown without a reporting channel:
+## Agent markers
 
-| Marker | Meaning |
-|---|---|
-| `●` | Agent detected with an unknown phase |
-| `◐` `◓` `◑` `◒` | Thinking, working, planning, compacting, or running background work |
-| `○` | Ready, or stopped without confirmed completion (see the status rail) |
-| `✓` | Confirmed completion |
-| `□` | Interrupted |
-| `▲` | Waiting for user input |
-| `■` | Waiting for permission approval |
-| `★` | Stopped with an error |
+Each running terminal tab has one marker in the workspace tree. A tab without a detected agent shows `●` without an agent color. Claude Code markers are orange, Codex markers are blue, and OpenCode markers are green. Foreground process detection supplies the color. [Native Codex status and agent hooks](agent-hooks.md) supply lifecycle phases; Codex and Claude Code remain unknown without a reporting channel.
+
+The status rail shows the label for the open terminal's agent. `romty list` prints the phase after the agent name, for example `claude/working`.
+
+| Marker | Status rail | `romty list` phase | Meaning |
+|---|---|---|---|
+| `●` | Status unavailable | none; agent name only | Agent detected, but no lifecycle report |
+| `◐` `◓` `◑` `◒` | Thinking, Working, Planning, Compacting, or Background work | `thinking`, `working`, `planning`, `compacting`, `background` | Active work |
+| `○` | Ready | `idle` | Waiting for a prompt |
+| `○` | Stopped · completion unconfirmed | `stopped` | The response stopped without confirmed completion |
+| `✓` | Completed | `completed` | Confirmed completion |
+| `□` | Interrupted | `interrupted` | Interrupted |
+| `▲` | Needs your answer | `waiting_input` | Waiting for user input |
+| `■` | Needs your approval | `waiting_approval` | Waiting for permission approval |
+| `★` | Failed | `error` | Stopped with an error |
+
+If a marker stays `●`, see [Status stays unavailable](agent-hooks.md#status-stays-unavailable).
 
 Press `Ctrl`+`Shift`+`A` to open the next terminal whose agent is waiting for input or approval. It walks those terminals in the order the tree draws them and wraps at the end, so repeated presses cycle every agent that stopped to ask something. When the only waiting agent is the terminal already open, the keyboard moves to it rather than reattaching. When nothing is waiting, the status bar says so and the open terminal is left alone.
+
+## Git state and actions
 
 Git metadata is rendered as `(branch*) ↑N ↓N`. `*` means the worktree has tracked or untracked changes, `!` replaces it for conflicts, and the arrows count commits ahead of or behind the upstream. A detached HEAD appears as `(@abcdef0)`.
 
 romty refreshes local Git state every 10 seconds. It fetches remote-tracking refs in the background at startup and every 5 minutes. `F5` refreshes local state immediately and starts another background fetch; fetches never prompt for credentials and time out without blocking the interface.
 
-Press `Ctrl`+`Shift`+`G` to open Git actions for a workspace. From the workspace pane it targets the row under the cursor; from the terminal pane or scrollback it targets the open terminal workspace. The menu provides `Status`, `Fetch`, `Pull`, and `Push`. `Pull` uses `--ff-only` so it never creates a merge commit. Commands run without interactive credential prompts, and their output or error remains in a scrollable result modal. Captured Git output is limited to 8 MiB; exceeding it stops the command and reports an error. That output is coloured: porcelain status letters take the same green, amber, and red the file view gives them, and a diffstat's `+` and `-` are split into additions and removals. Press `Enter` from a result to return to the action menu, or click `×` in its title bar to close it.
+Press `Ctrl`+`Shift`+`G` to open Git actions for a workspace. From the workspace pane it targets the row under the cursor; from the terminal pane or scrollback it targets the open terminal workspace. The menu provides `Status`, `Fetch`, `Pull`, and `Push`.
 
-Press `Ctrl`+`Shift`+`F` to toggle the file view for the same contextual workspace. Its left pane shows staged, unstaged, and untracked files as a directory tree. Added and untracked files are green, modified and renamed files are amber, and deleted or conflicted files are red. Diff previews disable external diff and text-conversion commands and treat selected filenames literally. The right pane syntax-highlights recognised code files and falls back to plain text for other content or unusually large diffs. Added and removed rows use green and red background tints without replacing syntax colors. Press `F6` to switch between inline and split layouts; the last layout is restored when the view or romty is opened again. A file with both staged and unstaged edits shows both sections, and an untracked text file is compared with an empty file. Press `↑`/`↓` to select a file, use `Ctrl`+`↑`/`↓`, the mouse wheel, or the paging keys to read its diff, and press `F5` to reload the worktree.
+- `Pull` uses `--ff-only` so it never creates a merge commit.
+- Commands run without interactive credential prompts, and their output or error remains in a scrollable result modal.
+- Captured Git output is limited to 8 MiB; exceeding it stops the command and reports an error.
+- The output is coloured: porcelain status letters take the same green, amber, and red the file view gives them, and a diffstat's `+` and `-` are split into additions and removals.
+- Press `Enter` from a result to return to the action menu, or click `×` in its title bar to close it.
 
-The workspace action menu also provides `All files`. It recursively lists every regular file in the workspace, including ignored and dot-prefixed files such as `.env`, while skipping dot-prefixed directories such as `.git`. Each level lists directories before files, with each group sorted by name, and directories start collapsed. The selected file opens read-only with syntax highlighting when its format and size are supported. File previews are limited to 8 MiB and path resolution stays inside the workspace even if a parent directory changes after listing; larger files report an error. Symlinks are listed neither as files nor as traversable directories. This view is also available for workspaces that are not Git repositories.
+## File views
+
+### Changed files
+
+Press `Ctrl`+`Shift`+`F` to toggle the changed-file view for the same contextual workspace.
+
+The left pane shows staged, unstaged, and untracked files as a directory tree. Added and untracked files are green, modified and renamed files are amber, and deleted or conflicted files are red.
+
+The right pane shows the diff of the selected file:
+
+- It syntax-highlights recognised code files and falls back to plain text for other content or unusually large diffs.
+- Added and removed rows use green and red background tints without replacing syntax colors.
+- A file with both staged and unstaged edits shows both sections, and an untracked text file is compared with an empty file.
+- Diff previews disable external diff and text-conversion commands and treat selected filenames literally.
+
+Press `↑`/`↓` to select a file. Use `Ctrl`+`↑`/`↓`, the mouse wheel, or the paging keys to read its diff. Press `F6` to switch between inline and split layouts; the last layout is restored when the view or romty is opened again. Press `F5` to reload the worktree.
+
+### All files
+
+The workspace action menu also provides `All files`. This view is also available for workspaces that are not Git repositories.
+
+- It recursively lists every regular file in the workspace, including ignored and dot-prefixed files such as `.env`, while skipping dot-prefixed directories such as `.git`.
+- Each level lists directories before files, with each group sorted by name, and directories start collapsed.
+- Symlinks are listed neither as files nor as traversable directories.
+- The selected file opens read-only with syntax highlighting when its format and size are supported.
+- File previews are limited to 8 MiB; larger files report an error.
+- Path resolution stays inside the workspace even if a parent directory changes after listing.
+
+### Directory rows
 
 Both file views allow directory rows to take the cursor. Press `Enter` to toggle the selected directory, `←` to collapse it, or `→` to expand it. Click a directory to select and toggle it, click a file to select and open it, or use the wheel over the tree to move its selection. Collapsed directories remain collapsed when `F5` reloads the view.
 
@@ -116,7 +159,18 @@ The dashboard chrome is mouse-aware. Click a root or workspace to select and ope
 
 Mouse targets identify themselves before activation. Workspace, tab, picker, Git, Config, and dialog-action targets gain a muted background on hover, while the draggable divider changes to the accent color. Keyboard selection keeps the stronger accent treatment and is never replaced by hover.
 
-Modals are drawn over the dashboard rather than in place of it: the workspace tree and the terminal stay on screen around the box, redrawn in one receding tone so the box in front is what asks to be read. The box takes the width its content needs, up to a cap; Config is given half the screen because it is read rather than answered. The workspace action palette is the exception — it is anchored on the row it belongs to and leaves the tree around it as it was. Modal title bars provide a clickable `×` that performs the same close or cancel action as `Esc`. The button is hidden while a Git command, daemon shutdown, or hook installation is running. Confirmation dialogs also render their Enter and Esc actions inside the box and accept clicks on those actions. Modal boxes fit narrow terminal widths, and hidden portions of clipped actions are not clickable. Paste input while a modal is open does not reach the terminal behind it. Longer operations such as opening a terminal, reading a directory, running a Git action, stopping the daemon, or installing hooks show a moving one-cell activity marker; the marker stops scheduling frames when no visible work or agent animation remains.
+### Modals
+
+Modals are drawn over the dashboard rather than in place of it: the workspace tree and the terminal stay on screen around the box, redrawn in one receding tone so the box in front is what asks to be read.
+
+- The box takes the width its content needs, up to a cap. Config is given half the screen because it is read rather than answered.
+- The workspace action palette is the exception: it is anchored on the row it belongs to and leaves the tree around it as it was.
+- Modal title bars provide a clickable `×` that performs the same close or cancel action as `Esc`. The button is hidden while a Git command, daemon shutdown, or hook installation is running.
+- Confirmation dialogs also render their Enter and Esc actions inside the box and accept clicks on those actions.
+- Modal boxes fit narrow terminal widths, and hidden portions of clipped actions are not clickable.
+- Paste input while a modal is open does not reach the terminal behind it.
+
+Longer operations such as opening a terminal, reading a directory, running a Git action, stopping the daemon, or installing hooks show a moving one-cell activity marker. The marker stops scheduling frames when no visible work or agent animation remains.
 
 Modal content is pointer-aware as well. Click a directory in the root picker to open it, click a Git action to run it, and use the wheel over a completed Git result to read longer output. Config rows toggle when clicked and the row clicked becomes the one the cursor is on; use the wheel over the pane-width row for one-column adjustments.
 
