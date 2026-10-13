@@ -34,7 +34,7 @@ With Homebrew:
 brew install opspresso/tap/romty
 ```
 
-Or with Go 1.25 or later:
+Or with Go 1.26 or later:
 
 ```sh
 go install github.com/opspresso/romty/cmd/romty@latest

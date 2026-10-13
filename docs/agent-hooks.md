@@ -53,7 +53,7 @@ The reading needs the session identifier, which only a hook reports: two tabs ru
 
 ## Install or update
 
-When the TUI starts, romty looks for `claude`, `claude-code`, `codex`, and `opencode` on `PATH`. If a detected agent has missing or outdated romty hooks, the TUI opens a confirmation dialog. Press `Enter` to install or update every listed provider, or `Esc` to leave the files unchanged for that run.
+When the TUI starts, romty looks for `claude`, `claude-code`, `codex`, and `opencode` on `PATH`. If a detected agent has missing or outdated romty hooks, the TUI opens a confirmation dialog. Press `Enter` to install or update every listed provider, or `Esc` to leave the files unchanged for that run. After `Esc`, the status rail shows `Status unavailable · run romty hooks` for a skipped provider's agent until romty restarts or the agent reports an event.
 
 Hook installation is available only from a tagged release binary, including binaries installed from a tagged Go module. Development binaries produced by local `go run`, `go build`, or `go install` commands neither offer installation in the TUI nor write hook settings through `romty hooks`. This prevents temporary Go build-cache paths from becoming persistent hook commands.
 

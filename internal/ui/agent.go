@@ -214,6 +214,9 @@ func (m dashboard) agentStatusNote() string {
 		model.AgentPhaseWaitingApproval: "Needs your approval",
 		model.AgentPhaseError:           "Failed",
 	}[tab.AgentPhase]
+	if tab.AgentPhase == model.AgentPhaseUnknown && m.hooksSkipped[tab.Agent] {
+		label += " · run romty hooks"
+	}
 	if ledger := m.agentLedger(); ledger != "" {
 		if label == "" {
 			return ledger
