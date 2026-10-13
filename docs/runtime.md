@@ -33,6 +33,24 @@ The daemon reads a hooked Claude Code session's own transcript to report its tok
 
 romty refuses to start inside one of its own terminal sessions.
 
+## Stopping and resuming
+
+`romty stop`, or `F9` in the TUI, stops the daemon and every shell it owns. Before the shells go, the daemon saves each running tab's recorded output and agent session under `resume/` in the runtime directory.
+
+The next daemon offers a saved snapshot back through the first tab created in its workspace:
+
+1. The old output replays behind a `── restored from the previous romty session ──` marker.
+2. When Claude Code, Codex, or OpenCode was running, its resume command is typed at the prompt.
+3. Press `Enter` to continue the conversation, or `Ctrl+C` to decline.
+
+| Agent | With a saved session identifier | Without one |
+|---|---|---|
+| Claude Code | `claude --resume <id>` | `claude --continue` |
+| Codex | `codex resume <id>` | `codex resume` |
+| OpenCode | `opencode --session <id>` | `opencode --continue` |
+
+Without an identifier, the agent chooses its most recent session. Unconsumed snapshots are discarded after seven days.
+
 ## Data and configuration
 
 romty stores data in a `romty` directory under the user configuration directory: `~/Library/Application Support` on macOS, and `$XDG_CONFIG_HOME` or `~/.config` on Linux.
