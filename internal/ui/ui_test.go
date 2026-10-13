@@ -1254,6 +1254,35 @@ func TestDashboardCanSkipAgentHookInstallation(t *testing.T) {
 	}
 }
 
+func TestStatusRailExplainsSkippedAgentHooks(t *testing.T) {
+	value := newDashboard(&fakeBackend{}, model.Snapshot{Roots: []model.RootView{{
+		Root: model.Root{ID: "root"}, Tabs: []model.Tab{{ID: "tab", Running: true}},
+	}}})
+	value.offerAgentHooks([]agenthooks.Status{
+		{Provider: agenthooks.ProviderClaude, State: agenthooks.StateMissing},
+		{Provider: agenthooks.ProviderCodex, State: agenthooks.StateCurrent},
+	})
+	updated, _ := value.Update(key(tea.KeyEscape, ""))
+	value = updated.(dashboard)
+	tab, ok := value.openTab()
+	if !ok {
+		t.Fatal("no open tab")
+	}
+	note := func(agent model.Agent, phase model.AgentPhase) string {
+		value.updateAgents(map[string]model.AgentStatus{tab.ID: {Agent: agent, Phase: phase}})
+		return value.agentStatusNote()
+	}
+	if got := note(model.AgentClaude, model.AgentPhaseUnknown); got != "Status unavailable · run romty hooks" {
+		t.Fatalf("skipped Claude note = %q", got)
+	}
+	if got := note(model.AgentCodex, model.AgentPhaseUnknown); got != "Status unavailable" {
+		t.Fatalf("current Codex note = %q", got)
+	}
+	if got := note(model.AgentClaude, model.AgentPhaseWorking); got != "Working" {
+		t.Fatalf("reporting Claude note = %q", got)
+	}
+}
+
 func TestDashboardCanQuitDuringAgentHookInstallation(t *testing.T) {
 	for _, pending := range []bool{false, true} {
 		value := newDashboard(&fakeBackend{}, model.Snapshot{})

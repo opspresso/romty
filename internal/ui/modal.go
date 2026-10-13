@@ -12,6 +12,7 @@ import (
 
 	"github.com/opspresso/romty/internal/agenthooks"
 	"github.com/opspresso/romty/internal/display"
+	"github.com/opspresso/romty/internal/model"
 	"github.com/opspresso/romty/internal/version"
 )
 
@@ -37,6 +38,12 @@ func (m dashboard) openModal(value modal) (tea.Model, tea.Cmd) {
 func (m dashboard) handleModalKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if message.String() == "esc" {
 		if m.modal == hookInstallModal {
+			// The skipped agents keep an unavailable status for this run; the
+			// rail names the cause so a silent marker is not mistaken for idle.
+			m.hooksSkipped = make(map[model.Agent]bool)
+			for _, provider := range agenthooks.Pending(m.hookStatuses) {
+				m.hooksSkipped[model.Agent(provider)] = true
+			}
 			m.hookStatuses = nil
 		}
 		m.modal = noModal

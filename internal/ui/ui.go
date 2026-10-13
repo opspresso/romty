@@ -190,6 +190,7 @@ type dashboard struct {
 	modal                   modal
 	shutdownPending         bool
 	hookStatuses            []agenthooks.Status
+	hooksSkipped            map[model.Agent]bool
 	hookInstallPending      bool
 	agentAnimationFrame     int
 	agentAnimationActive    bool
