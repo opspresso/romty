@@ -41,6 +41,7 @@ romty stores data in a `romty` directory under the user configuration directory:
 |---|---|
 | `state.json` | Roots, workspaces, and terminal tab metadata |
 | `config.json` | TUI settings such as the last workspace and tab, workspace pane width, mouse passthrough, and diff layout |
+| `resume/` | Output and agent session of each tab that was running at `romty stop`; unconsumed snapshots are discarded after seven days |
 | `daemon.sock` | Local client-daemon Unix socket |
 | `daemon.sock.lock` | Lock held by the running daemon |
 | `daemon.log` | Detached daemon output and failures; archived before daemon startup after reaching 3 MiB |

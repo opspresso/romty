@@ -10,7 +10,7 @@ Website: [romty.dev](https://romty.dev)
 
 AI coding agents often need more time and compute than a laptop can reliably provide. romty is designed to run on an always-on workstation at home or at the office, beside the repositories and tools the agents use. Connect to that machine over Tailscale and SSH, start romty and an agent, then disconnect without terminating the terminal session. The next SSH login can reopen the same romty workspace and continue from its retained output.
 
-Tailscale and SSH provide access to the machine; romty does not expose a network service. Its client and daemon communicate through a private Unix socket on that host. Sessions survive SSH disconnects and TUI exits, but not a machine shutdown or an explicit `romty stop`. A stop does save each running tab's output and agent session: the first tabs opened in that workspace afterwards replay the saved output and, when Claude Code or Codex was running, start with its resume command already typed at the prompt.
+Tailscale and SSH provide access to the machine; romty does not expose a network service. Its client and daemon communicate through a private Unix socket on that host. Sessions survive SSH disconnects and TUI exits, but not a machine shutdown or an explicit `romty stop`. A stop does save each running tab's output and agent session: the first tabs opened in that workspace afterwards replay the saved output and, when Claude Code, Codex, or OpenCode was running, start with its resume command already typed at the prompt.
 
 ```text
 laptop -> Tailscale -> SSH -> always-on machine -> romty -> AI coding agent
@@ -57,7 +57,7 @@ Use `romty stop` outside the TUI when you intend to stop the daemon and every ru
 - [Getting started](docs/getting-started.md) — requirements, installation, first run, and CLI commands
 - [Interface](docs/interface.md) — workspace behavior, keyboard shortcuts, scrollback, mouse, and Git state
 - [Runtime](docs/runtime.md) — session persistence, local data, security boundaries, and architecture
-- [Agent status hooks](docs/agent-hooks.md) — Claude Code and Codex state reporting and hook installation
+- [Agent status hooks](docs/agent-hooks.md) — Claude Code, Codex, and OpenCode state reporting and hook installation
 - [Development](docs/development.md) — local checks, protocol compatibility, website deployment, and releases
 
 The complete documentation index is in [docs/README.md](docs/README.md).
