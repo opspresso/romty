@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strconv"
+	"strings"
 
 	"github.com/opspresso/romty/internal/model"
 	"github.com/opspresso/romty/internal/protocol"
@@ -390,7 +391,9 @@ func (s *Server) snapshot() model.Snapshot {
 		}
 		directories := make([]model.WorkspaceView, 0)
 		for _, entry := range entries {
-			if !entry.IsDir() {
+			// Dot-directories are tooling, not workspaces. One that still holds
+			// running tabs comes back through appendMissingRunningWorkspaces.
+			if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
 				continue
 			}
 			path := filepath.Join(root.Path, entry.Name())
