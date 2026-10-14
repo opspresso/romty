@@ -27,6 +27,10 @@ func tabCloseLocalX(tabs []model.Tab, want int) int {
 	position := 0
 	for index, tab := range tabs {
 		width := lipgloss.Width("  " + display.Text(tab.Name) + "  × ")
+		if tab.Running {
+			// The status marker and the gap after it.
+			width += 2
+		}
 		if index == want {
 			return position + width - 2
 		}

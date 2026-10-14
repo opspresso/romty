@@ -17,39 +17,46 @@ import (
 func openTabMarkers(styles *uiStyles, base lipgloss.Style, tabs []model.Tab, animationFrame int) string {
 	var result strings.Builder
 	for _, tab := range tabs {
-		if !tab.Running {
-			continue
-		}
-		style := base
-		switch tab.Agent {
-		case model.AgentClaude:
-			style = style.Foreground(styles.agentClaude.GetForeground())
-		case model.AgentCodex:
-			style = style.Foreground(styles.agentCodex.GetForeground())
-		case model.AgentOpenCode:
-			style = style.Foreground(styles.agentOpenCode.GetForeground())
-		}
-		marker := "●"
-		switch tab.AgentPhase {
-		case model.AgentPhaseThinking, model.AgentPhaseWorking, model.AgentPhasePlanning,
-			model.AgentPhaseCompacting, model.AgentPhaseBackground:
-			marker = agentAnimationFrames[animationFrame%len(agentAnimationFrames)]
-		case model.AgentPhaseIdle, model.AgentPhaseStopped:
-			marker = "○"
-		case model.AgentPhaseCompleted:
-			marker = "✓"
-		case model.AgentPhaseInterrupted:
-			marker = "□"
-		case model.AgentPhaseWaitingInput:
-			marker = "▲"
-		case model.AgentPhaseWaitingApproval:
-			marker = "■"
-		case model.AgentPhaseError:
-			marker = "★"
-		}
-		result.WriteString(style.Render(marker))
+		result.WriteString(openTabMarker(styles, base, tab, animationFrame))
 	}
 	return result.String()
+}
+
+// openTabMarker is one running tab's agent and phase in a single cell, the
+// same mark the workspace tree and the tab bar both show. A tab that is not
+// running has none.
+func openTabMarker(styles *uiStyles, base lipgloss.Style, tab model.Tab, animationFrame int) string {
+	if !tab.Running {
+		return ""
+	}
+	style := base
+	switch tab.Agent {
+	case model.AgentClaude:
+		style = style.Foreground(styles.agentClaude.GetForeground())
+	case model.AgentCodex:
+		style = style.Foreground(styles.agentCodex.GetForeground())
+	case model.AgentOpenCode:
+		style = style.Foreground(styles.agentOpenCode.GetForeground())
+	}
+	marker := "●"
+	switch tab.AgentPhase {
+	case model.AgentPhaseThinking, model.AgentPhaseWorking, model.AgentPhasePlanning,
+		model.AgentPhaseCompacting, model.AgentPhaseBackground:
+		marker = agentAnimationFrames[animationFrame%len(agentAnimationFrames)]
+	case model.AgentPhaseIdle, model.AgentPhaseStopped:
+		marker = "○"
+	case model.AgentPhaseCompleted:
+		marker = "✓"
+	case model.AgentPhaseInterrupted:
+		marker = "□"
+	case model.AgentPhaseWaitingInput:
+		marker = "▲"
+	case model.AgentPhaseWaitingApproval:
+		marker = "■"
+	case model.AgentPhaseError:
+		marker = "★"
+	}
+	return style.Render(marker)
 }
 
 // layout is the one description of where things sit. It used to be four
@@ -564,7 +571,7 @@ func (m dashboard) renderTerminal(width int) []string {
 	} else if m.hover.kind == hoverTabClose {
 		closeHover = m.hover.index
 	}
-	lines := renderTabBarWithHover(m.styles, tabs, m.tabIndex, hover, closeHover, width)
+	lines := renderTabBarWithHover(m.styles, tabs, m.tabIndex, hover, closeHover, m.agentAnimationFrame, width)
 	if m.terminal != nil {
 		return append(lines, m.terminal.renderViewport(m.scrollOffset)...)
 	}
@@ -578,19 +585,32 @@ func (m dashboard) renderTerminal(width int) []string {
 }
 
 func renderTabBar(styles *uiStyles, tabs []model.Tab, active, width int) []string {
-	return renderTabBarWithHover(styles, tabs, active, -1, -1, width)
+	return renderTabBarWithHover(styles, tabs, active, -1, -1, 0, width)
 }
 
-func renderTabBarWithHover(styles *uiStyles, tabs []model.Tab, active, hover, closeHover, width int) []string {
-	labels := make([]string, 0, len(tabs)+1)
-	for _, tab := range tabs {
-		labels = append(labels, "  "+display.Text(tab.Name)+"  × ")
+// tabLabel is a tab's text in the tab bar. A running tab leaves one cell
+// after the leading gap for its status marker, which is drawn in its own
+// color, so the text here only reserves the width the hit test also measures.
+func tabLabel(tab model.Tab) (prefix, rest string) {
+	if tab.Running {
+		return "  ", " " + display.Text(tab.Name) + "  × "
 	}
-	labels = append(labels, "  +  ")
+	return "", "  " + display.Text(tab.Name) + "  × "
+}
 
+func tabLabelWidth(tab model.Tab) int {
+	prefix, rest := tabLabel(tab)
+	width := lipgloss.Width(prefix) + lipgloss.Width(rest)
+	if tab.Running {
+		width++
+	}
+	return width
+}
+
+func renderTabBarWithHover(styles *uiStyles, tabs []model.Tab, active, hover, closeHover, animationFrame, width int) []string {
 	var tabsLine strings.Builder
 	var railLine strings.Builder
-	for index, label := range labels {
+	for index := 0; index <= len(tabs); index++ {
 		if index > 0 {
 			tabsLine.WriteString(" ")
 			railLine.WriteString(styles.tabRail.Render("─"))
@@ -606,13 +626,25 @@ func renderTabBarWithHover(styles *uiStyles, tabs []model.Tab, active, hover, cl
 			style = styles.interactiveHover
 			railStyle = styles.dividerActive
 		}
-		if index < len(tabs) && index == closeHover {
-			tabsLine.WriteString(style.Render(strings.TrimSuffix(label, "× ")))
-			tabsLine.WriteString(styles.interactiveHover.Render("× "))
+		labelWidth := lipgloss.Width("  +  ")
+		if index < len(tabs) {
+			tab := tabs[index]
+			prefix, rest := tabLabel(tab)
+			if prefix != "" {
+				tabsLine.WriteString(style.Render(prefix))
+				tabsLine.WriteString(openTabMarker(styles, style, tab, animationFrame))
+			}
+			if index == closeHover {
+				tabsLine.WriteString(style.Render(strings.TrimSuffix(rest, "× ")))
+				tabsLine.WriteString(styles.interactiveHover.Render("× "))
+			} else {
+				tabsLine.WriteString(style.Render(rest))
+			}
+			labelWidth = tabLabelWidth(tab)
 		} else {
-			tabsLine.WriteString(style.Render(label))
+			tabsLine.WriteString(style.Render("  +  "))
 		}
-		railLine.WriteString(railStyle.Render(strings.Repeat(railCharacter, lipgloss.Width(label))))
+		railLine.WriteString(railStyle.Render(strings.Repeat(railCharacter, labelWidth)))
 	}
 	remaining := width - lipgloss.Width(railLine.String())
 	if remaining > 0 {
