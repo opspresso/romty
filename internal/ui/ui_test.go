@@ -4421,6 +4421,7 @@ func TestOpenTabMarkersUseAgentColorsAndPhaseShapes(t *testing.T) {
 		{Running: true, Agent: model.AgentCodex, AgentPhase: model.AgentPhaseError},
 		{Running: true, Agent: model.AgentClaude, AgentPhase: model.AgentPhaseWorking},
 		{Running: true, Agent: model.AgentOpenCode, AgentPhase: model.AgentPhaseIdle},
+		{Running: true, Agent: model.AgentNode, AgentPhase: model.AgentPhaseUnknown},
 		{Running: true},
 	}
 
@@ -4432,9 +4433,59 @@ func TestOpenTabMarkersUseAgentColorsAndPhaseShapes(t *testing.T) {
 	failure := base.Foreground(value.styles.agentCodex.GetForeground()).Render("★")
 	working := base.Foreground(value.styles.agentClaude.GetForeground()).Render("◑")
 	opencode := base.Foreground(value.styles.agentOpenCode.GetForeground()).Render("○")
+	node := base.Foreground(value.styles.agentNode.GetForeground()).Render("●")
 	plain := base.Foreground(value.styles.agentPlain.GetForeground()).Render("●")
-	if markers != claude+codex+approval+failure+working+opencode+plain {
+	if markers != claude+codex+approval+failure+working+opencode+node+plain {
 		t.Fatalf("open tab markers = %q, want agent colors and phase shapes", markers)
+	}
+}
+
+func TestNodeMarkersStayGreenOnEverySurface(t *testing.T) {
+	for _, dark := range []bool{false, true} {
+		styles := newUIStyles(dark)
+		green := lipgloss.Color("#3F7D20")
+		if dark {
+			green = lipgloss.Color("#8CCF6B")
+		}
+		for _, base := range []lipgloss.Style{
+			styles.navigationItem, styles.navigationCurrent, styles.navigationSelected,
+			styles.interactiveHover, styles.tab, styles.tabSelected,
+		} {
+			tab := model.Tab{Running: true, Agent: model.AgentNode, AgentPhase: model.AgentPhaseUnknown}
+			if got, want := openTabMarker(styles, base, tab, 1), base.Foreground(green).Render("●"); got != want {
+				t.Fatalf("dark=%v: Node marker = %q, want %q", dark, got, want)
+			}
+		}
+	}
+}
+
+func TestNodeSnapshotUpdatesMarkersWithoutAgentActivity(t *testing.T) {
+	value := newDashboard(&fakeBackend{}, model.Snapshot{Roots: []model.RootView{{
+		Root: model.Root{ID: "root"}, Tabs: []model.Tab{{ID: "tab", Running: true}},
+	}}})
+	value.soundOnDone, value.soundOnWaiting = true, true
+	value.updateAgents(map[string]model.AgentStatus{"tab": {Agent: model.AgentNode, Phase: model.AgentPhaseUnknown}})
+	if value.hasAnimatedAgent() || len(value.waitingAgentStops()) != 0 {
+		t.Fatal("Node service activated agent animation or waiting navigation")
+	}
+	if got := value.agentStatusNote(); got != "Node.js running" {
+		t.Fatalf("Node status rail = %q, want Node.js running", got)
+	}
+	tabs := value.state.Roots[0].Tabs
+	line := renderTabBarWithHover(value.styles, tabs, 0, -1, -1, 1, 80)[0]
+	marker := value.styles.tabSelected.Foreground(value.styles.agentNode.GetForeground()).Render("●")
+	if !strings.Contains(line, marker) {
+		t.Fatalf("Node tab rail lacks green marker: %q", line)
+	}
+	if kind, ok := value.soundForAgentTransitions(nil); ok {
+		t.Fatalf("Node exit played %q", kind)
+	}
+	value.updateAgents(nil)
+	if got := openTabMarkers(value.styles, value.styles.navigationSelected, tabs, 1); got != value.styles.navigationSelected.Foreground(value.styles.agentPlain.GetForeground()).Render("●") {
+		t.Fatalf("Node exit did not restore neutral marker: %q", got)
+	}
+	if got := value.agentStatusNote(); got != "" {
+		t.Fatalf("Node exit left status rail %q", got)
 	}
 }
 

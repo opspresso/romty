@@ -10,7 +10,7 @@ Process detection alone gives a tab its agent color and the `●` marker. The ph
 | Claude Code | Hooks in its user settings | `romty hooks` |
 | OpenCode | A generated plugin | `romty hooks`, then restart OpenCode |
 
-Terminal output and silence do not establish Codex or Claude Code completion. Without a reporting channel, their status is unavailable. The [agent marker table](interface.md#agent-markers) lists every marker with its status rail label and `romty list` phase.
+Terminal output and silence do not establish Codex or Claude Code completion. Without a reporting channel, their status is unavailable. The [agent marker table](interface.md#agent-and-service-markers) lists every marker with its status rail label and `romty list` phase.
 
 ## Install or update
 

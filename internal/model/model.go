@@ -30,6 +30,8 @@ const (
 	AgentClaude   Agent = "claude"
 	AgentCodex    Agent = "codex"
 	AgentOpenCode Agent = "opencode"
+	// AgentNode identifies a foreground Node.js service without agent lifecycle phases.
+	AgentNode Agent = "node"
 )
 
 type AgentPhase string

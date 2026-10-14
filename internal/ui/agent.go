@@ -199,6 +199,9 @@ func (m dashboard) agentStatusNote() string {
 	if !ok || tab.Agent == "" {
 		return ""
 	}
+	if tab.Agent == model.AgentNode {
+		return "Node.js running"
+	}
 	label := map[model.AgentPhase]string{
 		model.AgentPhaseUnknown:         "Status unavailable",
 		model.AgentPhaseThinking:        "Thinking",
