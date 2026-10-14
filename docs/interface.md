@@ -176,7 +176,7 @@ Longer operations such as opening a terminal, reading a directory, running a Git
 
 Modal content is pointer-aware as well. Click a directory in the root picker to open it, click a Git action to run it, and use the wheel over a completed Git result to read longer output. Config rows toggle when clicked and the row clicked becomes the one the cursor is on; use the wheel over the pane-width row for one-column adjustments.
 
-romty discovers direct child directories only. Press `F5` after a command adds or removes a child. An unreadable root is marked `✗` and listed without workspaces; other roots remain usable.
+romty discovers direct child directories only and skips names that start with `.`. Press `F5` after a command adds or removes a child. An unreadable root is marked `✗` and listed without workspaces; other roots remain usable.
 
 ## Scrollback and mouse
 

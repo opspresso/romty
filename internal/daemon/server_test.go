@@ -70,6 +70,9 @@ func TestServerDiscoversWorkspacesAndReattachesSession(t *testing.T) {
 	if err := os.Mkdir(filepath.Join(root, "beta"), 0o755); err != nil {
 		t.Fatalf("Mkdir() error = %v", err)
 	}
+	if err := os.Mkdir(filepath.Join(root, ".hidden"), 0o755); err != nil {
+		t.Fatalf("Mkdir() hidden error = %v", err)
+	}
 	if err := os.WriteFile(filepath.Join(root, "README.md"), []byte("not a workspace"), 0o644); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
