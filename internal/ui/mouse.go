@@ -9,7 +9,6 @@ import (
 	"charm.land/lipgloss/v2"
 	uv "github.com/charmbracelet/ultraviolet"
 
-	"github.com/opspresso/romty/internal/display"
 	"github.com/opspresso/romty/internal/model"
 )
 
@@ -389,11 +388,11 @@ type tabHit struct {
 func tabHitAtX(tabs []model.Tab, x int) (tabHit, bool) {
 	position := 0
 	for index := 0; index <= len(tabs); index++ {
-		label := "  +  "
+		width := lipgloss.Width("  +  ")
 		if index < len(tabs) {
-			label = "  " + display.Text(tabs[index].Name) + "  × "
+			width = tabLabelWidth(tabs[index])
 		}
-		end := position + lipgloss.Width(label)
+		end := position + width
 		if x >= position && x < end {
 			close := index < len(tabs) && x >= end-2
 			return tabHit{index: index, close: close}, true

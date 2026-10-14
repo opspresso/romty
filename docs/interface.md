@@ -10,7 +10,7 @@ Below 80 columns the workspace pane takes half the screen from the terminal, so 
 
 ## Agent markers
 
-Each running terminal tab has one marker in the workspace tree. A tab without a detected agent shows `●` without an agent color. Claude Code markers are orange, Codex markers are blue, and OpenCode markers are green. Foreground process detection supplies the color. [Native Codex status and agent hooks](agent-hooks.md) supply lifecycle phases; Codex and Claude Code remain unknown without a reporting channel.
+Each running terminal tab has one marker in the workspace tree and the same marker before its name in the tab rail. A tab without a detected agent shows a neutral `●` in the text color. Claude Code markers are terracotta, Codex markers are blue, and OpenCode markers are violet. None of them uses romty's teal accent, so a marker stays distinct on the current and selected rows. Foreground process detection supplies the color. [Native Codex status and agent hooks](agent-hooks.md) supply lifecycle phases; Codex and Claude Code remain unknown without a reporting channel.
 
 The status rail shows the label for the open terminal's agent. `romty list` prints the phase after the agent name, for example `claude/working`.
 

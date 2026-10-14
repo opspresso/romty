@@ -899,7 +899,7 @@ func TestDashboardMouseSelectsWorkspaceAndTab(t *testing.T) {
 	value.selectedPath = workspace.Path
 	value.focus = terminalPane
 	rightX := value.dimensions().leftWidth + value.dimensions().separator
-	updated, command = value.Update(tea.MouseClickMsg{X: rightX + 9, Y: 0, Button: tea.MouseLeft})
+	updated, command = value.Update(tea.MouseClickMsg{X: rightX + 11, Y: 0, Button: tea.MouseLeft})
 	value = updated.(dashboard)
 	if value.tabIndex != 1 || command == nil {
 		t.Fatalf("tab click = (index %d, command %v), want second tab opened", value.tabIndex, command)
@@ -1034,7 +1034,7 @@ func TestDashboardHighlightsMouseTargetsOnHover(t *testing.T) {
 	}
 
 	before = value.render()
-	updated, _ = value.Update(tea.MouseMotionMsg{X: origin + 9, Y: 0})
+	updated, _ = value.Update(tea.MouseMotionMsg{X: origin + 11, Y: 0})
 	value = updated.(dashboard)
 	if value.hover.kind != hoverTab || value.hover.index != 1 || value.render() == before {
 		t.Fatalf("tab hover = %#v", value.hover)
@@ -3795,7 +3795,7 @@ func TestDashboardMovesWorkspaceAndTabCursorBeforeConfirming(t *testing.T) {
 	if command != nil || value.navIndex != 2 || value.terminal.id != firstTab.ID {
 		t.Fatalf("workspace cursor move = (command %v, index %d, terminal %q)", command, value.navIndex, value.terminal.id)
 	}
-	if rendered := value.render(); !strings.Contains(rendered, value.styles.tabSelected.Render("  two  × ")) {
+	if rendered := value.render(); !strings.Contains(rendered, value.styles.tabSelected.Render(" two  × ")) {
 		t.Fatalf("candidate workspace tabs are not visible:\n%s", rendered)
 	}
 
@@ -4342,7 +4342,7 @@ func TestDashboardHighlightsNavigationAndShowsOpenTabs(t *testing.T) {
 	if strings.Contains(plain, "2 exited") {
 		t.Fatalf("exited tab was included in terminal tabs:\n%s", rendered)
 	}
-	if !strings.Contains(rendered, value.styles.tabSelected.Render("  1  × ")) || !strings.Contains(rendered, value.styles.tab.Render("  3  × ")) {
+	if !strings.Contains(rendered, value.styles.tabSelected.Render(" 1  × ")) || !strings.Contains(rendered, value.styles.tab.Render(" 3  × ")) {
 		t.Fatalf("terminal tabs are not styled as active and inactive tabs:\n%s", rendered)
 	}
 	status := value.styles.shortcutKey.Render(" F2 ") + " " + value.styles.shortcutDescription.Render("add root")
@@ -4432,9 +4432,28 @@ func TestOpenTabMarkersUseAgentColorsAndPhaseShapes(t *testing.T) {
 	failure := base.Foreground(value.styles.agentCodex.GetForeground()).Render("★")
 	working := base.Foreground(value.styles.agentClaude.GetForeground()).Render("◑")
 	opencode := base.Foreground(value.styles.agentOpenCode.GetForeground()).Render("○")
-	plain := base.Render("●")
+	plain := base.Foreground(value.styles.agentPlain.GetForeground()).Render("●")
 	if markers != claude+codex+approval+failure+working+opencode+plain {
 		t.Fatalf("open tab markers = %q, want agent colors and phase shapes", markers)
+	}
+}
+
+func TestTabBarShowsEachRunningTabStatusMarker(t *testing.T) {
+	value := newDashboard(&fakeBackend{}, model.Snapshot{})
+	tabs := []model.Tab{
+		{Name: "one", Running: true, Agent: model.AgentClaude, AgentPhase: model.AgentPhaseWaitingApproval},
+		{Name: "two", Running: true, Agent: model.AgentCodex, AgentPhase: model.AgentPhaseWorking},
+		{Name: "three"},
+	}
+
+	line := renderTabBarWithHover(value.styles, tabs, 0, -1, -1, 2, 80)[0]
+	if plain := ansi.Strip(line); !strings.HasPrefix(plain, "  ■ one  ×    ◑ two  ×    three  ×    +  ") {
+		t.Fatalf("tab bar = %q, want the status marker before each running tab name", plain)
+	}
+	approval := value.styles.tabSelected.Foreground(value.styles.agentClaude.GetForeground()).Render("■")
+	working := value.styles.tab.Foreground(value.styles.agentCodex.GetForeground()).Render("◑")
+	if !strings.Contains(line, approval) || !strings.Contains(line, working) {
+		t.Fatalf("tab bar = %q, want markers in the agent color over the tab's own style", line)
 	}
 }
 
