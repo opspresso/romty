@@ -467,9 +467,9 @@ func inferPhases(
 		if reported[tabID].Agent == agent {
 			continue
 		}
-		// Terminal redraws do not establish whether a turn is active, awaiting
-		// an answer, or complete. These providers expose lifecycle channels.
-		if agent == model.AgentCodex || agent == model.AgentClaude {
+		// Only OpenCode uses terminal-derived phases. Node.js has no agent
+		// lifecycle, and Codex and Claude expose lifecycle channels.
+		if agent != model.AgentOpenCode {
 			continue
 		}
 		value, ok := sessions[tabID]

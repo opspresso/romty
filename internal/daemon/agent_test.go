@@ -24,6 +24,7 @@ func TestProcessAgentsRecogniseClaudeCodeAndCodex(t *testing.T) {
 		202: model.AgentClaude,
 		303: model.AgentCodex,
 		505: model.AgentOpenCode,
+		606: model.Agent("node"),
 		707: model.AgentOpenCode,
 	}
 
@@ -48,16 +49,61 @@ func TestProcessAgentsRecogniseNativeAgentExecutables(t *testing.T) {
 	}
 }
 
+func TestCommandAgentRecognisesNodeServices(t *testing.T) {
+	for _, probe := range []struct {
+		command string
+		want    model.Agent
+	}{
+		{command: "node server.js", want: "node"},
+		{command: "/opt/homebrew/bin/node --watch server.js", want: "node"},
+		{command: "nodejs server.js", want: "node"},
+		{command: "node /project/node_modules/vite/bin/vite.js", want: "node"},
+		{command: "npm run dev", want: "node"},
+		{command: "pnpm dev", want: "node"},
+		{command: "yarn start", want: "node"},
+		{command: "next-server (v16.1.1)", want: "node"},
+		{command: "node /usr/local/lib/node_modules/@anthropic-ai/claude-code/cli.js", want: model.AgentClaude},
+		{command: "node /usr/local/lib/node_modules/@openai/codex/bin/codex.js", want: model.AgentCodex},
+		{command: "node /usr/local/bin/opencode", want: model.AgentOpenCode},
+		{command: "node /project/node_modules/opencode-ai/bin/opencode", want: model.AgentOpenCode},
+		{command: "vim node-server.js"},
+		{command: "zsh -c node server.js"},
+		{command: "node-exporter"},
+		{command: "bun server.ts"},
+		{command: "deno run server.ts"},
+	} {
+		t.Run(probe.command, func(t *testing.T) {
+			if got := commandAgent(probe.command); got != probe.want {
+				t.Fatalf("commandAgent(%q) = %q, want %q", probe.command, got, probe.want)
+			}
+		})
+	}
+}
+
+func TestProcessAgentsPreferAgentsOverNodeWrappers(t *testing.T) {
+	for _, agent := range []model.Agent{model.AgentClaude, model.AgentCodex, model.AgentOpenCode} {
+		for _, output := range []string{
+			"101 node wrapper.js\n101 " + string(agent) + "\n",
+			"101 " + string(agent) + "\n101 node wrapper.js\n",
+		} {
+			if got := processAgents([]byte(output))[101]; got != agent {
+				t.Fatalf("processAgents(%q)[101] = %q, want %q", output, got, agent)
+			}
+		}
+	}
+}
+
 func TestSessionAgentsMatchTabsByForegroundProcessGroup(t *testing.T) {
 	claudePTY := new(os.File)
 	codexPTY := new(os.File)
 	opencodePTY := new(os.File)
-	groups := map[*os.File]int{claudePTY: 101, codexPTY: 202, opencodePTY: 303}
+	nodePTY := new(os.File)
+	groups := map[*os.File]int{claudePTY: 101, codexPTY: 202, opencodePTY: 303, nodePTY: 404}
 	previousGroup := foregroundProcessGroup
 	previousList := runProcessList
 	foregroundProcessGroup = func(terminal *os.File) (int, error) { return groups[terminal], nil }
 	runProcessList = func(context.Context) ([]byte, error) {
-		return []byte("101 claude\n202 codex\n303 opencode\n"), nil
+		return []byte("101 claude\n202 codex\n303 opencode\n404 node server.js\n505 node background.js\n"), nil
 	}
 	t.Cleanup(func() {
 		foregroundProcessGroup = previousGroup
@@ -68,11 +114,13 @@ func TestSessionAgentsMatchTabsByForegroundProcessGroup(t *testing.T) {
 		"tab-1": newSessionForTest(claudePTY),
 		"tab-2": newSessionForTest(codexPTY),
 		"tab-3": newSessionForTest(opencodePTY),
+		"tab-4": newSessionForTest(nodePTY),
 	}
 	want := map[string]model.Agent{
 		"tab-1": model.AgentClaude,
 		"tab-2": model.AgentCodex,
 		"tab-3": model.AgentOpenCode,
+		"tab-4": model.Agent("node"),
 	}
 	if got := sessionAgents(sessions); !reflect.DeepEqual(got, want) {
 		t.Fatalf("sessionAgents() = %#v, want %#v", got, want)

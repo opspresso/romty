@@ -73,10 +73,12 @@ func processAgents(output []byte) map[int]model.Agent {
 			continue
 		}
 		group, err := strconv.Atoi(fields[0])
-		if err != nil || result[group] != "" {
+		if err != nil || result[group] != "" && result[group] != model.AgentNode {
 			continue
 		}
 		command := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), fields[0]))
+		// A Node.js launcher can share the agent's foreground group. The
+		// specific agent takes precedence regardless of process-list order.
 		if agent := commandAgent(command); agent != "" {
 			result[group] = agent
 		}
@@ -97,6 +99,9 @@ func commandAgent(command string) model.Agent {
 		return model.AgentCodex
 	case name == "opencode" || strings.HasPrefix(name, "opencode-"):
 		return model.AgentOpenCode
+	case name == "npm" || name == "pnpm" || name == "yarn" || name == "next-server":
+		// Node.js tools can replace their process title, hiding the runtime.
+		return model.AgentNode
 	}
 
 	if name != "node" && name != "nodejs" && name != "bun" && name != "deno" {
@@ -111,6 +116,9 @@ func commandAgent(command string) model.Agent {
 		return model.AgentCodex
 	case strings.Contains(script, "opencode-ai") || runsExecutable(arguments, "opencode"):
 		return model.AgentOpenCode
+	}
+	if name == "node" || name == "nodejs" {
+		return model.AgentNode
 	}
 	return ""
 }

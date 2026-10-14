@@ -116,6 +116,31 @@ func TestAgentStatusRequiresARunningTab(t *testing.T) {
 	}
 }
 
+func TestNodeStatusReportsPresenceWithoutAgentPhases(t *testing.T) {
+	previousGroup, previousList := foregroundProcessGroup, runProcessList
+	foregroundProcessGroup = func(*os.File) (int, error) { return 101, nil }
+	command := "node server.js"
+	runProcessList = func(context.Context) ([]byte, error) { return []byte("101 " + command + "\n"), nil }
+	t.Cleanup(func() { foregroundProcessGroup, runProcessList = previousGroup, previousList })
+
+	value := newSessionForTest(nil)
+	value.broadcast([]byte("Server ready. Press Enter to continue.\r\n"))
+	server := &Server{
+		sessions: map[string]*session{"tab": value},
+		agentStatuses: map[string]agentRuntime{
+			"tab": {AgentStatus: model.AgentStatus{Agent: model.AgentClaude, Phase: model.AgentPhaseWaitingApproval}},
+		},
+	}
+	want := map[string]model.AgentStatus{"tab": {Agent: "node", Phase: model.AgentPhaseUnknown}}
+	if got := server.agentStatusesSnapshot(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("node status = %#v, want %#v", got, want)
+	}
+	command = "zsh"
+	if got := server.agentStatusesSnapshot(); len(got) != 0 {
+		t.Fatalf("shell status = %#v, want Node presence cleared", got)
+	}
+}
+
 func TestQuestionRemainsPendingWhileOtherToolsFinish(t *testing.T) {
 	s := &Server{sessions: map[string]*session{"tab": nil}, agentStatuses: make(map[string]agentRuntime)}
 	report := func(hook, tool, id string) {

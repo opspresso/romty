@@ -13,6 +13,7 @@ type uiStyles struct {
 	agentClaude         lipgloss.Style
 	agentCodex          lipgloss.Style
 	agentOpenCode       lipgloss.Style
+	agentNode           lipgloss.Style
 	agentPlain          lipgloss.Style
 	gitBranch           lipgloss.Style
 	gitStatus           lipgloss.Style
@@ -78,11 +79,13 @@ func newUIStyles(hasDarkBackground bool) *uiStyles {
 		// Agent markers sit on the plain, selected, tab, and hover surfaces, so
 		// each hue stays at 3:1 or more on all of them in both themes. They are
 		// kept apart from romty's own teal accent and from one another: Claude
-		// terracotta, Codex blue, OpenCode violet, and a neutral for a terminal
-		// with no agent, which would otherwise take the row's teal.
+		// terracotta, Codex blue, OpenCode violet, Node.js green, and a neutral
+		// for a terminal with no detected program, which would otherwise take
+		// the row's teal.
 		agentClaude:         lipgloss.NewStyle().Foreground(lightDark(lipgloss.Color("#B5482A"), lipgloss.Color("#E8906F"))),
 		agentCodex:          lipgloss.NewStyle().Foreground(lightDark(lipgloss.Color("#1D4ED8"), lipgloss.Color("#60A5FA"))),
 		agentOpenCode:       lipgloss.NewStyle().Foreground(lightDark(lipgloss.Color("#7E22CE"), lipgloss.Color("#C084FC"))),
+		agentNode:           lipgloss.NewStyle().Foreground(lightDark(lipgloss.Color("#3F7D20"), lipgloss.Color("#8CCF6B"))),
 		agentPlain:          lipgloss.NewStyle().Foreground(text),
 		gitBranch:           lipgloss.NewStyle().Foreground(muted),
 		gitStatus:           lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B")),
