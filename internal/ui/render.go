@@ -29,7 +29,7 @@ func openTabMarker(styles *uiStyles, base lipgloss.Style, tab model.Tab, animati
 	if !tab.Running {
 		return ""
 	}
-	style := base
+	style := base.Foreground(styles.agentPlain.GetForeground())
 	switch tab.Agent {
 	case model.AgentClaude:
 		style = style.Foreground(styles.agentClaude.GetForeground())

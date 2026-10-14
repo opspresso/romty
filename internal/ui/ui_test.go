@@ -4432,7 +4432,7 @@ func TestOpenTabMarkersUseAgentColorsAndPhaseShapes(t *testing.T) {
 	failure := base.Foreground(value.styles.agentCodex.GetForeground()).Render("★")
 	working := base.Foreground(value.styles.agentClaude.GetForeground()).Render("◑")
 	opencode := base.Foreground(value.styles.agentOpenCode.GetForeground()).Render("○")
-	plain := base.Render("●")
+	plain := base.Foreground(value.styles.agentPlain.GetForeground()).Render("●")
 	if markers != claude+codex+approval+failure+working+opencode+plain {
 		t.Fatalf("open tab markers = %q, want agent colors and phase shapes", markers)
 	}

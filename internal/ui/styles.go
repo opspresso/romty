@@ -13,6 +13,7 @@ type uiStyles struct {
 	agentClaude         lipgloss.Style
 	agentCodex          lipgloss.Style
 	agentOpenCode       lipgloss.Style
+	agentPlain          lipgloss.Style
 	gitBranch           lipgloss.Style
 	gitStatus           lipgloss.Style
 	gitConflict         lipgloss.Style
@@ -67,16 +68,22 @@ func newUIStyles(hasDarkBackground bool) *uiStyles {
 	removedBackground := lightDark(lipgloss.Color("#FFEBE9"), lipgloss.Color("#301B1F"))
 
 	return &uiStyles{
-		paneTitle:           lipgloss.NewStyle().Foreground(muted).Bold(true),
-		paneTitleActive:     lipgloss.NewStyle().Foreground(accent).Bold(true),
-		navigationItem:      lipgloss.NewStyle().Foreground(text),
-		navigationRoot:      lipgloss.NewStyle().Foreground(text).Bold(true),
-		navigationCurrent:   lipgloss.NewStyle().Foreground(accent).Bold(true),
-		navigationSelected:  lipgloss.NewStyle().Foreground(accentText).Background(accentSurface).Bold(true),
-		interactiveHover:    lipgloss.NewStyle().Foreground(text).Background(hoverSurface),
-		agentClaude:         lipgloss.NewStyle().Foreground(lipgloss.Color("#D97757")),
-		agentCodex:          lipgloss.NewStyle().Foreground(lipgloss.Color("#3B82F6")),
-		agentOpenCode:       lipgloss.NewStyle().Foreground(lipgloss.Color("#10B981")),
+		paneTitle:          lipgloss.NewStyle().Foreground(muted).Bold(true),
+		paneTitleActive:    lipgloss.NewStyle().Foreground(accent).Bold(true),
+		navigationItem:     lipgloss.NewStyle().Foreground(text),
+		navigationRoot:     lipgloss.NewStyle().Foreground(text).Bold(true),
+		navigationCurrent:  lipgloss.NewStyle().Foreground(accent).Bold(true),
+		navigationSelected: lipgloss.NewStyle().Foreground(accentText).Background(accentSurface).Bold(true),
+		interactiveHover:   lipgloss.NewStyle().Foreground(text).Background(hoverSurface),
+		// Agent markers sit on the plain, selected, tab, and hover surfaces, so
+		// each hue stays at 3:1 or more on all of them in both themes. They are
+		// kept apart from romty's own teal accent and from one another: Claude
+		// terracotta, Codex blue, OpenCode violet, and a neutral for a terminal
+		// with no agent, which would otherwise take the row's teal.
+		agentClaude:         lipgloss.NewStyle().Foreground(lightDark(lipgloss.Color("#B5482A"), lipgloss.Color("#E8906F"))),
+		agentCodex:          lipgloss.NewStyle().Foreground(lightDark(lipgloss.Color("#1D4ED8"), lipgloss.Color("#60A5FA"))),
+		agentOpenCode:       lipgloss.NewStyle().Foreground(lightDark(lipgloss.Color("#7E22CE"), lipgloss.Color("#C084FC"))),
+		agentPlain:          lipgloss.NewStyle().Foreground(text),
 		gitBranch:           lipgloss.NewStyle().Foreground(muted),
 		gitStatus:           lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B")),
 		gitConflict:         lipgloss.NewStyle().Foreground(errorColor),
