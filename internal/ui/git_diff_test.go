@@ -124,7 +124,7 @@ func TestReadGitFileDiffTreatsFilenameLiterally(t *testing.T) {
 		writeDiffFile(t, repository, name, "before\n")
 	}
 	runGit(t, "-C", repository, "add", ".")
-	runGit(t, "-C", repository, "-c", "user.name=romty", "-c", "user.email=romty@example.com", "commit", "-m", "filenames")
+	runGit(t, "-C", repository, "commit", "-m", "filenames")
 	writeDiffFile(t, repository, "[ab].txt", "selected\n")
 	writeDiffFile(t, repository, "a.txt", "unselected\n")
 	diff, err := readGitFileDiff(repository, gitChangedFile{Path: "[ab].txt", IndexStatus: ' ', WorkTreeStatus: 'M'})
@@ -140,7 +140,7 @@ func initializeDiffRepository(t *testing.T) string {
 	writeDiffFile(t, repository, "modified.txt", "before\n")
 	writeDiffFile(t, repository, "staged.txt", "before\n")
 	runGit(t, "-C", repository, "add", ".")
-	runGit(t, "-C", repository, "-c", "user.name=romty", "-c", "user.email=romty@example.com", "commit", "-m", "initial")
+	runGit(t, "-C", repository, "commit", "-m", "initial")
 	return repository
 }
 

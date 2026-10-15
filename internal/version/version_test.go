@@ -7,11 +7,15 @@ import (
 	"github.com/opspresso/romty/internal/version"
 )
 
-// A stamped release reports its tag with the v release tooling strips.
-func TestStringRestoresTheTagPrefix(t *testing.T) {
+// keepStamp restores the release stamp a test changes.
+func keepStamp(t *testing.T) {
 	original := version.Value
 	t.Cleanup(func() { version.Value = original })
+}
 
+// A stamped release reports its tag with the v release tooling strips.
+func TestStringRestoresTheTagPrefix(t *testing.T) {
+	keepStamp(t)
 	for _, probe := range []struct{ stamped, want string }{
 		{stamped: "0.3.1", want: "v0.3.1"},
 		{stamped: "v0.3.1", want: "v0.3.1"},
@@ -28,9 +32,7 @@ func TestStringRestoresTheTagPrefix(t *testing.T) {
 // An unstamped build still has to name itself: About shows whatever this
 // returns, and an empty line there tells a bug report nothing.
 func TestStringNamesAnUnstampedBuild(t *testing.T) {
-	original := version.Value
-	t.Cleanup(func() { version.Value = original })
-
+	keepStamp(t)
 	version.Value = ""
 	got := version.String()
 	if !regexp.MustCompile(`^(dev|[0-9a-f]{7,40}|v.+)(-dirty)?$`).MatchString(got) {
@@ -39,9 +41,7 @@ func TestStringNamesAnUnstampedBuild(t *testing.T) {
 }
 
 func TestIsReleaseRejectsAnUnstampedDevelopmentBuild(t *testing.T) {
-	original := version.Value
-	t.Cleanup(func() { version.Value = original })
-
+	keepStamp(t)
 	for _, probe := range []struct {
 		value string
 		want  bool

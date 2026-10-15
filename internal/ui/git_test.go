@@ -20,7 +20,7 @@ func TestGitStateUsesFetchedUpstream(t *testing.T) {
 	runGit(t, "init", "--initial-branch=main", source)
 	writeGitFile(t, source, "one")
 	runGit(t, "-C", source, "add", "status.txt")
-	runGit(t, "-C", source, "-c", "user.name=romty", "-c", "user.email=romty@example.com", "commit", "-m", "one")
+	runGit(t, "-C", source, "commit", "-m", "one")
 	state, ok := readGitState(source, false)
 	if !ok || state.Branch != "main" || state.Dirty || state.Ahead != 0 || state.Behind != 0 {
 		t.Fatalf("repository without upstream state = %#v, %v", state, ok)
@@ -31,7 +31,7 @@ func TestGitStateUsesFetchedUpstream(t *testing.T) {
 
 	writeGitFile(t, source, "two")
 	runGit(t, "-C", source, "add", "status.txt")
-	runGit(t, "-C", source, "-c", "user.name=romty", "-c", "user.email=romty@example.com", "commit", "-m", "two")
+	runGit(t, "-C", source, "commit", "-m", "two")
 	runGit(t, "-C", source, "push", "origin", "main")
 
 	state, ok = readGitState(workspace, false)
@@ -56,7 +56,7 @@ func TestGitStateUsesFetchedUpstream(t *testing.T) {
 		t.Fatalf("modified and untracked workspace state = %#v, %v, want dirty", state, ok)
 	}
 	runGit(t, "-C", workspace, "add", "status.txt", "untracked.txt")
-	runGit(t, "-C", workspace, "-c", "user.name=romty", "-c", "user.email=romty@example.com", "commit", "-m", "local")
+	runGit(t, "-C", workspace, "commit", "-m", "local")
 	state, ok = readGitState(workspace, false)
 	if !ok || state.Dirty || state.Ahead != 1 || state.Behind != 1 {
 		t.Fatalf("diverged workspace state = %#v, %v, want clean and one ahead/behind", state, ok)
@@ -85,7 +85,10 @@ func TestGitStateIgnoresDirectoriesWithoutGitMetadata(t *testing.T) {
 func runGit(t *testing.T, arguments ...string) {
 	t.Helper()
 	command := exec.Command("git", arguments...)
-	command.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1")
+	// A fixed identity lets fixtures commit without any user Git configuration.
+	command.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1",
+		"GIT_AUTHOR_NAME=romty", "GIT_AUTHOR_EMAIL=romty@example.com",
+		"GIT_COMMITTER_NAME=romty", "GIT_COMMITTER_EMAIL=romty@example.com")
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("git %v: %v\n%s", arguments, err, output)
 	}
