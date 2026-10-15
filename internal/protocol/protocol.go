@@ -217,6 +217,18 @@ func HasCapability(capabilities []string, target string) bool {
 	return slices.Contains(capabilities, target)
 }
 
+// IntersectCapabilities returns the capabilities in first that second also
+// has, in the order of first.
+func IntersectCapabilities(first, second []string) []string {
+	var result []string
+	for _, capability := range first {
+		if HasCapability(second, capability) {
+			result = append(result, capability)
+		}
+	}
+	return result
+}
+
 func Write(w io.Writer, value any) error {
 	data, err := json.Marshal(value)
 	if err != nil {

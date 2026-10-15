@@ -166,9 +166,6 @@ func (s *Server) Serve(ctx context.Context) error {
 	if err := prepareSocket(s.socket); err != nil {
 		return err
 	}
-	// The socket is created with the process umask applied to 0777, so it is
-	// briefly connectable by anyone. Clamp the umask across the bind rather
-	// than widening and narrowing again.
 	listener, err := listenPrivately(s.socket)
 	if err != nil {
 		return err

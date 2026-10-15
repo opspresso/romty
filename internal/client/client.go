@@ -502,7 +502,7 @@ func (c *Client) negotiateProtocol() (*negotiatedProtocol, error) {
 	if response.MinVersion == 0 && len(advertised) == 0 {
 		advertised = protocol.CapabilitiesForVersion(daemonMax)
 	}
-	capabilities := intersectCapabilities(protocol.CapabilitiesForVersion(selected), advertised)
+	capabilities := protocol.IntersectCapabilities(protocol.CapabilitiesForVersion(selected), advertised)
 	c.protocol = &negotiatedProtocol{
 		selectedVersion: selected,
 		capabilities:    capabilities,
@@ -544,16 +544,6 @@ func (c *Client) supports(capability string) (bool, error) {
 		return false, err
 	}
 	return protocol.HasCapability(negotiated.capabilities, capability), nil
-}
-
-func intersectCapabilities(first, second []string) []string {
-	var result []string
-	for _, capability := range first {
-		if protocol.HasCapability(second, capability) {
-			result = append(result, capability)
-		}
-	}
-	return result
 }
 
 func validateDaemonSocket(path string) error {
