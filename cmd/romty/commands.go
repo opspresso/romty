@@ -18,6 +18,7 @@ import (
 	"github.com/opspresso/romty/internal/display"
 	"github.com/opspresso/romty/internal/model"
 	"github.com/opspresso/romty/internal/paths"
+	"github.com/opspresso/romty/internal/ui"
 	"github.com/opspresso/romty/internal/version"
 )
 
@@ -212,11 +213,6 @@ type snapshotSummary struct {
 	shell      int
 }
 
-type configDocument struct {
-	LeftWidth        int  `json:"left_width,omitempty"`
-	MousePassthrough bool `json:"mouse_passthrough,omitempty"`
-}
-
 func printStatus(output io.Writer, runtime paths.Paths, theme commandTheme) error {
 	backend := client.New(runtime.Socket)
 	daemonProtocol, err := backend.ProtocolVersion()
@@ -336,7 +332,7 @@ func printDoctor(output io.Writer, runtime paths.Paths, theme commandTheme) erro
 	writeField(&report, theme, "version", version.String())
 	problems += checkRuntime(&report, theme, runtime.Directory)
 	problems += checkJSONFile(&report, theme, "state", runtime.State, &model.State{})
-	problems += checkJSONFile(&report, theme, "config", runtime.Config, &configDocument{})
+	problems += checkJSONFile(&report, theme, "config", runtime.Config, &ui.Config{})
 	problems += checkShell(&report, theme)
 	problems += checkDaemon(&report, theme, runtime.Socket)
 	if _, err := io.WriteString(output, report.String()); err != nil {
