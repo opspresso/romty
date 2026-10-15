@@ -22,7 +22,11 @@ const (
 	gitDiffViewSplit  = "split"
 )
 
+// Config is the TUI's settings in config.json. Fields this build does not know
+// are kept and written back unchanged.
 type Config struct {
+	// LeftWidth is the workspace pane width in columns; zero sizes it from the
+	// screen.
 	LeftWidth int `json:"left_width,omitempty"`
 	// MousePassthrough hands the mouse to applications that ask for it, at the
 	// cost of the host terminal's drag selection while they run.
@@ -30,10 +34,12 @@ type Config struct {
 	// ScrollbackMouse keeps the mouse in scrollback rather than returning it to
 	// the host. Scrolling then works on a terminal with no alternate scroll, at
 	// the cost of the drag selection scrollback otherwise offers.
-	ScrollbackMouse   bool   `json:"scrollback_mouse,omitempty"`
-	SoundOnDone       bool   `json:"sound_on_done,omitempty"`
-	SoundOnWaiting    bool   `json:"sound_on_waiting,omitempty"`
-	GitDiffView       string `json:"git_diff_view,omitempty"`
+	ScrollbackMouse bool `json:"scrollback_mouse,omitempty"`
+	SoundOnDone     bool `json:"sound_on_done,omitempty"`
+	SoundOnWaiting  bool `json:"sound_on_waiting,omitempty"`
+	// GitDiffView is the diff layout, "inline" or "split".
+	GitDiffView string `json:"git_diff_view,omitempty"`
+	// LastWorkspacePath and LastTabID are the terminal romty reopens on start.
 	LastWorkspacePath string `json:"last_workspace_path,omitempty"`
 	LastTabID         string `json:"last_tab_id,omitempty"`
 	unknownFields     map[string]json.RawMessage
