@@ -179,103 +179,110 @@ func Install(providers []Provider) ([]Result, error) {
 	return results, errors.Join(failures...)
 }
 
-func inspect(value definition) Status {
-	if value.plugin {
-		return inspectPlugin(value)
-	}
-	titleChanged := false
-	if value.provider == ProviderCodex {
-		titlePath, _, changed, err := codexTitleConfiguration()
-		if err != nil {
-			return Status{Provider: value.provider, State: StateInvalid, Path: titlePath, Err: err}
-		}
-		titleChanged = changed
-	}
-	path, err := configurationPath(value)
-	if err != nil {
-		return Status{Provider: value.provider, State: StateInvalid, Err: err}
-	}
-	data, exists, err := readConfiguration(path)
-	if err != nil {
-		return Status{Provider: value.provider, State: StateInvalid, Path: path, Err: err}
-	}
-	if !exists {
-		return Status{Provider: value.provider, State: StateMissing, Path: path}
-	}
-	command, err := desiredCommand(value.provider)
-	if err != nil {
-		return Status{Provider: value.provider, State: StateInvalid, Path: path, Err: err}
-	}
-	_, owned, changed, err := normalize(data, value, command)
-	if err != nil {
-		return Status{Provider: value.provider, State: StateInvalid, Path: path, Err: err}
-	}
-	state := StateCurrent
-	if owned == 0 {
-		state = StateMissing
-	} else if changed {
-		state = StateOutdated
-	}
-	if titleChanged && state == StateCurrent {
-		state = StateOutdated
-	}
-	return Status{Provider: value.provider, State: state, Path: path}
+// plan is what bringing one provider's hooks up to date would do: the state its
+// files are in now and the writes that would make them current. Detect reports
+// the state and Install performs the writes, so the two cannot disagree.
+type plan struct {
+	path   string
+	state  State
+	writes []fileWrite
 }
 
-func install(value definition) (Result, error) {
+type fileWrite struct {
+	path string
+	data []byte
+}
+
+func planFor(value definition) (plan, error) {
 	if value.plugin {
-		return installPlugin(value)
+		return planPlugin(value)
 	}
-	// Validate both files before changing either one.
+	// Both files are read and validated before either one is written.
+	var titleWrite *fileWrite
 	if value.provider == ProviderCodex {
-		if _, _, _, err := codexTitleConfiguration(); err != nil {
-			return Result{}, err
+		titlePath, data, changed, err := codexTitleConfiguration()
+		if err != nil {
+			return plan{path: titlePath}, err
+		}
+		if changed {
+			titleWrite = &fileWrite{path: titlePath, data: data}
 		}
 	}
 	path, err := configurationPath(value)
 	if err != nil {
-		return Result{}, err
+		return plan{}, err
 	}
+	result := plan{path: path}
 	data, exists, err := readConfiguration(path)
 	if err != nil {
-		return Result{}, err
+		return result, err
 	}
 	if !exists {
 		data = []byte("{}")
 	}
 	command, err := desiredCommand(value.provider)
 	if err != nil {
-		return Result{}, err
+		return result, err
 	}
 	document, owned, changed, err := normalize(data, value, command)
 	if err != nil {
+		return result, err
+	}
+	switch {
+	case owned == 0:
+		result.state = StateMissing
+	case changed || titleWrite != nil:
+		result.state = StateOutdated
+	default:
+		result.state = StateCurrent
+	}
+	if changed {
+		encoded, err := json.MarshalIndent(document, "", "  ")
+		if err != nil {
+			return result, fmt.Errorf("encode %s: %w", value.filename, err)
+		}
+		result.writes = append(result.writes, fileWrite{path: path, data: append(encoded, '\n')})
+	}
+	if titleWrite != nil {
+		result.writes = append(result.writes, *titleWrite)
+	}
+	return result, nil
+}
+
+func inspect(value definition) Status {
+	current, err := planFor(value)
+	if err != nil {
+		return Status{Provider: value.provider, State: StateInvalid, Path: current.path, Err: err}
+	}
+	return Status{Provider: value.provider, State: current.state, Path: current.path}
+}
+
+func install(value definition) (Result, error) {
+	current, err := planFor(value)
+	if err != nil {
 		return Result{}, err
 	}
+	// Every target is resolved before the first write, so a refused symlink
+	// leaves both files as they were.
+	targets := make([]string, len(current.writes))
+	for index, write := range current.writes {
+		if targets[index], err = writablePath(write.path); err != nil {
+			return Result{}, err
+		}
+	}
+	for index, write := range current.writes {
+		if err := jsonfile.WriteBytes(targets[index], write.data); err != nil {
+			return Result{}, err
+		}
+	}
 	action := ActionUnchanged
-	if changed {
-		target, err := writablePath(path)
-		if err != nil {
-			return Result{}, err
-		}
-		if err := jsonfile.Write(target, document); err != nil {
-			return Result{}, err
-		}
-		if owned == 0 {
-			action = ActionInstalled
-		} else {
-			action = ActionUpdated
-		}
+	switch current.state {
+	case StateMissing:
+		action = ActionInstalled
+	case StateOutdated:
+		action = ActionUpdated
 	}
-	if value.provider == ProviderCodex {
-		titleChanged, err := installCodexTitle()
-		if err != nil {
-			return Result{}, err
-		}
-		if titleChanged && action == ActionUnchanged {
-			action = ActionUpdated
-		}
-	}
-	return Result{Provider: value.provider, Action: action, Path: path}, nil
+	return Result{Provider: value.provider, Action: action, Path: current.path}, nil
 }
 
 func normalize(data []byte, value definition, command string) (map[string]any, int, bool, error) {
@@ -663,65 +670,32 @@ func pluginContents(value definition) ([]byte, error) {
 	return []byte(fmt.Sprintf(openCodePluginTemplate, quoted)), nil
 }
 
-func inspectPlugin(value definition) Status {
+func planPlugin(value definition) (plan, error) {
 	path, err := pluginPath(value)
 	if err != nil {
-		return Status{Provider: value.provider, State: StateInvalid, Err: err}
+		return plan{}, err
 	}
+	result := plan{path: path}
 	desired, err := pluginContents(value)
 	if err != nil {
-		return Status{Provider: value.provider, State: StateInvalid, Path: path, Err: err}
+		return result, err
 	}
 	data, err := os.ReadFile(path)
-	if errors.Is(err, os.ErrNotExist) {
-		return Status{Provider: value.provider, State: StateMissing, Path: path}
+	switch {
+	case errors.Is(err, os.ErrNotExist):
+		result.state = StateMissing
+	case err != nil:
+		return result, fmt.Errorf("read %s: %w", filepath.Base(path), err)
+	case !bytes.Contains(data, []byte(pluginMarker)):
+		return result, fmt.Errorf("%s is not a romty-managed file", filepath.Base(path))
+	case bytes.Equal(data, desired):
+		result.state = StateCurrent
+		return result, nil
+	default:
+		result.state = StateOutdated
 	}
-	if err != nil {
-		return Status{Provider: value.provider, State: StateInvalid, Path: path,
-			Err: fmt.Errorf("read %s: %w", filepath.Base(path), err)}
-	}
-	if !bytes.Contains(data, []byte(pluginMarker)) {
-		return Status{Provider: value.provider, State: StateInvalid, Path: path,
-			Err: fmt.Errorf("%s is not a romty-managed file", filepath.Base(path))}
-	}
-	if bytes.Equal(data, desired) {
-		return Status{Provider: value.provider, State: StateCurrent, Path: path}
-	}
-	return Status{Provider: value.provider, State: StateOutdated, Path: path}
-}
-
-func installPlugin(value definition) (Result, error) {
-	path, err := pluginPath(value)
-	if err != nil {
-		return Result{}, err
-	}
-	desired, err := pluginContents(value)
-	if err != nil {
-		return Result{}, err
-	}
-	data, err := os.ReadFile(path)
-	exists := err == nil
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return Result{}, fmt.Errorf("read %s: %w", filepath.Base(path), err)
-	}
-	if exists && !bytes.Contains(data, []byte(pluginMarker)) {
-		return Result{}, fmt.Errorf("%s is not a romty-managed file", filepath.Base(path))
-	}
-	if exists && bytes.Equal(data, desired) {
-		return Result{Provider: value.provider, Action: ActionUnchanged, Path: path}, nil
-	}
-	target, err := writablePath(path)
-	if err != nil {
-		return Result{}, err
-	}
-	if err := jsonfile.WriteBytes(target, desired); err != nil {
-		return Result{}, err
-	}
-	action := ActionInstalled
-	if exists {
-		action = ActionUpdated
-	}
-	return Result{Provider: value.provider, Action: action, Path: path}, nil
+	result.writes = []fileWrite{{path: path, data: desired}}
+	return result, nil
 }
 
 func available(names []string) bool {

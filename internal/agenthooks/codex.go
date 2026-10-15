@@ -8,8 +8,6 @@ import (
 
 	"github.com/pelletier/go-toml/v2"
 	"github.com/pelletier/go-toml/v2/unstable"
-
-	"github.com/opspresso/romty/internal/jsonfile"
 )
 
 // Codex's own TUI emits thread-id in its OSC title. Adding that metadata lets
@@ -26,18 +24,6 @@ func codexTitleConfiguration() (string, []byte, bool, error) {
 	}
 	updated, changed, err := normalizeCodexTitle(data)
 	return path, updated, changed, err
-}
-
-func installCodexTitle() (bool, error) {
-	path, data, changed, err := codexTitleConfiguration()
-	if err != nil || !changed {
-		return false, err
-	}
-	target, err := writablePath(path)
-	if err != nil {
-		return false, err
-	}
-	return true, jsonfile.WriteBytes(target, data)
 }
 
 func normalizeCodexTitle(data []byte) ([]byte, bool, error) {
