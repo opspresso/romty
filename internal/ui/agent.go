@@ -170,6 +170,26 @@ func (m dashboard) agentLedger() string {
 	return strings.Join(parts, "  ")
 }
 
+// agentPhaseLabels is how the rail names each phase of the open terminal's
+// agent.
+var agentPhaseLabels = map[model.AgentPhase]string{
+	model.AgentPhaseUnknown:         "Status unavailable",
+	model.AgentPhaseThinking:        "Thinking",
+	model.AgentPhaseWorking:         "Working",
+	model.AgentPhasePlanning:        "Planning",
+	model.AgentPhaseCompacting:      "Compacting",
+	model.AgentPhaseBackground:      "Background work",
+	model.AgentPhaseIdle:            "Ready",
+	model.AgentPhaseStopped:         "Stopped · completion unconfirmed",
+	model.AgentPhaseCompleted:       "Completed",
+	model.AgentPhaseInterrupted:     "Interrupted",
+	model.AgentPhaseWaitingInput:    "Needs your answer",
+	model.AgentPhaseWaitingApproval: "Needs your approval",
+	model.AgentPhaseError:           "Failed",
+}
+
+// agentStatusNote is what the rail says about the open terminal's agent: its
+// phase and, when the agent recorded them, its token and cost readings.
 func (m dashboard) agentStatusNote() string {
 	tab, ok := m.openTab()
 	if !ok || tab.Agent == "" {
@@ -178,21 +198,7 @@ func (m dashboard) agentStatusNote() string {
 	if tab.Agent == model.AgentNode {
 		return "Node.js running"
 	}
-	label := map[model.AgentPhase]string{
-		model.AgentPhaseUnknown:         "Status unavailable",
-		model.AgentPhaseThinking:        "Thinking",
-		model.AgentPhaseWorking:         "Working",
-		model.AgentPhasePlanning:        "Planning",
-		model.AgentPhaseCompacting:      "Compacting",
-		model.AgentPhaseBackground:      "Background work",
-		model.AgentPhaseIdle:            "Ready",
-		model.AgentPhaseStopped:         "Stopped · completion unconfirmed",
-		model.AgentPhaseCompleted:       "Completed",
-		model.AgentPhaseInterrupted:     "Interrupted",
-		model.AgentPhaseWaitingInput:    "Needs your answer",
-		model.AgentPhaseWaitingApproval: "Needs your approval",
-		model.AgentPhaseError:           "Failed",
-	}[tab.AgentPhase]
+	label := agentPhaseLabels[tab.AgentPhase]
 	if tab.AgentPhase == model.AgentPhaseUnknown && m.hooksSkipped[tab.Agent] {
 		label += " · run romty hooks"
 	}
