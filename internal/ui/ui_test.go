@@ -4286,6 +4286,32 @@ func TestGitStatusUpdatesStateAndSchedulesAnotherRefresh(t *testing.T) {
 	}
 }
 
+// A root the user just added has workspaces the periodic read has never seen,
+// so their Git state and Git actions must not wait for its next tick.
+func TestDashboardReadsGitStateForNewWorkspaces(t *testing.T) {
+	repository := t.TempDir()
+	testutil.RunGit(t, "init", "-q", "-b", "main", repository)
+	value := newDashboard(&fakeBackend{}, model.Snapshot{})
+	added := projectsSnapshot([]model.WorkspaceView{{
+		Workspace: model.Workspace{ID: "w", RootID: "root-1", Name: "alpha", Path: repository},
+	}})
+	added.Revision = 1
+
+	command := send(&value, snapshotMsg{value: added})
+	status := commandMessage[gitStatusMsg](t, command)
+	if state, ok := status.value[repository]; !ok || state.Branch != "main" {
+		t.Fatalf("Git read = %v, want the new workspace on main", status.value)
+	}
+	if status.reschedule {
+		t.Fatal("the extra read scheduled a second periodic loop")
+	}
+
+	// The same tree again is an ordinary refresh with nothing new to read.
+	if command := send(&value, snapshotMsg{value: added}); command != nil {
+		t.Fatalf("an unchanged tree produced %v, want no Git read", command)
+	}
+}
+
 func TestGitStatusFetchesAtStartupAndAfterInterval(t *testing.T) {
 	current := time.Date(2026, time.August, 25, 12, 0, 0, 0, time.UTC)
 	testutil.Set(t, &now, func() time.Time { return current })

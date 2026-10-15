@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -572,6 +573,7 @@ func (m dashboard) update(message tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
+		paths := m.workspacePaths()
 		if !m.applySnapshot(order, message.value) {
 			return m, nil
 		}
@@ -582,10 +584,18 @@ func (m dashboard) update(message tea.Msg) (tea.Model, tea.Cmd) {
 		// resize or a daemon that would not stop, so it clears tree errors
 		// only.
 		m.clearError(treeError)
-		if m.terminalExited {
-			return m.settleAfterExit()
+		// A workspace that just appeared, such as one under a root the user
+		// added, would otherwise show no Git state and offer no Git actions
+		// until the next periodic read.
+		var readGit tea.Cmd
+		if !slices.Equal(paths, m.workspacePaths()) {
+			readGit = m.readGitStatus(false, false)
 		}
-		return m, nil
+		if m.terminalExited {
+			settled, command := m.settleAfterExit()
+			return settled, tea.Batch(command, readGit)
+		}
+		return m, readGit
 	case agentSnapshotMsg:
 		if message.err == nil {
 			kind, ring := m.soundForAgentTransitions(message.value)
