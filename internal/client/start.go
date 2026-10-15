@@ -49,10 +49,10 @@ func EnsureDaemon(runtime paths.Paths, executable string) error {
 		if err == nil {
 			return nil
 		}
-		if !Unavailable(err) {
-			return err
-		}
 		time.Sleep(25 * time.Millisecond)
+	}
+	if !Unavailable(err) {
+		return err
 	}
 	if held, lockErr := daemonLockHeld(runtime.Socket); lockErr != nil {
 		return lockErr
