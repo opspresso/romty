@@ -307,24 +307,41 @@ func daemonStopped(socket string) (bool, error) {
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return false, fmt.Errorf("inspect daemon socket after shutdown: %w", err)
 	}
-	lock, err := os.OpenFile(socket+".lock", os.O_RDWR, 0)
+	held, err := daemonLockHeld(socket)
+	return !held, err
+}
+
+// daemonLockHeld distinguishes an absent daemon from one whose socket was
+// unlinked. Never create or replace the lock: a second inode would bypass the
+// running daemon's ownership of its sessions and state.
+func daemonLockHeld(socket string) (bool, error) {
+	fd, err := syscall.Open(socket+".lock", syscall.O_RDWR|syscall.O_CLOEXEC|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
 	if errors.Is(err, os.ErrNotExist) {
-		return true, nil
+		return false, nil
 	}
 	if err != nil {
-		return false, fmt.Errorf("open daemon lock after shutdown: %w", err)
+		return false, fmt.Errorf("open daemon lock: %w", err)
 	}
+	lock := os.NewFile(uintptr(fd), socket+".lock")
 	defer lock.Close()
+	info, err := lock.Stat()
+	if err != nil {
+		return false, fmt.Errorf("inspect daemon lock: %w", err)
+	}
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !info.Mode().IsRegular() || !ok || stat.Uid != uint32(os.Geteuid()) || stat.Nlink != 1 {
+		return false, fmt.Errorf("daemon lock must be a regular file owned only by the current user")
+	}
 	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
 		if errors.Is(err, syscall.EWOULDBLOCK) {
-			return false, nil
+			return true, nil
 		}
-		return false, fmt.Errorf("check daemon lock after shutdown: %w", err)
+		return false, fmt.Errorf("check daemon lock: %w", err)
 	}
 	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_UN); err != nil {
-		return false, fmt.Errorf("release daemon lock after shutdown check: %w", err)
+		return false, fmt.Errorf("release daemon lock after check: %w", err)
 	}
-	return true, nil
+	return false, nil
 }
 
 // Unavailable reports whether err means the daemon socket could not be reached,
