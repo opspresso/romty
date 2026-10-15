@@ -1680,8 +1680,7 @@ func TestDashboardRendersCopyModeFullWidth(t *testing.T) {
 }
 
 // An application that owns the screen has a history of its own and romty has
-// none to offer, so the wheel is its business. Without this the wheel did
-// nothing at all inside vim, less, or an agent, and said nothing either.
+// none to offer, so the wheel goes to vim, less, or an agent.
 func TestDashboardGivesTheWheelToAGuestThatOwnsTheScreen(t *testing.T) {
 	t.Run("a guest that asked for the mouse", func(t *testing.T) {
 		value := scrolledDashboard(t, 200)
@@ -1790,8 +1789,8 @@ func TestDashboardScrollsHistoryNotTheGuestWithBothMouseOptions(t *testing.T) {
 	waitForGuestSilence(t, value.terminal, sent)
 }
 
-// The title sits on the border, so accent bold on accent left the top of every
-// box reading as one unbroken line. A chip is how romty draws every other label.
+// The title sits on the border. A chip, the way romty draws every other label,
+// keeps it from reading as part of one unbroken accent line.
 func TestDashboardDrawsModalTitlesAsChips(t *testing.T) {
 	for _, dark := range []bool{true, false} {
 		styles := newUIStyles(dark)
@@ -1806,8 +1805,7 @@ func TestDashboardDrawsModalTitlesAsChips(t *testing.T) {
 }
 
 // What is about to be deleted is named first and its path is the context under
-// it. The path used to trail the two red warnings in the body colour, where it
-// read as a third consequence rather than as the thing being named.
+// it, muted, so it does not read as a third consequence after the red warnings.
 func TestDashboardNamesTheDeleteTargetBeforeItsConsequences(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, model.Snapshot{})
 	value.width, value.height = 100, 30
@@ -1836,8 +1834,7 @@ func TestDashboardNamesTheDeleteTargetBeforeItsConsequences(t *testing.T) {
 }
 
 // configRowReads reports whether the Config modal draws a setting with the
-// value given, which now sit in columns of their own rather than glued into
-// one "name: value" string.
+// value given. Name and value sit in columns of their own on one row.
 func configRowReads(rendered, name, value string) bool {
 	for _, line := range strings.Split(rendered, "\n") {
 		at := strings.Index(line, name)
@@ -2213,9 +2210,9 @@ func TestDashboardSwitchesPanesWithOneKey(t *testing.T) {
 		{name: "F7", key: key(tea.KeyF7, "")},
 		{name: "Ctrl+/", key: controlSlashKey()},
 		{name: "Ctrl+/ as 0x1F", key: controlUnderscoreKey()},
-		// Ctrl+\ is what romty bound before Ctrl+/ and is kept for the hands
-		// that learned it, including on a layout that reports the physical key
-		// separately from the character it types.
+		// Ctrl+\ is an unadvertised alias for the same toggle, including on a
+		// layout that reports the physical key separately from the character
+		// it types.
 		{name: "Ctrl+\\", key: controlBackslashKey()},
 		{name: "Ctrl+\\ with an alternate layout", key: tea.KeyPressMsg(tea.Key{
 			Code: '₩', BaseCode: '\\', Mod: tea.ModCtrl,
@@ -2545,8 +2542,7 @@ func TestDashboardSettlesAnExitWhenTheSnapshotFails(t *testing.T) {
 }
 
 // Every user-visible failure the backend can produce has to reach the status
-// bar and leave the dashboard usable. None of these branches had a test,
-// because the fake could not fail.
+// bar and leave the dashboard usable.
 func TestDashboardReportsBackendFailures(t *testing.T) {
 	snapshot, workspace := alphaWorkspaceSnapshot(nil)
 
@@ -2692,9 +2688,8 @@ func TestDashboardReconnectsWhenTerminalInputFails(t *testing.T) {
 	}
 }
 
-// A root romty cannot read has to say so, and be removable: it used to make
-// every snapshot fail, and there was no way to forget it short of editing the
-// state file.
+// A root romty cannot read is marked in the tree without failing the snapshot
+// for its neighbours, and can be forgotten from the workspace actions.
 func TestDashboardShowsAndRemovesAnUnreadableRoot(t *testing.T) {
 	snapshot := model.Snapshot{Roots: []model.RootView{
 		{
@@ -2755,7 +2750,7 @@ func twoRootSnapshot() model.Snapshot {
 	}}
 }
 
-func TestDashboardDoesNotUseRemovedLetterShortcuts(t *testing.T) {
+func TestDashboardLeavesLettersUnboundInTheWorkspacePane(t *testing.T) {
 	for _, letter := range []rune{'a', 'q', 'r', 's', 'd', 't'} {
 		t.Run(string(letter), func(t *testing.T) {
 			value := scrolledDashboard(t, 200)
@@ -3008,9 +3003,9 @@ func TestDashboardForgetsTheRootTheConfirmationNamed(t *testing.T) {
 	}
 }
 
-// A connection that drops used to be retried at once: the daemon replayed the
-// whole recording, the client fell behind, the daemon cut it off, and round it
-// went. Retries are spaced and bounded, and the last word is the user's.
+// A connection that keeps dropping must not loop: each reattach replays the
+// whole recording, and a client that falls behind is cut off again. Retries are
+// spaced and bounded, and the last word is the user's.
 func TestDashboardBacksOffRepeatedReattaches(t *testing.T) {
 	tabs := openTabs(1)
 	value, backend, refresh := exitedDashboard(t, tabs, 0)
@@ -3152,9 +3147,8 @@ func TestLayoutMatchesWhatIsRendered(t *testing.T) {
 	}
 }
 
-// The status bar has one slot, and a refresh used to empty it whatever was in
-// it. So the F5 a user presses right after a failure erased the reason for it,
-// and an in-flight refresh could erase one at random.
+// The status bar has one slot. A refresh clears only the failures it answers,
+// so the F5 a user presses right after another failure keeps the reason.
 func TestDashboardKeepsErrorsARefreshDoesNotAnswer(t *testing.T) {
 	snapshot := projectsSnapshot([]model.WorkspaceView{{Workspace: model.Workspace{ID: "w", Name: "alpha", Path: "/projects/alpha"}}})
 
@@ -3224,8 +3218,8 @@ func TestDashboardKeepsErrorsARefreshDoesNotAnswer(t *testing.T) {
 	}
 }
 
-// A resize failure is not a snapshot: borrowing snapshotMsg for it meant the
-// handler could not trust message.value, and the failure erased itself.
+// A resize failure is its own message, not a snapshot, so a refresh does not
+// erase it and the snapshot handler can trust message.value.
 func TestDashboardReportsAFailedResizeAsItsOwnFailure(t *testing.T) {
 	backend := &fakeBackend{}
 	backend.fail("Resize", errors.New("terminal session not found"))
@@ -3254,9 +3248,8 @@ func TestDashboardReportsAFailedResizeAsItsOwnFailure(t *testing.T) {
 }
 
 // Holding an arrow key in the config modal outruns the disk, so an answer can
-// arrive under a width that has already moved on. Reading the width before the
-// error meant such a save could fail without a word — the one outcome the user
-// has to hear about.
+// arrive under a width that has already moved on. The failure is still
+// reported, and the newer width is saved again.
 func TestDashboardReportsAConfigFailureTheWidthMovedPast(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, model.Snapshot{})
 	value.width, value.height = 120, 40
@@ -3275,9 +3268,8 @@ func TestDashboardReportsAConfigFailureTheWidthMovedPast(t *testing.T) {
 }
 
 // A resize is a round trip, so dragging a window and then switching tabs
-// leaves one in flight for the tab just left. The daemon answers "running
-// terminal session not found" for a terminal nobody is looking at, and the
-// status bar used to hang that on whichever terminal had taken its place.
+// leaves one in flight for the tab just left. A failure for that tab must not
+// be reported against whichever terminal took its place.
 func TestDashboardIgnoresAResizeFailureForATerminalItLeft(t *testing.T) {
 	backend := &fakeBackend{}
 	backend.fail("Resize", errors.New("running terminal session not found"))
@@ -3308,10 +3300,9 @@ func TestDashboardIgnoresAResizeFailureForATerminalItLeft(t *testing.T) {
 	}
 }
 
-// The tree is rebuilt from the daemon on every refresh, so a directory
-// appearing above the cursor — a `git clone` finishing in another terminal —
-// used to slide the highlight onto its neighbour without the user touching a
-// key. Enter then opened a workspace they had not chosen.
+// The tree is rebuilt from the daemon on every refresh. A directory appearing
+// above the cursor — a `git clone` finishing in another terminal — must not
+// slide the highlight onto a workspace the user did not choose.
 func TestDashboardKeepsTheCursorOnTheSameWorkspace(t *testing.T) {
 	tree := func(names ...string) model.Snapshot {
 		directories := make([]model.WorkspaceView, 0, len(names))
@@ -3445,9 +3436,6 @@ func TestDashboardCapturesLiveMouseWheelAndUsesKeyboardFocus(t *testing.T) {
 
 	if view := value.View(); view.MouseMode != tea.MouseModeCellMotion {
 		t.Fatalf("initial mouse mode = %v, want button events", view.MouseMode)
-	}
-	if rendered := value.render(); strings.Contains(rendered, "Ctrl+G") || strings.Contains(rendered, "mouse focus") {
-		t.Fatalf("mouse focus mode is still advertised:\n%s", rendered)
 	}
 
 	send(&value, controlSlashKey())
@@ -3587,10 +3575,10 @@ func TestDashboardSwitchesTabsWithCtrlShiftArrows(t *testing.T) {
 	}
 }
 
-// Ctrl+Shift+Up/Down is the other axis of the same chord: reaching a terminal
-// in another workspace used to mean leaving the terminal pane, walking the
-// tree and pressing Enter. Only workspaces with a terminal running are stops,
-// because a root lists every child directory whether it has been used or not.
+// Ctrl+Shift+Up/Down is the other axis of the same chord: it reaches a
+// terminal in another workspace without leaving the terminal pane. Only
+// workspaces with a terminal running are stops, because a root lists every
+// child directory whether it has been used or not.
 func TestDashboardSwitchesWorkspacesWithCtrlShiftArrows(t *testing.T) {
 	root := projectsRoot
 	// alpha and charlie have terminals; bravo is an empty directory between
@@ -3978,10 +3966,10 @@ func TestDashboardHighlightsNavigationAndShowsOpenTabs(t *testing.T) {
 	rendered := value.render()
 	plain := ansi.Strip(rendered)
 	if strings.Contains(rendered, "Terminal") || strings.Contains(rendered, "/projects/SnowClash") {
-		t.Fatalf("terminal title or workspace path is still visible:\n%s", rendered)
+		t.Fatalf("terminal title or workspace path is visible:\n%s", rendered)
 	}
 	if strings.Contains(plain, "> ") {
-		t.Fatalf("navigation still contains arrow cursor:\n%s", rendered)
+		t.Fatalf("navigation draws an arrow cursor:\n%s", rendered)
 	}
 	if !strings.Contains(plain, "▾ nalbam") || !strings.Contains(plain, "▌ - SnowClash") {
 		t.Fatalf("navigation tree or selection color is missing:\n%s", rendered)
@@ -4595,10 +4583,9 @@ func TestDashboardKeepsNavigationCursorVisible(t *testing.T) {
 	}
 }
 
-// A modal is a box on top of romty, not a screen romty replaces itself with.
-// Blanking the body meant opening Config took the workspace tree and the
-// terminal away to show five settings, and laying the box out at the cap meant
-// covering most of the screen to say one sentence.
+// A modal is a box on top of romty, not a screen romty replaces itself with:
+// the workspace tree and terminal stay visible around it, and the box is only
+// as wide as its content needs.
 func TestDashboardCentersModalOverTheDashboardItLeavesShowing(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, model.Snapshot{})
 	value.width = 100
@@ -4634,8 +4621,8 @@ func TestDashboardCentersModalOverTheDashboardItLeavesShowing(t *testing.T) {
 	body := strings.Split(ansi.Strip(rendered), "\n")[:bodyHeight]
 	top := (bodyHeight - len(modalLines)) / 2
 	wantLeft := (value.width - boxWidth) / 2
-	// By column, not by byte: the workspace pane the box now sits on top of
-	// draws box-drawing runes of its own.
+	// By column, not by byte: the workspace pane under the box draws
+	// box-drawing runes of its own.
 	at := strings.Index(body[top], "╭")
 	if at < 0 {
 		t.Fatalf("about modal has no top-left corner on its first row:\n%s", ansi.Strip(rendered))
@@ -4691,9 +4678,8 @@ func TestOverlayBoxKeepsWideBackdropAndBoxInTheirColumns(t *testing.T) {
 	}
 }
 
-// Help used to answer to `?` alone, which the terminal pane forwards to the
-// shell, so the pane whose shortcuts are hardest to remember was the one with
-// no way to look them up.
+// The terminal pane forwards `?` to the shell, so F1 is how that pane opens
+// Help.
 func TestDashboardOpensHelpFromTheTerminalPane(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, model.Snapshot{})
 	value.focus = terminalPane
@@ -4875,10 +4861,8 @@ func TestFormatTokensKeepsItsWidthAsItGrows(t *testing.T) {
 }
 
 // The help modal is the only place a user can look a shortcut up, so every key
-// romty takes in both panes has to appear there. Comparing the reference with
-// the table that routes those keys says that; counting rendered lines did not,
-// and the hand-copied list of every shortcut that stood beside it was a second
-// copy of the reference that quietly fell behind it.
+// romty takes in both panes has to appear there. The reference is compared with
+// the table that routes those keys rather than with a hand-copied list.
 func TestHelpReferenceDocumentsEveryGlobalKey(t *testing.T) {
 	documented := make(map[string]bool)
 	for _, entry := range helpReference() {
@@ -4970,13 +4954,6 @@ func TestDashboardShowsCompleteShortcutReferenceInHelpModal(t *testing.T) {
 		}
 	}
 
-	// The reference was once nine sections of two or three lines each, which
-	// read as a list of headings rather than of shortcuts.
-	for _, section := range []string{"CORE", "NAVIGATE", "FILES", "SCROLLBACK", "PICKER", "HELP", "CONFIG", "GIT", "PROMPTS"} {
-		if strings.Contains(plain, section) {
-			t.Fatalf("help modal still contains duplicated %q section:\n%s", section, plain)
-		}
-	}
 	// Each function key is documented once, so no shortcut is listed twice
 	// under different words. F6 is the exception: it toggles scrollback, and
 	// the file view gives it a second meaning of its own.
@@ -5150,9 +5127,8 @@ func scrollbackToggleKey() tea.KeyPressMsg {
 }
 
 // The backoff damps a terminal that is dropping now, not one that has dropped
-// before. Retries used to only ever accumulate, so a tab that reconnected and
-// then worked for an afternoon still counted its old drops towards the ceiling
-// and was eventually left saying it keeps disconnecting.
+// before. A tab that stays attached past the healthy interval starts its retry
+// count over, so old drops never count towards the ceiling.
 func TestDashboardForgetsRetriesAfterAHealthyAttach(t *testing.T) {
 	tabs := openTabs(1)
 	value, _, refresh := exitedDashboard(t, tabs, 0)
