@@ -13,7 +13,6 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"github.com/alecthomas/chroma/v2"
-	"github.com/alecthomas/chroma/v2/lexers"
 )
 
 const workspaceFileTimeout = 10 * time.Second
@@ -142,18 +141,8 @@ func expandWorkspaceFileTabs(line string) string {
 }
 
 func highlightWorkspaceFileSyntax(path string, lines []string) ([]gitDiffLineSyntax, bool) {
-	if len(lines) > maximumHighlightedDiffLines {
-		return nil, false
-	}
-	size := max(len(lines)-1, 0)
-	for _, line := range lines {
-		size += len(line)
-		if size > maximumHighlightedDiffBytes {
-			return nil, false
-		}
-	}
-	lexer := lexers.Match(path)
-	if lexer == nil || lexer.Config().Name == "fallback" || lexer.Config().Name == "plaintext" {
+	lexer, ok := syntaxLexer(path, lines)
+	if !ok {
 		return nil, false
 	}
 	return highlightWorkspaceFileSyntaxWithLexer(lexer, lines)
