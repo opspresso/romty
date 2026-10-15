@@ -324,7 +324,11 @@ func applyKiroV2Record(result *Reading, line []byte, modified time.Time) {
 	if len(line) == 0 || json.Unmarshal(line, &record) != nil || record.Kind == "" {
 		return
 	}
-	result.InterruptedAt = time.Time{}
+	// A prompt or a response continues the conversation. Other records, such
+	// as tool results, can report a cancellation but cannot clear one.
+	if record.Kind == "Prompt" || record.Kind == "AssistantMessage" {
+		result.InterruptedAt = time.Time{}
+	}
 	if record.Kind == "Prompt" {
 		return
 	}

@@ -63,6 +63,14 @@ func TestReadKiroV2DatesACancellationByTheFileTime(t *testing.T) {
 		}
 		modified = modified.Add(time.Second)
 	}
+	// A later tool result does not show that the session went on.
+	writeKiro(t, path, prompt, response, `{"version":"v1","kind":"ToolResults","data":{"results":[]}}`)
+	if err := os.Chtimes(path, modified, modified); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := reader.ReadKiro(home, session); !got.InterruptedAt.Equal(modified) {
+		t.Fatalf("ReadKiro() = %+v, want the cancellation kept past a tool result", got)
+	}
 	for _, lines := range [][]string{{prompt, response, prompt}, {prompt, answered}} {
 		writeKiro(t, path, lines...)
 		if got, _ := reader.ReadKiro(home, session); !got.InterruptedAt.IsZero() {
