@@ -20,6 +20,7 @@ import (
 	"github.com/opspresso/romty/internal/version"
 )
 
+// Provider names an agent romty can install status hooks for.
 type Provider string
 
 const (
@@ -28,17 +29,24 @@ const (
 	ProviderOpenCode Provider = "opencode"
 )
 
+// State is how a provider's hook files compare with what romty would write.
 type State string
 
 const (
+	// StateUnavailable: the agent is not installed.
 	StateUnavailable State = "unavailable"
+	// StateDevelopment: this build has no stable path to use as the hook
+	// command, so it does not inspect or install hooks.
 	StateDevelopment State = "development"
 	StateCurrent     State = "current"
 	StateMissing     State = "missing"
 	StateOutdated    State = "outdated"
-	StateInvalid     State = "invalid"
+	// StateInvalid: a file cannot be read or is not romty's to change; Err
+	// says why.
+	StateInvalid State = "invalid"
 )
 
+// Status is the hook state of one provider.
 type Status struct {
 	Provider Provider
 	State    State
@@ -46,6 +54,7 @@ type Status struct {
 	Err      error
 }
 
+// Action is what Install did to one provider's files.
 type Action string
 
 const (
@@ -54,6 +63,7 @@ const (
 	ActionUnchanged Action = "unchanged"
 )
 
+// Result is what Install did for one provider.
 type Result struct {
 	Provider Provider
 	Action   Action
@@ -118,6 +128,7 @@ var findExecutable = exec.LookPath
 var userHomeDirectory = os.UserHomeDir
 var findRomtyExecutable = os.Executable
 
+// DisplayName is the provider's product name as the user knows it.
 func (p Provider) DisplayName() string {
 	switch p {
 	case ProviderClaude:
@@ -131,6 +142,7 @@ func (p Provider) DisplayName() string {
 	}
 }
 
+// Detect reports the hook state of every provider romty supports.
 func Detect() []Status {
 	statuses := make([]Status, 0, len(definitions))
 	for _, value := range definitions {
@@ -147,6 +159,7 @@ func Detect() []Status {
 	return statuses
 }
 
+// Pending returns the providers whose hooks are missing or outdated.
 func Pending(statuses []Status) []Provider {
 	providers := make([]Provider, 0, len(statuses))
 	for _, status := range statuses {
@@ -157,6 +170,8 @@ func Pending(statuses []Status) []Provider {
 	return providers
 }
 
+// Install brings each provider's hooks up to date. It continues past a failed
+// provider and returns every failure joined.
 func Install(providers []Provider) ([]Result, error) {
 	if len(providers) > 0 && !version.IsRelease() {
 		return nil, ErrDevelopmentBuild
