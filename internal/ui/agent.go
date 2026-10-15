@@ -46,19 +46,9 @@ func animateAgentMarker() tea.Cmd {
 
 func (m *dashboard) updateAgents(statuses map[string]model.AgentStatus) {
 	for tab := range m.state.Tabs() {
-		applyAgentStatus(tab, statuses)
+		tab.SetAgentStatus(statuses[tab.ID])
 	}
 	m.agentAnimationActive = m.hasAnimatedAgent()
-}
-
-func applyAgentStatus(tab *model.Tab, statuses map[string]model.AgentStatus) {
-	status := statuses[tab.ID]
-	tab.Agent = status.Agent
-	tab.AgentPhase = status.Phase
-	tab.AgentSessionID = status.SessionID
-	tab.AgentTurnID = status.TurnID
-	tab.AgentContextTokens = status.ContextTokens
-	tab.AgentCostUSD = status.CostUSD
 }
 
 func (m dashboard) soundForAgentTransitions(statuses map[string]model.AgentStatus) (sound.Kind, bool) {
@@ -75,7 +65,7 @@ func (m dashboard) soundForAgentTransitions(statuses map[string]model.AgentStatu
 			(status.Phase == model.AgentPhaseCompleted || status.Phase == model.AgentPhaseError) {
 			return sound.Done, true
 		}
-		if m.config.SoundOnWaiting && !waitingAgentPhase(tab.AgentPhase) && waitingAgentPhase(status.Phase) {
+		if m.config.SoundOnWaiting && !tab.AgentPhase.Waiting() && status.Phase.Waiting() {
 			return sound.Waiting, true
 		}
 		return "", false
@@ -88,27 +78,13 @@ func (m dashboard) soundForAgentTransitions(statuses map[string]model.AgentStatu
 	return "", false
 }
 
-func waitingAgentPhase(phase model.AgentPhase) bool {
-	return phase == model.AgentPhaseWaitingInput || phase == model.AgentPhaseWaitingApproval
-}
-
 func (m dashboard) hasAnimatedAgent() bool {
 	for tab := range m.state.Tabs() {
-		if tab.Running && animatedAgentPhase(tab.AgentPhase) {
+		if tab.Running && tab.AgentPhase.Busy() {
 			return true
 		}
 	}
 	return false
-}
-
-func animatedAgentPhase(phase model.AgentPhase) bool {
-	switch phase {
-	case model.AgentPhaseThinking, model.AgentPhaseWorking, model.AgentPhasePlanning,
-		model.AgentPhaseCompacting, model.AgentPhaseBackground:
-		return true
-	default:
-		return false
-	}
 }
 
 // jumpToWaitingAgent opens the next terminal whose agent stopped to ask
@@ -154,7 +130,7 @@ func (m dashboard) waitingAgentStops() []waitingAgentStop {
 	stops := make([]waitingAgentStop, 0)
 	for navIndex, item := range m.navigationItems() {
 		for tabIndex, tab := range runningTabs(item.tabs) {
-			if waitingAgentPhase(tab.AgentPhase) {
+			if tab.AgentPhase.Waiting() {
 				stops = append(stops, waitingAgentStop{
 					navIndex: navIndex, tabIndex: tabIndex, tabID: tab.ID,
 				})

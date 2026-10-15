@@ -118,7 +118,7 @@ func (s *Server) recordAgentEvent(tabID string, event *protocol.AgentEvent) prot
 		switch {
 		case current.Phase == model.AgentPhaseStopped || current.Phase == model.AgentPhaseBackground:
 			phase = model.AgentPhaseCompleted
-		case activePhase(current.Phase):
+		case current.Phase.Running():
 			phase = model.AgentPhaseInterrupted
 		default:
 			return protocol.Response{}
@@ -150,7 +150,7 @@ func (s *Server) recordAgentEvent(tabID string, event *protocol.AgentEvent) prot
 			delete(current.Tools, event.ToolUseID)
 		}
 	}
-	if activePhase(current.Phase) || waitingPhase(current.Phase) {
+	if current.Phase.Running() || current.Phase.Waiting() {
 		current.Phase = resolveTurnPhase(current.Phase, current.Tools, current.PendingElicitations)
 	}
 	if event.HookEvent == "UserPromptSubmit" || current.TurnID == "" {
@@ -211,19 +211,6 @@ func toolFinished(hookEvent string) bool {
 	return hookEvent == "PostToolUse" || hookEvent == "PostToolUseFailure" || hookEvent == "PermissionDenied"
 }
 
-// activePhase reports a turn that is running without waiting for the user.
-func activePhase(phase model.AgentPhase) bool {
-	switch phase {
-	case model.AgentPhaseThinking, model.AgentPhaseWorking, model.AgentPhasePlanning, model.AgentPhaseCompacting:
-		return true
-	}
-	return false
-}
-
-func waitingPhase(phase model.AgentPhase) bool {
-	return phase == model.AgentPhaseWaitingInput || phase == model.AgentPhaseWaitingApproval
-}
-
 func turnEnded(phase model.AgentPhase) bool {
 	switch phase {
 	case model.AgentPhaseStopped, model.AgentPhaseCompleted, model.AgentPhaseInterrupted, model.AgentPhaseError:
@@ -237,7 +224,7 @@ func turnEnded(phase model.AgentPhase) bool {
 // interrupt or a rejected tool; its transcript records both.
 func applyTranscriptInterrupt(runtime agentRuntime, interruptedAt time.Time) (agentRuntime, bool) {
 	if interruptedAt.IsZero() || !interruptedAt.After(runtime.UpdatedAt) ||
-		!activePhase(runtime.Phase) && !waitingPhase(runtime.Phase) {
+		!runtime.Phase.Running() && !runtime.Phase.Waiting() {
 		return runtime, false
 	}
 	runtime.Phase = model.AgentPhaseInterrupted

@@ -41,21 +41,20 @@ func openTabMarker(styles *uiStyles, base lipgloss.Style, tab model.Tab, animati
 		style = style.Foreground(styles.agentNode.GetForeground())
 	}
 	marker := "●"
-	switch tab.AgentPhase {
-	case model.AgentPhaseThinking, model.AgentPhaseWorking, model.AgentPhasePlanning,
-		model.AgentPhaseCompacting, model.AgentPhaseBackground:
+	switch phase := tab.AgentPhase; {
+	case phase.Busy():
 		marker = agentAnimationFrames[animationFrame%len(agentAnimationFrames)]
-	case model.AgentPhaseIdle, model.AgentPhaseStopped:
+	case phase == model.AgentPhaseIdle || phase == model.AgentPhaseStopped:
 		marker = "○"
-	case model.AgentPhaseCompleted:
+	case phase == model.AgentPhaseCompleted:
 		marker = "✓"
-	case model.AgentPhaseInterrupted:
+	case phase == model.AgentPhaseInterrupted:
 		marker = "□"
-	case model.AgentPhaseWaitingInput:
+	case phase == model.AgentPhaseWaitingInput:
 		marker = "▲"
-	case model.AgentPhaseWaitingApproval:
+	case phase == model.AgentPhaseWaitingApproval:
 		marker = "■"
-	case model.AgentPhaseError:
+	case phase == model.AgentPhaseError:
 		marker = "★"
 	}
 	return style.Render(marker)

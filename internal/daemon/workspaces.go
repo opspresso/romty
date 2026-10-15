@@ -368,13 +368,7 @@ func (s *Server) snapshot() model.Snapshot {
 	s.mu.Unlock()
 	statuses := s.agentStatusesSnapshot()
 	for index := range value.Tabs {
-		status := statuses[value.Tabs[index].ID]
-		value.Tabs[index].Agent = status.Agent
-		value.Tabs[index].AgentPhase = status.Phase
-		value.Tabs[index].AgentSessionID = status.SessionID
-		value.Tabs[index].AgentTurnID = status.TurnID
-		value.Tabs[index].AgentContextTokens = status.ContextTokens
-		value.Tabs[index].AgentCostUSD = status.CostUSD
+		value.Tabs[index].SetAgentStatus(statuses[value.Tabs[index].ID])
 	}
 
 	index := newStateIndex(value)
