@@ -80,15 +80,7 @@ func TestExemptCallsSurviveAnOutdatedDaemon(t *testing.T) {
 }
 
 func TestShutdownWaitsForTheDaemonToReleaseItsSocket(t *testing.T) {
-	socket := filepath.Join(testutil.ShortTempDir(t), "daemon.sock")
-	listener, err := net.Listen("unix", socket)
-	if err != nil {
-		t.Fatalf("Listen() error = %v", err)
-	}
-	if err := os.Chmod(socket, 0o600); err != nil {
-		t.Fatalf("Chmod() socket error = %v", err)
-	}
-	defer listener.Close()
+	socket, listener := listenPrivate(t)
 
 	acknowledged := make(chan struct{})
 	release := make(chan struct{})
@@ -144,15 +136,7 @@ func TestShutdownWaitsForTheDaemonToReleaseItsSocket(t *testing.T) {
 // way one from before the field would.
 func serveUnversioned(t *testing.T) string {
 	t.Helper()
-	socket := filepath.Join(testutil.ShortTempDir(t), "daemon.sock")
-	listener, err := net.Listen("unix", socket)
-	if err != nil {
-		t.Fatalf("Listen() error = %v", err)
-	}
-	if err := os.Chmod(socket, 0o600); err != nil {
-		t.Fatalf("Chmod() socket error = %v", err)
-	}
-	t.Cleanup(func() { listener.Close() })
+	socket, listener := listenPrivate(t)
 
 	go func() {
 		for {
@@ -195,15 +179,7 @@ func TestEnsureDaemonAcceptsAnOutdatedDaemon(t *testing.T) {
 // either. Reporting what the ping said beats spending three seconds waiting
 // for a daemon that was never going to start.
 func TestEnsureDaemonReportsASocketThatAnswersNothing(t *testing.T) {
-	socket := filepath.Join(testutil.ShortTempDir(t), "daemon.sock")
-	listener, err := net.Listen("unix", socket)
-	if err != nil {
-		t.Fatalf("Listen() error = %v", err)
-	}
-	if err := os.Chmod(socket, 0o600); err != nil {
-		t.Fatalf("Chmod() socket error = %v", err)
-	}
-	defer listener.Close()
+	socket, listener := listenPrivate(t)
 	go func() {
 		for {
 			connection, err := listener.Accept()
@@ -217,7 +193,7 @@ func TestEnsureDaemonReportsASocketThatAnswersNothing(t *testing.T) {
 
 	testutil.Set(t, &handshakeTimeout, 200*time.Millisecond)
 
-	err = EnsureDaemon(runtimeFor(socket), "/nonexistent/romty")
+	err := EnsureDaemon(runtimeFor(socket), "/nonexistent/romty")
 	if err == nil {
 		t.Fatal("EnsureDaemon() succeeded against a socket that answers nothing")
 	}
@@ -355,15 +331,7 @@ func runtimeFor(socket string) paths.Paths {
 // runs on the goroutine that opens a terminal, so a read with no deadline
 // leaves the tab never appearing and nothing to say why.
 func TestOpenAttachGivesUpOnADaemonThatNeverAnswers(t *testing.T) {
-	socket := filepath.Join(testutil.ShortTempDir(t), "daemon.sock")
-	listener, err := net.Listen("unix", socket)
-	if err != nil {
-		t.Fatalf("Listen() error = %v", err)
-	}
-	if err := os.Chmod(socket, 0o600); err != nil {
-		t.Fatalf("Chmod() socket error = %v", err)
-	}
-	defer listener.Close()
+	socket, listener := listenPrivate(t)
 
 	accepted := make(chan net.Conn, 1)
 	go func() {
@@ -399,15 +367,7 @@ func TestOpenAttachGivesUpOnADaemonThatNeverAnswers(t *testing.T) {
 // UI, so a long session can be restored without rendering every read along the
 // way. Bytes after that exact boundary stay on the stream as live output.
 func TestOpenTerminalSeparatesReplayFromLiveOutput(t *testing.T) {
-	socket := filepath.Join(testutil.ShortTempDir(t), "daemon.sock")
-	listener, err := net.Listen("unix", socket)
-	if err != nil {
-		t.Fatalf("Listen() error = %v", err)
-	}
-	if err := os.Chmod(socket, 0o600); err != nil {
-		t.Fatalf("Chmod() socket error = %v", err)
-	}
-	defer listener.Close()
+	socket, listener := listenPrivate(t)
 
 	replay := bytes.Repeat([]byte("recorded output\r\n"), 8192)
 	live := []byte("live output\r\n")
@@ -415,16 +375,11 @@ func TestOpenTerminalSeparatesReplayFromLiveOutput(t *testing.T) {
 		if err := answerNegotiation(listener, protocol.Version, protocol.MinimumVersion); err != nil {
 			return
 		}
-		connection, err := listener.Accept()
+		connection, _, err := acceptRequest(listener)
 		if err != nil {
 			return
 		}
 		defer connection.Close()
-		reader := bufio.NewReader(connection)
-		var request protocol.Request
-		if err := protocol.Read(reader, &request); err != nil {
-			return
-		}
 		if err := protocol.Write(connection, protocol.Response{
 			Version:       protocol.Version,
 			ReplayBytes:   len(replay),
@@ -462,44 +417,28 @@ func TestOpenTerminalSeparatesReplayFromLiveOutput(t *testing.T) {
 }
 
 func TestTerminalRequestsShareAClientIdentity(t *testing.T) {
-	socket := filepath.Join(testutil.ShortTempDir(t), "daemon.sock")
-	listener, err := net.Listen("unix", socket)
-	if err != nil {
-		t.Fatalf("Listen() error = %v", err)
-	}
-	if err := os.Chmod(socket, 0o600); err != nil {
-		t.Fatalf("Chmod() socket error = %v", err)
-	}
-	defer listener.Close()
+	socket, listener := listenPrivate(t)
 
 	requests := make(chan protocol.Request, 2)
 	go func() {
 		if err := answerNegotiation(listener, protocol.Version, protocol.MinimumVersion); err != nil {
 			return
 		}
-		attachment, err := listener.Accept()
+		attachment, attach, err := acceptRequest(listener)
 		if err != nil {
 			return
 		}
 		defer attachment.Close()
-		var attach protocol.Request
-		if err := protocol.Read(bufio.NewReader(attachment), &attach); err != nil {
-			return
-		}
 		requests <- attach
 		if err := protocol.Write(attachment, protocol.Response{Version: protocol.Version}); err != nil {
 			return
 		}
 
-		connection, err := listener.Accept()
+		connection, resize, err := acceptRequest(listener)
 		if err != nil {
 			return
 		}
 		defer connection.Close()
-		var resize protocol.Request
-		if err := protocol.Read(bufio.NewReader(connection), &resize); err != nil {
-			return
-		}
 		requests <- resize
 		_ = protocol.Write(connection, protocol.Response{Version: protocol.Version})
 	}()
@@ -521,42 +460,17 @@ func TestTerminalRequestsShareAClientIdentity(t *testing.T) {
 }
 
 func TestOpenTerminalFallsBackToALegacyReplayStream(t *testing.T) {
-	socket := filepath.Join(testutil.ShortTempDir(t), "daemon.sock")
-	listener, err := net.Listen("unix", socket)
-	if err != nil {
-		t.Fatalf("Listen() error = %v", err)
-	}
-	if err := os.Chmod(socket, 0o600); err != nil {
-		t.Fatalf("Chmod() socket error = %v", err)
-	}
-	defer listener.Close()
+	socket, listener := listenPrivate(t)
 
 	legacyReplay := []byte("legacy replay\r\n")
 	go func() {
-		connection, err := listener.Accept()
-		if err != nil {
-			return
-		}
-		var ping protocol.Request
-		if err := protocol.Read(bufio.NewReader(connection), &ping); err != nil {
-			connection.Close()
-			return
-		}
-		_ = protocol.Write(connection, protocol.Response{
-			Version: 4,
-			Error:   "this daemon speaks protocol 4 but the client speaks 5",
-		})
-		connection.Close()
+		refuseNegotiation(listener, 4)
 
-		connection, err = listener.Accept()
+		connection, attach, err := acceptRequest(listener)
 		if err != nil {
 			return
 		}
 		defer connection.Close()
-		var attach protocol.Request
-		if err := protocol.Read(bufio.NewReader(connection), &attach); err != nil {
-			return
-		}
 		if attach.Version != 4 {
 			return
 		}
@@ -584,30 +498,18 @@ func TestOpenTerminalFallsBackToALegacyReplayStream(t *testing.T) {
 }
 
 func TestClientSelectsTheHighestProtocolSharedWithAFutureDaemon(t *testing.T) {
-	socket := filepath.Join(testutil.ShortTempDir(t), "daemon.sock")
-	listener, err := net.Listen("unix", socket)
-	if err != nil {
-		t.Fatalf("Listen() error = %v", err)
-	}
-	if err := os.Chmod(socket, 0o600); err != nil {
-		t.Fatalf("Chmod() socket error = %v", err)
-	}
-	defer listener.Close()
+	socket, listener := listenPrivate(t)
 
 	selected := make(chan int, 1)
 	go func() {
 		if err := answerNegotiation(listener, 8, 5); err != nil {
 			return
 		}
-		connection, err := listener.Accept()
+		connection, request, err := acceptRequest(listener)
 		if err != nil {
 			return
 		}
 		defer connection.Close()
-		var request protocol.Request
-		if err := protocol.Read(bufio.NewReader(connection), &request); err != nil {
-			return
-		}
 		selected <- request.Version
 		_ = protocol.Write(connection, protocol.Response{
 			Version:  request.Version,
@@ -624,42 +526,17 @@ func TestClientSelectsTheHighestProtocolSharedWithAFutureDaemon(t *testing.T) {
 }
 
 func TestClientUsesAnOlderDaemonSelectedProtocol(t *testing.T) {
-	socket := filepath.Join(testutil.ShortTempDir(t), "daemon.sock")
-	listener, err := net.Listen("unix", socket)
-	if err != nil {
-		t.Fatalf("Listen() error = %v", err)
-	}
-	if err := os.Chmod(socket, 0o600); err != nil {
-		t.Fatalf("Chmod() socket error = %v", err)
-	}
-	defer listener.Close()
+	socket, listener := listenPrivate(t)
 
 	selected := make(chan protocol.Request, 1)
 	go func() {
-		connection, err := listener.Accept()
-		if err != nil {
-			return
-		}
-		var ping protocol.Request
-		if err := protocol.Read(bufio.NewReader(connection), &ping); err != nil {
-			connection.Close()
-			return
-		}
-		_ = protocol.Write(connection, protocol.Response{
-			Version: 1,
-			Error:   "this daemon speaks protocol 1 but the client speaks 5",
-		})
-		connection.Close()
+		refuseNegotiation(listener, 1)
 
-		connection, err = listener.Accept()
+		connection, request, err := acceptRequest(listener)
 		if err != nil {
 			return
 		}
 		defer connection.Close()
-		var request protocol.Request
-		if err := protocol.Read(bufio.NewReader(connection), &request); err != nil {
-			return
-		}
 		selected <- request
 		_ = protocol.Write(connection, protocol.Response{
 			Version:  1,
@@ -680,29 +557,19 @@ func TestClientUsesAnOlderDaemonSelectedProtocol(t *testing.T) {
 // client can negotiate with. What it said is the only clue there is, and
 // swallowing it leaves EnsureDaemon treating the socket as healthy.
 func TestPingReportsAPeerThatNamesNoProtocol(t *testing.T) {
-	socket := filepath.Join(testutil.ShortTempDir(t), "daemon.sock")
-	listener, err := net.Listen("unix", socket)
-	if err != nil {
-		t.Fatalf("Listen() error = %v", err)
-	}
-	if err := os.Chmod(socket, 0o600); err != nil {
-		t.Fatalf("Chmod() socket error = %v", err)
-	}
+	socket, listener := listenPrivate(t)
 
 	go func() {
-		connection, err := listener.Accept()
+		defer listener.Close()
+		connection, _, err := acceptRequest(listener)
 		if err != nil {
 			return
 		}
-		var request protocol.Request
-		if err := protocol.Read(bufio.NewReader(connection), &request); err == nil {
-			_ = protocol.Write(connection, protocol.Response{Error: "decode protocol message: unexpected end"})
-		}
-		connection.Close()
-		listener.Close()
+		defer connection.Close()
+		_ = protocol.Write(connection, protocol.Response{Error: "decode protocol message: unexpected end"})
 	}()
 
-	err = New(socket).Ping()
+	err := New(socket).Ping()
 	if err == nil || !strings.Contains(err.Error(), "decode protocol message") {
 		t.Fatalf("Ping() error = %v, want the peer's own refusal", err)
 	}
@@ -715,34 +582,23 @@ func TestPingReportsAPeerThatNamesNoProtocol(t *testing.T) {
 // client's version check does not refuse the very reply that is reporting the
 // mismatch and hide the sentence naming the remedy.
 func TestClientShowsADaemonRefusalForTheSelectedProtocol(t *testing.T) {
-	socket := filepath.Join(testutil.ShortTempDir(t), "daemon.sock")
-	listener, err := net.Listen("unix", socket)
-	if err != nil {
-		t.Fatalf("Listen() error = %v", err)
-	}
-	if err := os.Chmod(socket, 0o600); err != nil {
-		t.Fatalf("Chmod() socket error = %v", err)
-	}
+	socket, listener := listenPrivate(t)
 
 	refusal := "daemon supports protocol 1..4 but the client selected 5; " + protocol.Remedy
 	go func() {
 		if err := answerNegotiation(listener, protocol.Version, protocol.MinimumVersion); err != nil {
 			return
 		}
-		connection, err := listener.Accept()
+		connection, request, err := acceptRequest(listener)
 		if err != nil {
 			return
 		}
 		defer connection.Close()
 		listener.Close()
-		var request protocol.Request
-		if err := protocol.Read(bufio.NewReader(connection), &request); err != nil {
-			return
-		}
 		_ = protocol.Write(connection, protocol.Response{Version: request.Version, Error: refusal})
 	}()
 
-	_, err = New(socket).Snapshot()
+	_, err := New(socket).Snapshot()
 	if err == nil || !strings.Contains(err.Error(), refusal) {
 		t.Fatalf("Snapshot() error = %v, want the daemon's refusal %q", err, refusal)
 	}
@@ -777,14 +633,7 @@ func TestReadReplayKeepsAReplayThatEndsWithItsError(t *testing.T) {
 }
 
 func TestClientDegradesFeaturesMissingFromAnOlderDaemon(t *testing.T) {
-	socket := filepath.Join(testutil.ShortTempDir(t), "daemon.sock")
-	listener, err := net.Listen("unix", socket)
-	if err != nil {
-		t.Fatalf("Listen() error = %v", err)
-	}
-	if err := os.Chmod(socket, 0o600); err != nil {
-		t.Fatalf("Chmod() socket error = %v", err)
-	}
+	socket, listener := listenPrivate(t)
 
 	go func() {
 		_ = answerNegotiation(listener, 1, 1)
@@ -814,20 +663,13 @@ func TestClientDegradesFeaturesMissingFromAnOlderDaemon(t *testing.T) {
 // A mismatch is only useful to a user who is told what to do about it, and
 // romty stop is what every one of them resolves to.
 func TestNegotiationFailureNamesItsRemedy(t *testing.T) {
-	socket := filepath.Join(testutil.ShortTempDir(t), "daemon.sock")
-	listener, err := net.Listen("unix", socket)
-	if err != nil {
-		t.Fatalf("Listen() error = %v", err)
-	}
-	if err := os.Chmod(socket, 0o600); err != nil {
-		t.Fatalf("Chmod() socket error = %v", err)
-	}
+	socket, listener := listenPrivate(t)
 
 	go func() {
 		_ = answerNegotiation(listener, protocol.Version+3, protocol.Version+1)
 		listener.Close()
 	}()
-	_, err = New(socket).Snapshot()
+	_, err := New(socket).Snapshot()
 	if err == nil {
 		t.Fatal("Snapshot() succeeded against a daemon with no shared protocol")
 	}
@@ -837,31 +679,18 @@ func TestNegotiationFailureNamesItsRemedy(t *testing.T) {
 }
 
 func TestOpenTerminalGivesUpWhenReplayStopsMakingProgress(t *testing.T) {
-	socket := filepath.Join(testutil.ShortTempDir(t), "daemon.sock")
-	listener, err := net.Listen("unix", socket)
-	if err != nil {
-		t.Fatalf("Listen() error = %v", err)
-	}
-	if err := os.Chmod(socket, 0o600); err != nil {
-		t.Fatalf("Chmod() socket error = %v", err)
-	}
-	defer listener.Close()
+	socket, listener := listenPrivate(t)
 
 	release := make(chan struct{})
 	go func() {
 		if err := answerNegotiation(listener, protocol.Version, protocol.MinimumVersion); err != nil {
 			return
 		}
-		connection, err := listener.Accept()
+		connection, _, err := acceptRequest(listener)
 		if err != nil {
 			return
 		}
 		defer connection.Close()
-		reader := bufio.NewReader(connection)
-		var request protocol.Request
-		if err := protocol.Read(reader, &request); err != nil {
-			return
-		}
 		if err := protocol.Write(connection, protocol.Response{
 			Version:     protocol.Version,
 			ReplayBytes: 1024,
@@ -882,17 +711,56 @@ func TestOpenTerminalGivesUpWhenReplayStopsMakingProgress(t *testing.T) {
 	}
 }
 
-func answerNegotiation(listener net.Listener, maximum, minimum int) error {
+// listenPrivate listens on a new daemon socket only this user can reach, as
+// the client requires, and closes it when the test ends.
+func listenPrivate(t *testing.T) (string, net.Listener) {
+	t.Helper()
+	socket := filepath.Join(testutil.ShortTempDir(t), "daemon.sock")
+	listener, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatalf("Listen() error = %v", err)
+	}
+	if err := os.Chmod(socket, 0o600); err != nil {
+		t.Fatalf("Chmod() socket error = %v", err)
+	}
+	t.Cleanup(func() { listener.Close() })
+	return socket, listener
+}
+
+// acceptRequest accepts the next connection and reads its request.
+func acceptRequest(listener net.Listener) (net.Conn, protocol.Request, error) {
 	connection, err := listener.Accept()
+	if err != nil {
+		return nil, protocol.Request{}, err
+	}
+	var request protocol.Request
+	if err := protocol.Read(bufio.NewReader(connection), &request); err != nil {
+		connection.Close()
+		return nil, protocol.Request{}, err
+	}
+	return connection, request, nil
+}
+
+// refuseNegotiation answers the next request the way a daemon that speaks only
+// version does.
+func refuseNegotiation(listener net.Listener, version int) {
+	connection, _, err := acceptRequest(listener)
+	if err != nil {
+		return
+	}
+	defer connection.Close()
+	_ = protocol.Write(connection, protocol.Response{
+		Version: version,
+		Error:   fmt.Sprintf("this daemon speaks protocol %d but the client speaks %d", version, protocol.Version),
+	})
+}
+
+func answerNegotiation(listener net.Listener, maximum, minimum int) error {
+	connection, request, err := acceptRequest(listener)
 	if err != nil {
 		return err
 	}
 	defer connection.Close()
-	reader := bufio.NewReader(connection)
-	var request protocol.Request
-	if err := protocol.Read(reader, &request); err != nil {
-		return err
-	}
 	return protocol.Write(connection, protocol.Response{
 		Version:      request.Version,
 		MinVersion:   minimum,
