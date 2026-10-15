@@ -4704,13 +4704,6 @@ func TestDashboardOpensHelpFromTheTerminalPane(t *testing.T) {
 	}
 }
 
-// The help modal is the only place a user can look a shortcut up, so every key
-// romty takes in both panes has to appear there. Comparing the reference with
-// the table that routes those keys says that; counting rendered lines did not,
-// and the hand-copied list of every shortcut that stood beside it was a second
-// copy of the reference that quietly fell behind it.
-// The counters are the agent's own; romty reports them and estimates nothing,
-// so a tab with none shows none.
 func TestDashboardFindsAndWalksScrollbackMatches(t *testing.T) {
 	value := scrolledDashboard(t, 200)
 	send(&value, tea.KeyPressMsg(tea.Key{Code: tea.KeyPgUp, Mod: tea.ModShift}))
@@ -4762,8 +4755,8 @@ func TestDashboardSaysWhenScrollbackHasNoMatch(t *testing.T) {
 	}
 	// Without matches n is not a search key, so it goes back to being what any
 	// other key is in scrollback: leave, and send it to the shell.
-	updated, _ := value.Update(key('n', "n"))
-	if updated.(dashboard).scrollback {
+	send(&value, key('n', "n"))
+	if value.scrollback {
 		t.Fatal("n with no matches did not leave scrollback")
 	}
 }
@@ -4772,8 +4765,8 @@ func TestDashboardSaysWhenScrollbackHasNoMatch(t *testing.T) {
 // stale match from output that has since scrolled away.
 func TestDashboardForgetsTheSearchOnLeavingScrollback(t *testing.T) {
 	value := scrolledDashboard(t, 200)
-	updated, _ := value.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyPgUp, Mod: tea.ModShift}))
-	value = typeSearch(t, updated.(dashboard), "line-004")
+	send(&value, tea.KeyPressMsg(tea.Key{Code: tea.KeyPgUp, Mod: tea.ModShift}))
+	value = typeSearch(t, value, "line-004")
 
 	send(&value, key(tea.KeyEscape, ""))
 	if value.scrollback || value.searchMode || value.searchQuery != "" || len(value.searchMatches) != 0 {
@@ -4816,16 +4809,13 @@ func plainStatus(value dashboard) string {
 	return ansi.Strip(strings.Join(value.renderStatus(value.width, value.dimensions().bodyHeight), "\n"))
 }
 
+// The counters are the agent's own; romty reports them and estimates nothing,
+// so a tab with none shows none.
 func TestDashboardShowsTheOpenAgentLedgerInTheRail(t *testing.T) {
-	root := projectsRoot
-	alpha := model.Workspace{ID: "workspace-1", RootID: root.ID, Name: "alpha", Path: "/projects/alpha"}
-	tab := model.Tab{ID: "tab-1", WorkspaceID: alpha.ID, Name: "1", Running: true,
+	tab := model.Tab{ID: "tab-1", WorkspaceID: "workspace-1", Name: "1", Running: true,
 		Agent: model.AgentClaude, AgentPhase: model.AgentPhaseWorking,
 		AgentContextTokens: 344103, AgentCostUSD: 1.25}
-	snapshot := model.Snapshot{Roots: []model.RootView{{
-		Root:        root,
-		Directories: []model.WorkspaceView{{Workspace: alpha, Tabs: []model.Tab{tab}}},
-	}}}
+	snapshot, alpha := alphaWorkspaceSnapshot([]model.Tab{tab})
 
 	value := newDashboard(&fakeBackend{snapshot: snapshot}, snapshot)
 	value.width = 120
@@ -4878,6 +4868,11 @@ func TestFormatTokensKeepsItsWidthAsItGrows(t *testing.T) {
 	}
 }
 
+// The help modal is the only place a user can look a shortcut up, so every key
+// romty takes in both panes has to appear there. Comparing the reference with
+// the table that routes those keys says that; counting rendered lines did not,
+// and the hand-copied list of every shortcut that stood beside it was a second
+// copy of the reference that quietly fell behind it.
 func TestHelpReferenceDocumentsEveryGlobalKey(t *testing.T) {
 	documented := make(map[string]bool)
 	for _, entry := range helpReference() {
