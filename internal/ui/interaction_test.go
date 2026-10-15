@@ -27,15 +27,15 @@ func TestModalFitsNarrowScreen(t *testing.T) {
 
 func TestWorkspaceActionLargeBackwardStep(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, model.Snapshot{})
-	value.workspaceActionTarget.failure = "unreadable"
+	value.palette.target.failure = "unreadable"
 	value.moveWorkspaceAction(-30)
-	if value.workspaceActionIndex != 0 {
-		t.Fatalf("single action cursor = %d", value.workspaceActionIndex)
+	if value.palette.index != 0 {
+		t.Fatalf("single action cursor = %d", value.palette.index)
 	}
-	value.workspaceActionTarget.failure = ""
+	value.palette.target.failure = ""
 	value.moveWorkspaceAction(-31)
-	if value.workspaceActionIndex != 2 {
-		t.Fatalf("backward wrap cursor = %d, want 2", value.workspaceActionIndex)
+	if value.palette.index != 2 {
+		t.Fatalf("backward wrap cursor = %d, want 2", value.palette.index)
 	}
 }
 
@@ -123,8 +123,8 @@ func TestModalOwnsPaste(t *testing.T) {
 func TestWorkspaceMenuKeepsSelectionVisibleAfterResize(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, model.Snapshot{})
 	value.width, value.height, value.modal = 100, 30, workspaceActionsModal
-	value.workspaceActionTarget.hasGit = true
-	value.workspaceActionIndex = len(value.workspaceActionChoices()) - 1
+	value.palette.target.hasGit = true
+	value.palette.index = len(value.workspaceActionChoices()) - 1
 	send(&value, tea.WindowSizeMsg{Width: 40, Height: 10})
 	lines, _, _ := value.workspaceActionPopup(value.bodySize())
 	if !strings.Contains(ansi.Strip(strings.Join(lines, "\n")), "Delete workspace") {

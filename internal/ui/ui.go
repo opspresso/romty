@@ -246,14 +246,8 @@ type dashboard struct {
 	homePath string
 	// browse is the root picker's state, kept on the dashboard so the modal
 	// renders from it and the keys move it.
-	browse browser
-	// workspaceActionTarget is captured when its action palette opens, so a
-	// refresh cannot retarget a destructive or remote action behind the modal.
-	workspaceActionTarget  navItem
-	workspaceActionIndex   int
-	workspaceActionOffset  int
-	workspaceActionAnchorX int
-	workspaceActionAnchorY int
+	browse  browser
+	palette workspacePalette
 	// config is the document as loaded, kept so saving edits it instead of
 	// reconstructing it from fields.
 	config           Config

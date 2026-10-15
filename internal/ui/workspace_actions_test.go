@@ -34,7 +34,7 @@ func workspaceActionIndexFor(t *testing.T, value dashboard, action workspaceActi
 func runWorkspaceAction(t *testing.T, value dashboard, action workspaceAction) (dashboard, tea.Cmd) {
 	t.Helper()
 	send(&value, key(tea.KeyF8, ""))
-	value.workspaceActionIndex = workspaceActionIndexFor(t, value, action)
+	value.palette.index = workspaceActionIndexFor(t, value, action)
 	command := send(&value, key(tea.KeyEnter, ""))
 	return value, command
 }
@@ -60,7 +60,7 @@ func TestWorkspaceActionsStartWithThePrimaryTerminalAction(t *testing.T) {
 			value.setNavigation(1)
 			target, _ := value.navigationItem()
 			target.git, target.hasGit, target.failure = probe.git, probe.hasGit, probe.failure
-			value.workspaceActionTarget = target
+			value.palette.target = target
 			choices := value.workspaceActionChoices()
 			if len(choices) == 0 || choices[0].action != probe.want {
 				t.Fatalf("first action = %+v, want action %d for %s", choices, probe.want, workspace.Path)
@@ -75,8 +75,8 @@ func TestWorkspaceActionsExposeEveryGitOperationDirectly(t *testing.T) {
 	value.gitStates = map[string]gitState{workspace.Path: {Branch: "main", Dirty: true}}
 	value.setNavigation(1)
 	command := send(&value, key(tea.KeyF8, ""))
-	if command != nil || value.modal != workspaceActionsModal || value.workspaceActionTarget.workspace.Path != workspace.Path {
-		t.Fatalf("F8 = (command %v, modal %v, target %q)", command, value.modal, value.workspaceActionTarget.workspace.Path)
+	if command != nil || value.modal != workspaceActionsModal || value.palette.target.workspace.Path != workspace.Path {
+		t.Fatalf("F8 = (command %v, modal %v, target %q)", command, value.modal, value.palette.target.workspace.Path)
 	}
 
 	popup, _, _ := value.workspaceActionPopup(100, 30)
@@ -206,9 +206,9 @@ func TestDashboardRightClickOpensActionsForThePointedWorkspace(t *testing.T) {
 
 	command := send(&value, tea.MouseClickMsg{X: 2, Y: 3, Button: tea.MouseRight})
 	if command != nil || value.modal != workspaceActionsModal || value.navIndex != 1 ||
-		value.workspaceActionTarget.workspace.Path != workspace.Path {
+		value.palette.target.workspace.Path != workspace.Path {
 		t.Fatalf("right click = (command %v, modal %v, index %d, target %q)",
-			command, value.modal, value.navIndex, value.workspaceActionTarget.workspace.Path)
+			command, value.modal, value.navIndex, value.palette.target.workspace.Path)
 	}
 
 	popup, left, top := value.workspaceActionPopup(value.width, value.dimensions().bodyHeight)
@@ -239,9 +239,9 @@ func TestWorkspaceActionsWindowACompactScreen(t *testing.T) {
 	send(&value, key(tea.KeyEnd, ""))
 	popup, _, _ := value.workspaceActionPopup(value.width, value.dimensions().bodyHeight)
 	rendered := ansi.Strip(strings.Join(popup, "\n"))
-	if value.workspaceActionOffset == 0 || !strings.Contains(rendered, "Delete workspace") ||
+	if value.palette.offset == 0 || !strings.Contains(rendered, "Delete workspace") ||
 		len(popup) > value.dimensions().bodyHeight {
-		t.Fatalf("compact workspace actions = (offset %d):\n%s", value.workspaceActionOffset, rendered)
+		t.Fatalf("compact workspace actions = (offset %d):\n%s", value.palette.offset, rendered)
 	}
 }
 

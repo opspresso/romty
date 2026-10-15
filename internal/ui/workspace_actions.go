@@ -41,6 +41,18 @@ type workspaceActionChoice struct {
 	destructive bool
 }
 
+// workspacePalette is the open workspace action palette.
+type workspacePalette struct {
+	// target is captured when the palette opens, so a refresh cannot
+	// retarget a destructive or remote action behind it.
+	target navItem
+	index  int
+	offset int
+	// anchorX and anchorY are the screen cell the palette opened at.
+	anchorX int
+	anchorY int
+}
+
 type workspaceActionRow struct {
 	choiceIndex int
 	divider     bool
@@ -64,11 +76,7 @@ func (m dashboard) openWorkspaceActions() (tea.Model, tea.Cmd) {
 
 func (m dashboard) openWorkspaceActionsAt(target navItem, x, y int) (tea.Model, tea.Cmd) {
 	m.modal = workspaceActionsModal
-	m.workspaceActionTarget = target
-	m.workspaceActionIndex = 0
-	m.workspaceActionOffset = 0
-	m.workspaceActionAnchorX = x
-	m.workspaceActionAnchorY = y
+	m.palette = workspacePalette{target: target, anchorX: x, anchorY: y}
 	m.clearAnyError()
 	return m, nil
 }
@@ -90,7 +98,7 @@ func (m dashboard) navigationRowForIndex(want, height int) (int, bool) {
 }
 
 func (m dashboard) workspaceActionChoices() []workspaceActionChoice {
-	target := m.workspaceActionTarget
+	target := m.palette.target
 	choices := make([]workspaceActionChoice, 0, 10)
 	if target.failure == "" {
 		if len(runningTabs(target.tabs)) > 0 {
@@ -150,43 +158,43 @@ func (m dashboard) workspaceActionCapacity(height int) int {
 func (m dashboard) workspaceActionWindow(height int) (int, int) {
 	count := len(m.workspaceActionRows())
 	capacity := m.workspaceActionCapacity(height)
-	offset := min(max(m.workspaceActionOffset, 0), max(count-capacity, 0))
+	offset := min(max(m.palette.offset, 0), max(count-capacity, 0))
 	return offset, min(offset+capacity, count)
 }
 
 func (m *dashboard) moveWorkspaceAction(delta int) {
 	choices := m.workspaceActionChoices()
 	if len(choices) == 0 {
-		m.workspaceActionIndex, m.workspaceActionOffset = 0, 0
+		m.palette.index, m.palette.offset = 0, 0
 		return
 	}
-	m.workspaceActionIndex = ((m.workspaceActionIndex+delta)%len(choices) + len(choices)) % len(choices)
+	m.palette.index = ((m.palette.index+delta)%len(choices) + len(choices)) % len(choices)
 	m.ensureWorkspaceActionVisible()
 }
 
 func (m *dashboard) ensureWorkspaceActionVisible() {
 	count := len(m.workspaceActionChoices())
 	if count == 0 {
-		m.workspaceActionOffset = 0
+		m.palette.offset = 0
 		return
 	}
 	capacity := m.workspaceActionCapacity(m.dimensions().bodyHeight)
-	m.workspaceActionIndex = min(max(m.workspaceActionIndex, 0), count-1)
+	m.palette.index = min(max(m.palette.index, 0), count-1)
 	rows := m.workspaceActionRows()
 	selectedRow := 0
 	for index, row := range rows {
-		if !row.divider && row.choiceIndex == m.workspaceActionIndex {
+		if !row.divider && row.choiceIndex == m.palette.index {
 			selectedRow = index
 			break
 		}
 	}
 	maximum := max(len(rows)-capacity, 0)
-	m.workspaceActionOffset = min(max(m.workspaceActionOffset, 0), maximum)
-	if selectedRow < m.workspaceActionOffset {
-		m.workspaceActionOffset = selectedRow
+	m.palette.offset = min(max(m.palette.offset, 0), maximum)
+	if selectedRow < m.palette.offset {
+		m.palette.offset = selectedRow
 	}
-	if selectedRow >= m.workspaceActionOffset+capacity {
-		m.workspaceActionOffset = selectedRow - capacity + 1
+	if selectedRow >= m.palette.offset+capacity {
+		m.palette.offset = selectedRow - capacity + 1
 	}
 }
 
@@ -206,13 +214,13 @@ func (m dashboard) handleWorkspaceActionKey(message tea.KeyPressMsg) (tea.Model,
 	case "pgdown", "ctrl+f":
 		m.moveWorkspaceAction(page)
 	case "home", "g":
-		m.workspaceActionIndex = 0
+		m.palette.index = 0
 		m.ensureWorkspaceActionVisible()
 	case "end", "G":
-		m.workspaceActionIndex = len(choices) - 1
+		m.palette.index = len(choices) - 1
 		m.ensureWorkspaceActionVisible()
 	case "enter":
-		return m.runWorkspaceAction(choices[m.workspaceActionIndex].action)
+		return m.runWorkspaceAction(choices[m.palette.index].action)
 	}
 	return m, nil
 }
@@ -224,7 +232,7 @@ func (m dashboard) runWorkspaceAction(action workspaceAction) (tea.Model, tea.Cm
 		m.setNotice(treeError, "selected workspace no longer exists")
 		return m, nil
 	}
-	m.workspaceActionTarget = target
+	m.palette.target = target
 	switch action {
 	case workspaceOpenTerminalAction:
 		tabs := runningTabs(target.tabs)
@@ -266,7 +274,7 @@ func (m dashboard) runWorkspaceAction(action workspaceAction) (tea.Model, tea.Cm
 }
 
 func (m *dashboard) currentWorkspaceActionTarget() (navItem, bool) {
-	target := m.workspaceActionTarget
+	target := m.palette.target
 	for index, item := range m.navigationItems() {
 		if item.root.ID == target.root.ID && item.workspace.Path == target.workspace.Path {
 			m.setNavigation(index)
@@ -326,7 +334,7 @@ func (m dashboard) workspaceActionPopup(width, height int) (lines []string, x, y
 		if choice.destructive {
 			style = m.styles.errorText
 		}
-		if row.choiceIndex == m.workspaceActionIndex {
+		if row.choiceIndex == m.palette.index {
 			style = m.styles.navigationSelected
 		} else if m.hover.kind == hoverWorkspaceAction && m.hover.index == row.choiceIndex {
 			style = m.styles.hovered(style)
@@ -337,8 +345,8 @@ func (m dashboard) workspaceActionPopup(width, height int) (lines []string, x, y
 			m.styles.modalBorder.Render("│"))
 	}
 	lines = append(lines, m.styles.modalBorder.Render("╰"+strings.Repeat("─", innerWidth)+"╯"))
-	x = min(max(m.workspaceActionAnchorX, 0), max(width-popupWidth, 0))
-	y = min(max(m.workspaceActionAnchorY, 0), max(height-len(lines), 0))
+	x = min(max(m.palette.anchorX, 0), max(width-popupWidth, 0))
+	y = min(max(m.palette.anchorY, 0), max(height-len(lines), 0))
 	return lines, x, y
 }
 
@@ -379,7 +387,7 @@ func (m dashboard) handleWorkspaceActionsMouse(message tea.MouseMsg) (tea.Model,
 		m.modal = noModal
 		return m, nil, true
 	}
-	m.workspaceActionIndex = index
+	m.palette.index = index
 	choices := m.workspaceActionChoices()
 	updated, command := m.runWorkspaceAction(choices[index].action)
 	return updated, command, true
