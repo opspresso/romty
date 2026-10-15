@@ -89,26 +89,27 @@ func NewReader() *Reader {
 	return &Reader{entries: make(map[string]entry)}
 }
 
-// ReadClaude returns what one Claude Code session's transcript reports.
-// configDir is the agent's configuration directory, workspace the directory the
-// session runs in, and sessionID the identifier its hooks reported.
-func (r *Reader) ReadClaude(configDir, workspace, sessionID string) (Reading, bool) {
-	if configDir == "" || workspace == "" || !SafeSessionID(sessionID) {
+// ReadClaude returns what one Claude Code session's transcript reports. path
+// is the transcript_path the session's hook reported. It is read only when it
+// names <configDir>/projects/<folder>/<sessionID>.jsonl and is a regular
+// file: the path arrives over the socket, so it is untrusted input.
+//
+// romty takes the path from the hook rather than building it, because Claude
+// Code's folder naming is its own and changes between versions.
+func (r *Reader) ReadClaude(configDir, path, sessionID string) (Reading, bool) {
+	if !claudeTranscriptPath(configDir, path, sessionID) {
 		return Reading{}, false
 	}
-	path := filepath.Join(configDir, "projects", transcriptDirectory(workspace), sessionID+".jsonl")
-	info, err := os.Stat(path)
+	info, err := os.Lstat(path)
 	if err != nil || !info.Mode().IsRegular() {
 		return Reading{}, false
 	}
-
 	r.mu.Lock()
 	cached, ok := r.entries[path]
 	r.mu.Unlock()
 	if ok && cached.modified.Equal(info.ModTime()) && cached.size == info.Size() {
 		return cached.value, cached.found
 	}
-
 	value, found := readTranscript(path)
 	r.mu.Lock()
 	if len(r.entries) >= maxCachedTranscripts {
@@ -121,10 +122,16 @@ func (r *Reader) ReadClaude(configDir, workspace, sessionID string) (Reading, bo
 	return value, found
 }
 
-// transcriptDirectory is how Claude Code names a working directory's transcript
-// folder: every separator and dot becomes a dash.
-func transcriptDirectory(workspace string) string {
-	return strings.NewReplacer("/", "-", ".", "-").Replace(workspace)
+// claudeTranscriptPath reports whether path is a session transcript directly
+// inside one project folder of configDir.
+func claudeTranscriptPath(configDir, path, sessionID string) bool {
+	if configDir == "" || !filepath.IsAbs(path) || filepath.Clean(path) != path || !SafeSessionID(sessionID) {
+		return false
+	}
+	folder := filepath.Dir(path)
+	return filepath.Base(path) == sessionID+".jsonl" &&
+		filepath.Dir(folder) == filepath.Join(configDir, "projects") &&
+		filepath.Base(folder) != ".."
 }
 
 // SafeSessionID reports whether an agent's session identifier can be joined

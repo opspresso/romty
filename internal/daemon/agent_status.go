@@ -21,6 +21,8 @@ type agentRuntime struct {
 	// UpdatedAt is when the newest hook event was recorded. A transcript
 	// interrupt counts only if it is newer.
 	UpdatedAt time.Time
+	// TranscriptPath is the session transcript the newest hook event named.
+	TranscriptPath string
 }
 
 // agentNow is the clock hook events are stamped with.
@@ -158,6 +160,9 @@ func (s *Server) recordAgentEvent(tabID string, event *protocol.AgentEvent) prot
 	}
 	if current.SessionID == "" {
 		current.SessionID = event.SessionID
+	}
+	if event.TranscriptPath != "" {
+		current.TranscriptPath = event.TranscriptPath
 	}
 	s.agentStatuses[tabID] = current
 	return protocol.Response{}

@@ -15,13 +15,20 @@ import (
 // workspace is the project directory the fixtures' transcripts belong to.
 const workspace = "/Users/example/work/romty"
 
+// transcriptPath is where a fixture keeps a project's session transcript. The
+// folder name is the fixture's own: romty reads the path the hook reports and
+// never derives Claude Code's naming.
+func transcriptPath(configDir, project, sessionID string) string {
+	folder := strings.NewReplacer("/", "-", ".", "-", "_", "-", " ", "-").Replace(project)
+	return filepath.Join(configDir, "projects", folder, sessionID+".jsonl")
+}
+
 func writeTranscript(t *testing.T, configDir, project, sessionID string, lines ...string) {
 	t.Helper()
-	directory := filepath.Join(configDir, "projects", transcriptDirectory(project))
-	if err := os.MkdirAll(directory, 0o700); err != nil {
+	path := transcriptPath(configDir, project, sessionID)
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		t.Fatalf("MkdirAll() error = %v", err)
 	}
-	path := filepath.Join(directory, sessionID+".jsonl")
 	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
@@ -49,7 +56,7 @@ func TestReadClaudeTakesTheNewestCounters(t *testing.T) {
 		`{"type":"summary","totalCostUSD":1.25}`,
 	)
 
-	value, ok := NewReader().ReadClaude(configDir, workspace, "session-1")
+	value, ok := NewReader().ReadClaude(configDir, transcriptPath(configDir, workspace, "session-1"), "session-1")
 	if !ok {
 		t.Fatal("ReadClaude() found no counters")
 	}
@@ -73,7 +80,7 @@ func TestReadClaudeReadsOnlyTheEndOfALongTranscript(t *testing.T) {
 	lines = append(lines, assistantLine(1, 2, 3))
 	writeTranscript(t, configDir, workspace, "session-1", lines...)
 
-	value, ok := NewReader().ReadClaude(configDir, workspace, "session-1")
+	value, ok := NewReader().ReadClaude(configDir, transcriptPath(configDir, workspace, "session-1"), "session-1")
 	if !ok || value.ContextTokens != 6 {
 		t.Fatalf("ReadClaude() = (%+v, %v), want the last record's 6 tokens", value, ok)
 	}
@@ -89,7 +96,7 @@ func TestReadClaudeSkipsAnOversizedRecord(t *testing.T) {
 		assistantLine(4, 5, 6),
 	)
 
-	value, ok := NewReader().ReadClaude(configDir, workspace, "session-1")
+	value, ok := NewReader().ReadClaude(configDir, transcriptPath(configDir, workspace, "session-1"), "session-1")
 	if !ok || value.ContextTokens != 15 {
 		t.Fatalf("ReadClaude() = (%+v, %v), want the record after the oversized one", value, ok)
 	}
@@ -99,10 +106,10 @@ func TestReadClaudeReportsNothingWithoutCounters(t *testing.T) {
 	configDir := t.TempDir()
 	writeTranscript(t, configDir, workspace, "session-1", `{"type":"user","message":{"content":"hello"}}`)
 
-	if value, ok := NewReader().ReadClaude(configDir, workspace, "session-1"); ok {
+	if value, ok := NewReader().ReadClaude(configDir, transcriptPath(configDir, workspace, "session-1"), "session-1"); ok {
 		t.Fatalf("ReadClaude() = (%+v, true), want no reading", value)
 	}
-	if value, ok := NewReader().ReadClaude(configDir, workspace, "missing"); ok {
+	if value, ok := NewReader().ReadClaude(configDir, transcriptPath(configDir, workspace, "missing"), "missing"); ok {
 		t.Fatalf("ReadClaude() on a missing transcript = (%+v, true), want no reading", value)
 	}
 }
@@ -131,7 +138,7 @@ func TestReadClaudeRefusesAnUnsafeSessionID(t *testing.T) {
 		[]byte(assistantLine(1, 2, 3)+"\n"), 0o600); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
-	if value, ok := NewReader().ReadClaude(configDir, "/w", "../secret"); ok {
+	if value, ok := NewReader().ReadClaude(configDir, filepath.Join(configDir, "secret.jsonl"), "../secret"); ok {
 		t.Fatalf("ReadClaude() escaped the transcript directory: %+v", value)
 	}
 }
@@ -143,12 +150,12 @@ func TestReaderRereadsOnlyAChangedTranscript(t *testing.T) {
 	writeTranscript(t, configDir, workspace, "session-1", assistantLine(1, 2, 3))
 	reader := NewReader()
 
-	if value, ok := reader.ReadClaude(configDir, workspace, "session-1"); !ok || value.ContextTokens != 6 {
+	if value, ok := reader.ReadClaude(configDir, transcriptPath(configDir, workspace, "session-1"), "session-1"); !ok || value.ContextTokens != 6 {
 		t.Fatalf("first read = (%+v, %v), want 6 tokens", value, ok)
 	}
 	// Rewritten behind the reader's back with the same size and timestamp: the
 	// cached reading is what it must still report.
-	path := filepath.Join(configDir, "projects", transcriptDirectory(workspace), "session-1.jsonl")
+	path := transcriptPath(configDir, workspace, "session-1")
 	info, err := os.Stat(path)
 	if err != nil {
 		t.Fatalf("Stat() error = %v", err)
@@ -159,7 +166,7 @@ func TestReaderRereadsOnlyAChangedTranscript(t *testing.T) {
 	if err := os.Chtimes(path, info.ModTime(), info.ModTime()); err != nil {
 		t.Fatalf("Chtimes() error = %v", err)
 	}
-	if value, _ := reader.ReadClaude(configDir, workspace, "session-1"); value.ContextTokens != 6 {
+	if value, _ := reader.ReadClaude(configDir, transcriptPath(configDir, workspace, "session-1"), "session-1"); value.ContextTokens != 6 {
 		t.Fatalf("unchanged read = %+v, want the cached 6 tokens", value)
 	}
 
@@ -167,7 +174,7 @@ func TestReaderRereadsOnlyAChangedTranscript(t *testing.T) {
 	if err := os.Chtimes(path, info.ModTime().Add(time.Second), info.ModTime().Add(time.Second)); err != nil {
 		t.Fatalf("Chtimes() error = %v", err)
 	}
-	if value, _ := reader.ReadClaude(configDir, workspace, "session-1"); value.ContextTokens != 15 {
+	if value, _ := reader.ReadClaude(configDir, transcriptPath(configDir, workspace, "session-1"), "session-1"); value.ContextTokens != 15 {
 		t.Fatalf("changed read = %+v, want the new 15 tokens", value)
 	}
 }
@@ -178,7 +185,7 @@ func TestReaderForgetsEverythingWhenItFillsUp(t *testing.T) {
 	for index := range maxCachedTranscripts + 1 {
 		workspace := fmt.Sprintf("/w/%d", index)
 		writeTranscript(t, configDir, workspace, "session-1", assistantLine(1, 2, 3))
-		if _, ok := reader.ReadClaude(configDir, workspace, "session-1"); !ok {
+		if _, ok := reader.ReadClaude(configDir, transcriptPath(configDir, workspace, "session-1"), "session-1"); !ok {
 			t.Fatalf("read %d found no counters", index)
 		}
 	}
@@ -187,9 +194,27 @@ func TestReaderForgetsEverythingWhenItFillsUp(t *testing.T) {
 	}
 }
 
-func TestTranscriptDirectoryMatchesClaudesNaming(t *testing.T) {
-	if got := transcriptDirectory("/Users/bruce/.vibemon"); got != "-Users-bruce--vibemon" {
-		t.Fatalf("transcriptDirectory() = %q, want dots and separators dashed", got)
+// The path arrives from a hook over the socket. Only a session transcript
+// directly inside one project folder of the config directory is read.
+func TestReadClaudeReadsOnlyTranscriptPathsInsideTheProjectsFolder(t *testing.T) {
+	configDir := t.TempDir()
+	writeTranscript(t, configDir, "/work/my_proj name", "session-1", assistantLine(1, 2, 3))
+	path := transcriptPath(configDir, "/work/my_proj name", "session-1")
+	if value, ok := NewReader().ReadClaude(configDir, path, "session-1"); !ok || value.ContextTokens != 6 {
+		t.Fatalf("ReadClaude(reported path) = (%+v, %v), want 6 tokens", value, ok)
+	}
+	outside := filepath.Join(t.TempDir(), "projects", "folder", "session-1.jsonl")
+	testutil.WriteFile(t, filepath.Dir(outside), "session-1.jsonl", assistantLine(1, 2, 3)+"\n")
+	for _, probe := range []struct{ name, path, session string }{
+		{"another config directory", outside, "session-1"},
+		{"another session", path, "session-2"},
+		{"a relative path", "projects/folder/session-1.jsonl", "session-1"},
+		{"an unclean path", filepath.Join(configDir, "projects", "a") + "/../" + filepath.Base(filepath.Dir(path)) + "/session-1.jsonl", "session-1"},
+		{"the projects folder itself", filepath.Join(configDir, "projects", "session-1.jsonl"), "session-1"},
+	} {
+		if value, ok := NewReader().ReadClaude(configDir, probe.path, probe.session); ok {
+			t.Errorf("%s: ReadClaude() = %+v, want it refused", probe.name, value)
+		}
 	}
 }
 
@@ -208,7 +233,7 @@ func TestReadClaudeKeepsARecordThatStartsAtTheTailBoundary(t *testing.T) {
 	testutil.Set(t, &maxTranscriptTail, int64(len(newest)+len(trailing)+2))
 
 	writeTranscript(t, configDir, workspace, "session-1", older, newest, trailing)
-	value, ok := NewReader().ReadClaude(configDir, workspace, "session-1")
+	value, ok := NewReader().ReadClaude(configDir, transcriptPath(configDir, workspace, "session-1"), "session-1")
 	if !ok || value.ContextTokens != 6 {
 		t.Fatalf("ReadClaude() = (%+v, %v), want the 6 tokens on the boundary record", value, ok)
 	}
@@ -244,7 +269,7 @@ func TestReadClaudeReportsAnInterruptOnlyAsTheNewestConversationRecord(t *testin
 		t.Run(testCase.name, func(t *testing.T) {
 			configDir := t.TempDir()
 			writeTranscript(t, configDir, "/w", "session-1", testCase.lines...)
-			value, _ := NewReader().ReadClaude(configDir, "/w", "session-1")
+			value, _ := NewReader().ReadClaude(configDir, transcriptPath(configDir, "/w", "session-1"), "session-1")
 			if !value.InterruptedAt.Equal(testCase.want) {
 				t.Fatalf("InterruptedAt = %v, want %v", value.InterruptedAt, testCase.want)
 			}

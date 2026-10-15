@@ -120,6 +120,9 @@ type AgentEvent struct {
 	NotificationType string      `json:"notification_type,omitempty"`
 	PermissionMode   string      `json:"permission_mode,omitempty"`
 	Background       bool        `json:"background,omitempty"`
+	// TranscriptPath is where the agent writes the session transcript, as its
+	// hook reported it. The daemon reads counters and interrupts from it.
+	TranscriptPath string `json:"transcript_path,omitempty"`
 	// ProcessGroups are the process groups of the hook command and its
 	// ancestors. A shared agent server runs hooks for every terminal, so an
 	// OpenCode event counts for a tab only when that tab's foreground job is
@@ -131,6 +134,9 @@ type AgentEvent struct {
 // ends check it and neither can take the other's word for it: the hook command
 // is handed whatever the agent wrote, and the daemon is answering a socket.
 const MaxAgentEventMetadataBytes = 512
+
+// MaxAgentEventPathBytes bounds the transcript path a hook reports.
+const MaxAgentEventPathBytes = 4096
 
 // MaxAgentEventProcessGroups bounds the ancestry a hook reports.
 const MaxAgentEventProcessGroups = 32
@@ -149,6 +155,9 @@ func (e AgentEvent) Validate() error {
 	}
 	if e.HookEvent == "" {
 		return errors.New("hook event is required")
+	}
+	if len(e.TranscriptPath) > MaxAgentEventPathBytes {
+		return fmt.Errorf("agent event transcript path is longer than %d bytes", MaxAgentEventPathBytes)
 	}
 	if len(e.ProcessGroups) > MaxAgentEventProcessGroups {
 		return fmt.Errorf("agent event reports more than %d process groups", MaxAgentEventProcessGroups)

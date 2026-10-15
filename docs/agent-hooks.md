@@ -141,11 +141,11 @@ The terminal-output fallback remains an estimate and never confirms completion.
 
 ## What a hook sends
 
-The hook command sends only tab, provider, session, turn/prompt, subagent and tool-use identifiers, event name, tool name, notification type, permission mode, whether background work remains, and, for OpenCode, the process groups above the hook. It does not send or retain prompts, transcripts, tool inputs, tool outputs, or assistant messages. It is silent outside a romty tab or when the daemon is unavailable.
+The hook command sends only tab, provider, session, turn/prompt, subagent and tool-use identifiers, event name, tool name, notification type, permission mode, whether background work remains, for Claude Code the transcript file path, and, for OpenCode, the process groups above the hook. It does not send or retain prompts, transcript contents, tool inputs, tool outputs, or assistant messages. It is silent outside a romty tab or when the daemon is unavailable.
 
 ## Token and cost readings
 
-A hooked Claude Code session also reports what it has spent. romty reads the counters Claude Code writes to its own transcript under `${CLAUDE_CONFIG_DIR:-~/.claude}/projects`. While that terminal is open, the rail above the status row shows two readings: the tokens the newest request carried into the model, and the session cost the agent totalled.
+A hooked Claude Code session also reports what it has spent. romty reads the counters Claude Code writes to its own transcript, at the path the session's hook reports. romty reads the path only when it is a session transcript directly inside one project folder of `${CLAUDE_CONFIG_DIR:-~/.claude}/projects`. While that terminal is open, the rail above the status row shows two readings: the tokens the newest request carried into the model, and the session cost the agent totalled.
 
 romty decodes only these counters, each record's type and time, and the text of a record that starts with Claude Code's interrupt marker. It does not decode prompts, tool inputs, or responses.
 
