@@ -52,26 +52,27 @@ func (m *dashboard) updateAgents(statuses map[string]model.AgentStatus) {
 }
 
 func (m dashboard) soundForAgentTransitions(statuses map[string]model.AgentStatus) (sound.Kind, bool) {
-	changed := func(tab model.Tab) (sound.Kind, bool) {
-		status, ok := statuses[tab.ID]
+	changed := func(tabID string) (sound.Kind, bool) {
+		status, ok := statuses[tabID]
 		if !ok || status.Agent != model.AgentClaude && status.Agent != model.AgentCodex && status.Agent != model.AgentOpenCode {
 			return "", false
 		}
-		changedTurn := status.TurnID != "" && tab.AgentTurnID != "" && status.TurnID != tab.AgentTurnID
-		if m.config.SoundOnDone && !status.Estimated && (tab.AgentPhase != status.Phase || changedTurn) &&
-			status.Agent == tab.Agent &&
-			(tab.AgentSessionID == "" || status.SessionID == tab.AgentSessionID) &&
-			tab.AgentPhase != model.AgentPhaseUnknown && tab.AgentPhase != "" &&
+		heard := m.heardAgents[tabID]
+		changedTurn := status.TurnID != "" && heard.TurnID != "" && status.TurnID != heard.TurnID
+		if m.config.SoundOnDone && !status.Estimated && (heard.Phase != status.Phase || changedTurn) &&
+			status.Agent == heard.Agent &&
+			(heard.SessionID == "" || status.SessionID == heard.SessionID) &&
+			heard.Phase != model.AgentPhaseUnknown && heard.Phase != "" &&
 			(status.Phase == model.AgentPhaseCompleted || status.Phase == model.AgentPhaseError) {
 			return sound.Done, true
 		}
-		if m.config.SoundOnWaiting && !tab.AgentPhase.Waiting() && status.Phase.Waiting() {
+		if m.config.SoundOnWaiting && !heard.Phase.Waiting() && status.Phase.Waiting() {
 			return sound.Waiting, true
 		}
 		return "", false
 	}
 	for tab := range m.state.Tabs() {
-		if kind, ok := changed(*tab); ok {
+		if kind, ok := changed(tab.ID); ok {
 			return kind, true
 		}
 	}
