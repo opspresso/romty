@@ -16,8 +16,10 @@
   --accent-surface: #134e4a;
   --accent-text: #f0fdfa;
   --danger: #fb7185;
-  --agent-claude: #d97757;
-  --agent-codex: #3b82f6;
+  --added: #86efac;
+  --git-status: #f59e0b;
+  --agent-claude: #e8906f;
+  --agent-codex: #60a5fa;
 
   --radius: 12px;
   --radius-lg: 16px;
@@ -39,6 +41,9 @@
   --accent-surface: #ccfbf1;
   --accent-text: #115e59;
   --danger: #be123c;
+  --added: #15803d;
+  --agent-claude: #b5482a;
+  --agent-codex: #1d4ed8;
 
   --shadow: 0 18px 40px rgba(15, 23, 42, 0.1);
 }
@@ -229,7 +234,7 @@ pre {
   fill: currentColor;
 }
 
-/* ------------------------------------------------------------ install */
+/* ---------------------------------------------------------- copy line */
 
 .copy-line {
   display: inline-flex;
@@ -504,7 +509,7 @@ pre {
 }
 
 .git-row em {
-  color: #f59e0b;
+  color: var(--git-status);
   font-style: normal;
 }
 
@@ -630,7 +635,7 @@ pre {
 }
 
 .agent-session .added {
-  color: #86efac;
+  color: var(--added);
 }
 
 .agent-session .removed {
@@ -696,23 +701,6 @@ pre {
   25%, 49% { content: "◓"; }
   50%, 74% { content: "◑"; }
   75%, 100% { content: "◒"; }
-}
-
-/* The blinking caret is the loudest motion here, but the lifting cards and
-   buttons are motion too. Someone who asked for less of it meant all of it. */
-@media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    animation: none !important;
-    transition: none !important;
-  }
-
-  .btn:hover,
-  .card:hover,
-  .theme-toggle:hover {
-    transform: none;
-  }
 }
 
 .statusbar {
@@ -1003,14 +991,9 @@ kbd {
   .remote-copy {
     max-width: 62ch;
   }
-
 }
 
 @media (max-width: 560px) {
-  .nav-links a[href="#remote"] {
-    display: none;
-  }
-
   .nav-links a[data-optional] {
     display: none;
   }
@@ -1031,5 +1014,25 @@ kbd {
 
   .key-row .caps {
     flex-basis: 8rem;
+  }
+}
+
+/* ------------------------------------------------------ reduced motion */
+
+/* The blinking caret is the loudest motion here, but the lifting cards and
+   buttons are motion too. Someone who asked for less of it meant all of it.
+   This block comes last so it overrides the hover lifts declared above. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+
+  .btn:hover,
+  .card:hover,
+  .theme-toggle:hover {
+    transform: none;
   }
 }
