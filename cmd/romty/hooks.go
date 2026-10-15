@@ -55,8 +55,10 @@ func runHookCommand(provider string, input io.Reader) {
 		// OpenCode's shared background service can carry the tab ID of the
 		// terminal that started it, and Kiro runs hooks from its own agent
 		// server process. The daemon accepts the event only if the tab's
-		// foreground job is an ancestor of this hook.
-		event.ProcessGroups = procinfo.AncestorGroups()
+		// foreground job is an ancestor of this hook and the hook does not
+		// run for a background job.
+		ancestry := procinfo.Current()
+		event.ProcessGroups, event.BackgroundJob = ancestry.Groups, ancestry.BackgroundJob
 	}
 	runtime, err := paths.Resolve()
 	if err != nil {

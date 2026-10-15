@@ -6,24 +6,34 @@ import (
 	"strings"
 )
 
-// processInfo reads a process's parent and process group from /proc. The
-// command name can hold spaces and parentheses, so fields are counted from
-// the last closing parenthesis.
-func processInfo(pid int) (parent, group int, ok bool) {
+// processInfo reads a process's parent, process group and controlling
+// terminal from /proc. The command name can hold spaces and parentheses, so
+// fields are counted from the last closing parenthesis. A process without a
+// terminal has the device 0.
+func processInfo(pid int) (process, bool) {
 	data, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/stat")
 	if err != nil {
-		return 0, 0, false
+		return process{}, false
 	}
 	text := string(data)
 	end := strings.LastIndexByte(text, ')')
 	if end < 0 {
-		return 0, 0, false
+		return process{}, false
 	}
+	// state ppid pgrp session tty_nr tpgid
 	fields := strings.Fields(text[end+1:])
-	if len(fields) < 3 {
-		return 0, 0, false
+	if len(fields) < 6 {
+		return process{}, false
 	}
-	parent, parentErr := strconv.Atoi(fields[1])
-	group, groupErr := strconv.Atoi(fields[2])
-	return parent, group, parentErr == nil && groupErr == nil
+	var numbers [4]int
+	for index, field := range []string{fields[1], fields[2], fields[4], fields[5]} {
+		value, err := strconv.Atoi(field)
+		if err != nil {
+			return process{}, false
+		}
+		numbers[index] = value
+	}
+	return process{
+		parent: numbers[0], group: numbers[1], terminal: numbers[2] != 0, terminalGroup: numbers[3],
+	}, true
 }

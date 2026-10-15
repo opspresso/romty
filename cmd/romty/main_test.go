@@ -25,7 +25,12 @@ import (
 	"github.com/opspresso/romty/internal/version"
 )
 
+// TestMain runs every test tab in /bin/sh. The daemon runs the caller's
+// $SHELL, and a developer's interactive shell loads dotfiles whose prompts,
+// wrappers and helper commands change what the tests read.
 func TestMain(m *testing.M) {
+	os.Setenv("SHELL", "/bin/sh")
+	os.Unsetenv("ENV")
 	if os.Getenv("ROMTY_TEST_PROCESS") == "1" {
 		if err := run(); err != nil {
 			fmt.Fprintln(os.Stderr, err)

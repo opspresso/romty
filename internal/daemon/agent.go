@@ -186,10 +186,11 @@ func commandAgent(command string) model.Agent {
 		return model.AgentCodex
 	case name == "opencode" || strings.HasPrefix(name, "opencode-"):
 		return model.AgentOpenCode
-	case name == "kiro-cli-term":
-		// Kiro's terminal wrapper runs the shell, not the agent.
-		return ""
-	case name == "kiro-cli" || strings.HasPrefix(name, "kiro-cli-"):
+	case name == "kiro-cli-chat":
+		// kiro-cli is also the launcher of helper commands that shell
+		// integration runs at every prompt, such as `kiro-cli init`, and
+		// kiro-cli-term is its terminal wrapper. Only a chat session runs
+		// kiro-cli-chat.
 		return model.AgentKiro
 	case name == "npm" || name == "pnpm" || name == "yarn" || name == "next-server":
 		// Node.js tools can replace their process title, hiding the runtime.
