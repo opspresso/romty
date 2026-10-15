@@ -66,7 +66,7 @@ func TestCodexHookUsesTerminalIdentityInsteadOfSharedDaemonTabID(t *testing.T) {
 func TestNativeCodexReadUpdatesPlainCodexAndInvalidatesStaleState(t *testing.T) {
 	testutil.Set(t, &foregroundProcessGroup, func(*os.File) (int, error) { return 101, nil })
 	process := "codex"
-	testutil.Set(t, &runProcessList, func(context.Context) ([]byte, error) { return []byte("101 " + process + "\n"), nil })
+	testutil.Set(t, &runProcessList, func(context.Context) ([]byte, error) { return []byte("101 1 101 101 " + process + "\n"), nil })
 	value := codexSession(codexSessionA)
 	reader := &fakeCodexReader{states: map[string]model.AgentStatus{codexSessionA[:29]: {
 		Agent: model.AgentCodex, Phase: model.AgentPhaseWorking, Source: "runtime", Active: true, SessionID: codexSessionA,
