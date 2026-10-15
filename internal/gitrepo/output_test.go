@@ -10,7 +10,7 @@ import (
 	"github.com/opspresso/romty/internal/testutil"
 )
 
-func TestCappedGitOutputCancelsOnlyOnOverflow(t *testing.T) {
+func TestCappedOutputCancelsOnlyOnOverflow(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	output := cappedOutput{limit: 4, cancel: cancel}
@@ -27,7 +27,7 @@ func TestCappedGitOutputCancelsOnlyOnOverflow(t *testing.T) {
 	}
 }
 
-func TestGitDiffRejectsOversizedOutput(t *testing.T) {
+func TestFileDiffRejectsOversizedOutput(t *testing.T) {
 	repository := initializeDiffRepository(t)
 	testutil.WriteFile(t, repository, "large.txt", strings.Repeat("line\n", maxOutputBytes/5))
 	diff, err := FileDiff(repository, ChangedFile{Path: "large.txt", IndexStatus: '?', WorkTreeStatus: '?'})
@@ -36,7 +36,7 @@ func TestGitDiffRejectsOversizedOutput(t *testing.T) {
 	}
 }
 
-func TestGitStatusRejectsOversizedOutput(t *testing.T) {
+func TestStatusRejectsOversizedOutput(t *testing.T) {
 	bin := t.TempDir()
 	git := filepath.Join(bin, "git")
 	if err := os.WriteFile(git, []byte("#!/bin/sh\ndd if=/dev/zero bs=1048576 count=9 2>/dev/null\n"), 0o700); err != nil {

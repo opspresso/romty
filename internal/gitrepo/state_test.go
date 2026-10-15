@@ -9,7 +9,7 @@ import (
 	"github.com/opspresso/romty/internal/testutil"
 )
 
-func TestGitStateUsesFetchedUpstream(t *testing.T) {
+func TestStatesUseTheFetchedUpstream(t *testing.T) {
 	base := t.TempDir()
 	remote := filepath.Join(base, "remote.git")
 	source := filepath.Join(base, "source")
@@ -61,7 +61,7 @@ func TestGitStateUsesFetchedUpstream(t *testing.T) {
 	}
 }
 
-func TestParseGitStateRecognizesDetachedConflict(t *testing.T) {
+func TestParseStateRecognizesADetachedConflict(t *testing.T) {
 	state := parseState(strings.Join([]string{
 		"# branch.oid 0123456789abcdef",
 		"# branch.head (detached)",
@@ -74,7 +74,7 @@ func TestParseGitStateRecognizesDetachedConflict(t *testing.T) {
 	}
 }
 
-func TestGitStateIgnoresDirectoriesWithoutGitMetadata(t *testing.T) {
+func TestStateIgnoresDirectoriesWithoutGitMetadata(t *testing.T) {
 	if state, ok := readState(t.TempDir(), true); ok {
 		t.Fatalf("non-repository state = %#v, want no state", state)
 	}
