@@ -12,13 +12,14 @@ import (
 	"github.com/opspresso/romty/internal/display"
 	"github.com/opspresso/romty/internal/gitrepo"
 	"github.com/opspresso/romty/internal/model"
+	"github.com/opspresso/romty/internal/workspacefs"
 )
 
 var (
 	loadGitChangedFiles = gitrepo.ChangedFiles
 	loadGitFileDiff     = gitrepo.FileDiff
 	loadWorkspaceFiles  = readWorkspaceFiles
-	loadWorkspaceFile   = readWorkspaceFile
+	loadWorkspaceFile   = workspacefs.Read
 )
 
 type fileViewMode int
