@@ -100,10 +100,8 @@ func TestSessionAgentsMatchTabsByForegroundProcessGroup(t *testing.T) {
 	opencodePTY := new(os.File)
 	nodePTY := new(os.File)
 	groups := map[*os.File]int{claudePTY: 101, codexPTY: 202, opencodePTY: 303, nodePTY: 404}
-	testutil.Set(t, &foregroundProcessGroup, func(terminal *os.File) (int, error) { return groups[terminal], nil })
-	testutil.Set(t, &runProcessList, func(context.Context) ([]byte, error) {
-		return []byte("101 claude\n202 codex\n303 opencode\n404 node server.js\n505 node background.js\n"), nil
-	})
+	stubForeground(t, func(terminal *os.File) int { return groups[terminal] },
+		"101 claude\n202 codex\n303 opencode\n404 node server.js\n505 node background.js\n")
 
 	sessions := map[string]*session{
 		"tab-1": newSessionForTest(claudePTY),
