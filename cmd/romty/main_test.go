@@ -48,9 +48,7 @@ func TestRunRejectsNestedRomty(t *testing.T) {
 func TestVersionAndHelpDoNotNeedARuntime(t *testing.T) {
 	t.Setenv("ROMTY", "1")
 	t.Setenv("ROMTY_HOME", strings.Repeat("too-deep/", paths.SocketPathLimit))
-	originalVersion := version.Value
-	version.Value = "9.8.7"
-	t.Cleanup(func() { version.Value = originalVersion })
+	testutil.Set(t, &version.Value, "9.8.7")
 
 	var output bytes.Buffer
 	if err := runCommand([]string{"version"}, &output); err != nil {
@@ -151,9 +149,7 @@ func TestHooksCommandSkipsDevelopmentBuild(t *testing.T) {
 		t.Fatal(err)
 	}
 	home := t.TempDir()
-	originalVersion := version.Value
-	version.Value = ""
-	t.Cleanup(func() { version.Value = originalVersion })
+	testutil.Set(t, &version.Value, "")
 	t.Setenv("PATH", bin)
 	t.Setenv("CLAUDE_CONFIG_DIR", home)
 	t.Setenv("CODEX_HOME", filepath.Join(t.TempDir(), "codex"))
@@ -172,9 +168,7 @@ func TestHooksCommandSkipsDevelopmentBuild(t *testing.T) {
 
 func useReleaseBuild(t *testing.T) {
 	t.Helper()
-	original := version.Value
-	version.Value = "0.15.0"
-	t.Cleanup(func() { version.Value = original })
+	testutil.Set(t, &version.Value, "0.15.0")
 }
 
 func TestStatusAndListDoNotStartAMissingDaemon(t *testing.T) {
@@ -475,9 +469,7 @@ func stopArgs(t *testing.T) paths.Paths {
 	if err != nil {
 		t.Fatalf("Resolve() error = %v", err)
 	}
-	originalArgs := os.Args
-	os.Args = []string{"romty", "stop"}
-	t.Cleanup(func() { os.Args = originalArgs })
+	testutil.Set(t, &os.Args, []string{"romty", "stop"})
 	return runtime
 }
 

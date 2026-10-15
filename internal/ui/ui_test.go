@@ -23,6 +23,7 @@ import (
 	"github.com/opspresso/romty/internal/agenthooks"
 	"github.com/opspresso/romty/internal/model"
 	"github.com/opspresso/romty/internal/sound"
+	"github.com/opspresso/romty/internal/testutil"
 	"github.com/opspresso/romty/internal/version"
 )
 
@@ -1207,16 +1208,14 @@ func TestDashboardConfirmsAgentHookInstallation(t *testing.T) {
 		}
 	}
 
-	previousInstall := installHookProviders
 	var installed []agenthooks.Provider
-	installHookProviders = func(providers []agenthooks.Provider) ([]agenthooks.Result, error) {
+	testutil.Set(t, &installHookProviders, func(providers []agenthooks.Provider) ([]agenthooks.Result, error) {
 		installed = append(installed, providers...)
 		return []agenthooks.Result{
 			{Provider: agenthooks.ProviderClaude, Action: agenthooks.ActionInstalled},
 			{Provider: agenthooks.ProviderCodex, Action: agenthooks.ActionUpdated},
 		}, nil
-	}
-	t.Cleanup(func() { installHookProviders = previousInstall })
+	})
 
 	updated, command := value.Update(key(tea.KeyEnter, ""))
 	value = updated.(dashboard)
@@ -4651,10 +4650,8 @@ func TestGitStatusUpdatesStateAndSchedulesAnotherRefresh(t *testing.T) {
 }
 
 func TestGitStatusFetchesAtStartupAndAfterInterval(t *testing.T) {
-	previousNow := now
 	current := time.Date(2026, time.August, 25, 12, 0, 0, 0, time.UTC)
-	now = func() time.Time { return current }
-	t.Cleanup(func() { now = previousNow })
+	testutil.Set(t, &now, func() time.Time { return current })
 
 	value := newDashboard(&fakeBackend{}, model.Snapshot{})
 	beforeInterval := value.readGitStatus(false, true)().(gitStatusMsg)

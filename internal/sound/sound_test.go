@@ -8,6 +8,8 @@ import (
 	"os/exec"
 	"reflect"
 	"testing"
+
+	"github.com/opspresso/romty/internal/testutil"
 )
 
 func TestEmbeddedSoundsArePCMWaveFiles(t *testing.T) {
@@ -50,15 +52,9 @@ func TestPlayerCommandUsesPlatformTools(t *testing.T) {
 }
 
 func TestPlayWritesAndRemovesTheEmbeddedSound(t *testing.T) {
-	previousFind := findPlayer
-	previousRun := runPlayer
-	t.Cleanup(func() {
-		findPlayer = previousFind
-		runPlayer = previousRun
-	})
-	findPlayer = func(string) (string, error) { return "/bin/player", nil }
+	testutil.Set(t, &findPlayer, func(string) (string, error) { return "/bin/player", nil })
 	var path string
-	runPlayer = func(command *exec.Cmd) error {
+	testutil.Set(t, &runPlayer, func(command *exec.Cmd) error {
 		path = command.Args[len(command.Args)-1]
 		info, err := os.Stat(path)
 		if err != nil {
@@ -75,7 +71,7 @@ func TestPlayWritesAndRemovesTheEmbeddedSound(t *testing.T) {
 			return errors.New("temporary file did not contain the done sound")
 		}
 		return nil
-	}
+	})
 
 	if err := Play(Done); err != nil {
 		t.Fatalf("Play() error = %v", err)

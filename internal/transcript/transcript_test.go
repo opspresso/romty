@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/opspresso/romty/internal/testutil"
 )
 
 func writeTranscript(t *testing.T, configDir, workspace, sessionID string, lines ...string) {
@@ -205,10 +207,8 @@ func TestReadClaudeKeepsARecordThatStartsAtTheTailBoundary(t *testing.T) {
 	trailing := `{"type":"user","message":{"content":"thanks"}}`
 	older := assistantLine(100, 200, 300)
 
-	previous := maxTranscriptTail
 	// Exactly the two final records, so the boundary sits on newest's first byte.
-	maxTranscriptTail = int64(len(newest) + len(trailing) + 2)
-	t.Cleanup(func() { maxTranscriptTail = previous })
+	testutil.Set(t, &maxTranscriptTail, int64(len(newest)+len(trailing)+2))
 
 	writeTranscript(t, configDir, workspace, "session-1", older, newest, trailing)
 	value, ok := NewReader().ReadClaude(configDir, workspace, "session-1")

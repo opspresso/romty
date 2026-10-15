@@ -215,9 +215,7 @@ func TestEnsureDaemonReportsASocketThatAnswersNothing(t *testing.T) {
 		}
 	}()
 
-	previous := handshakeTimeout
-	handshakeTimeout = 200 * time.Millisecond
-	defer func() { handshakeTimeout = previous }()
+	testutil.Set(t, &handshakeTimeout, 200*time.Millisecond)
 
 	err = EnsureDaemon(runtimeFor(socket), "/nonexistent/romty")
 	if err == nil {
@@ -261,9 +259,7 @@ func TestOpenDaemonLogRotatesAtTheSizeLimit(t *testing.T) {
 	if err := os.WriteFile(path, []byte("full"), 0o600); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
-	previous := maxDaemonLogBytes
-	maxDaemonLogBytes = 4
-	t.Cleanup(func() { maxDaemonLogBytes = previous })
+	testutil.Set(t, &maxDaemonLogBytes, 4)
 
 	file, err := openDaemonLog(path)
 	if err != nil {
@@ -301,9 +297,7 @@ func TestOpenDaemonLogKeepsOneArchive(t *testing.T) {
 	if err := os.WriteFile(path+".1", []byte("old"), 0o600); err != nil {
 		t.Fatalf("WriteFile() archive error = %v", err)
 	}
-	previous := maxDaemonLogBytes
-	maxDaemonLogBytes = 1
-	t.Cleanup(func() { maxDaemonLogBytes = previous })
+	testutil.Set(t, &maxDaemonLogBytes, 1)
 
 	file, err := openDaemonLog(path)
 	if err != nil {
@@ -381,9 +375,7 @@ func TestOpenAttachGivesUpOnADaemonThatNeverAnswers(t *testing.T) {
 		accepted <- connection
 	}()
 
-	previous := handshakeTimeout
-	handshakeTimeout = 200 * time.Millisecond
-	defer func() { handshakeTimeout = previous }()
+	testutil.Set(t, &handshakeTimeout, 200*time.Millisecond)
 
 	done := make(chan error, 1)
 	go func() {
@@ -883,9 +875,7 @@ func TestOpenTerminalGivesUpWhenReplayStopsMakingProgress(t *testing.T) {
 	}()
 	t.Cleanup(func() { close(release) })
 
-	previous := replayReadTimeout
-	replayReadTimeout = 200 * time.Millisecond
-	t.Cleanup(func() { replayReadTimeout = previous })
+	testutil.Set(t, &replayReadTimeout, 200*time.Millisecond)
 
 	if _, _, err := New(socket).OpenTerminal("tab-1"); err == nil {
 		t.Fatal("OpenTerminal() waited forever for an incomplete replay")

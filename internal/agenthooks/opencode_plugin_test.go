@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/opspresso/romty/internal/testutil"
 )
 
 // pluginHarness drives the generated plugin through OpenCode 2's setup() and
@@ -76,9 +78,7 @@ func runPluginHarness(t *testing.T, api string, want int) []map[string]string {
 	if err := os.WriteFile(romty, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	previous := findRomtyExecutable
-	findRomtyExecutable = func() (string, error) { return romty, nil }
-	t.Cleanup(func() { findRomtyExecutable = previous })
+	testutil.Set(t, &findRomtyExecutable, func() (string, error) { return romty, nil })
 	contents, err := pluginContents(definition{})
 	if err != nil {
 		t.Fatal(err)

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/opspresso/romty/internal/testutil"
 	"github.com/opspresso/romty/internal/version"
 )
 
@@ -18,19 +19,13 @@ func TestDetectReportsOnlyAvailableAgentsAsPending(t *testing.T) {
 	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	t.Setenv("CODEX_HOME", "")
 	t.Setenv("OPENCODE_CONFIG_DIR", "")
-	previousFind := findExecutable
-	previousHome := userHomeDirectory
-	findExecutable = func(name string) (string, error) {
+	testutil.Set(t, &findExecutable, func(name string) (string, error) {
 		if name == "claude" {
 			return "/usr/local/bin/claude", nil
 		}
 		return "", errors.New("not found")
-	}
-	userHomeDirectory = func() (string, error) { return home, nil }
-	t.Cleanup(func() {
-		findExecutable = previousFind
-		userHomeDirectory = previousHome
 	})
+	testutil.Set(t, &userHomeDirectory, func() (string, error) { return home, nil })
 
 	statuses := Detect()
 	if len(statuses) != 3 || statuses[0].State != StateMissing ||
@@ -134,19 +129,13 @@ func TestInstallCreatesOpenCodePluginAndHonorsConfigDirectory(t *testing.T) {
 	useReleaseBuild(t)
 	directory := filepath.Join(t.TempDir(), "custom-opencode")
 	t.Setenv("OPENCODE_CONFIG_DIR", directory)
-	previousFind := findRomtyExecutable
-	previousExecutables := findExecutable
-	findRomtyExecutable = func() (string, error) { return "/usr/local/bin/romty", nil }
+	testutil.Set(t, &findRomtyExecutable, func() (string, error) { return "/usr/local/bin/romty", nil })
 	// Detect consults PATH, which does not hold opencode on a clean machine.
-	findExecutable = func(name string) (string, error) {
+	testutil.Set(t, &findExecutable, func(name string) (string, error) {
 		if name == "opencode" {
 			return "/usr/local/bin/opencode", nil
 		}
 		return "", errors.New("not found")
-	}
-	t.Cleanup(func() {
-		findRomtyExecutable = previousFind
-		findExecutable = previousExecutables
 	})
 
 	path := filepath.Join(directory, "plugins", "romty.js")
@@ -214,11 +203,9 @@ func TestOpenCodePluginRefusesToOverwriteAForeignFile(t *testing.T) {
 }
 
 func TestDesiredCommandQuotesTheRunningExecutable(t *testing.T) {
-	previousFind := findRomtyExecutable
-	findRomtyExecutable = func() (string, error) {
+	testutil.Set(t, &findRomtyExecutable, func() (string, error) {
 		return "/opt/Romty App/romty's", nil
-	}
-	t.Cleanup(func() { findRomtyExecutable = previousFind })
+	})
 
 	got, err := desiredCommand(ProviderCodex)
 	if err != nil {
@@ -305,19 +292,11 @@ func TestInstallPreservesASettingsSymlink(t *testing.T) {
 }
 
 func TestDevelopmentBuildDoesNotInspectOrInstallHooks(t *testing.T) {
-	originalVersion := version.Value
-	originalFind := findExecutable
-	originalRomty := findRomtyExecutable
-	version.Value = ""
-	findExecutable = func(string) (string, error) { return "/usr/local/bin/agent", nil }
-	findRomtyExecutable = func() (string, error) {
+	testutil.Set(t, &version.Value, "")
+	testutil.Set(t, &findExecutable, func(string) (string, error) { return "/usr/local/bin/agent", nil })
+	testutil.Set(t, &findRomtyExecutable, func() (string, error) {
 		t.Fatal("development hook detection resolved the temporary executable")
 		return "", nil
-	}
-	t.Cleanup(func() {
-		version.Value = originalVersion
-		findExecutable = originalFind
-		findRomtyExecutable = originalRomty
 	})
 
 	statuses := Detect()
@@ -335,9 +314,7 @@ func TestDevelopmentBuildDoesNotInspectOrInstallHooks(t *testing.T) {
 
 func useReleaseBuild(t *testing.T) {
 	t.Helper()
-	original := version.Value
-	version.Value = "0.15.0"
-	t.Cleanup(func() { version.Value = original })
+	testutil.Set(t, &version.Value, "0.15.0")
 }
 
 // The daemon reads a provider's transcripts out of the same directory the hook
@@ -353,9 +330,7 @@ func TestConfigDirectoryFollowsTheProviderOverride(t *testing.T) {
 	}
 
 	t.Setenv("CLAUDE_CONFIG_DIR", "")
-	previous := userHomeDirectory
-	userHomeDirectory = func() (string, error) { return "/home/example", nil }
-	t.Cleanup(func() { userHomeDirectory = previous })
+	testutil.Set(t, &userHomeDirectory, func() (string, error) { return "/home/example", nil })
 	directory, err = ConfigDirectory(ProviderClaude)
 	if err != nil {
 		t.Fatalf("ConfigDirectory() error = %v", err)

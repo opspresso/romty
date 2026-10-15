@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/opspresso/romty/internal/model"
+	"github.com/opspresso/romty/internal/testutil"
 )
 
 func TestDashboardTogglesGitDiffViewForContextWorkspace(t *testing.T) {
@@ -18,9 +19,7 @@ func TestDashboardTogglesGitDiffViewForContextWorkspace(t *testing.T) {
 		Root:        model.Root{ID: "root-1", Name: "projects", Path: "/projects"},
 		Directories: []model.WorkspaceView{{Workspace: workspace}},
 	}}}
-	previousFiles, previousDiff := loadGitChangedFiles, loadGitFileDiff
-	t.Cleanup(func() { loadGitChangedFiles, loadGitFileDiff = previousFiles, previousDiff })
-	loadGitChangedFiles = func(path string) ([]gitChangedFile, error) {
+	testutil.Set(t, &loadGitChangedFiles, func(path string) ([]gitChangedFile, error) {
 		if path != workspace.Path {
 			t.Fatalf("changed files path = %q, want %q", path, workspace.Path)
 		}
@@ -28,13 +27,13 @@ func TestDashboardTogglesGitDiffViewForContextWorkspace(t *testing.T) {
 			{Path: "README.md", WorkTreeStatus: 'M', IndexStatus: ' '},
 			{Path: "internal/ui/view.go", WorkTreeStatus: '?', IndexStatus: '?'},
 		}, nil
-	}
-	loadGitFileDiff = func(path string, file gitChangedFile) (string, error) {
+	})
+	testutil.Set(t, &loadGitFileDiff, func(path string, file gitChangedFile) (string, error) {
 		if path != workspace.Path || file.Path != "README.md" {
 			t.Fatalf("diff target = (%q, %q), want (%q, README.md)", path, file.Path, workspace.Path)
 		}
 		return "diff --git a/README.md b/README.md\n@@ -1 +1 @@\n-old\n+new", nil
-	}
+	})
 
 	value := newDashboard(&fakeBackend{}, snapshot)
 	value.gitStates = map[string]gitState{workspace.Path: {Branch: "main", Dirty: true}}
@@ -77,20 +76,18 @@ func TestDashboardLoadsAndRendersEveryWorkspaceFile(t *testing.T) {
 		Root:        model.Root{ID: "root-1", Name: "projects", Path: "/projects"},
 		Directories: []model.WorkspaceView{{Workspace: workspace}},
 	}}}
-	previousFiles, previousFile := loadWorkspaceFiles, loadWorkspaceFile
-	t.Cleanup(func() { loadWorkspaceFiles, loadWorkspaceFile = previousFiles, previousFile })
-	loadWorkspaceFiles = func(path string) ([]gitChangedFile, error) {
+	testutil.Set(t, &loadWorkspaceFiles, func(path string) ([]gitChangedFile, error) {
 		if path != workspace.Path {
 			t.Fatalf("workspace files path = %q, want %q", path, workspace.Path)
 		}
 		return []gitChangedFile{{Path: "README.md"}, {Path: "internal/ui/view.go"}}, nil
-	}
-	loadWorkspaceFile = func(path, filePath string) (string, error) {
+	})
+	testutil.Set(t, &loadWorkspaceFile, func(path, filePath string) (string, error) {
 		if path != workspace.Path || filePath != "README.md" {
 			t.Fatalf("workspace file target = (%q, %q), want (%q, README.md)", path, filePath, workspace.Path)
 		}
 		return "# Alpha\n", nil
-	}
+	})
 
 	value := newDashboard(&fakeBackend{}, snapshot)
 	value.setNavigation(1)
@@ -275,11 +272,9 @@ func TestDashboardExpandsTabsInLoadedGitDiff(t *testing.T) {
 }
 
 func TestDashboardNavigatesAndScrollsGitDiffView(t *testing.T) {
-	previousDiff := loadGitFileDiff
-	t.Cleanup(func() { loadGitFileDiff = previousDiff })
-	loadGitFileDiff = func(_ string, file gitChangedFile) (string, error) {
+	testutil.Set(t, &loadGitFileDiff, func(_ string, file gitChangedFile) (string, error) {
 		return file.Path + "\n" + strings.Join([]string{"one", "two", "three", "four", "five", "six", "seven"}, "\n"), nil
-	}
+	})
 	value := newDashboard(&fakeBackend{}, model.Snapshot{})
 	value.width = 80
 	value.height = 10
@@ -339,11 +334,9 @@ func TestDashboardNavigatesAndScrollsGitDiffView(t *testing.T) {
 }
 
 func TestDashboardUsesMouseInFileTree(t *testing.T) {
-	previousFile := loadWorkspaceFile
-	t.Cleanup(func() { loadWorkspaceFile = previousFile })
-	loadWorkspaceFile = func(_ string, filePath string) (string, error) {
+	testutil.Set(t, &loadWorkspaceFile, func(_ string, filePath string) (string, error) {
 		return filePath, nil
-	}
+	})
 	files := []gitChangedFile{
 		{Path: "folder/inside.txt"},
 		{Path: "root.txt"},

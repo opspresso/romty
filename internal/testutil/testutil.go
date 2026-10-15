@@ -58,3 +58,12 @@ func WaitForDaemon(t *testing.T, backend Pinger) {
 	}
 	t.Fatal("daemon did not become ready")
 }
+
+// Set replaces *target with value for the rest of the test and restores the
+// previous value when the test ends.
+func Set[T any](t testing.TB, target *T, value T) {
+	t.Helper()
+	previous := *target
+	*target = value
+	t.Cleanup(func() { *target = previous })
+}

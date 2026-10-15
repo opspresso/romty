@@ -50,14 +50,12 @@ func TestShutdownDoesNotWaitForDirectoryPreflight(t *testing.T) {
 			entered := make(chan struct{})
 			release := make(chan struct{})
 			released := false
-			previous := resolveDirectory
-			resolveDirectory = func(path string) (string, error) {
+			testutil.Set(t, &resolveDirectory, func(path string) (string, error) {
 				close(entered)
 				<-release
 				return path, nil
-			}
+			})
 			t.Cleanup(func() {
-				resolveDirectory = previous
 				if !released {
 					close(release)
 				}
@@ -116,14 +114,12 @@ func TestShutdownDoesNotWaitForResponseSnapshot(t *testing.T) {
 			entered := make(chan struct{})
 			release := make(chan struct{})
 			released := false
-			previous := readDirectory
-			readDirectory = func(string) ([]os.DirEntry, error) {
+			testutil.Set(t, &readDirectory, func(string) ([]os.DirEntry, error) {
 				close(entered)
 				<-release
 				return nil, nil
-			}
+			})
 			t.Cleanup(func() {
-				readDirectory = previous
 				if !released {
 					close(release)
 				}
@@ -161,9 +157,7 @@ func TestShutdownDoesNotWaitForResponseSnapshot(t *testing.T) {
 // and a file descriptor for the daemon's whole life, and must not keep the
 // daemon from serving anyone else.
 func TestHandshakeTimesOutOnASilentPeer(t *testing.T) {
-	previous := requestTimeout
-	requestTimeout = 150 * time.Millisecond
-	t.Cleanup(func() { requestTimeout = previous })
+	testutil.Set(t, &requestTimeout, 150*time.Millisecond)
 
 	base := testutil.ShortTempDir(t)
 	socket := filepath.Join(base, "daemon.sock")
@@ -204,9 +198,7 @@ func TestHandshakeTimesOutOnASilentPeer(t *testing.T) {
 }
 
 func TestServeLimitsActiveConnectionsAndRecoversCapacity(t *testing.T) {
-	previous := maxActiveConnections
-	maxActiveConnections = 1
-	t.Cleanup(func() { maxActiveConnections = previous })
+	testutil.Set(t, &maxActiveConnections, 1)
 
 	base := testutil.ShortTempDir(t)
 	socket := filepath.Join(base, "daemon.sock")
@@ -366,9 +358,7 @@ func TestAttachDoesNotStallTheSessionForOtherClients(t *testing.T) {
 }
 
 func TestSlowLiveClientDoesNotStallAnotherClient(t *testing.T) {
-	previous := maxLiveClientQueueBytes
-	maxLiveClientQueueBytes = 64
-	t.Cleanup(func() { maxLiveClientQueueBytes = previous })
+	testutil.Set(t, &maxLiveClientQueueBytes, 64)
 
 	value := newSessionForTest(nil)
 	slow, unread := net.Pipe()
@@ -741,9 +731,7 @@ func TestShutdownDoesNotPersistTheTabsItIsKilling(t *testing.T) {
 // large recording sent to a steadily reading client can still be dropped.
 func TestAttachSurvivesAClientThatReadsSteadilyButSlowly(t *testing.T) {
 	withHistoryLimit(t, 256*1024)
-	previous := replayTimeout
-	replayTimeout = 150 * time.Millisecond
-	t.Cleanup(func() { replayTimeout = previous })
+	testutil.Set(t, &replayTimeout, 150*time.Millisecond)
 
 	client, daemonSide := net.Pipe()
 	defer daemonSide.Close()
@@ -774,9 +762,7 @@ func TestAttachSurvivesAClientThatReadsSteadilyButSlowly(t *testing.T) {
 // The recording handed to the replay must be a copy: the ring is written in
 // place, so an aliased slice would be rewritten under the replay's feet.
 func TestAttachCopiesTheRecordingItReplays(t *testing.T) {
-	previous := maxHistoryBytes
-	maxHistoryBytes = 4096
-	t.Cleanup(func() { maxHistoryBytes = previous })
+	testutil.Set(t, &maxHistoryBytes, 4096)
 
 	client, daemonSide := net.Pipe()
 	defer daemonSide.Close()
@@ -885,9 +871,7 @@ func TestSessionExitIsRecordedWhenStateCannotBeSaved(t *testing.T) {
 // typed text, so a multi-line paste runs each line — data loss arriving long
 // after the mode went missing.
 func TestAttachRestoresModesTheRecordingNoLongerHolds(t *testing.T) {
-	previous := maxHistoryBytes
-	maxHistoryBytes = 2048
-	t.Cleanup(func() { maxHistoryBytes = previous })
+	testutil.Set(t, &maxHistoryBytes, 2048)
 
 	value := newSessionForTest(nil)
 	value.broadcast([]byte("\x1b[?2004h\x1b[?1h"))
@@ -994,9 +978,7 @@ func TestListenPrivatelyReportsAlreadyRunningWhenTheBindIsLost(t *testing.T) {
 // and then stops reading holds a goroutine and a file descriptor exactly as a
 // peer that never sends one does, once the reply outgrows the socket buffer.
 func TestReplyGivesUpOnAPeerThatStoppedReading(t *testing.T) {
-	previous := requestTimeout
-	requestTimeout = 100 * time.Millisecond
-	t.Cleanup(func() { requestTimeout = previous })
+	testutil.Set(t, &requestTimeout, 100*time.Millisecond)
 
 	// net.Pipe buffers nothing, so the write blocks until someone reads, which
 	// is what a full socket buffer looks like without having to fill one.

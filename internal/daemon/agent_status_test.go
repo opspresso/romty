@@ -11,6 +11,7 @@ import (
 
 	"github.com/opspresso/romty/internal/model"
 	"github.com/opspresso/romty/internal/protocol"
+	"github.com/opspresso/romty/internal/testutil"
 	"github.com/opspresso/romty/internal/transcript"
 )
 
@@ -117,11 +118,9 @@ func TestAgentStatusRequiresARunningTab(t *testing.T) {
 }
 
 func TestNodeStatusReportsPresenceWithoutAgentPhases(t *testing.T) {
-	previousGroup, previousList := foregroundProcessGroup, runProcessList
-	foregroundProcessGroup = func(*os.File) (int, error) { return 101, nil }
+	testutil.Set(t, &foregroundProcessGroup, func(*os.File) (int, error) { return 101, nil })
 	command := "node server.js"
-	runProcessList = func(context.Context) ([]byte, error) { return []byte("101 " + command + "\n"), nil }
-	t.Cleanup(func() { foregroundProcessGroup, runProcessList = previousGroup, previousList })
+	testutil.Set(t, &runProcessList, func(context.Context) ([]byte, error) { return []byte("101 " + command + "\n"), nil })
 
 	value := newSessionForTest(nil)
 	value.broadcast([]byte("Server ready. Press Enter to continue.\r\n"))
@@ -272,9 +271,7 @@ func TestTranscriptInterruptEndsOnlyANewerOpenTurn(t *testing.T) {
 func TestAgentStatusRequiresLifecycleReportsForCodexAndClaude(t *testing.T) {
 	hooked, unhooked := new(os.File), new(os.File)
 	titled := new(os.File)
-	previousGroup := foregroundProcessGroup
-	previousList := runProcessList
-	foregroundProcessGroup = func(terminal *os.File) (int, error) {
+	testutil.Set(t, &foregroundProcessGroup, func(terminal *os.File) (int, error) {
 		switch terminal {
 		case hooked:
 			return 101, nil
@@ -283,13 +280,9 @@ func TestAgentStatusRequiresLifecycleReportsForCodexAndClaude(t *testing.T) {
 		default:
 			return 103, nil
 		}
-	}
-	runProcessList = func(context.Context) ([]byte, error) {
+	})
+	testutil.Set(t, &runProcessList, func(context.Context) ([]byte, error) {
 		return []byte("101 claude\n102 claude\n103 codex\n"), nil
-	}
-	t.Cleanup(func() {
-		foregroundProcessGroup = previousGroup
-		runProcessList = previousList
 	})
 
 	hookedSession := newSessionForTest(hooked)
@@ -340,19 +333,13 @@ func TestAgentStatusReportsTheLedgerOnlyForAHookedSession(t *testing.T) {
 	}
 
 	hooked, unhooked := new(os.File), new(os.File)
-	previousGroup := foregroundProcessGroup
-	previousList := runProcessList
-	foregroundProcessGroup = func(terminal *os.File) (int, error) {
+	testutil.Set(t, &foregroundProcessGroup, func(terminal *os.File) (int, error) {
 		if terminal == hooked {
 			return 101, nil
 		}
 		return 102, nil
-	}
-	runProcessList = func(context.Context) ([]byte, error) { return []byte("101 claude\n102 claude\n"), nil }
-	t.Cleanup(func() {
-		foregroundProcessGroup = previousGroup
-		runProcessList = previousList
 	})
+	testutil.Set(t, &runProcessList, func(context.Context) ([]byte, error) { return []byte("101 claude\n102 claude\n"), nil })
 
 	server := &Server{
 		sessions: map[string]*session{
@@ -401,14 +388,8 @@ func TestAgentStatusReportsTheLedgerOnlyForAHookedSession(t *testing.T) {
 // rather than being guessed into a state it is not in.
 func TestAgentStatusLeavesAnUnreadableScreenUnknown(t *testing.T) {
 	terminal := new(os.File)
-	previousGroup := foregroundProcessGroup
-	previousList := runProcessList
-	foregroundProcessGroup = func(*os.File) (int, error) { return 101, nil }
-	runProcessList = func(context.Context) ([]byte, error) { return []byte("101 claude\n"), nil }
-	t.Cleanup(func() {
-		foregroundProcessGroup = previousGroup
-		runProcessList = previousList
-	})
+	testutil.Set(t, &foregroundProcessGroup, func(*os.File) (int, error) { return 101, nil })
+	testutil.Set(t, &runProcessList, func(context.Context) ([]byte, error) { return []byte("101 claude\n"), nil })
 
 	value := newSessionForTest(terminal)
 	value.history.append([]byte("go: downloading github.com/example/module v1.2.3\r\n"))
@@ -423,14 +404,8 @@ func TestAgentStatusLeavesAnUnreadableScreenUnknown(t *testing.T) {
 }
 
 func TestAgentStatusDoesNotGuessCodexLifecycleFromRedraws(t *testing.T) {
-	previousGroup := foregroundProcessGroup
-	previousList := runProcessList
-	foregroundProcessGroup = func(*os.File) (int, error) { return 101, nil }
-	runProcessList = func(context.Context) ([]byte, error) { return []byte("101 codex\n"), nil }
-	t.Cleanup(func() {
-		foregroundProcessGroup = previousGroup
-		runProcessList = previousList
-	})
+	testutil.Set(t, &foregroundProcessGroup, func(*os.File) (int, error) { return 101, nil })
+	testutil.Set(t, &runProcessList, func(context.Context) ([]byte, error) { return []byte("101 codex\n"), nil })
 
 	value := newSessionForTest(new(os.File))
 	server := &Server{
@@ -462,14 +437,8 @@ func TestAgentStatusDoesNotGuessCodexLifecycleFromRedraws(t *testing.T) {
 
 func TestAgentStatusUsesForegroundProcessAsPresenceAuthority(t *testing.T) {
 	claudePTY := new(os.File)
-	previousGroup := foregroundProcessGroup
-	previousList := runProcessList
-	foregroundProcessGroup = func(terminal *os.File) (int, error) { return 101, nil }
-	runProcessList = func(context.Context) ([]byte, error) { return []byte("101 claude\n"), nil }
-	t.Cleanup(func() {
-		foregroundProcessGroup = previousGroup
-		runProcessList = previousList
-	})
+	testutil.Set(t, &foregroundProcessGroup, func(terminal *os.File) (int, error) { return 101, nil })
+	testutil.Set(t, &runProcessList, func(context.Context) ([]byte, error) { return []byte("101 claude\n"), nil })
 
 	server := &Server{
 		sessions: map[string]*session{
@@ -506,10 +475,8 @@ func TestAgentStatusEndsATurnTheTranscriptRecordsAsInterrupted(t *testing.T) {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 	terminal := new(os.File)
-	previousGroup, previousList := foregroundProcessGroup, runProcessList
-	foregroundProcessGroup = func(*os.File) (int, error) { return 101, nil }
-	runProcessList = func(context.Context) ([]byte, error) { return []byte("101 claude\n"), nil }
-	t.Cleanup(func() { foregroundProcessGroup, runProcessList = previousGroup, previousList })
+	testutil.Set(t, &foregroundProcessGroup, func(*os.File) (int, error) { return 101, nil })
+	testutil.Set(t, &runProcessList, func(context.Context) ([]byte, error) { return []byte("101 claude\n"), nil })
 
 	server := &Server{
 		sessions: map[string]*session{"tab-1": newSessionForTest(terminal)},
@@ -536,9 +503,7 @@ func TestAgentStatusEndsATurnTheTranscriptRecordsAsInterrupted(t *testing.T) {
 // carry another tab's ID. Only a hook below the tab's foreground job counts.
 func TestOpenCodeEventsCountOnlyFromTheTabsForegroundJob(t *testing.T) {
 	terminal := new(os.File)
-	previous := foregroundProcessGroup
-	foregroundProcessGroup = func(*os.File) (int, error) { return 4242, nil }
-	t.Cleanup(func() { foregroundProcessGroup = previous })
+	testutil.Set(t, &foregroundProcessGroup, func(*os.File) (int, error) { return 4242, nil })
 	server := &Server{sessions: map[string]*session{"tab": newSessionForTest(terminal)}, agentStatuses: make(map[string]agentRuntime)}
 	report := func(groups ...int) {
 		t.Helper()

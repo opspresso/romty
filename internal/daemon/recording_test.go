@@ -4,15 +4,15 @@ import (
 	"bytes"
 	"strings"
 	"testing"
+
+	"github.com/opspresso/romty/internal/testutil"
 )
 
 // withHistoryLimit sets the recording's ceiling for one test, so the wrapping
 // paths can be reached without building eight megabytes.
 func withHistoryLimit(t *testing.T, limit int) {
 	t.Helper()
-	previous := maxHistoryBytes
-	maxHistoryBytes = limit
-	t.Cleanup(func() { maxHistoryBytes = previous })
+	testutil.Set(t, &maxHistoryBytes, limit)
 }
 
 // The recording is a ring, so what it holds is the last limit bytes in the

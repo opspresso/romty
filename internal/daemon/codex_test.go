@@ -10,6 +10,7 @@ import (
 	"github.com/opspresso/romty/internal/codexstate"
 	"github.com/opspresso/romty/internal/model"
 	"github.com/opspresso/romty/internal/protocol"
+	"github.com/opspresso/romty/internal/testutil"
 )
 
 const codexSessionA = "01234567-89ab-7000-8000-123456789abc"
@@ -64,11 +65,9 @@ func TestCodexHookUsesTerminalIdentityInsteadOfSharedDaemonTabID(t *testing.T) {
 }
 
 func TestNativeCodexReadUpdatesPlainCodexAndInvalidatesStaleState(t *testing.T) {
-	previousGroup, previousList := foregroundProcessGroup, runProcessList
-	foregroundProcessGroup = func(*os.File) (int, error) { return 101, nil }
+	testutil.Set(t, &foregroundProcessGroup, func(*os.File) (int, error) { return 101, nil })
 	process := "codex"
-	runProcessList = func(context.Context) ([]byte, error) { return []byte("101 " + process + "\n"), nil }
-	t.Cleanup(func() { foregroundProcessGroup, runProcessList = previousGroup, previousList })
+	testutil.Set(t, &runProcessList, func(context.Context) ([]byte, error) { return []byte("101 " + process + "\n"), nil })
 	value := codexSession(codexSessionA)
 	reader := &fakeCodexReader{states: map[string]codexstate.State{codexSessionA[:29]: {
 		AgentStatus: model.AgentStatus{Agent: model.AgentCodex, Phase: model.AgentPhaseWorking, Source: "runtime", Active: true}, SessionID: codexSessionA,
