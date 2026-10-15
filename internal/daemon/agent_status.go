@@ -76,9 +76,10 @@ func (s *Server) recordAgentEvent(tabID string, event *protocol.AgentEvent) prot
 	if !ok {
 		return protocol.Response{Error: errNoSession}
 	}
-	if (event.Agent == model.AgentOpenCode || event.Agent == model.AgentKiro) && !runsInForeground(value, event.ProcessGroups) {
+	if (event.Agent == model.AgentOpenCode || event.Agent == model.AgentKiro) &&
+		(event.BackgroundJob || !runsInForeground(value, event.ProcessGroups)) {
 		// The event came from a process outside this tab's foreground job,
-		// such as OpenCode's shared background service.
+		// such as OpenCode's shared background service or a background job.
 		return protocol.Response{}
 	}
 	current, exists := s.agentStatuses[tabID]

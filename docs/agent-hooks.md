@@ -148,7 +148,7 @@ The terminal-output fallback remains an estimate and never confirms completion.
 
 Kiro CLI 3, and Kiro CLI 2 started with `kiro-cli --v3`, run the global hook files. `romty.json` reports `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, and `Stop`. `romty-session-end.json` reports `SessionEnd` and is a separate file: Kiro IDE and the V2 engine do not list that trigger, so a surface that rejects it skips only that file.
 
-Kiro runs hooks from its agent server, a child of the `kiro-cli` process. Each hook therefore reports the process groups above it, and romty accepts a Kiro event only when the tab's foreground job is among them. Kiro runs `Stop` only for a completed turn, so `Stop` is `completed`.
+Kiro runs hooks from its agent server, a child of the `kiro-cli` process. Each hook therefore reports the process groups above it, and romty accepts a Kiro event only when the tab's foreground job is among them and the hook does not run for a background job such as `kiro-cli &`. romty detects a Kiro tab by its `kiro-cli-chat` process, because Kiro CLI shell integration also runs `kiro-cli` helper commands and the `kiro-cli-term` wrapper in every shell. Kiro runs `Stop` only for a completed turn, so `Stop` is `completed`.
 
 A cancelled turn runs no hook. romty reads the session record that the hook's session ID names, and a newer cancellation there ends the turn as `interrupted`:
 
@@ -159,7 +159,7 @@ Kiro CLI 2's default V2 engine runs no global hooks. To report V2 sessions, add 
 
 ## What a hook sends
 
-The hook command sends only tab, provider, session, turn/prompt, subagent and tool-use identifiers, event name, tool name, notification type, permission mode, whether background work remains, for Claude Code the transcript file path, and, for OpenCode and Kiro, the process groups above the hook. It does not send or retain prompts, transcript contents, tool inputs, tool outputs, or assistant messages. It is silent outside a romty tab or when the daemon is unavailable.
+The hook command sends only tab, provider, session, turn/prompt, subagent and tool-use identifiers, event name, tool name, notification type, permission mode, whether background work remains, for Claude Code the transcript file path, and, for OpenCode and Kiro, the process groups above the hook and whether it runs for a background job. It does not send or retain prompts, transcript contents, tool inputs, tool outputs, or assistant messages. It is silent outside a romty tab or when the daemon is unavailable.
 
 ## Token and cost readings
 

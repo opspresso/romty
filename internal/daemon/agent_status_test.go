@@ -557,6 +557,26 @@ func TestKiroEventsCountFromTheForegroundJobAndStopCompletes(t *testing.T) {
 	}
 }
 
+// Under a terminal wrapper the tab's foreground job is the wrapper, an ancestor
+// of every process in the tab. A hook that runs for a background job, such as
+// `kiro-cli &`, still does not report for the tab.
+func TestHooksFromABackgroundJobDoNotReport(t *testing.T) {
+	testutil.Set(t, &foregroundProcessGroup, func(*os.File) (int, error) { return 4242, nil })
+	for _, agent := range []model.Agent{model.AgentKiro, model.AgentOpenCode} {
+		server := &Server{sessions: map[string]*session{"tab": newSessionForTest(new(os.File))}, agentStatuses: make(map[string]agentRuntime)}
+		event := protocol.AgentEvent{
+			Agent: agent, SessionID: "sess_1", HookEvent: "UserPromptSubmit",
+			ProcessGroups: []int{8304, 600, 400, 4242}, BackgroundJob: true,
+		}
+		if response := server.recordAgentEvent("tab", &event); response.Error != "" {
+			t.Fatal(response.Error)
+		}
+		if _, ok := server.agentStatuses["tab"]; ok {
+			t.Fatalf("a %s hook from a background job reported for the tab", agent)
+		}
+	}
+}
+
 // Claude Code names a project's transcript folder by its own rules, which
 // change between versions. The daemon reads the path the hook reports, so a
 // workspace whose name holds an underscore or a space still gets its counters
@@ -600,7 +620,7 @@ func TestScanAgentsForgetsTheStatusOfAnExitedAgent(t *testing.T) {
 		return 101, nil
 	})
 	testutil.Set(t, &runProcessList, func(context.Context) ([]byte, error) {
-		return []byte("101 1 101 101 /bin/zsh\n202 1 202 202 kiro-cli\n"), nil
+		return []byte("101 1 101 101 /bin/zsh\n202 1 202 202 kiro-cli-chat\n"), nil
 	})
 	scanStart := time.Unix(100, 0)
 	testutil.Set(t, &agentNow, func() time.Time { return scanStart })

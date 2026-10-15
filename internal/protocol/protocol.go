@@ -125,9 +125,13 @@ type AgentEvent struct {
 	TranscriptPath string `json:"transcript_path,omitempty"`
 	// ProcessGroups are the process groups of the hook command and its
 	// ancestors. A shared agent server runs hooks for every terminal, so an
-	// OpenCode event counts for a tab only when that tab's foreground job is
-	// among them.
+	// OpenCode or Kiro event counts for a tab only when that tab's foreground
+	// job is among them.
 	ProcessGroups []int `json:"process_groups,omitempty"`
+	// BackgroundJob reports that the hook runs for a job its shell put in the
+	// background. Such a job is not what the tab shows, even when a terminal
+	// wrapper puts the tab's foreground job among ProcessGroups.
+	BackgroundJob bool `json:"background_job,omitempty"`
 }
 
 // MaxAgentEventMetadataBytes bounds each metadata string a hook reports. Both

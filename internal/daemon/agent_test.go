@@ -161,11 +161,19 @@ func TestForegroundJobKeepsAGroupWithoutNestedTerminal(t *testing.T) {
 	}
 }
 
-func TestCommandAgentIgnoresKiroTerminalWrapper(t *testing.T) {
-	for _, command := range []string{"kiro-cli-term", "/Users/me/.local/bin/kiro-cli-term --login"} {
+// Kiro CLI shell integration runs kiro-cli helpers and the kiro-cli-term
+// wrapper in every shell. Only a chat session runs kiro-cli-chat.
+func TestCommandAgentRecognisesOnlyAKiroChatSession(t *testing.T) {
+	for _, command := range []string{
+		"kiro-cli", "kiro-cli init zsh post --rcfile zshrc", "kiro-cli _ should-figterm-launch",
+		"kiro-cli-term", "/Users/me/.local/bin/kiro-cli-term --login",
+	} {
 		if got := commandAgent(command); got != "" {
 			t.Fatalf("commandAgent(%q) = %q, want none", command, got)
 		}
+	}
+	if got := commandAgent("/Users/me/.local/bin/kiro-cli-chat chat --v3"); got != model.AgentKiro {
+		t.Fatalf("commandAgent(kiro-cli-chat) = %q, want kiro", got)
 	}
 }
 
