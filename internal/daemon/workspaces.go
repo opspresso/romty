@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -252,7 +253,8 @@ func (s *Server) ensureWorkspace(rootID, path string) protocol.Response {
 		return protocol.Response{Error: errRootNotFound}
 	}
 	for _, workspace := range s.value.Workspaces {
-		if workspace.RootID == rootID && workspace.Path == path && workspaceHasTabs(s.value.Tabs, workspace.ID) {
+		if workspace.RootID == rootID && workspace.Path == path &&
+			slices.ContainsFunc(s.value.Tabs, func(tab model.Tab) bool { return tab.WorkspaceID == workspace.ID }) {
 			copy := workspace
 			s.mu.Unlock()
 			return protocol.Response{Workspace: &copy}
@@ -375,63 +377,101 @@ func (s *Server) snapshot() model.Snapshot {
 		value.Tabs[index].AgentCostUSD = status.CostUSD
 	}
 
+	index := newStateIndex(value)
 	result := model.Snapshot{Revision: revision, Roots: make([]model.RootView, 0, len(value.Roots))}
 	for _, root := range value.Roots {
-		rootWorkspace, _ := workspaceAt(value.Workspaces, root.ID, root.Path)
+		rootWorkspace, _ := index.workspaceAt(root.ID, root.Path)
+		view := model.RootView{Root: root, Tabs: index.tabsFor(rootWorkspace.ID)}
 		entries, err := readDirectory(root.Path)
 		if err != nil {
-			directories := appendMissingRunningWorkspaces(nil, value, root)
-			result.Roots = append(result.Roots, model.RootView{
-				Root:        root,
-				Tabs:        tabsFor(value.Tabs, rootWorkspace.ID),
-				Error:       err.Error(),
-				Directories: directories,
-			})
+			view.Error = err.Error()
+			view.Directories = index.appendRunningWorkspaces(nil, root)
+			result.Roots = append(result.Roots, view)
 			continue
 		}
-		directories := make([]model.WorkspaceView, 0)
+		directories := make([]model.WorkspaceView, 0, len(entries))
 		for _, entry := range entries {
 			// Dot-directories are tooling, not workspaces. One that still holds
-			// running tabs comes back through appendMissingRunningWorkspaces.
+			// running tabs comes back through appendRunningWorkspaces.
 			if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
 				continue
 			}
 			path := filepath.Join(root.Path, entry.Name())
-			workspace, ok := workspaceAt(value.Workspaces, root.ID, path)
+			workspace, ok := index.workspaceAt(root.ID, path)
 			if !ok {
 				workspace = model.Workspace{RootID: root.ID, Name: entry.Name(), Path: path}
 			}
 			directories = append(directories, model.WorkspaceView{
 				Workspace: workspace,
-				Tabs:      tabsFor(value.Tabs, workspace.ID),
+				Tabs:      index.tabsFor(workspace.ID),
 			})
 		}
-		directories = appendMissingRunningWorkspaces(directories, value, root)
+		directories = index.appendRunningWorkspaces(directories, root)
 		sort.Slice(directories, func(i, j int) bool {
 			return directories[i].Workspace.Name < directories[j].Workspace.Name
 		})
-		result.Roots = append(result.Roots, model.RootView{
-			Root:        root,
-			Tabs:        tabsFor(value.Tabs, rootWorkspace.ID),
-			Directories: directories,
-		})
+		view.Directories = directories
+		result.Roots = append(result.Roots, view)
 	}
 	return result
 }
 
-func appendMissingRunningWorkspaces(directories []model.WorkspaceView, value model.State, root model.Root) []model.WorkspaceView {
+// stateIndex looks workspaces and tabs up by key. A snapshot asks once per
+// directory under every root, so a linear scan per question would cost
+// directories times tabs on every refresh.
+type stateIndex struct {
+	workspaces []model.Workspace
+	byPath     map[workspaceKey]model.Workspace
+	tabs       map[string][]model.Tab
+}
+
+type workspaceKey struct{ rootID, path string }
+
+func newStateIndex(value model.State) stateIndex {
+	index := stateIndex{
+		workspaces: value.Workspaces,
+		byPath:     make(map[workspaceKey]model.Workspace, len(value.Workspaces)),
+		tabs:       make(map[string][]model.Tab),
+	}
+	for _, workspace := range value.Workspaces {
+		index.byPath[workspaceKey{workspace.RootID, workspace.Path}] = workspace
+	}
+	for _, tab := range value.Tabs {
+		index.tabs[tab.WorkspaceID] = append(index.tabs[tab.WorkspaceID], tab)
+	}
+	return index
+}
+
+func (i stateIndex) workspaceAt(rootID, path string) (model.Workspace, bool) {
+	workspace, ok := i.byPath[workspaceKey{rootID, path}]
+	return workspace, ok
+}
+
+// tabsFor never returns nil, so a workspace without tabs is encoded as an
+// empty list.
+func (i stateIndex) tabsFor(workspaceID string) []model.Tab {
+	if tabs := i.tabs[workspaceID]; tabs != nil {
+		return tabs
+	}
+	return []model.Tab{}
+}
+
+// appendRunningWorkspaces adds the workspaces of root that hold running tabs
+// but are not among directories: a directory that was deleted, renamed, or
+// hidden while its shells still run.
+func (i stateIndex) appendRunningWorkspaces(directories []model.WorkspaceView, root model.Root) []model.WorkspaceView {
 	seen := make(map[string]struct{}, len(directories))
 	for _, directory := range directories {
 		seen[directory.Workspace.Path] = struct{}{}
 	}
-	for _, workspace := range value.Workspaces {
+	for _, workspace := range i.workspaces {
 		if workspace.RootID != root.ID || workspace.Path == root.Path {
 			continue
 		}
 		if _, ok := seen[workspace.Path]; ok {
 			continue
 		}
-		tabs := tabsFor(value.Tabs, workspace.ID)
+		tabs := i.tabs[workspace.ID]
 		if len(tabs) == 0 {
 			continue
 		}
@@ -487,34 +527,6 @@ func findWorkspace(values []model.Workspace, id string) (model.Workspace, bool) 
 		}
 	}
 	return model.Workspace{}, false
-}
-
-func workspaceAt(values []model.Workspace, rootID, path string) (model.Workspace, bool) {
-	for _, value := range values {
-		if value.RootID == rootID && value.Path == path {
-			return value, true
-		}
-	}
-	return model.Workspace{}, false
-}
-
-func tabsFor(values []model.Tab, workspaceID string) []model.Tab {
-	result := make([]model.Tab, 0)
-	for _, value := range values {
-		if value.WorkspaceID == workspaceID {
-			result = append(result, value)
-		}
-	}
-	return result
-}
-
-func workspaceHasTabs(values []model.Tab, workspaceID string) bool {
-	for _, value := range values {
-		if value.WorkspaceID == workspaceID {
-			return true
-		}
-	}
-	return false
 }
 
 func nextTabName(values []model.Tab, workspaceID string) string {
