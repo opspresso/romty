@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/opspresso/romty/internal/protocol"
+	"github.com/opspresso/romty/internal/testutil"
 )
 
 // clickTabLabel clicks inside a tab's label, clear of its close button.
@@ -63,9 +64,7 @@ func TestDashboardDoubleClickNeedsTheSameTabInQuickSuccession(t *testing.T) {
 	value, _ := tabCloseDashboard(tabs)
 	value.focus = terminalPane
 	current := time.Now()
-	original := now
-	now = func() time.Time { return current }
-	t.Cleanup(func() { now = original })
+	testutil.Set(t, &now, func() time.Time { return current })
 
 	clickTabLabel(&value, 0)
 	clickTabLabel(&value, 1)
