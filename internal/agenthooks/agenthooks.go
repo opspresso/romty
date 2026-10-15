@@ -27,6 +27,7 @@ const (
 	ProviderClaude   Provider = "claude"
 	ProviderCodex    Provider = "codex"
 	ProviderOpenCode Provider = "opencode"
+	ProviderKiro     Provider = "kiro"
 )
 
 // State is how a provider's hook files compare with what romty would write.
@@ -72,10 +73,10 @@ type Result struct {
 
 var ErrDevelopmentBuild = errors.New("agent hook installation is disabled for development builds")
 
-// definition describes where a provider keeps the file that reports its state,
-// and what shape that file takes. Claude Code and Codex merge romty command
-// handlers into a JSON settings document; OpenCode loads a JavaScript plugin
-// from a plugins directory, so its file is generated whole instead.
+// definition describes where a provider keeps the files that report its
+// state, and what shape they take. Claude Code and Codex merge romty command
+// handlers into a JSON settings document. OpenCode loads a JavaScript plugin
+// and Kiro loads standalone hook files, so romty generates those whole.
 type definition struct {
 	provider    Provider
 	executables []string
@@ -84,10 +85,16 @@ type definition struct {
 	// filename is the JSON settings file the command handlers are merged into.
 	filename string
 	events   []string
-	// plugin reports that the provider is configured with a generated plugin
-	// file rather than merged JSON handlers.
-	plugin     bool
-	pluginFile string
+	// generated lists files romty writes whole instead of merging handlers.
+	generated []generatedFile
+}
+
+// generatedFile is one file romty owns entirely. marker identifies it as
+// romty's: a file without it is the user's and is never overwritten.
+type generatedFile struct {
+	path     string
+	marker   string
+	contents func() ([]byte, error)
 }
 
 var definitions = []definition{
@@ -119,8 +126,17 @@ var definitions = []definition{
 		executables: []string{"opencode"},
 		directory:   ".config/opencode",
 		environment: "OPENCODE_CONFIG_DIR",
-		plugin:      true,
-		pluginFile:  "plugins/romty.js",
+		generated:   []generatedFile{{path: "plugins/romty.js", marker: pluginMarker, contents: pluginContents}},
+	},
+	{
+		provider:    ProviderKiro,
+		executables: []string{"kiro-cli"},
+		directory:   ".kiro",
+		environment: "KIRO_HOME",
+		generated: []generatedFile{
+			{path: "hooks/romty.json", marker: kiroMarker, contents: kiroHooks(kiroLifecycleTriggers)},
+			{path: "hooks/romty-session-end.json", marker: kiroMarker, contents: kiroHooks([]string{"SessionEnd"})},
+		},
 	},
 }
 
@@ -137,6 +153,8 @@ func (p Provider) DisplayName() string {
 		return "Codex"
 	case ProviderOpenCode:
 		return "OpenCode"
+	case ProviderKiro:
+		return "Kiro"
 	default:
 		return string(p)
 	}
@@ -209,8 +227,8 @@ type fileWrite struct {
 }
 
 func planFor(value definition) (plan, error) {
-	if value.plugin {
-		return planPlugin(value)
+	if len(value.generated) > 0 {
+		return planGenerated(value)
 	}
 	// Both files are read and validated before either one is written.
 	var titleWrite *fileWrite
@@ -665,14 +683,6 @@ async function server() {
 export default { id: "romty", setup, server }
 `
 
-func pluginPath(value definition) (string, error) {
-	directory, err := providerDirectory(value)
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(directory, value.pluginFile), nil
-}
-
 func pluginContents() ([]byte, error) {
 	absolute, err := romtyPath()
 	if err != nil {
@@ -685,31 +695,44 @@ func pluginContents() ([]byte, error) {
 	return []byte(fmt.Sprintf(openCodePluginTemplate, quoted)), nil
 }
 
-func planPlugin(value definition) (plan, error) {
-	path, err := pluginPath(value)
+// planGenerated compares each generated file with what romty would write. The
+// provider is missing when none exists, current when all match, and outdated
+// otherwise; only the files that differ are written.
+func planGenerated(value definition) (plan, error) {
+	directory, err := providerDirectory(value)
 	if err != nil {
 		return plan{}, err
 	}
-	result := plan{path: path}
-	desired, err := pluginContents()
-	if err != nil {
-		return result, err
+	result := plan{path: filepath.Join(directory, value.generated[0].path)}
+	missing, current := 0, 0
+	for _, file := range value.generated {
+		path := filepath.Join(directory, file.path)
+		desired, err := file.contents()
+		if err != nil {
+			return result, err
+		}
+		data, err := os.ReadFile(path)
+		switch {
+		case errors.Is(err, os.ErrNotExist):
+			missing++
+		case err != nil:
+			return result, fmt.Errorf("read %s: %w", filepath.Base(path), err)
+		case !bytes.Contains(data, []byte(file.marker)):
+			return result, fmt.Errorf("%s is not a romty-managed file", filepath.Base(path))
+		case bytes.Equal(data, desired):
+			current++
+			continue
+		}
+		result.writes = append(result.writes, fileWrite{path: path, data: desired})
 	}
-	data, err := os.ReadFile(path)
 	switch {
-	case errors.Is(err, os.ErrNotExist):
+	case missing == len(value.generated):
 		result.state = StateMissing
-	case err != nil:
-		return result, fmt.Errorf("read %s: %w", filepath.Base(path), err)
-	case !bytes.Contains(data, []byte(pluginMarker)):
-		return result, fmt.Errorf("%s is not a romty-managed file", filepath.Base(path))
-	case bytes.Equal(data, desired):
+	case current == len(value.generated):
 		result.state = StateCurrent
-		return result, nil
 	default:
 		result.state = StateOutdated
 	}
-	result.writes = []fileWrite{{path: path, data: desired}}
 	return result, nil
 }
 
