@@ -83,10 +83,6 @@ type gitActionMsg struct {
 	err    error
 }
 
-func executeGitAction(path string, action gitAction) (string, error) {
-	return executeGitActionContext(context.Background(), path, action)
-}
-
 func executeGitActionContext(parent context.Context, path string, action gitAction) (string, error) {
 	arguments, err := action.arguments()
 	if err != nil {
