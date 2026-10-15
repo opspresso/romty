@@ -136,10 +136,9 @@ func (m dashboard) gitActionWorkspace() (navItem, bool) {
 	if m.focus == leftPane && !m.scrollback {
 		return m.navigationItem()
 	}
-	for _, item := range m.navigationItems() {
-		if item.workspace.Path == m.selectedPath {
-			return item, true
-		}
+	items := m.navigationItems()
+	if index := workspaceIndex(items, m.selectedPath); index >= 0 {
+		return items[index], true
 	}
 	return navItem{}, false
 }

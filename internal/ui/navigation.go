@@ -4,6 +4,8 @@
 package ui
 
 import (
+	"slices"
+
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/opspresso/romty/internal/gitrepo"
@@ -253,12 +255,7 @@ func workspaceIndex(items []navItem, path string) int {
 	if path == "" {
 		return -1
 	}
-	for index, item := range items {
-		if item.workspace.Path == path {
-			return index
-		}
-	}
-	return -1
+	return slices.IndexFunc(items, func(item navItem) bool { return item.workspace.Path == path })
 }
 
 // nextTab is the tab delta steps along tabs, wrapping at both ends and never
@@ -308,13 +305,9 @@ func (m *dashboard) ensureWorkspaceCursor() {
 		m.navIndex, m.cursorPath = 0, ""
 		return
 	}
-	if m.cursorPath != "" {
-		for index, item := range items {
-			if item.workspace.Path == m.cursorPath {
-				m.navIndex = index
-				return
-			}
-		}
+	if index := workspaceIndex(items, m.cursorPath); index >= 0 {
+		m.navIndex = index
+		return
 	}
 	// The remembered item is gone, or there is none yet: fall back to the
 	// position and record whatever that lands on.
@@ -350,12 +343,9 @@ func (m *dashboard) focusTerminal() {
 func (m *dashboard) focusNavigation() {
 	m.focus = leftPane
 	items := m.navigationItems()
-	for index, item := range items {
-		if item.workspace.Path == m.selectedPath {
-			m.setNavigation(index)
-			m.syncTabCursor(runningTabs(item.tabs))
-			return
-		}
+	if index := workspaceIndex(items, m.selectedPath); index >= 0 {
+		m.setNavigation(index)
+		m.syncTabCursor(runningTabs(items[index].tabs))
 	}
 }
 
@@ -393,23 +383,20 @@ func (m *dashboard) syncSelection() {
 
 func (m *dashboard) restoreSelection() {
 	path, tabID := m.config.LastWorkspacePath, m.config.LastTabID
-	if path == "" || tabID == "" {
+	if tabID == "" {
 		return
 	}
-	for navIndex, item := range m.navigationItems() {
-		if item.workspace.Path != path {
-			continue
-		}
-		for tabIndex, tab := range runningTabs(item.tabs) {
-			if tab.ID != tabID {
-				continue
-			}
+	items := m.navigationItems()
+	navIndex := workspaceIndex(items, path)
+	if navIndex < 0 {
+		return
+	}
+	for tabIndex, tab := range runningTabs(items[navIndex].tabs) {
+		if tab.ID == tabID {
 			m.setNavigation(navIndex)
 			m.tabIndex = tabIndex
 			m.selectedWorkspaceID = tab.WorkspaceID
 			m.selectedPath = path
-			m.config.LastWorkspacePath = path
-			m.config.LastTabID = tabID
 			m.restorePending = true
 			return
 		}
@@ -417,21 +404,14 @@ func (m *dashboard) restoreSelection() {
 }
 
 func (m *dashboard) rememberSelection(tabID string) bool {
-	for _, item := range m.navigationItems() {
-		if item.workspace.Path != m.selectedPath {
-			continue
-		}
-		for _, tab := range runningTabs(item.tabs) {
-			if tab.ID != tabID {
-				continue
-			}
-			changed := m.config.LastWorkspacePath != item.workspace.Path || m.config.LastTabID != tab.ID
-			m.config.LastWorkspacePath = item.workspace.Path
-			m.config.LastTabID = tab.ID
-			return changed
-		}
+	items := m.navigationItems()
+	index := workspaceIndex(items, m.selectedPath)
+	if index < 0 || !slices.ContainsFunc(runningTabs(items[index].tabs), func(tab model.Tab) bool { return tab.ID == tabID }) {
+		return false
 	}
-	return false
+	changed := m.config.LastWorkspacePath != m.selectedPath || m.config.LastTabID != tabID
+	m.config.LastWorkspacePath, m.config.LastTabID = m.selectedPath, tabID
+	return changed
 }
 
 func (m dashboard) navigationItems() []navItem {
@@ -490,8 +470,7 @@ func (m dashboard) navigationTabs() []model.Tab {
 // visibleTabs is the tab row that is actually on screen: the open terminal's
 // tabs, except in the workspace pane, where the cursor may sit on a workspace
 // other than the open one and the rail shows that workspace's tabs instead.
-// Drawing the rail, hit-testing a click on it and hovering it are three
-// readings of the same row, and each kept its own copy of that rule.
+// Drawing the rail, hit-testing a click on it and hovering it all read it.
 func (m dashboard) visibleTabs() []model.Tab {
 	if m.focus == leftPane {
 		return m.navigationTabs()
