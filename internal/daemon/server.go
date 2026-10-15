@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"maps"
 	"net"
 	"os"
 	"path/filepath"
@@ -225,10 +226,11 @@ func (s *Server) removeStaleTabs() error {
 func (s *Server) shutdown() {
 	s.mu.Lock()
 	s.stopping = true
-	sessions := make([]*session, 0, len(s.sessions))
-	for _, value := range s.sessions {
-		sessions = append(sessions, value)
-	}
+	sessions := s.sessionsLocked()
+	s.mu.Unlock()
+	// Only an agent that still runs has a session to resume.
+	s.scanAgents(sessions)
+	s.mu.Lock()
 	saves := s.resumeSnapshotsLocked()
 	s.mu.Unlock()
 	for _, value := range saves {
@@ -236,8 +238,14 @@ func (s *Server) shutdown() {
 			s.logger.Printf("save session for tab %s: %v", value.id, err)
 		}
 	}
-	closeSessions(sessions)
+	closeSessions(slices.Collect(maps.Values(sessions)))
 	_ = os.Remove(s.socket)
+}
+
+// sessionsLocked copies the running sessions, keyed by tab, so they can be
+// used with the server lock released.
+func (s *Server) sessionsLocked() map[string]*session {
+	return maps.Clone(s.sessions)
 }
 
 type resumeSave struct {
@@ -437,17 +445,16 @@ func (s *Server) agents() map[string]model.Agent {
 
 func (s *Server) agentStatusesSnapshot() map[string]model.AgentStatus {
 	s.mu.Lock()
-	sessions := make(map[string]*session, len(s.sessions))
-	for tabID, session := range s.sessions {
-		sessions[tabID] = session
-	}
+	sessions := s.sessionsLocked()
+	s.mu.Unlock()
+
+	agents := s.scanAgents(sessions)
+	s.mu.Lock()
 	reported := make(map[string]agentRuntime, len(s.agentStatuses))
 	for tabID, runtime := range s.agentStatuses {
 		reported[tabID] = runtime
 	}
 	s.mu.Unlock()
-
-	agents := sessionAgents(sessions)
 	native := s.readCodexStatuses(sessions, agents)
 	inferred := inferPhases(sessions, agents, reported)
 	readings := s.sessionTranscripts(reported)

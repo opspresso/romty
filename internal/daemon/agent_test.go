@@ -119,7 +119,7 @@ func TestSessionAgentsMatchTabsByForegroundProcessGroup(t *testing.T) {
 		"tab-3": model.AgentOpenCode,
 		"tab-4": model.Agent("node"),
 	}
-	if got := sessionAgents(sessions); !reflect.DeepEqual(got, want) {
+	if got, _ := sessionAgents(sessions); !reflect.DeepEqual(got, want) {
 		t.Fatalf("sessionAgents() = %#v, want %#v", got, want)
 	}
 }
@@ -137,7 +137,7 @@ func TestSessionAgentsFollowNestedTerminals(t *testing.T) {
 640 600 640 0 node service.js
 `)
 
-	got := sessionAgents(map[string]*session{"tab-1": newSessionForTest(new(os.File))})
+	got, _ := sessionAgents(map[string]*session{"tab-1": newSessionForTest(new(os.File))})
 	if want := map[string]model.Agent{"tab-1": model.AgentKiro}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("sessionAgents() = %#v, want %#v", got, want)
 	}

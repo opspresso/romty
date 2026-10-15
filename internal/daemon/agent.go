@@ -56,7 +56,10 @@ func listProcesses() ([]byte, error) {
 	return runProcessList(ctx)
 }
 
-func sessionAgents(sessions map[string]*session) map[string]model.Agent {
+// sessionAgents returns the agent in the foreground of each tab, and the tabs
+// it could check. A tab whose foreground or process list could not be read is
+// not checked: it has no agent in the result, but that does not mean none runs.
+func sessionAgents(sessions map[string]*session) (agents map[string]model.Agent, checked map[string]bool) {
 	groups := make(map[string]int, len(sessions))
 	for tabID, value := range sessions {
 		group, err := value.foregroundProcessGroup()
@@ -65,22 +68,24 @@ func sessionAgents(sessions map[string]*session) map[string]model.Agent {
 		}
 	}
 	if len(groups) == 0 {
-		return nil
+		return nil, nil
 	}
 
 	output, err := listProcesses()
 	if err != nil {
-		return nil
+		return nil, nil
 	}
 	processes := parseProcesses(output)
 	byGroup := processAgents(processes)
-	result := make(map[string]model.Agent)
+	agents = make(map[string]model.Agent)
+	checked = make(map[string]bool, len(groups))
 	for tabID, group := range groups {
+		checked[tabID] = true
 		if agent := byGroup[foregroundJob(processes, byGroup, group)]; agent != "" {
-			result[tabID] = agent
+			agents[tabID] = agent
 		}
 	}
-	return result
+	return agents, checked
 }
 
 // foregroundJob returns the process group the user sees in a tab whose

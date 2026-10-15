@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -1103,14 +1104,18 @@ func TestStopSavesSessionsAndTheNextDaemonRestoresThem(t *testing.T) {
 	_, workspace := openWorkspace(t, backend, base, workspacePath)
 	tab := createTab(t, backend, workspace)
 	const sessionID = "0123abcd-89ef-4567-0123-456789abcdef"
+	connection, reader := attach(t, backend, tab)
+	writeCommand(t, connection, `echo RESUME''PROOF`)
+	readUntil(t, connection, reader, "RESUMEPROOF")
+	// Only an agent that still runs is resumed, so one stays in the
+	// foreground: a copy of sleep, named the way romty recognises Claude Code.
+	writeCommand(t, connection, fakeAgent(t, base, "claude")+" 60")
+	waitForAgent(t, backend, tab.ID, model.AgentClaude)
 	if err := backend.ReportAgentEvent(tab.ID, protocol.AgentEvent{
 		Agent: model.AgentClaude, HookEvent: "SessionStart", SessionID: sessionID,
 	}); err != nil {
 		t.Fatalf("ReportAgentEvent() error = %v", err)
 	}
-	connection, reader := attach(t, backend, tab)
-	writeCommand(t, connection, `echo RESUME''PROOF`)
-	readUntil(t, connection, reader, "RESUMEPROOF")
 	connection.Close()
 	if err := first.stop(t); err != nil {
 		t.Fatalf("Serve() error = %v", err)
@@ -1153,6 +1158,71 @@ func TestStopSavesSessionsAndTheNextDaemonRestoresThem(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(base, "resume", tab.ID+".json")); !os.IsNotExist(err) {
 		t.Fatalf("consumed snapshot still on disk: %v", err)
 	}
+}
+
+// A tab whose agent has exited has no session to resume, even when its hook
+// reported one and no SessionEnd followed.
+func TestStopDoesNotResumeAnAgentThatExited(t *testing.T) {
+	base := testutil.ShortTempDir(t)
+	socket := filepath.Join(base, "daemon.sock")
+	statePath := filepath.Join(base, "state.json")
+
+	first := startDaemonAt(t, socket, statePath, "/bin/sh")
+	backend := first.connect(t)
+	_, workspace := openWorkspace(t, backend, base, base)
+	tab := createTab(t, backend, workspace)
+	connection, reader := attach(t, backend, tab)
+	writeCommand(t, connection, fakeAgent(t, base, "claude")+" 1; echo AGENT''GONE")
+	waitForAgent(t, backend, tab.ID, model.AgentClaude)
+	if err := backend.ReportAgentEvent(tab.ID, protocol.AgentEvent{
+		Agent: model.AgentClaude, HookEvent: "Stop", SessionID: "0123abcd-89ef-4567-0123-456789abcdef",
+	}); err != nil {
+		t.Fatalf("ReportAgentEvent() error = %v", err)
+	}
+	readUntil(t, connection, reader, "AGENTGONE")
+	connection.Close()
+	if err := first.stop(t); err != nil {
+		t.Fatalf("Serve() error = %v", err)
+	}
+
+	meta, err := os.ReadFile(filepath.Join(base, "resume", tab.ID+".json"))
+	if err != nil {
+		t.Fatalf("read saved session: %v", err)
+	}
+	if strings.Contains(string(meta), "claude") {
+		t.Fatalf("saved session names the exited agent: %s", meta)
+	}
+}
+
+// fakeAgent links sleep into directory under name, so a test can run a
+// process that romty recognises as that agent: the process list shows the
+// link's name. A link rather than a copy, because macOS kills a copied system
+// binary.
+func fakeAgent(t *testing.T, directory, name string) string {
+	t.Helper()
+	source, err := exec.LookPath("sleep")
+	if err != nil {
+		t.Fatalf("LookPath(sleep) error = %v", err)
+	}
+	path := filepath.Join(directory, name)
+	if err := os.Symlink(source, path); err != nil {
+		t.Fatalf("link %s: %v", name, err)
+	}
+	return path
+}
+
+// waitForAgent returns once the daemon sees agent in the tab's foreground.
+func waitForAgent(t *testing.T, backend *client.Client, tabID string, agent model.Agent) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		statuses, err := backend.AgentStatuses()
+		if err == nil && statuses[tabID].Agent == agent {
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatalf("%s never ran in the foreground of tab %s", agent, tabID)
 }
 
 func TestRenameTabChangesOnlyTheName(t *testing.T) {

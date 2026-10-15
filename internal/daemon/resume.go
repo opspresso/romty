@@ -134,8 +134,8 @@ func (s *resumeStore) discardStale(now time.Time) {
 }
 
 // agentSessionID is the shape of the session identifiers agents report
-// through their hooks: UUIDs from Claude Code and Codex, and `ses_` IDs from
-// OpenCode. The resume command is typed into a shell, so anything outside this
+// through their hooks: UUIDs from Claude Code and Codex, `ses_` IDs from
+// OpenCode, and `sess_` IDs from Kiro CLI. The resume command is typed into a shell, so anything outside this
 // shape is not an identifier to interpolate — it falls back to the agent's own
 // "most recent session" form instead.
 var agentSessionID = regexp.MustCompile(`^[A-Za-z0-9_-]{8,64}$`)
