@@ -28,8 +28,10 @@ const (
 	shortSessionIDBytes = 29
 )
 
-// Bounds on what one Reader holds and accepts from an app-server.
+// Bounds on what one Reader holds and accepts from an app-server, and on how
+// long one Read may take.
 const (
+	readTimeout       = 2 * time.Second
 	maxConnections    = 16
 	loadedPageSize    = 128
 	maxLoadedSessions = 512
@@ -72,6 +74,7 @@ type Reader struct {
 	connections map[string]*rpc
 }
 
+// NewReader returns a Reader with no open connections.
 func NewReader() *Reader { return &Reader{connections: make(map[string]*rpc)} }
 
 // Close closes every open app-server connection.
@@ -85,12 +88,12 @@ func (r *Reader) Close() {
 }
 
 // Read returns the status of each loaded session that exactly one prefix
-// matches, keyed by that prefix. It returns only uniquely matched sessions. An absent, ambiguous or
-// unreachable session is not guessed from its directory or most recent file.
+// matches, keyed by that prefix. An absent, ambiguous or unreachable session
+// is left out: it is never guessed from a directory or the most recent file.
 func (r *Reader) Read(ctx context.Context, home string, prefixes []string) (map[string]model.AgentStatus, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, readTimeout)
 	defer cancel()
 	client := r.connections[home]
 	if client == nil {
