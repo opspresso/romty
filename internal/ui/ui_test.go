@@ -639,7 +639,7 @@ func TestDashboardAddsRootFromPrompt(t *testing.T) {
 	if command == nil {
 		t.Fatal("add root command = nil")
 	}
-	send(&value, command())
+	send(&value, commandMessage[inputResultMsg](t, command))
 	if backend.addedPath != "/projects" || value.errorMessage != "" {
 		t.Fatalf("added path = %q, error = %q", backend.addedPath, value.errorMessage)
 	}
@@ -656,7 +656,7 @@ func TestDashboardAcceptsPastedRootPath(t *testing.T) {
 	if command == nil {
 		t.Fatal("add pasted root command = nil")
 	}
-	value.Update(command())
+	send(&value, commandMessage[inputResultMsg](t, command))
 	if backend.addedPath != "/projects/with spaces" {
 		t.Fatalf("added path = %q, want pasted path", backend.addedPath)
 	}
@@ -678,9 +678,9 @@ func TestDashboardSupportsRemainingWorkspaceShortcuts(t *testing.T) {
 	}
 }
 
-// The cursor stops at the ends of the tree. The wheel reaches romty as arrow
+// The cursor stops at the ends of the tree. The wheel can reach romty as arrow
 // keys — three per notch, through the terminal's alternate scroll — so a tree
-// that wrapped sent one notch at the bottom back to the top.
+// that wrapped would send one notch at the bottom back to the top.
 func TestDashboardNavigationStopsAtBothEnds(t *testing.T) {
 	snapshot := projectsSnapshot([]model.WorkspaceView{
 		{Workspace: model.Workspace{RootID: "root-1", Name: "api", Path: "/projects/api"}},
