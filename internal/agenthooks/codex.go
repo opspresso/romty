@@ -48,13 +48,7 @@ func normalizeCodexTitle(data []byte) ([]byte, bool, error) {
 	var updated []byte
 	var visit func(*unstable.Node, []string)
 	visit = func(node *unstable.Node, parent []string) {
-		keys := append([]string(nil), parent...)
-		lastKeyEnd := 0
-		for it := node.Key(); it.Next(); {
-			key := it.Node()
-			keys = append(keys, string(key.Data))
-			lastKeyEnd = int(key.Raw.Offset + key.Raw.Length)
-		}
+		keys, lastKeyEnd := keyPath(node, parent)
 		value := node.Value()
 		// The parsed key gives an exact starting point; quoted '=' characters
 		// inside keys or string values cannot be mistaken for the assignment.
@@ -82,13 +76,8 @@ func normalizeCodexTitle(data []byte) ([]byte, bool, error) {
 		node := parser.Expression()
 		switch node.Kind {
 		case unstable.Table, unstable.ArrayTable:
-			table = nil
-			lastKeyEnd := 0
-			for it := node.Key(); it.Next(); {
-				key := it.Node()
-				table = append(table, string(key.Data))
-				lastKeyEnd = int(key.Raw.Offset + key.Raw.Length)
-			}
+			var lastKeyEnd int
+			table, lastKeyEnd = keyPath(node, nil)
 			if node.Kind == unstable.Table && slices.Equal(table, []string{"tui"}) {
 				end := bytes.IndexByte(data[lastKeyEnd:], '\n')
 				if end < 0 {
@@ -123,6 +112,19 @@ func normalizeCodexTitle(data []byte) ([]byte, bool, error) {
 		return nil, false, fmt.Errorf("validate Codex title configuration: %w", err)
 	}
 	return updated, true, nil
+}
+
+// keyPath appends the dotted key of a TOML node to parent, and reports the
+// byte offset just past the key's last part.
+func keyPath(node *unstable.Node, parent []string) ([]string, int) {
+	keys := append([]string(nil), parent...)
+	end := 0
+	for it := node.Key(); it.Next(); {
+		key := it.Node()
+		keys = append(keys, string(key.Data))
+		end = int(key.Raw.Offset + key.Raw.Length)
+	}
+	return keys, end
 }
 
 func insertBytes(data []byte, at int, value string) []byte {

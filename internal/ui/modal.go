@@ -444,39 +444,38 @@ func (m dashboard) configValueStyle(row configRow) lipgloss.Style {
 func (m dashboard) modalActions() []modalAction {
 	switch m.modal {
 	case removeSelectionModal:
-		description := "forget root"
-		if !m.removeTarget.isRoot {
-			description = "delete workspace"
+		if m.removeTarget.isRoot {
+			return answerActions("forget root", "cancel")
 		}
-		return []modalAction{
-			{shortcut: shortcut{key: "Enter", description: description}, code: tea.KeyEnter},
-			{shortcut: shortcut{key: "Esc", description: "cancel"}, code: tea.KeyEscape},
-		}
+		return answerActions("delete workspace", "cancel")
 	case closeTabModal:
-		return []modalAction{
-			{shortcut: shortcut{key: "Enter", description: "close tab"}, code: tea.KeyEnter},
-			{shortcut: shortcut{key: "Esc", description: "cancel"}, code: tea.KeyEscape},
-		}
+		return answerActions("close tab", "cancel")
 	case shutdownModal:
 		if m.shutdownPending {
 			return nil
 		}
-		return []modalAction{
-			{shortcut: shortcut{key: "Enter", description: "stop daemon"}, code: tea.KeyEnter},
-			{shortcut: shortcut{key: "Esc", description: "cancel"}, code: tea.KeyEscape},
-		}
+		return answerActions("stop daemon", "cancel")
 	case hookInstallModal:
 		if m.hookInstallPending {
 			return nil
 		}
-		return []modalAction{
-			{shortcut: shortcut{key: "Enter", description: "install hooks"}, code: tea.KeyEnter},
-			{shortcut: shortcut{key: "Esc", description: "skip"}, code: tea.KeyEscape},
-		}
+		return answerActions("install hooks", "skip")
 	case inputModal:
-		return m.inputActions()
+		if m.input.pending {
+			return nil
+		}
+		return answerActions(m.input.kind.submit(), "cancel")
 	}
 	return nil
+}
+
+// answerActions are a question modal's two buttons: Enter accepts and Esc
+// declines, each named for what it does.
+func answerActions(accept, decline string) []modalAction {
+	return []modalAction{
+		{shortcut: shortcut{key: "Enter", description: accept}, code: tea.KeyEnter},
+		{shortcut: shortcut{key: "Esc", description: decline}, code: tea.KeyEscape},
+	}
 }
 
 func (m dashboard) withModalActions(lines []string) []string {

@@ -175,16 +175,6 @@ func (k inputKind) required() string {
 	return "root path is required"
 }
 
-func (m dashboard) inputActions() []modalAction {
-	if m.input.pending {
-		return nil
-	}
-	return []modalAction{
-		{shortcut: shortcut{key: "Enter", description: m.input.kind.submit()}, code: tea.KeyEnter},
-		{shortcut: shortcut{key: "Esc", description: "cancel"}, code: tea.KeyEscape},
-	}
-}
-
 // renderInputModal draws the text field and, under it, the progress of a
 // submit or the reason it was rejected. The status row is kept blank rather
 // than removed, so the box does not change height while the user types. A

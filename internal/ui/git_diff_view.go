@@ -192,9 +192,7 @@ func (m dashboard) handleGitChangedFiles(message gitChangedFilesMsg) (tea.Model,
 		}
 	}
 	m.gitDiff.treeRows = visibleGitDiffTreeRows(message.rows, m.gitDiff.collapsed)
-	if len(m.gitDiff.files) > 0 && len(m.gitDiff.treeRows) == 0 {
-		m.gitDiff.treeRows = visibleGitDiffTreeRows(fileViewTreeRows(m.gitDiff.files, m.gitDiff.mode), m.gitDiff.collapsed)
-	}
+	m.ensureGitDiffTreeRows()
 	selectedDirectory := m.gitDiff.selectedDirectory
 	m.gitDiff.fileIndex = 0
 	for index, file := range m.gitDiff.files {
