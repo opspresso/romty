@@ -3,6 +3,7 @@ package client
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -62,11 +63,8 @@ func TestProtocolVersionReportsAnOutdatedDaemon(t *testing.T) {
 }
 
 // The daemon answers ping and shutdown whatever version asked, and this side
-// has to accept those answers. It did not, and the two calls that carry the
-// remedy were exactly the two that could not reach it: ping reported a
-// mismatched daemon as no daemon at all, so romty started a second one and
-// gave up with "daemon did not become ready", and `romty stop` stopped the
-// daemon and then called that a failure to stop it.
+// accepts those answers: they are the two calls that carry the remedy for a
+// mismatch, so they must reach a daemon of any version.
 func TestExemptCallsSurviveAnOutdatedDaemon(t *testing.T) {
 	socket := serveUnversioned(t)
 	backend := New(socket)
@@ -161,10 +159,9 @@ func serveUnversioned(t *testing.T) string {
 }
 
 // Starting a second daemon is the answer to nothing listening, and to nothing
-// else. An outdated daemon is listening, so EnsureDaemon must let the caller
-// reach it and be told which side to restart, rather than starting a rival
-// that loses the lock and exits — which is what turned a mismatch into
-// "daemon did not become ready".
+// else. An outdated daemon is listening, so EnsureDaemon lets the caller reach
+// it and be told which side to restart, rather than starting a rival that
+// would lose the lock and exit.
 func TestEnsureDaemonAcceptsAnOutdatedDaemon(t *testing.T) {
 	socket := serveUnversioned(t)
 
@@ -602,6 +599,12 @@ func TestClientShowsADaemonRefusalForTheSelectedProtocol(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), refusal) {
 		t.Fatalf("Snapshot() error = %v, want the daemon's refusal %q", err, refusal)
 	}
+	// The TUI shows a refusal's reason beside the request that caused it, so
+	// the reason has to be recoverable without the transport prefix.
+	var refused *protocol.RefusedError
+	if !errors.As(err, &refused) || refused.Message != refusal {
+		t.Fatalf("Snapshot() error = %#v, want a RefusedError carrying %q", err, refusal)
+	}
 }
 
 // endsWithItsError delivers everything it has and reports the end of the
@@ -657,6 +660,11 @@ func TestClientDegradesFeaturesMissingFromAnOlderDaemon(t *testing.T) {
 		!strings.Contains(err.Error(), "requires a newer daemon") ||
 		!strings.Contains(err.Error(), protocol.Remedy) {
 		t.Fatalf("CloseTab() error = %v, want an unsupported capability and its remedy", err)
+	}
+	if _, err := backend.RenameTab("tab-1", "api"); err == nil ||
+		!strings.Contains(err.Error(), "renaming tabs requires a newer daemon") ||
+		!strings.Contains(err.Error(), protocol.Remedy) {
+		t.Fatalf("RenameTab() error = %v, want an unsupported capability and its remedy", err)
 	}
 }
 
