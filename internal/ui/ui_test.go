@@ -5265,8 +5265,7 @@ func TestDashboardIgnoresATerminalOpenedForTheTabItLeft(t *testing.T) {
 }
 
 func TestDashboardSizesTerminalWhenAttachCompletes(t *testing.T) {
-	tab := model.Tab{ID: "tab-1", WorkspaceID: "workspace-1", Name: "1", Running: true}
-	snapshot, workspace := alphaWorkspaceSnapshot([]model.Tab{tab})
+	snapshot, workspace := alphaWorkspaceSnapshot(openTabs(1))
 	backend := &fakeBackend{snapshot: snapshot, workspace: workspace}
 	value := newDashboard(backend, snapshot)
 	value.width = 80
@@ -5408,9 +5407,8 @@ func TestDashboardPreservesReplayRightEdgeWhenOpeningOnPhone(t *testing.T) {
 	for _, width := range []int{32, 60, 79, 120} {
 		for _, alternate := range []bool{false, true} {
 			t.Run(fmt.Sprintf("width=%d/alternate=%t", width, alternate), func(t *testing.T) {
-				workspace := model.Workspace{ID: "workspace-1", RootID: "root-1", Name: "alpha", Path: "/projects/alpha"}
-				tab := model.Tab{ID: "tab-1", WorkspaceID: workspace.ID, Name: "1", Running: true}
-				snapshot := projectsSnapshot([]model.WorkspaceView{{Workspace: workspace, Tabs: []model.Tab{tab}}})
+				tabs := openTabs(1)
+				snapshot, workspace := alphaWorkspaceSnapshot(tabs)
 				value := newDashboard(&fakeBackend{snapshot: snapshot}, snapshot)
 				value.width, value.height = width, 24
 				value.selectedWorkspaceID, value.selectedPath = workspace.ID, workspace.Path
@@ -5426,7 +5424,7 @@ func TestDashboardPreservesReplayRightEdgeWhenOpeningOnPhone(t *testing.T) {
 				// Check both initial selection and reopening an attached workspace.
 				for range 2 {
 					stream := replaySizedMemoryStream{memoryStream: newMemoryStream(""), columns: columns, rows: rows}
-					send(&value, terminalOpenedMsg{tabID: tab.ID, stream: stream, replay: []byte(replay)})
+					send(&value, terminalOpenedMsg{tabID: tabs[0].ID, stream: stream, replay: []byte(replay)})
 					t.Cleanup(value.closeTerminal)
 					if got := value.terminal.render()[0]; !strings.Contains(got, "RIGHT") {
 						t.Fatalf("restored first row lost its right edge: %q", got)
