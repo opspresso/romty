@@ -12,10 +12,6 @@ import (
 	"github.com/opspresso/romty/internal/display"
 )
 
-// Scrollback mode is the only state where romty wants the wheel, and it takes
-// it as the arrow keys the host's alternate scroll sends rather than by asking
-// for mouse events, which would take the host's native drag selection away —
-// the very thing scrollback exists to give you.
 // scrollbackSearch is the find prompt in scrollback.
 type scrollbackSearch struct {
 	// typing is set while the prompt takes keys; query is what was typed.
@@ -27,6 +23,10 @@ type scrollbackSearch struct {
 	index   int
 }
 
+// Scrollback mode is the only state where romty wants the wheel, and it takes
+// it as the arrow keys the host's alternate scroll sends rather than by asking
+// for mouse events, which would take the host's native drag selection away —
+// the very thing scrollback exists to give you.
 func (m dashboard) handleScrollbackKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.terminal == nil {
 		m.stopScrollback()
