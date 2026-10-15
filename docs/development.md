@@ -8,7 +8,7 @@ Build the command from a local checkout:
 go build -o build/romty ./cmd/romty
 ```
 
-Run the same checks used by CI:
+CI runs only before a release: the release workflow calls `ci.yml` first, and pull requests and pushes do not start it. Run it by hand with `gh workflow run ci.yml --ref <branch>` when a branch needs the hosted macOS and Linux checks. Before merging, run the same checks locally:
 
 ```sh
 test -z "$(gofmt -s -l .)"
@@ -66,4 +66,4 @@ The static website source is in `pages/`. Keep product and contributor guides in
 
 ## Releases
 
-Pushing a version tag such as `v0.2.0` runs the release workflow. It validates the project, publishes macOS and Linux archives for amd64 and arm64 to GitHub Releases, and updates the `romty` formula in `opspresso/homebrew-tap`.
+Pushing a version tag such as `v0.2.0` runs the release workflow. It runs the full CI on macOS and Linux (tests, release contract and vulnerability check) first, publishes macOS and Linux archives for amd64 and arm64 to GitHub Releases, and updates the `romty` formula in `opspresso/homebrew-tap`.

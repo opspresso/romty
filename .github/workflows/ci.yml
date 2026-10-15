@@ -1,10 +1,10 @@
 name: CI
 
+# Runs before every release (called by release.yml) and on demand. Pull requests and pushes do not
+# start it: the tag release is the single gate before artifacts are published.
 on:
-  pull_request:
-  push:
-    branches:
-      - main
+  workflow_call:
+  workflow_dispatch:
 
 permissions:
   contents: read
