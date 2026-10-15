@@ -94,6 +94,20 @@ func TestDecodeHookEventAcceptsOpenCode(t *testing.T) {
 	}
 }
 
+// Kiro CLI V3 reports V3 event names. A V2 custom agent reports lower camel
+// case names, which mean the same events.
+func TestDecodeHookEventNormalisesKiroEventNames(t *testing.T) {
+	for raw, want := range map[string]string{
+		"SessionStart": "SessionStart", "agentSpawn": "SessionStart", "userPromptSubmit": "UserPromptSubmit",
+		"preToolUse": "PreToolUse", "postToolUse": "PostToolUse", "stop": "Stop", "SessionEnd": "SessionEnd",
+	} {
+		event, err := decodeHookEvent("kiro", strings.NewReader(`{"session_id":"sess_1","hook_event_name":"`+raw+`","tool_name":"shell"}`))
+		if err != nil || event.Agent != model.AgentKiro || event.HookEvent != want || event.SessionID != "sess_1" {
+			t.Fatalf("decodeHookEvent(%s) = (%#v, %v), want %s", raw, event, err, want)
+		}
+	}
+}
+
 func TestHookCommandAcceptsOpenCode(t *testing.T) {
 	t.Setenv("ROMTY_TAB_ID", "")
 	var output bytes.Buffer

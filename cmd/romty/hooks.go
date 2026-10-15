@@ -16,6 +16,16 @@ import (
 
 const maxHookInputBytes = 1 << 20
 
+// kiroEvents maps the event names of Kiro CLI V2 custom-agent hooks to the
+// V3 names romty records. V3 already reports the latter.
+var kiroEvents = map[string]string{
+	"agentSpawn":       "SessionStart",
+	"userPromptSubmit": "UserPromptSubmit",
+	"preToolUse":       "PreToolUse",
+	"postToolUse":      "PostToolUse",
+	"stop":             "Stop",
+}
+
 type hookInput struct {
 	SessionID        string `json:"session_id"`
 	TurnID           string `json:"turn_id"`
@@ -41,10 +51,11 @@ func runHookCommand(provider string, input io.Reader) {
 	if err != nil {
 		return
 	}
-	if event.Agent == model.AgentOpenCode {
+	if event.Agent == model.AgentOpenCode || event.Agent == model.AgentKiro {
 		// OpenCode's shared background service can carry the tab ID of the
-		// terminal that started it. The daemon accepts the event only if the
-		// tab's foreground job is an ancestor of this hook.
+		// terminal that started it, and Kiro runs hooks from its own agent
+		// server process. The daemon accepts the event only if the tab's
+		// foreground job is an ancestor of this hook.
 		event.ProcessGroups = procinfo.AncestorGroups()
 	}
 	runtime, err := paths.Resolve()
@@ -94,6 +105,11 @@ func decodeHookEvent(provider string, input io.Reader) (protocol.AgentEvent, err
 	if event.Agent == model.AgentClaude {
 		event.TurnID = value.PromptID
 		event.TranscriptPath = value.TranscriptPath
+	}
+	if event.Agent == model.AgentKiro {
+		if name, ok := kiroEvents[event.HookEvent]; ok {
+			event.HookEvent = name
+		}
 	}
 	// Refused here as well as at the daemon, so a payload the daemon would not
 	// record never costs a connection: a hook runs on the agent's critical

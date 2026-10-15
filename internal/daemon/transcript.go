@@ -19,31 +19,40 @@ import (
 // installer already knows how to find a provider's directory, including the
 // environment variable that overrides it, so it is asked rather than copied.
 func claudeConfigDirectory() string {
-	directory, err := agenthooks.ConfigDirectory(agenthooks.ProviderClaude)
+	return configDirectory(agenthooks.ProviderClaude)
+}
+
+// configDirectory is where a provider keeps its records, or "" when unknown.
+func configDirectory(provider agenthooks.Provider) string {
+	directory, err := agenthooks.ConfigDirectory(provider)
 	if err != nil {
 		return ""
 	}
 	return directory
 }
 
-// sessionTranscripts reads the transcript of each tab whose hook reported a
-// Claude Code session and its transcript path, keyed by tab. A tab with no
-// hook, or an agent whose transcripts romty cannot read, is simply absent.
+// sessionTranscripts reads the session record of each tab whose hook reported
+// a Claude Code session and its transcript path, or a Kiro CLI session, keyed
+// by tab. A tab with no hook, or an agent whose records romty cannot read, is
+// simply absent.
 func (s *Server) sessionTranscripts(reported map[string]agentRuntime) map[string]transcript.Reading {
-	configDir := claudeConfigDirectory()
-	if configDir == "" {
-		return nil
-	}
+	claudeDir, kiroDir := claudeConfigDirectory(), configDirectory(agenthooks.ProviderKiro)
 	result := make(map[string]transcript.Reading)
 	for tabID, runtime := range reported {
-		if runtime.Agent != model.AgentClaude || runtime.SessionID == "" || runtime.TranscriptPath == "" {
+		if runtime.SessionID == "" {
 			continue
 		}
-		value, ok := s.transcripts.ReadClaude(configDir, runtime.TranscriptPath, runtime.SessionID)
-		if !ok {
-			continue
+		var value transcript.Reading
+		var ok bool
+		switch {
+		case runtime.Agent == model.AgentClaude && runtime.TranscriptPath != "":
+			value, ok = s.transcripts.ReadClaude(claudeDir, runtime.TranscriptPath, runtime.SessionID)
+		case runtime.Agent == model.AgentKiro:
+			value, ok = s.transcripts.ReadKiro(kiroDir, runtime.SessionID)
 		}
-		result[tabID] = value
+		if ok {
+			result[tabID] = value
+		}
 	}
 	return result
 }
