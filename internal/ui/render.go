@@ -331,37 +331,19 @@ func (m dashboard) renderStatus(width, bodyHeight int) []string {
 			shortcut{key: "/", description: "type a path"},
 			shortcut{key: "Esc", description: "cancel"},
 		)
-	case m.modal == removeSelectionModal:
-		action := "forget root"
-		if !m.removeTarget.isRoot {
-			action = "delete workspace"
-		}
-		status = renderShortcuts(m.styles, width,
-			shortcut{key: "Enter", description: action},
-			shortcut{key: "Esc", description: "cancel"},
-		)
 	case m.modal == inputModal && m.input.pending:
 		status = m.renderActivityStatus("SAVING", m.input.kind.pending(), width)
-	case m.modal == inputModal:
-		actions := m.inputActions()
-		status = renderShortcuts(m.styles, width, actions[0].shortcut, actions[1].shortcut)
-	case m.modal == closeTabModal:
-		status = renderShortcuts(m.styles, width,
-			shortcut{key: "Enter", description: "close tab"},
-			shortcut{key: "Esc", description: "cancel"},
-		)
-	case m.modal == shutdownModal:
-		status = renderShortcuts(m.styles, width,
-			shortcut{key: "Enter", description: "stop daemon"},
-			shortcut{key: "Esc", description: "cancel"},
-		)
 	case m.modal == hookInstallModal && m.hookInstallPending:
 		status = m.renderActivityStatus("INSTALLING", "updating agent status hooks", width)
-	case m.modal == hookInstallModal:
-		status = renderShortcuts(m.styles, width,
-			shortcut{key: "Enter", description: "install hooks"},
-			shortcut{key: "Esc", description: "skip"},
-		)
+	case len(m.modalActions()) > 0:
+		// A question modal draws its answers as buttons; the rail repeats
+		// them so the keys are named where every other state names its own.
+		actions := m.modalActions()
+		shortcuts := make([]shortcut, len(actions))
+		for index, action := range actions {
+			shortcuts[index] = action.shortcut
+		}
+		status = renderShortcuts(m.styles, width, shortcuts...)
 	case m.gitDiff.active:
 		rail = renderShortcutRail(m.styles, width,
 			shortcut{key: "Ctrl+Shift+F", description: "close file view"},
