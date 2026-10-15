@@ -115,12 +115,20 @@ type AgentEvent struct {
 	NotificationType string      `json:"notification_type,omitempty"`
 	PermissionMode   string      `json:"permission_mode,omitempty"`
 	Background       bool        `json:"background,omitempty"`
+	// ProcessGroups are the process groups of the hook command and its
+	// ancestors. A shared agent server runs hooks for every terminal, so an
+	// OpenCode event counts for a tab only when that tab's foreground job is
+	// among them.
+	ProcessGroups []int `json:"process_groups,omitempty"`
 }
 
 // MaxAgentEventMetadataBytes bounds each metadata string a hook reports. Both
 // ends check it and neither can take the other's word for it: the hook command
 // is handed whatever the agent wrote, and the daemon is answering a socket.
 const MaxAgentEventMetadataBytes = 512
+
+// MaxAgentEventProcessGroups bounds the ancestry a hook reports.
+const MaxAgentEventProcessGroups = 32
 
 // Validate reports whether an event is one the daemon can record. It is the
 // only description of that, so the check the hook command makes before it sends
@@ -136,6 +144,9 @@ func (e AgentEvent) Validate() error {
 	}
 	if e.HookEvent == "" {
 		return errors.New("hook event is required")
+	}
+	if len(e.ProcessGroups) > MaxAgentEventProcessGroups {
+		return fmt.Errorf("agent event reports more than %d process groups", MaxAgentEventProcessGroups)
 	}
 	for _, metadata := range []string{
 		e.SessionID, e.TurnID, e.AgentID, e.ToolUseID, e.HookEvent, e.ToolName, e.NotificationType, e.PermissionMode,

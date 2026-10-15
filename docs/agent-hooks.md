@@ -8,7 +8,7 @@ Process detection alone gives a tab its agent color and the `●` marker. The ph
 |---|---|---|
 | Codex | The local app-server's read-only APIs, with hooks for standalone sessions | `romty hooks`, then restart Codex and trust the hooks in `/hooks` |
 | Claude Code | Hooks in its user settings | `romty hooks` |
-| OpenCode | A generated plugin | `romty hooks`, then restart OpenCode |
+| OpenCode | A generated plugin; OpenCode 2 needs `opencode --standalone` | `romty hooks`, then restart OpenCode |
 
 Terminal output and silence do not establish Codex or Claude Code completion. Without a reporting channel, their status is unavailable. The [agent marker table](interface.md#agent-and-service-markers) lists every marker with its status rail label and `romty list` phase.
 
@@ -122,11 +122,24 @@ The phase stays as reported until the next event: romty does not age a running t
 
 ### OpenCode plugin
 
-OpenCode uses its plugin's lifecycle events. Its terminal-output fallback remains an estimate and never confirms completion.
+The generated plugin supports both plugin APIs from one default export. OpenCode 2 calls its `setup()`; OpenCode 1.18.29 and later call its `server()`.
+
+OpenCode 2 events map to phases as follows:
+
+- `session.execution.started` and `session.retry.scheduled` begin work.
+- The `execute.before` and `execute.after` tool hooks start and end a tool call by its call ID. A failed tool reports `PostToolUseFailure`.
+- `permission.asked` waits for approval.
+- `session.compaction.started` compacts; `session.compaction.ended` or `session.compaction.failed` returns to work.
+- Each turn ends with one outcome: `session.execution.succeeded` is `completed`, `session.execution.failed` is `error`, and `session.execution.interrupted` is `interrupted`.
+- Child sessions (subagents) do not report; the parent's tool call represents them.
+
+OpenCode 2 runs plugins in a server process. By default this is the shared background service, which serves every terminal and can carry the `ROMTY_TAB_ID` of the terminal that started it. Each hook therefore reports the process groups above it, and romty accepts an OpenCode event only when the tab's foreground job is among them. Events from the shared service are dropped, so a tab running plain `opencode` shows the terminal-output estimate. Start OpenCode with `opencode --standalone` to run its server inside the tab and get lifecycle phases.
+
+The terminal-output fallback remains an estimate and never confirms completion.
 
 ## What a hook sends
 
-The hook command sends only tab, provider, session, turn/prompt, subagent and tool-use identifiers, event name, tool name, notification type, permission mode, and whether background work remains. It does not send or retain prompts, transcripts, tool inputs, tool outputs, or assistant messages. It is silent outside a romty tab or when the daemon is unavailable.
+The hook command sends only tab, provider, session, turn/prompt, subagent and tool-use identifiers, event name, tool name, notification type, permission mode, whether background work remains, and, for OpenCode, the process groups above the hook. It does not send or retain prompts, transcripts, tool inputs, tool outputs, or assistant messages. It is silent outside a romty tab or when the daemon is unavailable.
 
 ## Token and cost readings
 

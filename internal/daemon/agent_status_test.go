@@ -531,3 +531,32 @@ func TestAgentStatusEndsATurnTheTranscriptRecordsAsInterrupted(t *testing.T) {
 		t.Fatalf("recorded runtime = %+v, want interrupted without tools", runtime)
 	}
 }
+
+// OpenCode 2 runs plugins in a shared background service whose environment can
+// carry another tab's ID. Only a hook below the tab's foreground job counts.
+func TestOpenCodeEventsCountOnlyFromTheTabsForegroundJob(t *testing.T) {
+	terminal := new(os.File)
+	previous := foregroundProcessGroup
+	foregroundProcessGroup = func(*os.File) (int, error) { return 4242, nil }
+	t.Cleanup(func() { foregroundProcessGroup = previous })
+	server := &Server{sessions: map[string]*session{"tab": newSessionForTest(terminal)}, agentStatuses: make(map[string]agentRuntime)}
+	report := func(groups ...int) {
+		t.Helper()
+		event := protocol.AgentEvent{Agent: model.AgentOpenCode, SessionID: "ses-1", HookEvent: "UserPromptSubmit", ProcessGroups: groups}
+		if response := server.recordAgentEvent("tab", &event); response.Error != "" {
+			t.Fatal(response.Error)
+		}
+	}
+	report(7, 99, 1)
+	if _, ok := server.agentStatuses["tab"]; ok {
+		t.Fatal("a hook outside the tab's foreground job reported for it")
+	}
+	report()
+	if _, ok := server.agentStatuses["tab"]; ok {
+		t.Fatal("a hook without ancestry reported for the tab")
+	}
+	report(7, 4242, 1)
+	if got := server.agentStatuses["tab"].Phase; got != model.AgentPhaseThinking {
+		t.Fatalf("foreground hook phase = %s, want thinking", got)
+	}
+}

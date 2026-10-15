@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"slices"
 	"strings"
 	"time"
 
@@ -73,8 +74,14 @@ func (s *Server) recordAgentEvent(tabID string, event *protocol.AgentEvent) prot
 		tabID = matched
 	}
 
-	if _, ok := s.sessions[tabID]; !ok {
+	value, ok := s.sessions[tabID]
+	if !ok {
 		return protocol.Response{Error: errNoSession}
+	}
+	if event.Agent == model.AgentOpenCode && !runsInForeground(value, event.ProcessGroups) {
+		// The event came from a process outside this tab's foreground job,
+		// such as OpenCode's shared background service.
+		return protocol.Response{}
 	}
 	current, exists := s.agentStatuses[tabID]
 	if exists && current.Source == "runtime" && current.Agent == event.Agent && current.SessionID == event.SessionID && current.Phase != model.AgentPhaseUnknown {
@@ -158,6 +165,16 @@ func (s *Server) recordAgentEvent(tabID string, event *protocol.AgentEvent) prot
 	}
 	s.agentStatuses[tabID] = current
 	return protocol.Response{}
+}
+
+// runsInForeground reports whether the tab's foreground job is among the
+// process groups above the hook that sent an event.
+func runsInForeground(value *session, groups []int) bool {
+	if value == nil {
+		return false
+	}
+	foreground, err := value.foregroundProcessGroup()
+	return err == nil && slices.Contains(groups, foreground)
 }
 
 // resolveTurnPhase lets the turn's open waits and running tools outrank the
