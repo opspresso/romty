@@ -95,3 +95,42 @@ func TestDashboardTabRenamePromptCancelsAndReportsFailure(t *testing.T) {
 		t.Fatalf("tab name after failed rename = %q, want 1", value.visibleTabs()[0].Name)
 	}
 }
+
+// A click elsewhere between two clicks on one tab breaks the pair, however
+// quickly the second click follows.
+func TestDashboardDoubleClickIgnoresClicksWithAnotherClickBetween(t *testing.T) {
+	tabs := openTabs(1)
+	value, _ := tabCloseDashboard(tabs)
+	value.focus = terminalPane
+
+	clickTabLabel(&value, 0)
+	origin := value.dimensions().leftWidth + value.dimensions().separator
+	send(&value, tea.MouseClickMsg{X: origin + 2, Y: 5, Button: tea.MouseLeft})
+	clickTabLabel(&value, 0)
+	if value.inputMode {
+		t.Fatal("clicks on one tab with another click between opened the name prompt")
+	}
+}
+
+func TestDashboardTabNamePromptShowsAnEmptyNameError(t *testing.T) {
+	tabs := openTabs(1)
+	value, backend := tabCloseDashboard(tabs)
+	value.focus = terminalPane
+	updated, _ := value.startRenameTab(tabs[0])
+	value = updated.(dashboard)
+
+	send(&value, tea.KeyPressMsg(tea.Key{Code: tea.KeyBackspace}))
+	if command := send(&value, tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter})); command != nil || !value.inputMode {
+		t.Fatalf("empty submit = (command %v, input %v), want the prompt kept open", command, value.inputMode)
+	}
+	if status := strings.Join(value.renderStatus(80, 20), "\n"); !strings.Contains(status, "tab name is required") {
+		t.Fatalf("status = %q, want the empty-name error beside the prompt", status)
+	}
+	send(&value, tea.KeyPressMsg(tea.Key{Text: "x", Code: 'x'}))
+	if status := strings.Join(value.renderStatus(80, 20), "\n"); strings.Contains(status, "tab name is required") {
+		t.Fatalf("status = %q, want the error cleared by typing", status)
+	}
+	if backend.renamedTabID != "" {
+		t.Fatalf("empty submit reached the backend for %q", backend.renamedTabID)
+	}
+}

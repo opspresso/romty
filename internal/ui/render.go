@@ -274,10 +274,14 @@ func (m dashboard) renderStatus(width, bodyHeight int) []string {
 		if m.inputKind == tabNameInput {
 			label = " NAME "
 		}
-		status = truncate(
-			m.styles.promptLabel.Render(label)+" "+m.styles.promptText.Render(display.Text(m.input))+m.styles.dividerActive.Render("█"),
-			width,
-		)
+		prompt := m.styles.promptLabel.Render(label) + " " + m.styles.promptText.Render(display.Text(m.input)) +
+			m.styles.dividerActive.Render("█")
+		if m.inputError != "" {
+			// The prompt stays open after a rejected submit, so the reason is
+			// drawn beside it; the status bar error would be hidden behind it.
+			prompt += "  " + m.styles.errorText.Render(m.inputError)
+		}
+		status = truncate(prompt, width)
 	case m.errorMessage != "":
 		label, text, title := m.styles.errorLabel, m.styles.errorText, " ERROR "
 		if m.noticeMessage {

@@ -1174,7 +1174,7 @@ func TestRenameTabChangesOnlyTheName(t *testing.T) {
 	}
 	stream.Close()
 
-	for _, name := range []string{"", "   ", strings.Repeat("x", 33), "a\tb"} {
+	for _, name := range []string{"", "   ", strings.Repeat("x", 33), "a\tb", "name\n", "\tname"} {
 		if _, err := backend.RenameTab(tab.ID, name); err == nil {
 			t.Fatalf("RenameTab(%q) succeeded, want an error", name)
 		}

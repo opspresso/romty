@@ -386,6 +386,11 @@ func (s *Server) renameTab(tabID, name string) protocol.Response {
 	if tabID == "" {
 		return protocol.Response{Error: "tab is required"}
 	}
+	// Control characters are checked before trimming, which would otherwise
+	// drop a trailing tab or newline and accept the name.
+	if strings.ContainsFunc(name, unicode.IsControl) {
+		return protocol.Response{Error: "tab name must not contain control characters"}
+	}
 	name = strings.TrimSpace(name)
 	if err := validateTabName(name); err != nil {
 		return protocol.Response{Error: err.Error()}
@@ -421,9 +426,6 @@ func validateTabName(name string) error {
 	}
 	if utf8.RuneCountInString(name) > maxTabNameLength {
 		return fmt.Errorf("tab name must be at most %d characters", maxTabNameLength)
-	}
-	if strings.ContainsFunc(name, unicode.IsControl) {
-		return errors.New("tab name must not contain control characters")
 	}
 	return nil
 }

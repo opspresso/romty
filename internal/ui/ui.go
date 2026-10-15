@@ -202,6 +202,7 @@ type dashboard struct {
 	inputMode               bool
 	inputKind               inputKind
 	input                   string
+	inputError              string
 	errorMessage            string
 	errorFrom               errorSource
 	noticeMessage           bool
@@ -559,6 +560,9 @@ func (m dashboard) update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		mouse := message.(tea.MouseMsg)
 		m.hover = m.hoverTargetAt(mouse.Mouse())
+		if click, ok := message.(tea.MouseClickMsg); ok && (click.Button != tea.MouseLeft || m.hover.kind != hoverTab) {
+			m.lastTabClick = tabClick{}
+		}
 		if m.modal != noModal {
 			if updated, command, handled := m.handleModalMouse(mouse); handled {
 				return updated, command
@@ -970,7 +974,8 @@ func (m dashboard) startRenameTab(tab model.Tab) (tea.Model, tea.Cmd) {
 }
 
 // isDoubleClick records a click on a tab label and reports whether it is the
-// second of two quick clicks on the same tab.
+// second of two quick clicks on the same tab. update clears lastTabClick on any
+// other click, so a click elsewhere in between breaks the pair.
 func (m *dashboard) isDoubleClick(tabID string) bool {
 	at := now()
 	previous := m.lastTabClick
@@ -1041,34 +1046,39 @@ func (m dashboard) saveConfig() tea.Cmd {
 func (m dashboard) handleInput(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch message.String() {
 	case "esc":
-		m.inputMode = false
-		m.input = ""
-		m.renameTabID = ""
+		m.closeInput()
 	case "enter":
 		if m.inputKind == tabNameInput {
 			name := strings.TrimSpace(m.input)
 			if name == "" {
-				m.setError(treeError, "tab name is required")
+				m.inputError = "tab name is required"
 				return m, nil
 			}
 			tabID := m.renameTabID
-			m.inputMode = false
-			m.input = ""
-			m.renameTabID = ""
+			m.closeInput()
 			return m, m.renameTab(tabID, name)
 		}
 		if strings.TrimSpace(m.input) == "" {
-			m.setError(treeError, "root path is required")
+			m.inputError = "root path is required"
 			return m, nil
 		}
 		path := strings.TrimSpace(m.input)
-		m.inputMode = false
-		m.input = ""
+		m.closeInput()
 		return m, m.addRoot(path)
 	default:
 		m.input = editText(m.input, message)
+		m.inputError = ""
 	}
 	return m, nil
+}
+
+// closeInput leaves the status bar prompt. A validation error belongs to the
+// prompt, so it leaves with it.
+func (m *dashboard) closeInput() {
+	m.inputMode = false
+	m.input = ""
+	m.inputError = ""
+	m.renameTabID = ""
 }
 
 // editText applies one key to a line of typed text. The root prompt and the
