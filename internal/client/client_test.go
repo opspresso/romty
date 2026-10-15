@@ -31,6 +31,9 @@ func TestNormalizePathExpandsHome(t *testing.T) {
 	if got != want {
 		t.Fatalf("normalizePath() = %q, want %q", got, want)
 	}
+	if got, err := normalizePath("~"); err != nil || got != home {
+		t.Fatalf("normalizePath(~) = (%q, %v), want the home directory %q", got, err, home)
+	}
 }
 
 // A daemon from before the version field must be named as the problem, in
