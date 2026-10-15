@@ -799,10 +799,7 @@ func TestDashboardSupportsIMEIndependentShortcuts(t *testing.T) {
 }
 
 func TestDashboardMouseSelectsWorkspaceAndTab(t *testing.T) {
-	tabs := []model.Tab{
-		{ID: "tab-1", WorkspaceID: "workspace-1", Name: "1", Running: true},
-		{ID: "tab-2", WorkspaceID: "workspace-1", Name: "2", Running: true},
-	}
+	tabs := openTabs(2)
 	snapshot, workspace := alphaWorkspaceSnapshot(tabs)
 	backend := &fakeBackend{snapshot: snapshot, workspace: workspace}
 	value := newDashboard(backend, snapshot)
@@ -1240,6 +1237,11 @@ func waitForGuest(t *testing.T, stream *memoryStream, want string) {
 	t.Fatalf("guest received %q, want it to contain %q", stream.String(), want)
 }
 
+// guest is the stream the dashboard's open terminal writes guest input to.
+func guest(value dashboard) *memoryStream {
+	return value.terminal.stream.(*memoryStream)
+}
+
 // waitForGuestSilence puts a marker behind the event under test. Seeing that
 // marker proves the copy goroutine processed everything before it.
 func waitForGuestSilence(t *testing.T, terminal *embeddedTerminal, was string) string {
@@ -1385,7 +1387,7 @@ func TestDashboardEntersScrollbackFromLiveMouseWheel(t *testing.T) {
 		t.Fatalf("typing = (scrollback %v, offset %d), want the live screen",
 			value.scrollback, value.scrollOffset)
 	}
-	waitForGuest(t, value.terminal.stream.(*memoryStream), "x")
+	waitForGuest(t, guest(value), "x")
 }
 
 // Outside scrollback the host's alternate scroll turns a wheel notch into three
@@ -1680,7 +1682,7 @@ func TestDashboardGivesTheWheelToAGuestThatOwnsTheScreen(t *testing.T) {
 		if value.scrollback {
 			t.Fatal("the wheel opened scrollback on the alternate screen")
 		}
-		waitForGuest(t, value.terminal.stream.(*memoryStream), "\x1b[<64;5;3")
+		waitForGuest(t, guest(value), "\x1b[<64;5;3")
 	})
 
 	t.Run("a guest that did not", func(t *testing.T) {
@@ -1696,12 +1698,12 @@ func TestDashboardGivesTheWheelToAGuestThatOwnsTheScreen(t *testing.T) {
 		if value.scrollback {
 			t.Fatal("the wheel opened scrollback on the alternate screen")
 		}
-		waitForGuest(t, value.terminal.stream.(*memoryStream), "\x1b[A\x1b[A\x1b[A")
+		waitForGuest(t, guest(value), "\x1b[A\x1b[A\x1b[A")
 
 		value.Update(tea.MouseWheelMsg{
 			X: leftWidth + separatorWidth + 4, Y: terminalTop + 2, Button: tea.MouseWheelDown,
 		})
-		waitForGuest(t, value.terminal.stream.(*memoryStream), "\x1b[B\x1b[B\x1b[B")
+		waitForGuest(t, guest(value), "\x1b[B\x1b[B\x1b[B")
 	})
 }
 
@@ -1765,7 +1767,7 @@ func TestDashboardScrollsHistoryNotTheGuestWithBothMouseOptions(t *testing.T) {
 	if !value.scrollback {
 		t.Fatal("F6 did not open scrollback")
 	}
-	sent := value.terminal.stream.(*memoryStream).String()
+	sent := guest(value).String()
 
 	send(&value, tea.MouseWheelMsg{X: 40, Y: terminalTop + 2, Button: tea.MouseWheelUp})
 	if value.scrollOffset != wheelLines {
@@ -2090,14 +2092,14 @@ func TestDashboardWithholdsUnrequestedMotionFromTheGuest(t *testing.T) {
 	// The buttons the guest did ask for still reach it.
 	value.Update(tea.MouseClickMsg{X: x, Y: y, Button: tea.MouseLeft})
 	sent += "\x1b[<0;5;3M"
-	waitForGuest(t, value.terminal.stream.(*memoryStream), sent)
+	waitForGuest(t, guest(value), sent)
 
 	// ?1002h is button-event tracking: motion, but only while a button is held.
 	value.terminal.writeOutput([]byte("\x1b[?1002h"))
 	value.Update(tea.MouseMotionMsg{X: x, Y: y})
 	sent = waitForGuestSilence(t, value.terminal, sent)
 	value.Update(tea.MouseMotionMsg{X: x, Y: y, Button: tea.MouseLeft})
-	waitForGuest(t, value.terminal.stream.(*memoryStream), sent+"\x1b[<32;5;3M")
+	waitForGuest(t, guest(value), sent+"\x1b[<32;5;3M")
 }
 
 func TestDashboardKeepsMouseWithTheHostUnlessPassthroughIsOn(t *testing.T) {
@@ -2124,8 +2126,8 @@ func TestDashboardKeepsMouseWithTheHostUnlessPassthroughIsOn(t *testing.T) {
 	}
 	leftWidth := value.dimensions().leftWidth
 	value.Update(tea.MouseWheelMsg{X: leftWidth + 3 + 4, Y: terminalTop + 2, Button: tea.MouseWheelUp})
-	waitForGuest(t, value.terminal.stream.(*memoryStream), "\x1b[<64;5;3")
-	sent := value.terminal.stream.(*memoryStream).String()
+	waitForGuest(t, guest(value), "\x1b[<64;5;3")
+	sent := guest(value).String()
 
 	// Events over the workspace pane are not the guest's business.
 	value.Update(tea.MouseWheelMsg{X: 1, Y: terminalTop + 2, Button: tea.MouseWheelUp})
@@ -2154,7 +2156,7 @@ func TestDashboardForwardsPagingToTheGuestThatOwnsTheScreen(t *testing.T) {
 
 	value.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyPgUp, Mod: tea.ModShift}))
 	// Sent unmodified: plain PgUp is the key such applications bind.
-	waitForGuest(t, value.terminal.stream.(*memoryStream), "\x1b[5~")
+	waitForGuest(t, guest(value), "\x1b[5~")
 
 	// On the main screen it still belongs to romty's own scrollback.
 	value.terminal.writeOutput([]byte("\x1b[?1049l"))
@@ -2415,11 +2417,7 @@ func exitedDashboard(t *testing.T, tabs []model.Tab, open int) (dashboard, *fake
 }
 
 func TestDashboardMovesToASiblingTabWhenTheShellExits(t *testing.T) {
-	tabs := []model.Tab{
-		{ID: "tab-1", WorkspaceID: "workspace-1", Name: "1", Running: true},
-		{ID: "tab-2", WorkspaceID: "workspace-1", Name: "2", Running: true},
-		{ID: "tab-3", WorkspaceID: "workspace-1", Name: "3", Running: true},
-	}
+	tabs := openTabs(3)
 	value, backend, refresh := exitedDashboard(t, tabs, 1)
 
 	// The daemon drops the tab whose shell exited.
@@ -2439,10 +2437,7 @@ func TestDashboardMovesToASiblingTabWhenTheShellExits(t *testing.T) {
 }
 
 func TestDashboardMovesToTheLastTabWhenTheLastShellExits(t *testing.T) {
-	tabs := []model.Tab{
-		{ID: "tab-1", WorkspaceID: "workspace-1", Name: "1", Running: true},
-		{ID: "tab-2", WorkspaceID: "workspace-1", Name: "2", Running: true},
-	}
+	tabs := openTabs(2)
 	value, backend, refresh := exitedDashboard(t, tabs, 1)
 
 	backend.snapshot.Roots[0].Directories[0].Tabs = tabs[:1]
@@ -2458,7 +2453,7 @@ func TestDashboardMovesToTheLastTabWhenTheLastShellExits(t *testing.T) {
 }
 
 func TestDashboardReturnsToTheWorkspaceWhenTheLastTabExits(t *testing.T) {
-	tabs := []model.Tab{{ID: "tab-1", WorkspaceID: "workspace-1", Name: "1", Running: true}}
+	tabs := openTabs(1)
 	value, backend, refresh := exitedDashboard(t, tabs, 0)
 
 	backend.snapshot.Roots[0].Directories[0].Tabs = nil
@@ -2479,7 +2474,7 @@ func TestDashboardReturnsToTheWorkspaceWhenTheLastTabExits(t *testing.T) {
 // A stream that drops while the tab keeps running is a lost connection, not an
 // exit, and the same walk reattaches to it.
 func TestDashboardReattachesWhenTheConnectionDrops(t *testing.T) {
-	tabs := []model.Tab{{ID: "tab-1", WorkspaceID: "workspace-1", Name: "1", Running: true}}
+	tabs := openTabs(1)
 	value, backend, refresh := exitedDashboard(t, tabs, 0)
 
 	open := send(&value, refresh())
@@ -2495,10 +2490,7 @@ func TestDashboardReattachesWhenTheConnectionDrops(t *testing.T) {
 
 // A shell exiting in the background must not pull the user out of the tree.
 func TestDashboardKeepsWorkspaceFocusWhenABackgroundShellExits(t *testing.T) {
-	tabs := []model.Tab{
-		{ID: "tab-1", WorkspaceID: "workspace-1", Name: "1", Running: true},
-		{ID: "tab-2", WorkspaceID: "workspace-1", Name: "2", Running: true},
-	}
+	tabs := openTabs(2)
 	value, backend, _ := exitedDashboard(t, tabs, 0)
 	value.focus = leftPane
 	value.terminalExited = true
@@ -2514,10 +2506,7 @@ func TestDashboardKeepsWorkspaceFocusWhenABackgroundShellExits(t *testing.T) {
 // go. If that snapshot never arrives the move must be settled, not left armed
 // to fire on whatever refresh comes next.
 func TestDashboardSettlesAnExitWhenTheSnapshotFails(t *testing.T) {
-	tabs := []model.Tab{
-		{ID: "tab-1", WorkspaceID: "workspace-1", Name: "1", Running: true},
-		{ID: "tab-2", WorkspaceID: "workspace-1", Name: "2", Running: true},
-	}
+	tabs := openTabs(2)
 	value, backend, _ := exitedDashboard(t, tabs, 0)
 
 	send(&value, snapshotMsg{err: errors.New("connect to daemon: no such file")})
@@ -2566,10 +2555,10 @@ func TestDashboardReportsBackendFailures(t *testing.T) {
 			name:   "adding a root",
 			method: "AddRoot",
 			act: func(m dashboard) (tea.Model, tea.Cmd) {
-				updated, _ := m.Update(key(tea.KeyF2, ""))
-				updated, _ = updated.(dashboard).Update(key('/', "/"))
-				updated, _ = updated.(dashboard).Update(key(tea.KeyExtended, "/projects"))
-				return updated.(dashboard).Update(key(tea.KeyEnter, ""))
+				send(&m, key(tea.KeyF2, ""))
+				send(&m, key('/', "/"))
+				send(&m, key(tea.KeyExtended, "/projects"))
+				return m.Update(key(tea.KeyEnter, ""))
 			},
 		},
 	} {
@@ -2606,14 +2595,8 @@ func TestDashboardReportsBackendFailures(t *testing.T) {
 // A tab whose creation failed must not leave the dashboard pointing at a
 // terminal that was never opened.
 func TestDashboardReportsAFailedTabCreation(t *testing.T) {
-	workspace := model.Workspace{ID: "workspace-1", RootID: "root-1", Name: "alpha", Path: "/projects/alpha"}
-	backend := &fakeBackend{
-		snapshot: model.Snapshot{Roots: []model.RootView{{
-			Root:        model.Root{ID: "root-1", Name: "projects", Path: "/projects"},
-			Directories: []model.WorkspaceView{{Workspace: workspace}},
-		}}},
-		workspace: workspace,
-	}
+	snapshot, workspace := alphaWorkspaceSnapshot(nil)
+	backend := &fakeBackend{snapshot: snapshot, workspace: workspace}
 	backend.fail("CreateTab", errors.New("daemon: start shell PTY: permission denied"))
 	value := newDashboard(backend, backend.snapshot)
 	value.selectedWorkspaceID = workspace.ID
@@ -2644,15 +2627,7 @@ func TestDashboardReturnsToTheTreeWhenOpeningFails(t *testing.T) {
 // of the dashboard. The event loop therefore renders only the final restored
 // screen, while keeping the history available to scrollback.
 func TestDashboardAdoptsACompletedTerminalReplay(t *testing.T) {
-	workspace := model.Workspace{ID: "workspace-1", RootID: "root-1", Name: "alpha", Path: "/projects/alpha"}
-	tab := model.Tab{ID: "tab-1", WorkspaceID: workspace.ID, Name: "1", Running: true}
-	snapshot := model.Snapshot{Roots: []model.RootView{{
-		Root: model.Root{ID: "root-1", Name: "projects", Path: "/projects"},
-		Directories: []model.WorkspaceView{{
-			Workspace: workspace,
-			Tabs:      []model.Tab{tab},
-		}},
-	}}}
+	snapshot, workspace := alphaWorkspaceSnapshot(openTabs(1))
 	value := newDashboard(&fakeBackend{}, snapshot)
 	value.width = 80
 	value.height = 12
@@ -2789,7 +2764,6 @@ func TestDashboardDoesNotUseRemovedLetterShortcuts(t *testing.T) {
 			}
 		})
 	}
-
 }
 
 func TestDashboardLeavesScrollbackForTerminalInput(t *testing.T) {
@@ -2812,7 +2786,7 @@ func TestDashboardLeavesScrollbackForTerminalInput(t *testing.T) {
 				t.Fatalf("%q = (scrollback %v, offset %d, focus %v), want terminal input mode",
 					test.message.String(), value.scrollback, value.scrollOffset, value.focus)
 			}
-			waitForGuest(t, value.terminal.stream.(*memoryStream), test.want)
+			waitForGuest(t, guest(value), test.want)
 		})
 	}
 }
@@ -2826,7 +2800,7 @@ func TestDashboardLeavesScrollbackForPaste(t *testing.T) {
 		t.Fatalf("paste = (scrollback %v, offset %d, focus %v), want terminal input mode",
 			value.scrollback, value.scrollOffset, value.focus)
 	}
-	waitForGuest(t, value.terminal.stream.(*memoryStream), "pasted")
+	waitForGuest(t, guest(value), "pasted")
 }
 
 // Unbound letters always belong to the shell in the terminal pane.
@@ -3034,7 +3008,7 @@ func TestDashboardForgetsTheRootTheConfirmationNamed(t *testing.T) {
 // whole recording, the client fell behind, the daemon cut it off, and round it
 // went. Retries are spaced and bounded, and the last word is the user's.
 func TestDashboardBacksOffRepeatedReattaches(t *testing.T) {
-	tabs := []model.Tab{{ID: "tab-1", WorkspaceID: "workspace-1", Name: "1", Running: true}}
+	tabs := openTabs(1)
 	value, backend, refresh := exitedDashboard(t, tabs, 0)
 
 	// drop reopens the terminal the way a completed attach does, then ends its
@@ -3100,7 +3074,7 @@ func TestDashboardBacksOffRepeatedReattaches(t *testing.T) {
 // Opening a workspace is the user asking again, so pending retries start over
 // and the next attach is immediate rather than delayed.
 func TestDashboardForgetsRetriesWhenTheUserSelectsAgain(t *testing.T) {
-	tabs := []model.Tab{{ID: "tab-1", WorkspaceID: "workspace-1", Name: "1", Running: true}}
+	tabs := openTabs(1)
 	value, backend, refresh := exitedDashboard(t, tabs, 0)
 
 	// One immediate reconnect, one drop, one counted retry.
@@ -3545,11 +3519,7 @@ func TestDashboardMovesWorkspaceAndTabCursorBeforeConfirming(t *testing.T) {
 // it has to switch on its own: moving the cursor and waiting for Enter is what
 // the plain arrows already do.
 func TestDashboardSwitchesTabsWithCtrlShiftArrows(t *testing.T) {
-	tabs := []model.Tab{
-		{ID: "tab-1", WorkspaceID: "workspace-1", Name: "1", Running: true},
-		{ID: "tab-2", WorkspaceID: "workspace-1", Name: "2", Running: true},
-		{ID: "tab-3", WorkspaceID: "workspace-1", Name: "3", Running: true},
-	}
+	tabs := openTabs(3)
 	snapshot, workspace := alphaWorkspaceSnapshot(tabs)
 	backend := &fakeBackend{snapshot: snapshot, workspace: workspace}
 	value := newDashboard(backend, snapshot)
@@ -3952,10 +3922,7 @@ func TestDashboardSwitchesTabsOfTheOpenTerminalNotTheCursor(t *testing.T) {
 }
 
 func TestDashboardSelectsPlusAndCreatesTabOnEnter(t *testing.T) {
-	tabs := []model.Tab{
-		{ID: "tab-1", WorkspaceID: "workspace-1", Name: "1", Running: true},
-		{ID: "tab-2", WorkspaceID: "workspace-1", Name: "2", Running: true},
-	}
+	tabs := openTabs(2)
 	snapshot, workspace := alphaWorkspaceSnapshot(tabs)
 	backend := &fakeBackend{
 		snapshot:   snapshot,
@@ -4499,10 +4466,7 @@ func TestDashboardDoesNotRestoreAMissingWorkspaceOrTab(t *testing.T) {
 }
 
 func TestDashboardPersistsTheLastOpenedWorkspaceAndTab(t *testing.T) {
-	tabs := []model.Tab{
-		{ID: "tab-1", WorkspaceID: "workspace-1", Name: "1", Running: true},
-		{ID: "tab-2", WorkspaceID: "workspace-1", Name: "2", Running: true},
-	}
+	tabs := openTabs(2)
 	snapshot, workspace := alphaWorkspaceSnapshot(tabs)
 	configPath := filepath.Join(t.TempDir(), "config.json")
 	value := newDashboardWithConfig(&fakeBackend{}, snapshot, configPath, Config{})
@@ -5215,7 +5179,7 @@ func scrollbackToggleKey() tea.KeyPressMsg {
 // then worked for an afternoon still counted its old drops towards the ceiling
 // and was eventually left saying it keeps disconnecting.
 func TestDashboardForgetsRetriesAfterAHealthyAttach(t *testing.T) {
-	tabs := []model.Tab{{ID: "tab-1", WorkspaceID: "workspace-1", Name: "1", Running: true}}
+	tabs := openTabs(1)
 	value, _, refresh := exitedDashboard(t, tabs, 0)
 
 	// One immediate reconnect, one drop, one counted retry — the same walk the
@@ -5250,7 +5214,7 @@ func TestDashboardForgetsRetriesAfterAHealthyAttach(t *testing.T) {
 // A drop that follows a fresh attach is another turn of the same loop, so the
 // healthy-attach reset must not hand it an immediate retry.
 func TestDashboardStillBacksOffWhenDropsAreImmediate(t *testing.T) {
-	tabs := []model.Tab{{ID: "tab-1", WorkspaceID: "workspace-1", Name: "1", Running: true}}
+	tabs := openTabs(1)
 	value, _, refresh := exitedDashboard(t, tabs, 0)
 
 	open := send(&value, refresh())
@@ -5270,10 +5234,7 @@ func TestDashboardStillBacksOffWhenDropsAreImmediate(t *testing.T) {
 }
 
 func TestDashboardIgnoresAReattachForTheTabItLeft(t *testing.T) {
-	tabs := []model.Tab{
-		{ID: "tab-1", WorkspaceID: "workspace-1", Name: "1", Running: true},
-		{ID: "tab-2", WorkspaceID: "workspace-1", Name: "2", Running: true},
-	}
+	tabs := openTabs(2)
 	value, _, refresh := exitedDashboard(t, tabs, 0)
 
 	open := send(&value, refresh())
@@ -5299,11 +5260,7 @@ func TestDashboardIgnoresAReattachForTheTabItLeft(t *testing.T) {
 // tab the user left must not be adopted: it would show that terminal under the
 // next tab's name and take the keyboard with it.
 func TestDashboardIgnoresATerminalOpenedForTheTabItLeft(t *testing.T) {
-	tabs := []model.Tab{
-		{ID: "tab-1", WorkspaceID: "workspace-1", Name: "1", Running: true},
-		{ID: "tab-2", WorkspaceID: "workspace-1", Name: "2", Running: true},
-		{ID: "tab-3", WorkspaceID: "workspace-1", Name: "3", Running: true},
-	}
+	tabs := openTabs(3)
 	snapshot, workspace := alphaWorkspaceSnapshot(tabs)
 	backend := &fakeBackend{snapshot: snapshot, workspace: workspace}
 	value := newDashboard(backend, snapshot)
