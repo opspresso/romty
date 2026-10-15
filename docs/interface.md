@@ -126,7 +126,7 @@ Both file views allow directory rows to take the cursor. Press `Enter` to toggle
 | `PgUp`/`PgDn` or `Ctrl+B`/`Ctrl+F` | Move one page | Picker, Help, Git result, file view |
 | `Home`/`End` or `g`/`G` | Move to the first or last item/line | Picker, Help, Git result, file view |
 | `Shift`+`PgUp`/`PgDn` | Enter scrollback or move one page | Workspace, terminal, scrollback |
-| Mouse wheel | Scroll | Help, scrollback, file view, terminal |
+| Mouse wheel | Scroll | Help, Git result, scrollback, file view, terminal |
 
 ### File view
 
