@@ -42,6 +42,8 @@
   --accent-text: #115e59;
   --danger: #be123c;
   --added: #15803d;
+  /* The program's amber reads at about 2:1 on a light page. */
+  --git-status: #b45309;
   --agent-claude: #b5482a;
   --agent-codex: #1d4ed8;
 
