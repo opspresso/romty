@@ -115,10 +115,9 @@ func TestRecordingRebuildsWhenTheLimitMoves(t *testing.T) {
 	}
 }
 
-// The straightforward "append, then shift the front off" moved the whole
-// recording on every chunk the PTY handed over, holding the session lock for
-// all of it. This is the benchmark that says the cost is now the chunk's, not
-// the recording's: raising the limit must not slow it down.
+// Appending to the ring costs the chunk, not the recording: raising the limit
+// must not slow this down. Shifting the front off a flat buffer instead would
+// move the whole recording on every chunk, under the session lock.
 func BenchmarkRecordingAppend(b *testing.B) {
 	chunk := bytes.Repeat([]byte("x"), 32*1024)
 	var value recording

@@ -257,7 +257,7 @@ func TestStripQueriesRemovesEveryAnsweredQueryFromRealisticHistory(t *testing.T)
 }
 
 // The scanner's memory of exhausted terminator searches is what keeps replay
-// linear. Without it this input took minutes, and it runs while the session
+// linear. Without it this input is quadratic, and it runs while the session
 // lock is held, so a regression stalls every client of that terminal.
 func TestStripQueriesStaysLinearOnUnterminatedIntroducers(t *testing.T) {
 	for _, probe := range []struct {
