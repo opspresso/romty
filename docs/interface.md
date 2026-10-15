@@ -82,7 +82,7 @@ Both file views allow directory rows to take the cursor. Press `Enter` to toggle
 
 ## Keyboard shortcuts
 
-`F1` through `F7` work in both panes and with regular modals open. Alternatives listed beside them are contextual; file view assigns its own action to `F5`, and changed-file view also assigns `F6`. The root path modal and the tab name modal own keyboard and paste input until submitted or cancelled, including `F4`. After `Enter`, the modal stays open until the daemon answers and accepts no input. If the daemon rejects the value, the modal keeps the typed text and shows the reason inside it. Clicks reach only the modal's `×` and action buttons, not the dashboard behind it. While daemon shutdown, hook installation, or a Git command is running, only `F4` is accepted. Press `F1` for the in-app reference.
+`F1` through `F7` work in both panes and with regular modals open. Alternatives listed beside them are contextual; file view assigns its own action to `F5`, and changed-file view also assigns `F6`. The root path modal and the tab name modal own keyboard and paste input until submitted or cancelled, including `F4`. After `Enter`, the modal stays open until the daemon answers. If the daemon rejects the value, the modal keeps the typed text and shows the reason inside it. Clicks reach only the modal's `×` and action buttons, not the dashboard behind it. While daemon shutdown, hook installation, a Git command, or a modal submit is running, only `F4` is accepted. Press `F1` for the in-app reference.
 
 ### Global
 

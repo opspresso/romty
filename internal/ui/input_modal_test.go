@@ -106,6 +106,10 @@ func TestInputModalHoldsWhileTheSubmitIsOut(t *testing.T) {
 	if status := ansi.Strip(value.renderStatus(80, 20)[1]); !strings.Contains(status, "SAVING") {
 		t.Fatalf("status while pending = %q, want the SAVING activity", status)
 	}
+	send(&value, tea.KeyPressMsg(tea.Key{Code: tea.KeyF4}))
+	if !value.result.Quit {
+		t.Fatal("F4 while pending did not quit")
+	}
 }
 
 func TestInputModalShowsARejectedRootPath(t *testing.T) {
