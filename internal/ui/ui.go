@@ -74,6 +74,7 @@ type Backend interface {
 	EnsureWorkspace(rootID, path string) (model.Workspace, error)
 	CreateTab(workspaceID string, columns, rows uint16) (model.Tab, error)
 	CloseTab(tabID string) (model.Snapshot, error)
+	RenameTab(tabID, name string) (model.Snapshot, error)
 	OpenTerminal(tabID string) (io.ReadWriteCloser, []byte, error)
 	Resize(tabID string, columns, rows uint16) error
 	Shutdown() error
@@ -126,6 +127,23 @@ const (
 	shutdownModal
 	hookInstallModal
 )
+
+// inputKind names what the status bar prompt is asking for.
+type inputKind int
+
+const (
+	rootPathInput inputKind = iota
+	tabNameInput
+)
+
+// doubleClickInterval is the longest gap between two clicks on one tab that
+// still counts as a double click.
+const doubleClickInterval = 500 * time.Millisecond
+
+type tabClick struct {
+	tabID string
+	at    time.Time
+}
 
 type shortcut struct {
 	key         string
@@ -182,7 +200,9 @@ type dashboard struct {
 	rememberedTabID         string
 	restorePending          bool
 	inputMode               bool
+	inputKind               inputKind
 	input                   string
+	inputError              string
 	errorMessage            string
 	errorFrom               errorSource
 	noticeMessage           bool
@@ -203,6 +223,12 @@ type dashboard struct {
 	// the place of the tab that leaves.
 	closeTabTarget model.Tab
 	closeTabIndex  int
+	// renameTabID is the tab the name prompt renames, held so the answer
+	// applies to the tab the prompt opened for.
+	renameTabID string
+	// lastTabClick is the previous click on a tab label, which is what turns
+	// a second click on the same tab into a double click.
+	lastTabClick   tabClick
 	terminalExited bool
 	// reattachTab and reattachAttempts damp the loop a dropped connection
 	// used to start: romty reattached at once, the daemon replayed the whole
@@ -534,6 +560,9 @@ func (m dashboard) update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		mouse := message.(tea.MouseMsg)
 		m.hover = m.hoverTargetAt(mouse.Mouse())
+		if click, ok := message.(tea.MouseClickMsg); ok && (click.Button != tea.MouseLeft || m.hover.kind != hoverTab) {
+			m.lastTabClick = tabClick{}
+		}
 		if m.modal != noModal {
 			if updated, command, handled := m.handleModalMouse(mouse); handled {
 				return updated, command
@@ -923,9 +952,39 @@ func installedHooksNotice(results []agenthooks.Result) string {
 func (m dashboard) startRootInput() (tea.Model, tea.Cmd) {
 	m.modal = noModal
 	m.inputMode = true
+	m.inputKind = rootPathInput
 	m.input = ""
 	m.clearAnyError()
 	return m, nil
+}
+
+// startRenameTab opens the name prompt with the tab's current name, so a small
+// change does not mean retyping the whole name.
+func (m dashboard) startRenameTab(tab model.Tab) (tea.Model, tea.Cmd) {
+	if tab.ID == "" {
+		return m, nil
+	}
+	m.modal = noModal
+	m.inputMode = true
+	m.inputKind = tabNameInput
+	m.input = tab.Name
+	m.renameTabID = tab.ID
+	m.clearAnyError()
+	return m, nil
+}
+
+// isDoubleClick records a click on a tab label and reports whether it is the
+// second of two quick clicks on the same tab. update clears lastTabClick on any
+// other click, so a click elsewhere in between breaks the pair.
+func (m *dashboard) isDoubleClick(tabID string) bool {
+	at := now()
+	previous := m.lastTabClick
+	if previous.tabID == tabID && at.Sub(previous.at) <= doubleClickInterval {
+		m.lastTabClick = tabClick{}
+		return true
+	}
+	m.lastTabClick = tabClick{tabID: tabID, at: at}
+	return false
 }
 
 func (m dashboard) shutdownDaemon() tea.Cmd {
@@ -987,21 +1046,39 @@ func (m dashboard) saveConfig() tea.Cmd {
 func (m dashboard) handleInput(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch message.String() {
 	case "esc":
-		m.inputMode = false
-		m.input = ""
+		m.closeInput()
 	case "enter":
+		if m.inputKind == tabNameInput {
+			name := strings.TrimSpace(m.input)
+			if name == "" {
+				m.inputError = "tab name is required"
+				return m, nil
+			}
+			tabID := m.renameTabID
+			m.closeInput()
+			return m, m.renameTab(tabID, name)
+		}
 		if strings.TrimSpace(m.input) == "" {
-			m.setError(treeError, "root path is required")
+			m.inputError = "root path is required"
 			return m, nil
 		}
 		path := strings.TrimSpace(m.input)
-		m.inputMode = false
-		m.input = ""
+		m.closeInput()
 		return m, m.addRoot(path)
 	default:
 		m.input = editText(m.input, message)
+		m.inputError = ""
 	}
 	return m, nil
+}
+
+// closeInput leaves the status bar prompt. A validation error belongs to the
+// prompt, so it leaves with it.
+func (m *dashboard) closeInput() {
+	m.inputMode = false
+	m.input = ""
+	m.inputError = ""
+	m.renameTabID = ""
 }
 
 // editText applies one key to a line of typed text. The root prompt and the
@@ -1028,6 +1105,18 @@ func (m *dashboard) addRoot(path string) tea.Cmd {
 	backend := m.backend
 	return func() tea.Msg {
 		value, err := backend.AddRoot(path)
+		return snapshotMsg{value: value, order: order, err: err}
+	}
+}
+
+func (m *dashboard) renameTab(tabID, name string) tea.Cmd {
+	order := m.nextSnapshotOrder()
+	backend := m.backend
+	return func() tea.Msg {
+		value, err := backend.RenameTab(tabID, name)
+		if err != nil {
+			err = fmt.Errorf("rename tab: %w", err)
+		}
 		return snapshotMsg{value: value, order: order, err: err}
 	}
 }

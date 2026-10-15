@@ -43,6 +43,8 @@ type fakeBackend struct {
 	createdRows            uint16
 	createCount            int
 	closedTabID            string
+	renamedTabID           string
+	renamedTabName         string
 	addedPath              string
 	removedRootID          string
 	removedWorkspaceRootID string
@@ -209,6 +211,20 @@ func (f *fakeBackend) CreateTab(workspaceID string, columns, rows uint16) (model
 		}
 	}
 	return f.createdTab, nil
+}
+
+func (f *fakeBackend) RenameTab(tabID, name string) (model.Snapshot, error) {
+	f.renamedTabID, f.renamedTabName = tabID, name
+	if err := f.failure("RenameTab"); err != nil {
+		return model.Snapshot{}, err
+	}
+	for tab := range f.snapshot.Tabs() {
+		if tab.ID == tabID {
+			tab.Name = name
+		}
+	}
+	f.snapshot.Revision++
+	return f.snapshot, nil
 }
 
 func (f *fakeBackend) CloseTab(tabID string) (model.Snapshot, error) {

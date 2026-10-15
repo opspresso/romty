@@ -240,6 +240,17 @@ func (c *Client) CloseTab(tabID string) (model.Snapshot, error) {
 	return callFor(c, protocol.Request{Action: protocol.ActionCloseTab, TabID: tabID}, snapshotOf, "snapshot")
 }
 
+func (c *Client) RenameTab(tabID, name string) (model.Snapshot, error) {
+	supported, err := c.supports(protocol.CapabilityRenameTab)
+	if err != nil {
+		return model.Snapshot{}, err
+	}
+	if !supported {
+		return model.Snapshot{}, fmt.Errorf("renaming tabs requires a newer daemon; %s", protocol.Remedy)
+	}
+	return callFor(c, protocol.Request{Action: protocol.ActionRenameTab, TabID: tabID, Name: name}, snapshotOf, "snapshot")
+}
+
 func (c *Client) Resize(tabID string, columns, rows uint16) error {
 	_, err := c.call(protocol.Request{
 		Action:   protocol.ActionResize,
