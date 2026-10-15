@@ -568,6 +568,10 @@ func (m dashboard) modalActionHits(geometry modalGeometry) []modalActionHit {
 	return hits
 }
 
+func (h modalActionHit) contains(mouse tea.Mouse) bool {
+	return mouse.Y == h.row && mouse.X >= h.left && mouse.X < h.right
+}
+
 func (m dashboard) renderModalAction(action modalAction, hovered bool) string {
 	if hovered {
 		return m.styles.interactiveHover.Render(" " + action.key + "  " + action.description)

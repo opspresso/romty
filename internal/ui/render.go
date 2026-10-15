@@ -73,6 +73,27 @@ type layout struct {
 	terminalHeight int
 }
 
+// onDivider reports a pointer on the divider between the panes.
+func (l layout) onDivider(mouse tea.Mouse) bool {
+	return l.separator > 0 && mouse.Y < l.bodyHeight &&
+		mouse.X >= l.leftWidth && mouse.X < l.leftWidth+l.separator
+}
+
+// inNavigation reports a pointer over the workspace pane.
+func (l layout) inNavigation(mouse tea.Mouse) bool {
+	return mouse.X < l.leftWidth && mouse.Y < l.bodyHeight
+}
+
+// tabBarX is the pointer's column inside the tab bar, the terminal pane's
+// first row, and whether the pointer is on that bar.
+func (l layout) tabBarX(mouse tea.Mouse) (int, bool) {
+	origin := l.leftWidth + l.separator
+	if mouse.Y != 0 || mouse.X < origin {
+		return 0, false
+	}
+	return mouse.X - origin, true
+}
+
 // screenWidth uses the host's actual columns, including phone screens below
 // 40 columns. The fallback only applies before the first window size arrives.
 func (m dashboard) screenWidth() int {
