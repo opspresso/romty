@@ -156,10 +156,7 @@ func pagingKey(pages int) tea.KeyPressMsg {
 
 func (m *dashboard) startScrollback() bool {
 	// Scrollback is a view of the terminal, and the file view is what is on
-	// screen instead of it. Opening it there set a mode nothing drew: the file
-	// view kept rendering, romty asked the host for alternate scroll on its
-	// behalf, and closing the file view landed the user in a scrollback they
-	// never asked for.
+	// screen instead of it, so it does not open behind the file view.
 	if m.gitDiff.active || m.terminal == nil || m.terminal.scrollbackLen() == 0 {
 		return false
 	}
