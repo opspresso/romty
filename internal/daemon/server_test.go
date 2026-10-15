@@ -907,6 +907,16 @@ type testDaemon struct {
 }
 
 // newQuietDaemon builds a daemon on socket and statePath that logs nowhere.
+// TestMain runs every test tab in /bin/sh. CreateTab sends the caller's
+// $SHELL, which outranks the shell a test daemon is given, and a developer's
+// interactive shell loads dotfiles: a prompt or a terminal wrapper such as
+// Kiro CLI's kiro-cli-term then changes the output the tests read.
+func TestMain(m *testing.M) {
+	os.Setenv("SHELL", "/bin/sh")
+	os.Unsetenv("ENV")
+	os.Exit(m.Run())
+}
+
 func newQuietDaemon(t *testing.T, socket, statePath, shell string) *daemon.Server {
 	t.Helper()
 	server, err := daemon.New(socket, statePath, shell)
