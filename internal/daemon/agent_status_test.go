@@ -16,7 +16,7 @@ import (
 )
 
 // stubForeground reports groupOf as each terminal's foreground process group
-// and processes ("pid command" lines) as the process list.
+// and processes ("pid ppid pgid tpgid command" lines) as the process list.
 func stubForeground(t *testing.T, groupOf func(*os.File) int, processes string) {
 	t.Helper()
 	testutil.Set(t, &foregroundProcessGroup, func(terminal *os.File) (int, error) { return groupOf(terminal), nil })
@@ -150,7 +150,7 @@ func TestAgentStatusRequiresARunningTab(t *testing.T) {
 func TestNodeStatusReportsPresenceWithoutAgentPhases(t *testing.T) {
 	testutil.Set(t, &foregroundProcessGroup, func(*os.File) (int, error) { return 101, nil })
 	command := "node server.js"
-	testutil.Set(t, &runProcessList, func(context.Context) ([]byte, error) { return []byte("101 " + command + "\n"), nil })
+	testutil.Set(t, &runProcessList, func(context.Context) ([]byte, error) { return []byte("101 1 101 101 " + command + "\n"), nil })
 
 	value := newSessionForTest(nil)
 	value.broadcast([]byte("Server ready. Press Enter to continue.\r\n"))
@@ -310,7 +310,7 @@ func TestAgentStatusRequiresLifecycleReportsForCodexAndClaude(t *testing.T) {
 		default:
 			return 103
 		}
-	}, "101 claude\n102 claude\n103 codex\n")
+	}, "101 1 101 101 claude\n102 1 102 102 claude\n103 1 103 103 codex\n")
 
 	hookedSession := newSessionForTest(hooked)
 	// The same approval prompt is on both screens.
@@ -356,7 +356,7 @@ func TestAgentStatusReportsTheLedgerOnlyForAHookedSession(t *testing.T) {
 			return 101
 		}
 		return 102
-	}, "101 claude\n102 claude\n")
+	}, "101 1 101 101 claude\n102 1 102 102 claude\n")
 
 	server := &Server{
 		sessions: map[string]*session{
@@ -404,7 +404,7 @@ func TestAgentStatusReportsTheLedgerOnlyForAHookedSession(t *testing.T) {
 // A tab whose agent has drawn nothing recognisable keeps the unknown phase
 // rather than being guessed into a state it is not in.
 func TestAgentStatusLeavesAnUnreadableScreenUnknown(t *testing.T) {
-	stubForeground(t, group(101), "101 claude\n")
+	stubForeground(t, group(101), "101 1 101 101 claude\n")
 	value := newSessionForTest(new(os.File))
 	value.history.append([]byte("go: downloading github.com/example/module v1.2.3\r\n"))
 	server := &Server{
@@ -418,7 +418,7 @@ func TestAgentStatusLeavesAnUnreadableScreenUnknown(t *testing.T) {
 }
 
 func TestAgentStatusDoesNotGuessCodexLifecycleFromRedraws(t *testing.T) {
-	stubForeground(t, group(101), "101 codex\n")
+	stubForeground(t, group(101), "101 1 101 101 codex\n")
 
 	value := newSessionForTest(new(os.File))
 	server := &Server{
@@ -450,7 +450,7 @@ func TestAgentStatusDoesNotGuessCodexLifecycleFromRedraws(t *testing.T) {
 
 func TestAgentStatusUsesForegroundProcessAsPresenceAuthority(t *testing.T) {
 	claudePTY := new(os.File)
-	stubForeground(t, group(101), "101 claude\n")
+	stubForeground(t, group(101), "101 1 101 101 claude\n")
 
 	server := &Server{
 		sessions: map[string]*session{
@@ -478,7 +478,7 @@ func TestAgentStatusEndsATurnTheTranscriptRecordsAsInterrupted(t *testing.T) {
 	workspace := "/projects/alpha"
 	path := writeClaudeTranscript(t, workspace, "session-1",
 		`{"type":"user","timestamp":"2026-10-15T09:00:05.000Z","message":{"content":[{"type":"text","text":"[Request interrupted by user]"}]}}`+"\n")
-	stubForeground(t, group(101), "101 claude\n")
+	stubForeground(t, group(101), "101 1 101 101 claude\n")
 
 	server := &Server{
 		sessions: map[string]*session{"tab-1": newSessionForTest(new(os.File))},
@@ -564,7 +564,7 @@ func TestAgentStatusReadsTheTranscriptPathTheHookReports(t *testing.T) {
 	workspace := "/projects/my_proj name"
 	path := writeClaudeTranscript(t, workspace, "session-1",
 		`{"type":"assistant","message":{"usage":{"input_tokens":3,"cache_creation_input_tokens":4,"cache_read_input_tokens":5}}}`+"\n")
-	stubForeground(t, group(101), "101 claude\n")
+	stubForeground(t, group(101), "101 1 101 101 claude\n")
 	server := &Server{
 		sessions:      map[string]*session{"tab-1": newSessionForTest(new(os.File))},
 		agentStatuses: make(map[string]agentRuntime),
