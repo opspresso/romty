@@ -116,6 +116,8 @@ func (t commandTheme) agent(agent model.Agent, value string) string {
 		return t.paint("38;2;217;119;87", value)
 	case model.AgentCodex:
 		return t.paint("38;2;59;130;246", value)
+	case model.AgentOpenCode:
+		return t.paint("38;2;192;132;252", value)
 	default:
 		return value
 	}
@@ -206,6 +208,7 @@ type snapshotSummary struct {
 	sessions   int
 	claude     int
 	codex      int
+	opencode   int
 	shell      int
 }
 
@@ -237,8 +240,8 @@ func printStatus(output io.Writer, runtime paths.Paths, theme commandTheme) erro
 		{label: "protocol", value: fmt.Sprint(daemonProtocol)},
 		{label: "roots", value: fmt.Sprint(summary.roots)},
 		{label: "workspaces", value: fmt.Sprint(summary.workspaces)},
-		{label: "sessions", value: fmt.Sprintf("%d (claude: %d, codex: %d, shell: %d)",
-			summary.sessions, summary.claude, summary.codex, summary.shell)},
+		{label: "sessions", value: fmt.Sprintf("%d (claude: %d, codex: %d, opencode: %d, shell: %d)",
+			summary.sessions, summary.claude, summary.codex, summary.opencode, summary.shell)},
 	}
 	for _, field := range fields {
 		if err := printField(output, theme, field.label, field.value); err != nil {
@@ -263,6 +266,8 @@ func summarizeSnapshot(snapshot model.Snapshot) snapshotSummary {
 			summary.claude++
 		case model.AgentCodex:
 			summary.codex++
+		case model.AgentOpenCode:
+			summary.opencode++
 		default:
 			summary.shell++
 		}

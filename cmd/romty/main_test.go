@@ -18,6 +18,7 @@ import (
 	"github.com/opspresso/romty/internal/client"
 	"github.com/opspresso/romty/internal/daemon"
 	"github.com/opspresso/romty/internal/display"
+	"github.com/opspresso/romty/internal/model"
 	"github.com/opspresso/romty/internal/paths"
 	"github.com/opspresso/romty/internal/protocol"
 	"github.com/opspresso/romty/internal/testutil"
@@ -239,7 +240,7 @@ func TestStatusAndListDescribeTheRunningDaemon(t *testing.T) {
 		fmt.Sprintf("protocol:   %d", protocol.Version),
 		"roots:      1",
 		"workspaces: 1",
-		"sessions:   1 (claude: 0, codex: 0, shell: 1)",
+		"sessions:   1 (claude: 0, codex: 0, opencode: 0, shell: 1)",
 	} {
 		if !strings.Contains(output.String(), want) {
 			t.Fatalf("status does not contain %q:\n%s", want, output.String())
@@ -536,5 +537,21 @@ func TestEveryCommandIsBothDocumentedAndAccepted(t *testing.T) {
 	}
 	if knownCommand("nonsense") {
 		t.Error("knownCommand accepted a word romty has no command for")
+	}
+}
+
+func TestSummarizeSnapshotCountsEveryAgent(t *testing.T) {
+	tabs := []model.Tab{
+		{Running: true, Agent: model.AgentClaude},
+		{Running: true, Agent: model.AgentCodex},
+		{Running: true, Agent: model.AgentOpenCode},
+		{Running: true, Agent: model.AgentNode},
+		{Running: true},
+		{Agent: model.AgentOpenCode},
+	}
+	got := summarizeSnapshot(model.Snapshot{Roots: []model.RootView{{Tabs: tabs}}})
+	want := snapshotSummary{roots: 1, sessions: 5, claude: 1, codex: 1, opencode: 1, shell: 2}
+	if got != want {
+		t.Fatalf("summarizeSnapshot() = %+v, want %+v", got, want)
 	}
 }
