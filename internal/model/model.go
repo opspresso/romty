@@ -107,6 +107,15 @@ type Tab struct {
 }
 
 // SetAgentStatus copies an agent status onto the tab it describes.
+// AgentStatus is the agent status the tab carries, the inverse of
+// SetAgentStatus.
+func (t Tab) AgentStatus() AgentStatus {
+	return AgentStatus{
+		Agent: t.Agent, Phase: t.AgentPhase, SessionID: t.AgentSessionID, TurnID: t.AgentTurnID,
+		ContextTokens: t.AgentContextTokens, CostUSD: t.AgentCostUSD,
+	}
+}
+
 func (t *Tab) SetAgentStatus(status AgentStatus) {
 	t.Agent = status.Agent
 	t.AgentPhase = status.Phase

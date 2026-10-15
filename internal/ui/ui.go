@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"slices"
 	"strings"
 	"sync"
@@ -254,11 +255,16 @@ type dashboard struct {
 	hover            hoverTarget
 	search           scrollbackSearch
 	agentSoundReady  bool
-	gitStates        map[string]gitrepo.State
-	gitFetchedAt     time.Time
-	gitRun           gitActionRun
-	fileView         fileViewState
-	styles           *uiStyles
+	// heardAgents is each tab's agent status as the last agent poll reported
+	// it. Sounds are judged against it rather than against the tree, because
+	// every snapshot carries the daemon's current statuses too: one landing
+	// between two polls would otherwise swallow the transition.
+	heardAgents  map[string]model.AgentStatus
+	gitStates    map[string]gitrepo.State
+	gitFetchedAt time.Time
+	gitRun       gitActionRun
+	fileView     fileViewState
+	styles       *uiStyles
 }
 
 type snapshotMsg struct {
@@ -396,6 +402,10 @@ func newDashboardWithConfig(backend Backend, initial model.Snapshot, configPath 
 	}
 	value.ensureWorkspaceCursor()
 	value.restoreSelection()
+	value.heardAgents = make(map[string]model.AgentStatus)
+	for tab := range initial.Tabs() {
+		value.heardAgents[tab.ID] = tab.AgentStatus()
+	}
 	value.agentAnimationActive = value.hasAnimatedAgent()
 	value.agentAnimationPending = value.agentAnimationActive || value.hasPendingActivity()
 	return value
@@ -601,6 +611,7 @@ func (m dashboard) update(message tea.Msg) (tea.Model, tea.Cmd) {
 			kind, ring := m.soundForAgentTransitions(message.value)
 			ring = m.agentSoundReady && ring
 			m.updateAgents(message.value)
+			m.heardAgents = maps.Clone(message.value)
 			m.agentSoundReady = true
 			if ring {
 				return m, tea.Batch(m.refreshAgents(), soundAlert(kind))

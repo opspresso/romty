@@ -1996,6 +1996,39 @@ func TestDashboardSoundsOnceForAgentTransitions(t *testing.T) {
 	}
 }
 
+// Every snapshot carries the daemon's current agent statuses, so a refresh can
+// land between two agent polls already holding the new phase. The transition
+// still belongs to the poll and must still sound.
+func TestDashboardSoundsForTransitionsASnapshotDeliveredFirst(t *testing.T) {
+	for _, probe := range []struct {
+		phase model.AgentPhase
+		want  sound.Kind
+	}{
+		{phase: model.AgentPhaseCompleted, want: sound.Done},
+		{phase: model.AgentPhaseWaitingInput, want: sound.Waiting},
+	} {
+		t.Run(string(probe.phase), func(t *testing.T) {
+			tree := func(phase model.AgentPhase, revision uint64) model.Snapshot {
+				return model.Snapshot{Revision: revision, Roots: []model.RootView{{
+					Root: model.Root{ID: "root"},
+					Tabs: []model.Tab{{ID: "tab", Running: true, Agent: model.AgentClaude, AgentPhase: phase}},
+				}}}
+			}
+			value := newDashboardWithConfig(&fakeBackend{}, tree(model.AgentPhaseWorking, 1), "",
+				Config{SoundOnDone: true, SoundOnWaiting: true})
+			value.agentSoundReady = true
+
+			send(&value, snapshotMsg{value: tree(probe.phase, 2)})
+			command := send(&value, agentSnapshotMsg{value: map[string]model.AgentStatus{
+				"tab": {Agent: model.AgentClaude, Phase: probe.phase},
+			}})
+			if kind, ok := playedSound(command); !ok || kind != probe.want {
+				t.Fatalf("sound = (%q, %v), want %q", kind, ok, probe.want)
+			}
+		})
+	}
+}
+
 func TestDashboardDoesNotSoundOnTheFirstAgentSnapshot(t *testing.T) {
 	value := newDashboardWithConfig(&fakeBackend{}, model.Snapshot{}, "", Config{SoundOnWaiting: true})
 	waiting := map[string]model.AgentStatus{"tab-1": {Agent: model.AgentCodex, Phase: model.AgentPhaseWaitingInput}}
