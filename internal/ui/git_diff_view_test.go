@@ -36,13 +36,11 @@ func TestDashboardTogglesGitDiffViewForContextWorkspace(t *testing.T) {
 	value.gitStates = map[string]gitState{workspace.Path: {Branch: "main", Dirty: true}}
 	value.setNavigation(1)
 
-	updated, filesCommand := value.Update(gitDiffViewKey())
-	value = updated.(dashboard)
+	filesCommand := send(&value, gitDiffViewKey())
 	if filesCommand == nil || !value.gitDiff.active || value.gitDiff.target.Path != workspace.Path || !value.gitDiff.filesPending {
 		t.Fatalf("open diff view = (command %v, state %#v)", filesCommand, value.gitDiff)
 	}
-	updated, diffCommand := value.Update(filesCommand())
-	value = updated.(dashboard)
+	diffCommand := send(&value, filesCommand())
 	if diffCommand == nil || len(value.gitDiff.files) != 2 || value.gitDiff.fileIndex != 0 || !value.gitDiff.diffPending {
 		t.Fatalf("changed files result = (command %v, state %#v)", diffCommand, value.gitDiff)
 	}
@@ -51,8 +49,7 @@ func TestDashboardTogglesGitDiffViewForContextWorkspace(t *testing.T) {
 	if loadedDiff.lines == nil || !loadedDiff.syntaxHighlighted {
 		t.Fatalf("background diff result was not prepared for rendering: %#v", loadedDiff)
 	}
-	updated, _ = value.Update(diffMessage)
-	value = updated.(dashboard)
+	send(&value, diffMessage)
 	rendered := ansi.Strip(value.render())
 	for _, fragment := range []string{"Changes · alpha", "README.md", "▾ internal/", "▾ ui/", "view.go", "Diff · README.md", "-old", "+new"} {
 		if !strings.Contains(rendered, fragment) {
@@ -60,8 +57,7 @@ func TestDashboardTogglesGitDiffViewForContextWorkspace(t *testing.T) {
 		}
 	}
 
-	updated, command := value.Update(gitDiffViewKey())
-	value = updated.(dashboard)
+	command := send(&value, gitDiffViewKey())
 	if command != nil || value.gitDiff.active {
 		t.Fatalf("close diff view = (command %v, state %#v)", command, value.gitDiff)
 	}
@@ -87,14 +83,12 @@ func TestDashboardLoadsAndRendersEveryWorkspaceFile(t *testing.T) {
 	target, _ := value.navigationItem()
 	updated, filesCommand := value.openAllFilesView(target)
 	value = updated.(dashboard)
-	updated, fileCommand := value.Update(filesCommand())
-	value = updated.(dashboard)
+	fileCommand := send(&value, filesCommand())
 	if fileCommand == nil || value.gitDiff.fileIndex != 0 || !value.gitDiff.collapsed["internal"] {
 		t.Fatalf("initial all-files tree = (command %v, state %#v), want README.md loading with directories collapsed",
 			fileCommand, value.gitDiff)
 	}
-	updated, _ = value.Update(fileCommand())
-	value = updated.(dashboard)
+	send(&value, fileCommand())
 
 	rendered := ansi.Strip(value.render())
 	for _, fragment := range []string{"Files · alpha", "▸ internal/", "README.md", "File · README.md", "# Alpha"} {
@@ -140,21 +134,18 @@ func TestAllFilesTreePreservesExpandedDirectoriesOnRefresh(t *testing.T) {
 		active: true, mode: allFilesView, filesPending: true, request: 1,
 	}
 
-	updated, command := value.Update(gitChangedFilesMsg{path: "", request: 1, files: files, rows: rows})
-	value = updated.(dashboard)
+	command := send(&value, gitChangedFilesMsg{path: "", request: 1, files: files, rows: rows})
 	if command != nil || !value.gitDiff.collapsed["internal"] || !value.gitDiff.collapsed["internal/ui"] {
 		t.Fatalf("initial collapsed directories = (command %v, collapsed %v)", command, value.gitDiff.collapsed)
 	}
-	updated, _ = value.Update(key(tea.KeyRight, ""))
-	value = updated.(dashboard)
+	send(&value, key(tea.KeyRight, ""))
 	if value.gitDiff.collapsed["internal"] {
 		t.Fatalf("expanded directory remains collapsed: %v", value.gitDiff.collapsed)
 	}
 
 	value.gitDiff.filesPending = true
 	value.gitDiff.request = 2
-	updated, _ = value.Update(gitChangedFilesMsg{path: "", request: 2, files: files, rows: rows})
-	value = updated.(dashboard)
+	send(&value, gitChangedFilesMsg{path: "", request: 2, files: files, rows: rows})
 	if value.gitDiff.collapsed["internal"] || !value.gitDiff.collapsed["internal/ui"] {
 		t.Fatalf("refresh changed expanded state: %v", value.gitDiff.collapsed)
 	}
@@ -172,8 +163,7 @@ func TestDashboardCollapsesAndExpandsFileTreeDirectories(t *testing.T) {
 		fileIndex: -1, treeIndex: 2,
 	}
 
-	updated, command := value.Update(key(tea.KeyEnter, ""))
-	value = updated.(dashboard)
+	command := send(&value, key(tea.KeyEnter, ""))
 	if command != nil || !value.gitDiff.collapsed["internal/ui"] || len(value.gitDiff.treeRows) != 3 {
 		t.Fatalf("collapse directory = (command %v, state %#v)", command, value.gitDiff)
 	}
@@ -182,8 +172,7 @@ func TestDashboardCollapsesAndExpandsFileTreeDirectories(t *testing.T) {
 		t.Fatalf("collapsed tree is incomplete:\n%s", rendered)
 	}
 
-	updated, command = value.Update(key(tea.KeyRight, ""))
-	value = updated.(dashboard)
+	command = send(&value, key(tea.KeyRight, ""))
 	if command != nil || value.gitDiff.collapsed["internal/ui"] || len(value.gitDiff.treeRows) != 5 {
 		t.Fatalf("expand directory = (command %v, state %#v)", command, value.gitDiff)
 	}
@@ -192,29 +181,25 @@ func TestDashboardCollapsesAndExpandsFileTreeDirectories(t *testing.T) {
 		t.Fatalf("expanded tree is incomplete:\n%s", rendered)
 	}
 
-	updated, command = value.Update(key(tea.KeyDown, ""))
-	value = updated.(dashboard)
+	command = send(&value, key(tea.KeyDown, ""))
 	if command == nil || value.gitDiff.fileIndex != 0 || value.gitDiff.selectedDirectory != "" {
 		t.Fatalf("move from directory to file = (command %v, state %#v)", command, value.gitDiff)
 	}
-	updated, command = value.Update(key(tea.KeyUp, ""))
-	value = updated.(dashboard)
+	command = send(&value, key(tea.KeyUp, ""))
 	if command != nil || value.gitDiff.fileIndex != -1 || value.gitDiff.selectedDirectory != "internal/ui" {
 		t.Fatalf("move from file to directory = (command %v, state %#v)", command, value.gitDiff)
 	}
 
-	updated, command = value.Update(key(tea.KeyLeft, ""))
-	value = updated.(dashboard)
+	command = send(&value, key(tea.KeyLeft, ""))
 	if command != nil || !value.gitDiff.collapsed["internal/ui"] {
 		t.Fatalf("collapse directory with Left = (command %v, state %#v)", command, value.gitDiff)
 	}
 
 	value.gitDiff.filesPending = true
 	value.gitDiff.request = 1
-	updated, command = value.Update(gitChangedFilesMsg{
+	command = send(&value, gitChangedFilesMsg{
 		path: "", request: 1, files: files, rows: gitDiffTreeRows(files),
 	})
-	value = updated.(dashboard)
 	if command != nil || !value.gitDiff.collapsed["internal/ui"] || len(value.gitDiff.treeRows) != 3 ||
 		value.gitDiff.selectedDirectory != "internal/ui" {
 		t.Fatalf("refresh collapsed directory = (command %v, state %#v)", command, value.gitDiff)
@@ -281,43 +266,36 @@ func TestDashboardNavigatesAndScrollsGitDiffView(t *testing.T) {
 		diffLines: []string{"first.txt"},
 	}
 
-	updated, command := value.Update(key(tea.KeyDown, ""))
-	value = updated.(dashboard)
+	command := send(&value, key(tea.KeyDown, ""))
 	if command == nil || value.gitDiff.fileIndex != 1 || !value.gitDiff.diffPending {
 		t.Fatalf("Down = (command %v, state %#v)", command, value.gitDiff)
 	}
-	updated, _ = value.Update(command())
-	value = updated.(dashboard)
+	send(&value, command())
 	if value.gitDiff.diffPending || len(value.gitDiff.diffLines) == 0 || value.gitDiff.diffLines[0] != "second.txt" {
 		t.Fatalf("second file diff = %#v", value.gitDiff)
 	}
 
-	updated, _ = value.Update(key(tea.KeyPgDown, ""))
-	value = updated.(dashboard)
+	send(&value, key(tea.KeyPgDown, ""))
 	if value.gitDiff.diffOffset == 0 {
 		t.Fatalf("PgDown diff offset = %d, want scrolled", value.gitDiff.diffOffset)
 	}
-	updated, _ = value.Update(key(tea.KeyHome, ""))
-	value = updated.(dashboard)
+	send(&value, key(tea.KeyHome, ""))
 	if value.gitDiff.diffOffset != 0 {
 		t.Fatalf("Home diff offset = %d, want 0", value.gitDiff.diffOffset)
 	}
-	updated, _ = value.Update(key(tea.KeyEnd, ""))
-	value = updated.(dashboard)
+	send(&value, key(tea.KeyEnd, ""))
 	if value.gitDiff.diffOffset != value.maximumGitDiffOffset() {
 		t.Fatalf("End diff offset = %d, want %d", value.gitDiff.diffOffset, value.maximumGitDiffOffset())
 	}
 	maximum := value.gitDiff.diffOffset
-	updated, _ = value.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyUp, Mod: tea.ModCtrl}))
-	value = updated.(dashboard)
+	send(&value, tea.KeyPressMsg(tea.Key{Code: tea.KeyUp, Mod: tea.ModCtrl}))
 	if value.gitDiff.diffOffset != maximum-1 {
 		t.Fatalf("Ctrl+Up diff offset = %d, want %d", value.gitDiff.diffOffset, maximum-1)
 	}
-	updated, _ = value.Update(tea.MouseWheelMsg{
+	send(&value, tea.MouseWheelMsg{
 		X: value.dimensions().leftWidth + separatorWidth,
 		Y: 4, Button: tea.MouseWheelUp,
 	})
-	value = updated.(dashboard)
 	if value.gitDiff.diffOffset != max(maximum-4, 0) {
 		t.Fatalf("wheel up diff offset = %d, want %d", value.gitDiff.diffOffset, max(maximum-4, 0))
 	}
@@ -344,20 +322,17 @@ func TestDashboardUsesMouseInFileTree(t *testing.T) {
 		collapsed: map[string]bool{"folder": true}, fileIndex: -1, selectedDirectory: "folder",
 	}
 
-	updated, command := value.Update(tea.MouseClickMsg{X: 2, Y: 2, Button: tea.MouseLeft})
-	value = updated.(dashboard)
+	command := send(&value, tea.MouseClickMsg{X: 2, Y: 2, Button: tea.MouseLeft})
 	if command != nil || value.gitDiff.collapsed["folder"] || len(value.gitDiff.treeRows) != 4 {
 		t.Fatalf("folder click = (command %v, state %#v), want expanded", command, value.gitDiff)
 	}
 
-	updated, command = value.Update(tea.MouseClickMsg{X: 2, Y: 3, Button: tea.MouseLeft})
-	value = updated.(dashboard)
+	command = send(&value, tea.MouseClickMsg{X: 2, Y: 3, Button: tea.MouseLeft})
 	if command == nil || value.gitDiff.fileIndex != 0 {
 		t.Fatalf("file click = (command %v, state %#v), want inside.txt loading", command, value.gitDiff)
 	}
 
-	updated, command = value.Update(tea.MouseWheelMsg{X: 2, Y: 3, Button: tea.MouseWheelDown})
-	value = updated.(dashboard)
+	command = send(&value, tea.MouseWheelMsg{X: 2, Y: 3, Button: tea.MouseWheelDown})
 	if command == nil || value.gitDiff.fileIndex != 2 {
 		t.Fatalf("file-tree wheel = (command %v, state %#v), want tail.txt loading", command, value.gitDiff)
 	}
@@ -468,20 +443,17 @@ func TestDashboardTogglesInlineAndSplitGitDiff(t *testing.T) {
 	if !strings.Contains(inline, "Diff · file.txt · inline") {
 		t.Fatalf("inline title is missing:\n%s", inline)
 	}
-	updated, command := value.Update(key('v', "v"))
-	value = updated.(dashboard)
+	command := send(&value, key('v', "v"))
 	if command != nil || value.gitDiff.split {
 		t.Fatalf("v = (command %v, split %t), want no shortcut action", command, value.gitDiff.split)
 	}
-	updated, _ = value.Update(key(tea.KeyF6, ""))
-	value = updated.(dashboard)
+	send(&value, key(tea.KeyF6, ""))
 	split := ansi.Strip(value.render())
 	if !value.gitDiff.split || !strings.Contains(split, "Diff · file.txt · split") ||
 		!lineContainsInOrder(split, "-old", "│", "+new") {
 		t.Fatalf("split view is incomplete:\n%s", split)
 	}
-	updated, _ = value.Update(key(tea.KeyF6, ""))
-	value = updated.(dashboard)
+	send(&value, key(tea.KeyF6, ""))
 	if value.gitDiff.split {
 		t.Fatal("a second F6 did not restore inline view")
 	}
@@ -495,11 +467,10 @@ func TestSplitDiffReplacesAndClearsPreparedRows(t *testing.T) {
 		files: []gitChangedFile{{Path: "file.txt"}}, request: 1,
 	}
 	for _, text := range []string{"first", "second"} {
-		updated, _ := value.Update(gitFileDiffMsg{
+		send(&value, gitFileDiffMsg{
 			path: "/workspace", filePath: "file.txt", request: value.gitDiff.request,
 			lines: []string{"@@ -1 +1 @@", "-old", "+" + text},
 		})
-		value = updated.(dashboard)
 		rendered := ansi.Strip(strings.Join(value.renderGitFileDiff(80, 8), "\n"))
 		if !lineContainsInOrder(rendered, "-old", "│", "+"+text) || value.maximumGitDiffOffset() != 0 {
 			t.Fatalf("prepared split rows did not follow new content:\n%s", rendered)
@@ -519,13 +490,11 @@ func TestDashboardRefreshesGitDiffWithF5Only(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, model.Snapshot{})
 	value.gitDiff = gitDiffView{active: true, target: model.Workspace{Name: "alpha", Path: "/projects/alpha"}}
 
-	updated, command := value.Update(key('r', "r"))
-	value = updated.(dashboard)
+	command := send(&value, key('r', "r"))
 	if command != nil || value.gitDiff.filesPending {
 		t.Fatalf("r = (command %v, pending %t), want no shortcut action", command, value.gitDiff.filesPending)
 	}
-	updated, command = value.Update(key(tea.KeyF5, ""))
-	value = updated.(dashboard)
+	command = send(&value, key(tea.KeyF5, ""))
 	if command == nil || !value.gitDiff.filesPending {
 		t.Fatalf("F5 = (command %v, pending %t), want file refresh", command, value.gitDiff.filesPending)
 	}
@@ -538,27 +507,22 @@ func TestDashboardPersistsAndRestoresGitDiffViewMode(t *testing.T) {
 	value.gitStates = map[string]gitState{workspace.Path: {Branch: "main", Dirty: true}}
 	value.setNavigation(1)
 
-	updated, _ := value.Update(gitDiffViewKey())
-	value = updated.(dashboard)
+	send(&value, gitDiffViewKey())
 	if value.gitDiff.split {
 		t.Fatal("new file view did not default to inline")
 	}
-	updated, save := value.Update(key(tea.KeyF6, ""))
-	value = updated.(dashboard)
+	save := send(&value, key(tea.KeyF6, ""))
 	if save == nil || !value.gitDiff.split {
 		t.Fatalf("F6 = (save %v, split %t), want split persisted", save, value.gitDiff.split)
 	}
-	updated, _ = value.Update(save())
-	value = updated.(dashboard)
+	send(&value, save())
 	loaded, err := loadConfig(configPath)
 	if err != nil || loaded.GitDiffView != "split" {
 		t.Fatalf("stored config = (%#v, %v), want split", loaded, err)
 	}
 
-	updated, _ = value.Update(gitDiffViewKey())
-	value = updated.(dashboard)
-	updated, _ = value.Update(gitDiffViewKey())
-	value = updated.(dashboard)
+	send(&value, gitDiffViewKey())
+	send(&value, gitDiffViewKey())
 	if !value.gitDiff.split {
 		t.Fatal("reopened file view forgot split mode")
 	}
@@ -566,8 +530,7 @@ func TestDashboardPersistsAndRestoresGitDiffViewMode(t *testing.T) {
 	restarted := newDashboardWithConfig(&fakeBackend{}, snapshot, configPath, loaded)
 	restarted.gitStates = value.gitStates
 	restarted.setNavigation(1)
-	updated, _ = restarted.Update(gitDiffViewKey())
-	restarted = updated.(dashboard)
+	send(&restarted, gitDiffViewKey())
 	if !restarted.gitDiff.split {
 		t.Fatal("restarted dashboard forgot split mode")
 	}
@@ -596,18 +559,16 @@ func TestDashboardGitDiffViewHandlesCleanAndFailedReads(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, model.Snapshot{})
 	value.gitDiff = gitDiffView{active: true, target: model.Workspace{Name: "alpha", Path: "/projects/alpha"}, filesPending: true, request: 1}
 
-	updated, command := value.Update(gitChangedFilesMsg{path: "/projects/alpha", request: 1})
-	value = updated.(dashboard)
+	command := send(&value, gitChangedFilesMsg{path: "/projects/alpha", request: 1})
 	if command != nil || value.gitDiff.filesPending || !strings.Contains(ansi.Strip(value.render()), "No changed files") {
 		t.Fatalf("clean repository = (command %v, state %#v)\n%s", command, value.gitDiff, ansi.Strip(value.render()))
 	}
 
 	value.gitDiff.filesPending = true
 	value.gitDiff.request++
-	updated, command = value.Update(gitChangedFilesMsg{
+	command = send(&value, gitChangedFilesMsg{
 		path: "/projects/alpha", request: value.gitDiff.request, err: errors.New("status failed"),
 	})
-	value = updated.(dashboard)
 	if command != nil || value.gitDiff.filesPending || value.gitDiff.err == "" || !strings.Contains(ansi.Strip(value.render()), "status failed") {
 		t.Fatalf("failed repository read = (command %v, state %#v)\n%s", command, value.gitDiff, ansi.Strip(value.render()))
 	}
@@ -620,8 +581,7 @@ func TestDashboardRecognisesCtrlShiftFForGitDiffAcrossInputLayouts(t *testing.T)
 	value.setNavigation(1)
 	physicalF := tea.KeyPressMsg(tea.Key{Code: 'ㄹ', BaseCode: 'f', Mod: tea.ModCtrl | tea.ModShift})
 
-	updated, command := value.Update(physicalF)
-	value = updated.(dashboard)
+	command := send(&value, physicalF)
 	if command == nil || !value.gitDiff.active {
 		t.Fatalf("Ctrl+Shift+F with a Korean layout = (command %v, state %#v)", command, value.gitDiff)
 	}
@@ -636,21 +596,17 @@ func TestDashboardGitDiffViewOwnsInputAndKeepsHelpModalUsable(t *testing.T) {
 	value.terminal = terminal
 	value.gitDiff = gitDiffView{active: true, target: model.Workspace{Name: "alpha", Path: "/projects/alpha"}}
 
-	updated, _ := value.Update(key('x', "x"))
-	value = updated.(dashboard)
-	updated, _ = value.Update(tea.PasteMsg{Content: "pasted"})
-	value = updated.(dashboard)
+	send(&value, key('x', "x"))
+	send(&value, tea.PasteMsg{Content: "pasted"})
 	if stream.String() != "" {
 		t.Fatalf("hidden terminal received input %q", stream.String())
 	}
 
-	updated, _ = value.Update(key(tea.KeyF1, ""))
-	value = updated.(dashboard)
+	send(&value, key(tea.KeyF1, ""))
 	if value.modal != helpModal || !value.gitDiff.active {
 		t.Fatalf("F1 = (modal %v, file view %t), want help over file view", value.modal, value.gitDiff.active)
 	}
-	updated, _ = value.Update(key(tea.KeyEscape, ""))
-	value = updated.(dashboard)
+	send(&value, key(tea.KeyEscape, ""))
 	if value.modal != noModal || !value.gitDiff.active {
 		t.Fatalf("Esc in help = (modal %v, file view %t), want only help closed", value.modal, value.gitDiff.active)
 	}
@@ -676,10 +632,8 @@ func TestDashboardRefusesScrollbackWhileTheFileViewIsOpen(t *testing.T) {
 	value.terminal = terminal
 	value.gitDiff = gitDiffView{active: true, target: model.Workspace{Name: "alpha", Path: "/projects/alpha"}}
 
-	updated, _ := value.Update(key(tea.KeyF1, ""))
-	value = updated.(dashboard)
-	updated, _ = value.Update(key(tea.KeyF6, ""))
-	value = updated.(dashboard)
+	send(&value, key(tea.KeyF1, ""))
+	send(&value, key(tea.KeyF6, ""))
 	if value.scrollback {
 		t.Fatal("F6 over the file view opened a scrollback nothing draws")
 	}

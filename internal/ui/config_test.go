@@ -78,10 +78,8 @@ func TestAdjustingOneSettingKeepsTheRest(t *testing.T) {
 	value := newDashboardWithConfig(&fakeBackend{}, model.Snapshot{}, path, loaded)
 	value.width = 120
 	value.height = 40
-	updated, _ := value.Update(key(',', ","))
-	value = updated.(dashboard)
-	updated, save := value.Update(key(tea.KeyRight, ""))
-	value = updated.(dashboard)
+	send(&value, key(',', ","))
+	save := send(&value, key(tea.KeyRight, ""))
 	if save == nil {
 		t.Fatal("adjusting the width produced no save")
 	}
@@ -105,8 +103,7 @@ func TestAdjustingOneSettingKeepsTheRest(t *testing.T) {
 	}
 
 	// The other way round: the mouse setting persists and leaves the width be.
-	updated, save = value.Update(key('m', "m"))
-	value = updated.(dashboard)
+	save = send(&value, key('m', "m"))
 	if save == nil {
 		t.Fatal("toggling the scrollback mouse produced no save")
 	}
@@ -238,28 +235,24 @@ func TestConfigRowsDrawAndAnswerTogether(t *testing.T) {
 func TestConfigWalksAndTogglesWithTheCursor(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, model.Snapshot{})
 	value.width, value.height = 120, 40
-	updated, _ := value.Update(key(tea.KeyF3, ""))
-	value = updated.(dashboard)
+	send(&value, key(tea.KeyF3, ""))
 	if value.modal != configModal || value.configIndex != 0 {
 		t.Fatalf("F3 = (modal %v, cursor %d), want config at its first row", value.modal, value.configIndex)
 	}
 
 	// The cursor stops at the ends rather than wrapping, as the workspace tree
 	// and the picker do.
-	updated, _ = value.Update(key(tea.KeyUp, ""))
-	value = updated.(dashboard)
+	send(&value, key(tea.KeyUp, ""))
 	if value.configIndex != 0 {
 		t.Fatalf("up at the first row = %d, want it to stay", value.configIndex)
 	}
 
 	// Down to "Scrollback mouse", then Enter runs the row the cursor is on.
-	updated, _ = value.Update(key(tea.KeyDown, ""))
-	value = updated.(dashboard)
+	send(&value, key(tea.KeyDown, ""))
 	if value.configIndex != 1 {
 		t.Fatalf("cursor = %d, want the second setting", value.configIndex)
 	}
-	updated, command := value.Update(key(tea.KeyEnter, ""))
-	value = updated.(dashboard)
+	command := send(&value, key(tea.KeyEnter, ""))
 	if !value.scrollbackMouse || command == nil {
 		t.Fatalf("Enter = (scrollback mouse %v, command %v), want the setting on and saved",
 			value.scrollbackMouse, command)
@@ -283,20 +276,17 @@ func TestConfigWalksAndTogglesWithTheCursor(t *testing.T) {
 
 	// Space runs the row too. Bubble Tea reports the space bar as "space", not
 	// as the literal " " a key case would otherwise be written with.
-	updated, _ = value.Update(key(tea.KeySpace, " "))
-	value = updated.(dashboard)
+	send(&value, key(tea.KeySpace, " "))
 	if value.scrollbackMouse {
 		t.Fatal("Space did not run the setting the cursor is on")
 	}
 
 	// End reaches the last setting and Enter runs that one instead.
-	updated, _ = value.Update(key(tea.KeyEnd, ""))
-	value = updated.(dashboard)
+	send(&value, key(tea.KeyEnd, ""))
 	if value.configIndex != len(configRows())-1 {
 		t.Fatalf("End = %d, want the last setting", value.configIndex)
 	}
-	updated, _ = value.Update(key(tea.KeyEnter, ""))
-	value = updated.(dashboard)
+	send(&value, key(tea.KeyEnter, ""))
 	if value.scrollbackMouse {
 		t.Fatal("Enter on the last setting toggled a different one")
 	}

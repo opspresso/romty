@@ -36,11 +36,10 @@ func workspaceActionIndexFor(t *testing.T, value dashboard, action workspaceActi
 // runs action with Enter.
 func runWorkspaceAction(t *testing.T, value dashboard, action workspaceAction) (dashboard, tea.Cmd) {
 	t.Helper()
-	updated, _ := value.Update(key(tea.KeyF8, ""))
-	value = updated.(dashboard)
+	send(&value, key(tea.KeyF8, ""))
 	value.workspaceActionIndex = workspaceActionIndexFor(t, value, action)
-	updated, command := value.Update(key(tea.KeyEnter, ""))
-	return updated.(dashboard), command
+	command := send(&value, key(tea.KeyEnter, ""))
+	return value, command
 }
 
 func TestWorkspaceActionsStartWithThePrimaryTerminalAction(t *testing.T) {
@@ -78,8 +77,7 @@ func TestWorkspaceActionsExposeEveryGitOperationDirectly(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, snapshot)
 	value.gitStates = map[string]gitState{workspace.Path: {Branch: "main", Dirty: true}}
 	value.setNavigation(1)
-	updated, command := value.Update(key(tea.KeyF8, ""))
-	value = updated.(dashboard)
+	command := send(&value, key(tea.KeyF8, ""))
 	if command != nil || value.modal != workspaceActionsModal || value.workspaceActionTarget.workspace.Path != workspace.Path {
 		t.Fatalf("F8 = (command %v, modal %v, target %q)", command, value.modal, value.workspaceActionTarget.workspace.Path)
 	}
@@ -117,8 +115,7 @@ func TestWorkspaceActionsRunAGitOperationAndReturnToThePalette(t *testing.T) {
 	value.gitActionPending = false
 	value.gitActionComplete = true
 	value.gitActionOutput = "Already up to date."
-	updated, _ := value.Update(key(tea.KeyEnter, ""))
-	value = updated.(dashboard)
+	send(&value, key(tea.KeyEnter, ""))
 	if value.modal != workspaceActionsModal || value.gitActionComplete {
 		t.Fatalf("Git result returned to modal %v with complete=%v, want workspace actions", value.modal, value.gitActionComplete)
 	}
@@ -162,8 +159,7 @@ func TestWorkspaceActionsRunTerminalAndFileCommands(t *testing.T) {
 		snapshot, _ := alphaWorkspaceSnapshot(nil)
 		value := newDashboard(&fakeBackend{}, snapshot)
 		value.setNavigation(1)
-		updated, _ := value.Update(key(tea.KeyF8, ""))
-		value = updated.(dashboard)
+		send(&value, key(tea.KeyF8, ""))
 		for _, choice := range value.workspaceActionChoices() {
 			if choice.action == workspaceCloseTabAction {
 				t.Fatalf("actions = %+v, want no close entry without a running terminal",
@@ -211,8 +207,7 @@ func TestDashboardRightClickOpensActionsForThePointedWorkspace(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, snapshot)
 	value.width, value.height = 120, 30
 
-	updated, command := value.Update(tea.MouseClickMsg{X: 2, Y: 3, Button: tea.MouseRight})
-	value = updated.(dashboard)
+	command := send(&value, tea.MouseClickMsg{X: 2, Y: 3, Button: tea.MouseRight})
 	if command != nil || value.modal != workspaceActionsModal || value.navIndex != 1 ||
 		value.workspaceActionTarget.workspace.Path != workspace.Path {
 		t.Fatalf("right click = (command %v, modal %v, index %d, target %q)",
@@ -223,15 +218,13 @@ func TestDashboardRightClickOpensActionsForThePointedWorkspace(t *testing.T) {
 	if left != 2 || top != 3 || len(popup) == 0 {
 		t.Fatalf("popup anchor = (%d, %d), want the click at (2, 3)", left, top)
 	}
-	updated, _ = value.Update(tea.MouseMotionMsg{X: left + 1, Y: top + 1})
-	value = updated.(dashboard)
+	send(&value, tea.MouseMotionMsg{X: left + 1, Y: top + 1})
 	if value.hover.kind != hoverWorkspaceAction || value.hover.index != 0 {
 		t.Fatalf("workspace action hover = %#v, want the first row", value.hover)
 	}
-	updated, command = value.Update(tea.MouseClickMsg{
+	command = send(&value, tea.MouseClickMsg{
 		X: left + 1, Y: top + 1, Button: tea.MouseLeft,
 	})
-	value = updated.(dashboard)
 	if command == nil || value.modal != noModal {
 		t.Fatalf("first action click = (command %v, modal %v), want new tab", command, value.modal)
 	}
@@ -244,11 +237,9 @@ func TestWorkspaceActionsWindowACompactScreen(t *testing.T) {
 	value.width, value.height = 80, 10
 	value.gitStates = map[string]gitState{workspace.Path: {Branch: "main"}}
 	value.setNavigation(1)
-	updated, _ := value.Update(key(tea.KeyF8, ""))
-	value = updated.(dashboard)
+	send(&value, key(tea.KeyF8, ""))
 
-	updated, _ = value.Update(key(tea.KeyEnd, ""))
-	value = updated.(dashboard)
+	send(&value, key(tea.KeyEnd, ""))
 	popup, _, _ := value.workspaceActionPopup(value.width, value.dimensions().bodyHeight)
 	rendered := ansi.Strip(strings.Join(popup, "\n"))
 	if value.workspaceActionOffset == 0 || !strings.Contains(rendered, "Delete workspace") ||
@@ -262,8 +253,7 @@ func TestWorkspaceActionsOverlayOnlyItsPopupRectangle(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, snapshot)
 	value.width, value.height = 120, 30
 	value.setNavigation(1)
-	updated, _ := value.Update(tea.MouseClickMsg{X: 2, Y: 3, Button: tea.MouseRight})
-	value = updated.(dashboard)
+	send(&value, tea.MouseClickMsg{X: 2, Y: 3, Button: tea.MouseRight})
 
 	rendered := strings.Split(ansi.Strip(value.render()), "\n")
 	if !strings.Contains(rendered[0], "romty") || !strings.Contains(strings.Join(rendered, "\n"), "Select +") {
@@ -272,7 +262,7 @@ func TestWorkspaceActionsOverlayOnlyItsPopupRectangle(t *testing.T) {
 	if !strings.Contains(rendered[3], "╭") || !strings.Contains(rendered[4], "New tab") {
 		t.Fatalf("context popup is not anchored at the click:\n%s", strings.Join(rendered, "\n"))
 	}
-	updated, _ = value.Update(tea.MouseClickMsg{X: 100, Y: 2, Button: tea.MouseLeft})
+	updated, _ := value.Update(tea.MouseClickMsg{X: 100, Y: 2, Button: tea.MouseLeft})
 	if updated.(dashboard).modal != noModal {
 		t.Fatal("clicking outside the context popup did not dismiss it")
 	}

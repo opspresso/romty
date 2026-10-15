@@ -54,16 +54,15 @@ func tabCloseLocalX(tabs []model.Tab, want int) int {
 func clickTabClose(t *testing.T, value dashboard, tabs []model.Tab, index int) (dashboard, tea.Cmd) {
 	t.Helper()
 	origin := value.dimensions().leftWidth + value.dimensions().separator
-	updated, _ := value.Update(tea.MouseClickMsg{
+	send(&value, tea.MouseClickMsg{
 		X: origin + tabCloseLocalX(tabs, index), Y: 0, Button: tea.MouseLeft,
 	})
-	value = updated.(dashboard)
 	if value.modal != closeTabModal || value.closeTabTarget.ID != tabs[index].ID {
 		t.Fatalf("close click = (modal %v, target %q), want the confirmation for %q",
 			value.modal, value.closeTabTarget.ID, tabs[index].ID)
 	}
-	updated, command := value.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
-	return updated.(dashboard), command
+	command := send(&value, tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+	return value, command
 }
 
 // A close button that fires on the click alone would end a shell romty exists
@@ -74,16 +73,14 @@ func TestDashboardKeepsTheTabUntilTheCloseIsConfirmed(t *testing.T) {
 	value.focus = terminalPane
 	origin := value.dimensions().leftWidth + value.dimensions().separator
 
-	updated, command := value.Update(tea.MouseClickMsg{
+	command := send(&value, tea.MouseClickMsg{
 		X: origin + tabCloseLocalX(tabs, 1), Y: 0, Button: tea.MouseLeft,
 	})
-	value = updated.(dashboard)
 	if command != nil || value.tabClosePending != "" || value.modal != closeTabModal {
 		t.Fatalf("close click = (command %v, pending %q, modal %v), want only the confirmation",
 			command, value.tabClosePending, value.modal)
 	}
-	updated, cancelled := value.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEscape}))
-	value = updated.(dashboard)
+	cancelled := send(&value, tea.KeyPressMsg(tea.Key{Code: tea.KeyEscape}))
 	if cancelled != nil || value.modal != noModal || backend.closedTabID != "" {
 		t.Fatalf("cancelled close = (command %v, modal %v, closed %q), want the tab left alone",
 			cancelled, value.modal, backend.closedTabID)
@@ -121,8 +118,7 @@ func TestDashboardClosesAnInactiveTabWithoutReplacingTheOpenTerminal(t *testing.
 	if command == nil || value.tabClosePending != tabs[1].ID {
 		t.Fatalf("close click = (command %v, pending %q), want tab-2", command, value.tabClosePending)
 	}
-	updated, next := value.Update(commandMessage[tabClosedMsg](t, command))
-	value = updated.(dashboard)
+	next := send(&value, commandMessage[tabClosedMsg](t, command))
 	if next != nil || backend.closedTabID != tabs[1].ID || value.terminal == nil || value.terminal.id != tabs[0].ID ||
 		len(value.selectedTabs()) != 2 {
 		t.Fatalf("inactive close = (next %v, closed %q, terminal %v, tabs %d)",
@@ -138,15 +134,12 @@ func TestDashboardClosesTheActiveTabAndOpensItsNextSibling(t *testing.T) {
 
 	value, closeCommand := clickTabClose(t, value, tabs, 1)
 	closingTerminal := value.terminal
-	updated, _ := value.Update(terminalOutputMsg{terminal: closingTerminal, err: io.EOF})
-	value = updated.(dashboard)
-	updated, openCommand := value.Update(commandMessage[tabClosedMsg](t, closeCommand))
-	value = updated.(dashboard)
+	send(&value, terminalOutputMsg{terminal: closingTerminal, err: io.EOF})
+	openCommand := send(&value, commandMessage[tabClosedMsg](t, closeCommand))
 	if openCommand == nil || value.tabIndex != 1 || value.terminal != nil {
 		t.Fatalf("active close = (open %v, index %d, terminal %v), want next sibling", openCommand, value.tabIndex, value.terminal)
 	}
-	updated, _ = value.Update(commandMessage[terminalOpenedMsg](t, openCommand))
-	value = updated.(dashboard)
+	send(&value, commandMessage[terminalOpenedMsg](t, openCommand))
 	t.Cleanup(value.closeTerminal)
 	if value.terminal == nil || value.terminal.id != tabs[2].ID {
 		t.Fatalf("opened terminal = %v, want %q", value.terminal, tabs[2].ID)
@@ -160,8 +153,7 @@ func TestDashboardClosesTheOnlyTabAndReturnsToTheWorkspacePane(t *testing.T) {
 	value.terminal = newEmbeddedTerminal(tabs[0].ID, newMemoryStream(""), 40, 10)
 
 	value, closeCommand := clickTabClose(t, value, tabs, 0)
-	updated, next := value.Update(commandMessage[tabClosedMsg](t, closeCommand))
-	value = updated.(dashboard)
+	next := send(&value, commandMessage[tabClosedMsg](t, closeCommand))
 	if next != nil || value.terminal != nil || value.focus != leftPane || value.tabIndex != 0 {
 		t.Fatalf("only close = (next %v, terminal %v, focus %v, index %d)",
 			next, value.terminal, value.focus, value.tabIndex)
@@ -174,8 +166,7 @@ func TestDashboardKeepsTheTabWhenCloseFails(t *testing.T) {
 	backend.fail("CloseTab", errors.New("daemon unavailable"))
 	updated, closeCommand := value.closeTab(tabs[0], 0)
 	value = updated.(dashboard)
-	updated, next := value.Update(commandMessage[tabClosedMsg](t, closeCommand))
-	value = updated.(dashboard)
+	next := send(&value, commandMessage[tabClosedMsg](t, closeCommand))
 	if next != nil || value.tabClosePending != "" || len(value.selectedTabs()) != 1 ||
 		!strings.Contains(value.errorMessage, "daemon unavailable") {
 		t.Fatalf("failed close = (next %v, pending %q, tabs %d, error %q)",
@@ -201,8 +192,7 @@ func TestDashboardClosesARootTabAndMovesItsCursor(t *testing.T) {
 
 	updated, closeCommand := value.closeTab(tabs[1], 1)
 	value = updated.(dashboard)
-	updated, next := value.Update(commandMessage[tabClosedMsg](t, closeCommand))
-	value = updated.(dashboard)
+	next := send(&value, commandMessage[tabClosedMsg](t, closeCommand))
 	if next != nil || len(value.navigationTabs()) != 1 || value.tabIndex != 0 {
 		t.Fatalf("root close = (next %v, tabs %d, index %d), want the cursor on the remaining tab",
 			next, len(value.navigationTabs()), value.tabIndex)

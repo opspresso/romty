@@ -55,15 +55,13 @@ func TestDashboardRunsGitActionForContextWorkspace(t *testing.T) {
 			}
 			probe.prepare(&value)
 
-			updated, command := value.Update(gitActionsKey())
-			value = updated.(dashboard)
+			command := send(&value, gitActionsKey())
 			if command != nil || value.modal != gitActionsModal || value.gitActionTarget.Path != probe.wantTarget.Path {
 				t.Fatalf("Ctrl+Shift+G = (command %v, modal %v, target %q), want Git actions for %q",
 					command, value.modal, value.gitActionTarget.Path, probe.wantTarget.Path)
 			}
 
-			updated, _ = value.Update(key(tea.KeyDown, ""))
-			value = updated.(dashboard)
+			send(&value, key(tea.KeyDown, ""))
 			if value.gitActionIndex != 1 {
 				t.Fatalf("Git action index = %d, want Fetch at 1", value.gitActionIndex)
 			}
@@ -77,22 +75,18 @@ func TestDashboardRunsSelectedGitActionAndShowsResult(t *testing.T) {
 	value.gitStates = map[string]gitState{workspace.Path: {Branch: "main"}}
 	value.setNavigation(1)
 
-	updated, _ := value.Update(gitActionsKey())
-	value = updated.(dashboard)
-	updated, _ = value.Update(key(tea.KeyDown, ""))
-	value = updated.(dashboard)
-	updated, command := value.Update(key(tea.KeyEnter, ""))
-	value = updated.(dashboard)
+	send(&value, gitActionsKey())
+	send(&value, key(tea.KeyDown, ""))
+	command := send(&value, key(tea.KeyEnter, ""))
 	if command == nil || !value.gitActionPending || value.gitAction != gitFetchAction {
 		t.Fatalf("Fetch selection = (command %v, pending %t, action %v)", command, value.gitActionPending, value.gitAction)
 	}
 
-	updated, refresh := value.Update(gitActionMsg{
+	refresh := send(&value, gitActionMsg{
 		path:   workspace.Path,
 		action: gitFetchAction,
 		output: "Fetched origin",
 	})
-	value = updated.(dashboard)
 	if refresh == nil || value.gitActionPending || value.gitActionOutput != "Fetched origin" {
 		t.Fatalf("Fetch result = (refresh %v, pending %t, output %q)", refresh, value.gitActionPending, value.gitActionOutput)
 	}
@@ -109,13 +103,12 @@ func TestDashboardReportsGitActionFailure(t *testing.T) {
 	value.gitActionTarget = model.Workspace{Path: "/projects/alpha"}
 	value.gitAction = gitPushAction
 
-	updated, refresh := value.Update(gitActionMsg{
+	refresh := send(&value, gitActionMsg{
 		path:   "/projects/alpha",
 		action: gitPushAction,
 		output: "rejected",
 		err:    errors.New("exit status 1"),
 	})
-	value = updated.(dashboard)
 	if refresh == nil || value.gitActionPending || value.gitActionError == "" {
 		t.Fatalf("Push failure = (refresh %v, pending %t, error %q)", refresh, value.gitActionPending, value.gitActionError)
 	}
@@ -135,8 +128,7 @@ func TestDashboardScrollsGitActionResult(t *testing.T) {
 	value.gitActionOutput = strings.Join([]string{"one", "two", "three", "four", "five", "six", "seven"}, "\n")
 
 	before := ansi.Strip(strings.Join(value.renderModal(value.width, value.dimensions().bodyHeight), "\n"))
-	updated, _ := value.Update(key(tea.KeyEnd, ""))
-	value = updated.(dashboard)
+	send(&value, key(tea.KeyEnd, ""))
 	after := ansi.Strip(strings.Join(value.renderModal(value.width, value.dimensions().bodyHeight), "\n"))
 	if value.gitActionOffset == 0 || strings.Contains(before, "seven") || !strings.Contains(after, "seven") {
 		t.Fatalf("Git result scroll = (offset %d)\nbefore:\n%s\nafter:\n%s", value.gitActionOffset, before, after)
@@ -154,8 +146,7 @@ func TestDashboardClosesGitResultWithMouse(t *testing.T) {
 			value.gitActionTarget = model.Workspace{Name: "alpha", Path: "/projects/alpha"}
 			value.gitActionOutput = output
 			value.gitActionError = failure
-			updated, _ := value.Update(key(tea.KeyEnd, ""))
-			value = updated.(dashboard)
+			send(&value, key(tea.KeyEnd, ""))
 			geometry := value.modalGeometry(value.bodySize())
 			if len(geometry.lines) > value.dimensions().bodyHeight {
 				t.Fatal("Git result exceeds the available height")
@@ -168,13 +159,11 @@ func TestDashboardClosesGitResultWithMouse(t *testing.T) {
 				}
 				x := geometry.left + lipgloss.Width(plain[:column])
 				y := geometry.top + row
-				updated, _ = value.Update(tea.MouseMotionMsg{X: x, Y: y})
-				value = updated.(dashboard)
+				send(&value, tea.MouseMotionMsg{X: x, Y: y})
 				if value.hover.kind != hoverModalClose {
 					t.Fatal("Close button does not respond to hover")
 				}
-				updated, command := value.Update(tea.MouseClickMsg{X: x, Y: y, Button: tea.MouseLeft})
-				value = updated.(dashboard)
+				command := send(&value, tea.MouseClickMsg{X: x, Y: y, Button: tea.MouseLeft})
 				if command != nil || value.modal != noModal {
 					t.Fatal("Clicking Close did not dismiss the Git result")
 				}
@@ -194,8 +183,7 @@ func TestDashboardClicksAndScrollsGitActions(t *testing.T) {
 	value.gitActionTarget = model.Workspace{Name: "alpha", Path: "/projects/alpha"}
 	left, top := value.modalGeometry(value.width, value.dimensions().bodyHeight).contentOrigin()
 
-	updated, command := value.Update(tea.MouseClickMsg{X: left + 2, Y: top + 4, Button: tea.MouseLeft})
-	value = updated.(dashboard)
+	command := send(&value, tea.MouseClickMsg{X: left + 2, Y: top + 4, Button: tea.MouseLeft})
 	if value.gitActionIndex != 2 || !value.gitActionPending || command == nil {
 		t.Fatalf("Git action click = (index %d, pending %v, command %v)",
 			value.gitActionIndex, value.gitActionPending, command)
@@ -204,8 +192,7 @@ func TestDashboardClicksAndScrollsGitActions(t *testing.T) {
 	value.gitActionPending = false
 	value.gitActionComplete = true
 	value.gitActionOutput = strings.Join([]string{"one", "two", "three", "four", "five", "six", "seven"}, "\n")
-	updated, _ = value.Update(tea.MouseWheelMsg{X: left + 2, Y: top + 3, Button: tea.MouseWheelDown})
-	value = updated.(dashboard)
+	send(&value, tea.MouseWheelMsg{X: left + 2, Y: top + 3, Button: tea.MouseWheelDown})
 	if value.gitActionOffset == 0 {
 		t.Fatal("Git result wheel did not scroll")
 	}
@@ -219,8 +206,7 @@ func TestDashboardHighlightsHoveredGitActionAndResult(t *testing.T) {
 	left, top := value.modalGeometry(value.width, value.dimensions().bodyHeight).contentOrigin()
 	before := value.render()
 
-	updated, _ := value.Update(tea.MouseMotionMsg{X: left + 2, Y: top + 4})
-	value = updated.(dashboard)
+	send(&value, tea.MouseMotionMsg{X: left + 2, Y: top + 4})
 	if value.hover.kind != hoverGitAction || value.hover.index != 2 || value.render() == before {
 		t.Fatalf("Git action hover = %#v", value.hover)
 	}
@@ -229,8 +215,7 @@ func TestDashboardHighlightsHoveredGitActionAndResult(t *testing.T) {
 	value.gitActionOutput = "one\ntwo\nthree\nfour\nfive\nsix"
 	left, top = value.modalGeometry(value.width, value.dimensions().bodyHeight).contentOrigin()
 	before = value.render()
-	updated, _ = value.Update(tea.MouseMotionMsg{X: left + 2, Y: top + 3})
-	value = updated.(dashboard)
+	send(&value, tea.MouseMotionMsg{X: left + 2, Y: top + 3})
 	if value.hover.kind != hoverGitResult || value.hover.index != 3 || value.render() == before {
 		t.Fatalf("Git result hover = %#v", value.hover)
 	}
@@ -245,16 +230,14 @@ func TestDashboardHoldsGitActionModalWhileCommandRuns(t *testing.T) {
 	value.gitActionCancel = func() { cancelled = true }
 
 	for _, message := range []tea.KeyPressMsg{key(tea.KeyEscape, ""), key(tea.KeyF1, "")} {
-		updated, command := value.Update(message)
-		value = updated.(dashboard)
+		command := send(&value, message)
 		if value.modal != gitActionsModal || value.result.Quit || cancelled {
 			t.Fatalf("%q during Git action = (command %v, modal %v, quit %t, cancelled %t)",
 				message.String(), command, value.modal, value.result.Quit, cancelled)
 		}
 	}
 
-	updated, command := value.Update(key(tea.KeyF4, ""))
-	value = updated.(dashboard)
+	command := send(&value, key(tea.KeyF4, ""))
 	if command == nil || !value.result.Quit || !cancelled {
 		t.Fatalf("F4 during Git action = (command %v, quit %t, cancelled %t)", command, value.result.Quit, cancelled)
 	}
@@ -265,8 +248,7 @@ func TestDashboardDoesNotOpenGitActionsOutsideRepository(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, snapshot)
 	value.setNavigation(1)
 
-	updated, command := value.Update(gitActionsKey())
-	value = updated.(dashboard)
+	command := send(&value, gitActionsKey())
 	if command != nil || value.modal != noModal || !strings.Contains(value.errorMessage, "not a Git repository") {
 		t.Fatalf("non-repository Git actions = (command %v, modal %v, error %q)", command, value.modal, value.errorMessage)
 	}
@@ -281,8 +263,7 @@ func TestDashboardRecognisesCtrlShiftGAcrossInputLayouts(t *testing.T) {
 		Code: 'ㅎ', BaseCode: 'g', Mod: tea.ModCtrl | tea.ModShift,
 	})
 
-	updated, command := value.Update(physicalG)
-	value = updated.(dashboard)
+	command := send(&value, physicalG)
 	if command != nil || value.modal != gitActionsModal {
 		t.Fatalf("Ctrl+Shift+G with a Korean layout = (command %v, modal %v)", command, value.modal)
 	}
