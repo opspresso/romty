@@ -5,6 +5,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/opspresso/romty/internal/gitrepo"
 	"github.com/opspresso/romty/internal/model"
 )
 
@@ -14,7 +15,7 @@ func executeGitAction(path string, action gitAction) (string, error) {
 	return executeGitActionContext(context.Background(), path, action)
 }
 
-func gitDiffTreeRows(files []gitChangedFile) []gitDiffTreeRow {
+func gitDiffTreeRows(files []gitrepo.ChangedFile) []gitDiffTreeRow {
 	return buildFileViewTreeRows(files, false)
 }
 

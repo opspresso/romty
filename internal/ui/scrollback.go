@@ -12,6 +12,17 @@ import (
 	"github.com/opspresso/romty/internal/display"
 )
 
+// scrollbackSearch is the find prompt in scrollback.
+type scrollbackSearch struct {
+	// typing is set while the prompt takes keys; query is what was typed.
+	typing bool
+	query  string
+	// matches are the absolute lines the confirmed query is on, oldest first,
+	// and index is the one the viewport shows.
+	matches []int
+	index   int
+}
+
 // Scrollback mode is the only state where romty wants the wheel, and it takes
 // it as the arrow keys the host's alternate scroll sends rather than by asking
 // for mouse events, which would take the host's native drag selection away —
@@ -21,12 +32,12 @@ func (m dashboard) handleScrollbackKey(message tea.KeyPressMsg) (tea.Model, tea.
 		m.stopScrollback()
 		return m, nil
 	}
-	if m.searchMode {
+	if m.search.typing {
 		return m.handleSearchKey(message)
 	}
 	// Only while a search is standing: without one these are ordinary keys, and
 	// an ordinary key in scrollback leaves it and reaches the shell.
-	if step, ok := searchStep(message.String()); ok && len(m.searchMatches) > 0 {
+	if step, ok := searchStep(message.String()); ok && len(m.search.matches) > 0 {
 		m.stepSearch(step)
 		return m, nil
 	}
@@ -38,9 +49,7 @@ func (m dashboard) handleScrollbackKey(message tea.KeyPressMsg) (tea.Model, tea.
 	case "down":
 		m.scrollTerminal(-1)
 	case "/":
-		m.searchMode = true
-		m.searchQuery = ""
-		m.searchMatches, m.searchIndex = nil, 0
+		m.search = scrollbackSearch{typing: true}
 	default:
 		m.stopScrollback()
 		m.terminal.sendKey(message)
@@ -66,28 +75,28 @@ func searchStep(name string) (int, bool) {
 func (m dashboard) handleSearchKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch message.String() {
 	case "esc":
-		m.searchMode = false
-		m.searchQuery = ""
+		m.search.typing = false
+		m.search.query = ""
 	case "enter":
-		query := strings.TrimSpace(m.searchQuery)
-		m.searchMode = false
+		query := strings.TrimSpace(m.search.query)
+		m.search.typing = false
 		if query == "" {
-			m.searchMatches, m.searchIndex = nil, 0
+			m.search.matches, m.search.index = nil, 0
 			return m, nil
 		}
-		m.searchMatches = m.terminal.searchLines(query)
-		m.searchIndex = 0
-		if len(m.searchMatches) == 0 {
+		m.search.matches = m.terminal.searchLines(query)
+		m.search.index = 0
+		if len(m.search.matches) == 0 {
 			m.setNotice(terminalError, "no output matches "+display.Text(query))
 			return m, nil
 		}
 		m.clearError(terminalError)
 		// The newest match first: the line a user is looking for is usually the
 		// most recent one, and scrollback opens at the newest output.
-		m.searchIndex = len(m.searchMatches) - 1
-		m.scrollToLine(m.searchMatches[m.searchIndex])
+		m.search.index = len(m.search.matches) - 1
+		m.scrollToLine(m.search.matches[m.search.index])
 	default:
-		m.searchQuery = editText(m.searchQuery, message)
+		m.search.query = editText(m.search.query, message)
 	}
 	return m, nil
 }
@@ -95,12 +104,12 @@ func (m dashboard) handleSearchKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd)
 // stepSearch moves to the next match, delta negative towards older output. It
 // wraps, so a walk off either end continues rather than stopping silently.
 func (m *dashboard) stepSearch(delta int) {
-	if len(m.searchMatches) == 0 {
+	if len(m.search.matches) == 0 {
 		return
 	}
-	count := len(m.searchMatches)
-	m.searchIndex = ((m.searchIndex-delta)%count + count) % count
-	m.scrollToLine(m.searchMatches[m.searchIndex])
+	count := len(m.search.matches)
+	m.search.index = ((m.search.index-delta)%count + count) % count
+	m.scrollToLine(m.search.matches[m.search.index])
 }
 
 // scrollToLine puts an absolute line into view, below the top row so the lines
@@ -178,9 +187,7 @@ func (m dashboard) scrollbackUnavailable() string {
 func (m *dashboard) stopScrollback() {
 	m.scrollback = false
 	m.scrollOffset = 0
-	m.searchMode = false
-	m.searchQuery = ""
-	m.searchMatches, m.searchIndex = nil, 0
+	m.search = scrollbackSearch{}
 	// Copy mode fills the screen with the terminal, so leaving it lands in the
 	// terminal rather than back in the workspace tree — including when
 	// scrollback was opened from the tree, because the tree is not what was

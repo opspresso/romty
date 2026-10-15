@@ -182,10 +182,10 @@ func (m dashboard) hoverTargetAt(mouse tea.Mouse) hoverTarget {
 				return hoverTarget{kind: hoverBrowseRow, index: index}
 			}
 		case gitActionsModal:
-			if m.gitActionComplete && row >= gitActionHeaderRows {
+			if m.gitRun.complete && row >= gitActionHeaderRows {
 				return hoverTarget{kind: hoverGitResult, index: row}
 			}
-			if !m.gitActionPending && row >= gitActionHeaderRows &&
+			if !m.gitRun.pending && row >= gitActionHeaderRows &&
 				row < gitActionHeaderRows+len(gitActionChoices) {
 				return hoverTarget{kind: hoverGitAction, index: row - gitActionHeaderRows}
 			}
@@ -283,9 +283,9 @@ func (m dashboard) handleDashboardMouse(message tea.MouseMsg) (tea.Model, tea.Cm
 	if wheel, ok := message.(tea.MouseWheelMsg); ok && mouse.X < view.leftWidth && mouse.Y < view.bodyHeight {
 		switch wheel.Button {
 		case tea.MouseWheelUp:
-			m.scrollNavigation(-3)
+			m.scrollNavigation(-wheelLines)
 		case tea.MouseWheelDown:
-			m.scrollNavigation(3)
+			m.scrollNavigation(wheelLines)
 		default:
 			return m, nil, false
 		}
@@ -347,9 +347,8 @@ func (m dashboard) handleDashboardMouse(message tea.MouseMsg) (tea.Model, tea.Cm
 	return m, nil, false
 }
 
-// navigationItemAtRow is the tree item drawn on a body row, and where it sits.
-// Both are wanted together: the click handlers used to ask for the index, then
-// rebuild the whole tree once more per field they read off the item.
+// navigationItemAtRow is the tree item drawn on a body row, and its index.
+// Both come from one build of the tree.
 func (m dashboard) navigationItemAtRow(row, height int) (navItem, int, bool) {
 	items := m.navigationItems()
 	available := max(height-2, 0)
@@ -423,7 +422,7 @@ func (m dashboard) mouseMode() tea.MouseMode {
 		// with no alternate scroll, which is what a phone SSH client and some
 		// desktop terminals are. It costs the drag selection, so it is asked
 		// for rather than assumed.
-		if m.scrollbackMouse {
+		if m.config.ScrollbackMouse {
 			return tea.MouseModeCellMotion
 		}
 		return tea.MouseModeNone
@@ -449,6 +448,6 @@ func (m dashboard) mouseMode() tea.MouseMode {
 // Scrollback is romty's own view of output the guest has already printed, so
 // the guest does not own the mouse there however the passthrough is set.
 func (m dashboard) guestOwnsMouse() bool {
-	return m.mousePassthrough && !m.scrollback &&
+	return m.config.MousePassthrough && !m.scrollback &&
 		m.terminal != nil && m.terminal.guestMouseMode() != tea.MouseModeNone
 }

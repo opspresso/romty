@@ -25,9 +25,9 @@ func (m dashboard) handleHelpMouse(message tea.MouseMsg) (tea.Model, tea.Cmd) {
 	}
 	switch wheel.Button {
 	case tea.MouseWheelUp:
-		return m.scrollHelp(-3)
+		return m.scrollHelp(-wheelLines)
 	case tea.MouseWheelDown:
-		return m.scrollHelp(3)
+		return m.scrollHelp(wheelLines)
 	}
 	return m, nil
 }

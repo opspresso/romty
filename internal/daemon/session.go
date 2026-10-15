@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/creack/pty"
+
+	"github.com/opspresso/romty/internal/codexstate"
 )
 
 // maxHistoryBytes is a variable so tests can reach the trimming path without
@@ -148,6 +150,13 @@ func (s *session) agentIdentity() (string, string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.guest.title, s.codexHome
+}
+
+// codexPrefix is the Codex session prefix the terminal title shows, or empty
+// when the title names no single session.
+func (s *session) codexPrefix() string {
+	title, _ := s.agentIdentity()
+	return codexstate.SessionPrefix(title)
 }
 
 // read drains the PTY master until it is exhausted, and owns closing it. The
@@ -355,11 +364,8 @@ func (s *session) replay(connection net.Conn, modes, recording []byte) error {
 
 // writeReplay pushes the recording out a piece at a time, refreshing the
 // deadline before each one, so the timeout means "this client has stopped
-// reading" and not "this client is taking a while".
-//
-// One deadline over the whole replay meant the second: an attach that was
-// making steady progress was cut off for being long, then retried the same
-// recording and was cut off again.
+// reading" and not "this client is taking a while". One deadline over the
+// whole replay would cut off a long replay that is making progress.
 func writeReplay(connection net.Conn, data []byte) error {
 	for len(data) > 0 {
 		if err := connection.SetWriteDeadline(time.Now().Add(replayTimeout)); err != nil {

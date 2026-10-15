@@ -41,29 +41,27 @@ func openTabMarker(styles *uiStyles, base lipgloss.Style, tab model.Tab, animati
 		style = style.Foreground(styles.agentNode.GetForeground())
 	}
 	marker := "●"
-	switch tab.AgentPhase {
-	case model.AgentPhaseThinking, model.AgentPhaseWorking, model.AgentPhasePlanning,
-		model.AgentPhaseCompacting, model.AgentPhaseBackground:
+	switch phase := tab.AgentPhase; {
+	case phase.Busy():
 		marker = agentAnimationFrames[animationFrame%len(agentAnimationFrames)]
-	case model.AgentPhaseIdle, model.AgentPhaseStopped:
+	case phase == model.AgentPhaseIdle || phase == model.AgentPhaseStopped:
 		marker = "○"
-	case model.AgentPhaseCompleted:
+	case phase == model.AgentPhaseCompleted:
 		marker = "✓"
-	case model.AgentPhaseInterrupted:
+	case phase == model.AgentPhaseInterrupted:
 		marker = "□"
-	case model.AgentPhaseWaitingInput:
+	case phase == model.AgentPhaseWaitingInput:
 		marker = "▲"
-	case model.AgentPhaseWaitingApproval:
+	case phase == model.AgentPhaseWaitingApproval:
 		marker = "■"
-	case model.AgentPhaseError:
+	case phase == model.AgentPhaseError:
 		marker = "★"
 	}
 	return style.Render(marker)
 }
 
-// layout is the one description of where things sit. It used to be four
-// unnamed ints, which every one of nineteen call sites unpacked positionally:
-// swapping two widths compiled, rendered, and only looked wrong.
+// layout is the one description of where things sit on screen. Its fields
+// are named so a call site cannot swap two widths unnoticed.
 type layout struct {
 	leftWidth int
 	// separator is what sits between the panes, which is zero while the
@@ -103,7 +101,7 @@ func (l layout) terminalOrigin() (int, int) {
 // because a hidden pane still has a width to come back to.
 func (m dashboard) paneWidth() int {
 	width := m.screenWidth()
-	leftWidth := m.leftWidth
+	leftWidth := m.config.LeftWidth
 	if leftWidth == 0 {
 		leftWidth = min(max(width/4, minimumLeftWidth), 28)
 	}
@@ -176,8 +174,7 @@ func (m dashboard) render() string {
 	view := m.dimensions()
 	width := m.screenWidth()
 	// Scrollback replaces the split rather than drawing over it, so the panes
-	// it hides are not built at all: rendering both meant every frame drew the
-	// workspace tree and a second terminal viewport it then threw away.
+	// it hides are not built at all.
 	var lines []string
 	switch {
 	case m.gitDiff.active:
@@ -303,9 +300,9 @@ func (m dashboard) renderStatus(width, bodyHeight int) []string {
 			shortcut{key: "Enter", description: "run"},
 			shortcut{key: "Esc", description: "cancel"},
 		)
-	case m.modal == gitActionsModal && m.gitActionPending:
-		status = m.renderActivityStatus("RUNNING", m.gitAction.label()+" in "+display.Text(m.gitActionTarget.Name), width)
-	case m.modal == gitActionsModal && m.gitActionComplete:
+	case m.modal == gitActionsModal && m.gitRun.pending:
+		status = m.renderActivityStatus("RUNNING", m.gitRun.action.label()+" in "+display.Text(m.gitRun.target.Name), width)
+	case m.modal == gitActionsModal && m.gitRun.complete:
 		shortcuts := []shortcut{
 			{key: "Enter", description: "actions"},
 			{key: "Esc", description: "close"},
@@ -334,37 +331,19 @@ func (m dashboard) renderStatus(width, bodyHeight int) []string {
 			shortcut{key: "/", description: "type a path"},
 			shortcut{key: "Esc", description: "cancel"},
 		)
-	case m.modal == removeSelectionModal:
-		action := "forget root"
-		if !m.removeTarget.isRoot {
-			action = "delete workspace"
-		}
-		status = renderShortcuts(m.styles, width,
-			shortcut{key: "Enter", description: action},
-			shortcut{key: "Esc", description: "cancel"},
-		)
-	case m.modal == inputModal && m.inputPending:
-		status = m.renderActivityStatus("SAVING", m.inputKind.pending(), width)
-	case m.modal == inputModal:
-		actions := m.inputActions()
-		status = renderShortcuts(m.styles, width, actions[0].shortcut, actions[1].shortcut)
-	case m.modal == closeTabModal:
-		status = renderShortcuts(m.styles, width,
-			shortcut{key: "Enter", description: "close tab"},
-			shortcut{key: "Esc", description: "cancel"},
-		)
-	case m.modal == shutdownModal:
-		status = renderShortcuts(m.styles, width,
-			shortcut{key: "Enter", description: "stop daemon"},
-			shortcut{key: "Esc", description: "cancel"},
-		)
+	case m.modal == inputModal && m.input.pending:
+		status = m.renderActivityStatus("SAVING", m.input.kind.pending(), width)
 	case m.modal == hookInstallModal && m.hookInstallPending:
 		status = m.renderActivityStatus("INSTALLING", "updating agent status hooks", width)
-	case m.modal == hookInstallModal:
-		status = renderShortcuts(m.styles, width,
-			shortcut{key: "Enter", description: "install hooks"},
-			shortcut{key: "Esc", description: "skip"},
-		)
+	case len(m.modalActions()) > 0:
+		// A question modal draws its answers as buttons; the rail repeats
+		// them so the keys are named where every other state names its own.
+		actions := m.modalActions()
+		shortcuts := make([]shortcut, len(actions))
+		for index, action := range actions {
+			shortcuts[index] = action.shortcut
+		}
+		status = renderShortcuts(m.styles, width, shortcuts...)
 	case m.gitDiff.active:
 		rail = renderShortcutRail(m.styles, width,
 			shortcut{key: "Ctrl+Shift+F", description: "close file view"},
@@ -382,10 +361,10 @@ func (m dashboard) renderStatus(width, bodyHeight int) []string {
 			shortcut{key: "Esc", description: "close"},
 		)
 		status = renderShortcuts(m.styles, width, shortcuts...)
-	case m.scrollback && m.searchMode:
+	case m.scrollback && m.search.typing:
 		status = truncate(
 			m.styles.promptLabel.Render(" FIND ")+" "+
-				m.styles.promptText.Render(display.Text(m.searchQuery))+
+				m.styles.promptText.Render(display.Text(m.search.query))+
 				m.styles.dividerActive.Render("█"),
 			width,
 		)
@@ -396,10 +375,10 @@ func (m dashboard) renderStatus(width, bodyHeight int) []string {
 			{key: "/", description: "find"},
 		}
 		position := m.scrollbackPosition()
-		if len(m.searchMatches) > 0 {
+		if len(m.search.matches) > 0 {
 			shortcuts = append(shortcuts, shortcut{key: "n/N", description: "match"})
-			position += fmt.Sprintf("  %s %d/%d", display.Text(m.searchQuery),
-				len(m.searchMatches)-m.searchIndex, len(m.searchMatches))
+			position += fmt.Sprintf("  %s %d/%d", display.Text(m.search.query),
+				len(m.search.matches)-m.search.index, len(m.search.matches))
 		}
 		shortcuts = append(shortcuts, shortcut{key: "Ctrl+Shift+\\", description: "exit"})
 		status = truncate(

@@ -17,13 +17,13 @@ import (
 
 	"github.com/opspresso/romty/internal/agenthooks"
 	"github.com/opspresso/romty/internal/display"
+	"github.com/opspresso/romty/internal/gitrepo"
 	"github.com/opspresso/romty/internal/model"
 	"github.com/opspresso/romty/internal/sound"
 )
 
 const (
-	// tagline is what About says romty is, and what help repeats now that
-	// About has no function key. Two copies of one sentence drift apart.
+	// tagline is what About and help say romty is.
 	tagline = "Persistent terminal workspace manager"
 
 	terminalTop        = 2
@@ -185,29 +185,24 @@ type dashboard struct {
 	// cursorPath is what the cursor is actually on. navIndex is only where
 	// that lands in the tree as it stands, and the tree is rebuilt on every
 	// refresh.
-	cursorPath              string
-	tabIndex                int
-	selectedWorkspaceID     string
-	selectedPath            string
-	rememberedWorkspacePath string
-	rememberedTabID         string
-	restorePending          bool
-	inputKind               inputKind
-	input                   string
-	inputError              string
-	inputPending            bool
-	errorMessage            string
-	errorFrom               errorSource
-	noticeMessage           bool
-	terminal                *embeddedTerminal
-	modal                   modal
-	shutdownPending         bool
-	hookStatuses            []agenthooks.Status
-	hooksSkipped            map[model.Agent]bool
-	hookInstallPending      bool
-	agentAnimationFrame     int
-	agentAnimationActive    bool
-	agentAnimationPending   bool
+	cursorPath            string
+	tabIndex              int
+	selectedWorkspaceID   string
+	selectedPath          string
+	restorePending        bool
+	input                 inputState
+	errorMessage          string
+	errorFrom             errorSource
+	noticeMessage         bool
+	terminal              *embeddedTerminal
+	modal                 modal
+	shutdownPending       bool
+	hookStatuses          []agenthooks.Status
+	hooksSkipped          map[model.Agent]bool
+	hookInstallPending    bool
+	agentAnimationFrame   int
+	agentAnimationActive  bool
+	agentAnimationPending bool
 	// removeTarget is the item the confirmation modal is asking about, held so
 	// the answer applies to the item the question named.
 	removeTarget navItem
@@ -219,16 +214,13 @@ type dashboard struct {
 	// newerRelease is the tag of a published release newer than this build,
 	// or empty when there is none or the check has not answered.
 	newerRelease string
-	// renameTabID is the tab the name modal renames, held so the answer
-	// applies to the tab the modal opened for.
-	renameTabID string
 	// lastTabClick is the previous click on a tab label, which is what turns
 	// a second click on the same tab into a double click.
 	lastTabClick   tabClick
 	terminalExited bool
-	// reattachTab and reattachAttempts damp the loop a dropped connection
-	// used to start: romty reattached at once, the daemon replayed the whole
-	// recording, the client fell behind, and the daemon cut it off again.
+	// reattachTab and reattachAttempts back off repeated reattaches to a tab
+	// whose connection keeps dropping: each attach replays the recording, and
+	// a client that falls behind it is cut off again.
 	reattachTab      string
 	reattachAttempts int
 	// terminalOpenedAt is when the open terminal attached, which is what tells
@@ -252,47 +244,20 @@ type dashboard struct {
 	homePath string
 	// browse is the root picker's state, kept on the dashboard so the modal
 	// renders from it and the keys move it.
-	browse browser
-	// workspaceActionTarget is captured when its action palette opens, so a
-	// refresh cannot retarget a destructive or remote action behind the modal.
-	workspaceActionTarget  navItem
-	workspaceActionIndex   int
-	workspaceActionOffset  int
-	workspaceActionAnchorX int
-	workspaceActionAnchorY int
-	// config is the document as loaded, kept so saving edits it instead of
-	// reconstructing it from fields.
+	browse  browser
+	palette workspacePalette
+	// config holds every persisted setting. It is the document as loaded,
+	// so saving keeps the fields this build does not know.
 	config           Config
-	leftWidth        int
 	navigationResize bool
 	hover            hoverTarget
-	mousePassthrough bool
-	scrollbackMouse  bool
-	// searchMode is scrollback's find prompt; searchQuery what has been typed
-	// into it. searchMatches are the absolute lines the confirmed query is on,
-	// oldest first, and searchIndex which of them the viewport sits on.
-	searchMode        bool
-	searchQuery       string
-	searchMatches     []int
-	searchIndex       int
-	soundOnDone       bool
-	soundOnWaiting    bool
-	agentSoundReady   bool
-	gitStates         map[string]gitState
-	gitFetchedAt      time.Time
-	gitActionTarget   model.Workspace
-	gitActionReturn   modal
-	gitActionIndex    int
-	gitAction         gitAction
-	gitActionPending  bool
-	gitActionComplete bool
-	gitActionOutput   string
-	gitActionError    string
-	gitActionOffset   int
-	gitActionCancel   func()
-	gitDiff           gitDiffView
-	gitDiffSplit      bool
-	styles            *uiStyles
+	search           scrollbackSearch
+	agentSoundReady  bool
+	gitStates        map[string]gitrepo.State
+	gitFetchedAt     time.Time
+	gitRun           gitActionRun
+	gitDiff          gitDiffView
+	styles           *uiStyles
 }
 
 type snapshotMsg struct {
@@ -313,7 +278,7 @@ type soundPlayedMsg struct {
 }
 
 type gitStatusMsg struct {
-	value      map[string]gitState
+	value      map[string]gitrepo.State
 	fetchedAt  time.Time
 	reschedule bool
 }
@@ -352,15 +317,10 @@ type terminalOpenedMsg struct {
 	err    error
 }
 
+// configSavedMsg reports one save and the settings it wrote.
 type configSavedMsg struct {
-	leftWidth         int
-	scrollbackMouse   bool
-	soundOnDone       bool
-	soundOnWaiting    bool
-	gitDiffView       string
-	lastWorkspacePath string
-	lastTabID         string
-	err               error
+	saved Config
+	err   error
 }
 
 type daemonStoppedMsg struct {
@@ -422,22 +382,16 @@ func Run(backend Backend, initial model.Snapshot, configPath string, hookStatuse
 
 func newDashboardWithConfig(backend Backend, initial model.Snapshot, configPath string, config Config) dashboard {
 	value := dashboard{
-		backend:          backend,
-		resizeMu:         &sync.Mutex{},
-		state:            initial,
-		width:            80,
-		height:           24,
-		configPath:       configPath,
-		homePath:         userHomeDirectory(),
-		config:           config,
-		leftWidth:        config.LeftWidth,
-		mousePassthrough: config.MousePassthrough,
-		scrollbackMouse:  config.ScrollbackMouse,
-		soundOnDone:      config.SoundOnDone,
-		soundOnWaiting:   config.SoundOnWaiting,
-		gitDiffSplit:     config.GitDiffView == gitDiffViewSplit,
-		styles:           newUIStyles(true),
-		gitFetchedAt:     now(),
+		backend:      backend,
+		resizeMu:     &sync.Mutex{},
+		state:        initial,
+		width:        80,
+		height:       24,
+		configPath:   configPath,
+		homePath:     userHomeDirectory(),
+		config:       config,
+		styles:       newUIStyles(true),
+		gitFetchedAt: now(),
 	}
 	value.ensureWorkspaceCursor()
 	value.restoreSelection()
@@ -517,7 +471,7 @@ func (m dashboard) syncAgentAnimation(command tea.Cmd) (dashboard, tea.Cmd) {
 // because a host that is reporting the mouse sends the wheel as mouse events
 // and never as those arrow keys.
 func (m dashboard) syncAltScroll(command tea.Cmd) (tea.Model, tea.Cmd) {
-	wanted := m.scrollback && !m.scrollbackMouse
+	wanted := m.scrollback && !m.config.ScrollbackMouse
 	if m.altScroll == wanted {
 		return m, command
 	}
@@ -581,15 +535,15 @@ func (m dashboard) update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case tea.PasteMsg:
-		if m.modal == inputModal {
-			if !m.inputPending {
-				m.input += message.Content
-				m.inputError = ""
-			}
-		} else if m.modal != noModal || m.shutdownPending || m.gitActionPending || m.hookInstallPending {
+		if m.requestPending() {
 			return m, nil
-		} else if m.scrollback && m.searchMode {
-			m.searchQuery += message.Content
+		} else if m.modal == inputModal {
+			m.input.text += message.Content
+			m.input.err = ""
+		} else if m.modal != noModal {
+			return m, nil
+		} else if m.scrollback && m.search.typing {
+			m.search.query += message.Content
 		} else if m.scrollback && m.terminal != nil {
 			m.stopScrollback()
 			m.terminal.paste(message.Content)
@@ -624,9 +578,8 @@ func (m dashboard) update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.ensureWorkspaceCursor()
 		m.clampTabIndex()
 		// A refresh says the tree is current; it says nothing about a failed
-		// resize or a daemon that would not stop. Clearing unconditionally
-		// meant the F5 a user presses after a failure erased the reason for
-		// it, and that an in-flight refresh could erase one at random.
+		// resize or a daemon that would not stop, so it clears tree errors
+		// only.
 		m.clearError(treeError)
 		if m.terminalExited {
 			return m.settleAfterExit()
@@ -681,24 +634,18 @@ func (m dashboard) update(message tea.Msg) (tea.Model, tea.Cmd) {
 	case terminalOutputMsg:
 		return m.handleTerminalOutput(message)
 	case configSavedMsg:
-		// What the save reported comes first. Holding an arrow key in the
-		// config modal outruns the disk, and reading the width before the
-		// error meant a save that failed under a width that had already moved
-		// on was dropped without a word — the one outcome the user has to
-		// hear about.
+		// What the save reported comes first, even when a later change has
+		// already made this save out of date: a failed save must reach the
+		// user.
 		if message.err != nil {
 			m.setError(settingError, message.err.Error())
 		} else {
 			m.clearError(settingError)
 		}
-		viewChanged := message.gitDiffView != "" && message.gitDiffView != gitDiffViewSetting(m.gitDiffSplit)
-		selectionChanged := message.lastWorkspacePath != m.rememberedWorkspacePath ||
-			message.lastTabID != m.rememberedTabID
-		if message.leftWidth != m.leftWidth || message.scrollbackMouse != m.scrollbackMouse ||
-			message.soundOnDone != m.soundOnDone || message.soundOnWaiting != m.soundOnWaiting ||
-			viewChanged || selectionChanged {
-			// The width moved while this one was being written, so it is
-			// already out of date. A later save answers whatever this one said.
+		if !sameConfig(message.saved, m.config) {
+			// A setting changed while this save was being written, so the
+			// file is already out of date. A later save answers whatever
+			// this one said.
 			return m, m.saveConfig()
 		}
 		return m, m.resizeTerminal()
@@ -746,10 +693,8 @@ func (m dashboard) update(message tea.Msg) (tea.Model, tea.Cmd) {
 // globalKeys are handled in both panes and with a modal open. Routing every
 // function key through one table keeps their precedence at a single point.
 var globalKeys = map[string]func(dashboard) (tea.Model, tea.Cmd){
-	// F1 is help everywhere else in computing, and romty used to spend it on
-	// About while help sat on `?` in the workspace pane only. That left the
-	// terminal pane, where the shortcuts are hardest to remember, with no way
-	// to look them up at all.
+	// F1 is help, as it is elsewhere, and it works in the terminal pane where
+	// `?` goes to the shell.
 	"f1": func(m dashboard) (tea.Model, tea.Cmd) { return m.openModal(helpModal) },
 	"f2": func(m dashboard) (tea.Model, tea.Cmd) { return m.startBrowse() },
 	"f3": func(m dashboard) (tea.Model, tea.Cmd) { return m.openModal(configModal) },
@@ -793,17 +738,16 @@ var globalKeys = map[string]func(dashboard) (tea.Model, tea.Cmd){
 }
 
 func (m dashboard) handleKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	if m.modal == inputModal {
-		return m.handleInput(message)
-	}
-	// A shutdown already asked for, a Git command already running, an installer
-	// already writing: the request is out and no key can take it back, so the
-	// only one that still applies is the one that leaves romty.
-	if m.shutdownPending || m.gitActionPending || m.hookInstallPending {
+	// While a request is out no key can take it back, so the only one that
+	// still applies is the one that leaves romty.
+	if m.requestPending() {
 		if message.String() == "f4" {
 			return m.quit()
 		}
 		return m, nil
+	}
+	if m.modal == inputModal {
+		return m.handleInput(message)
 	}
 	if m.modal == hookInstallModal {
 		if message.String() == "f4" {
@@ -980,58 +924,35 @@ func (m dashboard) adjustLeftWidth(delta int) (tea.Model, tea.Cmd) {
 
 func (m *dashboard) setLeftWidth(width int) {
 	maximum := max(min(maximumLeftWidth, m.screenWidth()-20), 0)
-	m.leftWidth = min(max(width, minimumLeftWidth), maximum)
+	m.config.LeftWidth = min(max(width, minimumLeftWidth), maximum)
 }
 
 func (m dashboard) toggleScrollbackMouse() (tea.Model, tea.Cmd) {
-	m.scrollbackMouse = !m.scrollbackMouse
+	m.config.ScrollbackMouse = !m.config.ScrollbackMouse
 	return m, m.saveConfig()
 }
 
 func (m dashboard) toggleSoundOnDone() (tea.Model, tea.Cmd) {
-	m.soundOnDone = !m.soundOnDone
+	m.config.SoundOnDone = !m.config.SoundOnDone
 	return m, m.saveConfig()
 }
 
 func (m dashboard) toggleSoundOnWaiting() (tea.Model, tea.Cmd) {
-	m.soundOnWaiting = !m.soundOnWaiting
+	m.config.SoundOnWaiting = !m.config.SoundOnWaiting
 	return m, m.saveConfig()
 }
 
 func (m dashboard) saveConfig() tea.Cmd {
-	path := m.configPath
-	// Edit the document romty loaded rather than rebuilding it from fields.
-	// Rebuilding meant a setting nobody remembered to copy here was erased the
-	// moment the user touched the pane width, and an older romty would erase
-	// whatever a newer one had written.
-	config := m.config
-	config.LeftWidth = m.leftWidth
-	config.ScrollbackMouse = m.scrollbackMouse
-	config.SoundOnDone = m.soundOnDone
-	config.SoundOnWaiting = m.soundOnWaiting
-	config.GitDiffView = gitDiffViewSetting(m.gitDiffSplit)
-	config.LastWorkspacePath = m.rememberedWorkspacePath
-	config.LastTabID = m.rememberedTabID
+	path, config := m.configPath, m.config.clone()
 	return func() tea.Msg {
-		return configSavedMsg{
-			leftWidth: config.LeftWidth, scrollbackMouse: config.ScrollbackMouse,
-			soundOnDone: config.SoundOnDone, soundOnWaiting: config.SoundOnWaiting,
-			gitDiffView:       config.GitDiffView,
-			lastWorkspacePath: config.LastWorkspacePath, lastTabID: config.LastTabID,
-			err: saveConfig(path, config),
-		}
+		return configSavedMsg{saved: config, err: saveConfig(path, config)}
 	}
 }
 
 // addRoot adds the directory the picker names and leaves the daemon to
 // canonicalise and judge it.
 func (m *dashboard) addRoot(path string) tea.Cmd {
-	order := m.nextSnapshotOrder()
-	backend := m.backend
-	return func() tea.Msg {
-		value, err := backend.AddRoot(path)
-		return snapshotMsg{value: value, order: order, err: err}
-	}
+	return m.snapshotCommand(func(backend Backend) (model.Snapshot, error) { return backend.AddRoot(path) })
 }
 
 func (m dashboard) handleWorkspace(message workspaceMsg) (tea.Model, tea.Cmd) {
@@ -1205,11 +1126,9 @@ func (m dashboard) settleAfterExit() (tea.Model, tea.Cmd) {
 }
 
 // attachWasHealthy reports whether the terminal that just dropped had been
-// attached long enough that the drop starts a fresh incident. The counter only
-// ever went up without it: it measured how many times a tab had dropped rather
-// than whether it was dropping now, so four drops spread over an afternoon were
-// damped exactly like four in a second and a working terminal was eventually
-// left saying it keeps disconnecting.
+// attached long enough that the drop starts a fresh incident. The retry count
+// then restarts, so drops spread over hours are not damped like drops in one
+// second.
 func (m dashboard) attachWasHealthy() bool {
 	return !m.terminalOpenedAt.IsZero() && now().Sub(m.terminalOpenedAt) >= healthyAttachInterval
 }
@@ -1235,28 +1154,17 @@ func (m *dashboard) removeSelection() tea.Cmd {
 	if rootID == "" {
 		return nil
 	}
-	order := m.nextSnapshotOrder()
-	backend := m.backend
 	target := m.removeTarget
-	return func() tea.Msg {
-		var value model.Snapshot
-		var err error
+	return m.snapshotCommand(func(backend Backend) (model.Snapshot, error) {
 		if target.isRoot {
-			value, err = backend.RemoveRoot(rootID)
-		} else {
-			value, err = backend.RemoveWorkspace(rootID, target.workspace.Path)
+			return backend.RemoveRoot(rootID)
 		}
-		return snapshotMsg{value: value, order: order, err: err}
-	}
+		return backend.RemoveWorkspace(rootID, target.workspace.Path)
+	})
 }
 
 func (m *dashboard) refresh() tea.Cmd {
-	order := m.nextSnapshotOrder()
-	backend := m.backend
-	return func() tea.Msg {
-		value, err := backend.Snapshot()
-		return snapshotMsg{value: value, order: order, err: err}
-	}
+	return m.snapshotCommand(Backend.Snapshot)
 }
 
 func (m dashboard) refreshAll() (tea.Model, tea.Cmd) {
@@ -1264,9 +1172,16 @@ func (m dashboard) refreshAll() (tea.Model, tea.Cmd) {
 	return m, tea.Batch(tree, m.readGitStatus(false, false), m.readGitStatus(true, false))
 }
 
+// requestPending reports a request a modal is waiting on: a daemon shutdown, a
+// Git command, a hook install, or an input modal's submit. The modal stays on
+// screen and takes no input until the answer arrives.
+func (m dashboard) requestPending() bool {
+	return m.shutdownPending || m.gitRun.pending || m.hookInstallPending || m.input.pending
+}
+
 func (m dashboard) hasPendingActivity() bool {
-	return m.tabPending || m.tabClosePending != "" || m.restorePending || m.gitActionPending || m.shutdownPending ||
-		m.hookInstallPending || m.inputPending || m.modal == browseModal && m.browse.loading
+	return m.requestPending() || m.tabPending || m.tabClosePending != "" || m.restorePending ||
+		m.modal == browseModal && m.browse.loading
 }
 
 func (m *dashboard) selectWorkspace() tea.Cmd {
@@ -1322,6 +1237,22 @@ func (m *dashboard) createTab() tea.Cmd {
 func (m *dashboard) nextSnapshotOrder() uint64 {
 	m.snapshotOrder++
 	return m.snapshotOrder
+}
+
+// snapshotRequest prepares a daemon call that answers with a snapshot. The
+// order is taken when the request is made, so answers apply in request order
+// whatever order they arrive in.
+func (m *dashboard) snapshotRequest(call func(Backend) (model.Snapshot, error)) func() snapshotMsg {
+	order, backend := m.nextSnapshotOrder(), m.backend
+	return func() snapshotMsg {
+		value, err := call(backend)
+		return snapshotMsg{value: value, order: order, err: err}
+	}
+}
+
+func (m *dashboard) snapshotCommand(call func(Backend) (model.Snapshot, error)) tea.Cmd {
+	request := m.snapshotRequest(call)
+	return func() tea.Msg { return request() }
 }
 
 func (m *dashboard) applySnapshot(order uint64, snapshot model.Snapshot) bool {

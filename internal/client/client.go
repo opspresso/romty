@@ -72,11 +72,9 @@ func New(socket string) *Client {
 	return &Client{socket: socket, id: fmt.Sprintf("%d-%d", os.Getpid(), nextClientID.Add(1))}
 }
 
-// callFor sends a request and hands back the one field of the reply the action
-// asked for. Seven actions each repeated the same three steps — call, refuse a
-// reply that carries no such field, dereference — which is seven places for the
-// middle one to be forgotten in, and a forgotten one is a nil dereference in
-// the TUI rather than a message naming the daemon.
+// callFor sends a request and returns the one field of the reply the action
+// asked for. A reply without that field is an error that names the daemon,
+// not a nil value for the caller to dereference.
 func callFor[T any](c *Client, request protocol.Request, field func(protocol.Response) *T, noun string) (T, error) {
 	var value T
 	response, err := c.call(request)
@@ -193,12 +191,8 @@ func (c *Client) RemoveRoot(rootID string) (model.Snapshot, error) {
 }
 
 func (c *Client) RemoveWorkspace(rootID, path string) (model.Snapshot, error) {
-	supported, err := c.supports(protocol.CapabilityRemoveWorkspace)
-	if err != nil {
+	if err := c.require(protocol.CapabilityRemoveWorkspace, "removing workspaces"); err != nil {
 		return model.Snapshot{}, err
-	}
-	if !supported {
-		return model.Snapshot{}, fmt.Errorf("running daemon does not support removing workspaces; %s", protocol.Remedy)
 	}
 	return callFor(c, protocol.Request{
 		Action: protocol.ActionRemoveWorkspace,
@@ -230,23 +224,15 @@ func (c *Client) CreateTab(workspaceID string, columns, rows uint16) (model.Tab,
 }
 
 func (c *Client) CloseTab(tabID string) (model.Snapshot, error) {
-	supported, err := c.supports(protocol.CapabilityCloseTab)
-	if err != nil {
+	if err := c.require(protocol.CapabilityCloseTab, "closing tabs"); err != nil {
 		return model.Snapshot{}, err
-	}
-	if !supported {
-		return model.Snapshot{}, fmt.Errorf("closing tabs requires a newer daemon; %s", protocol.Remedy)
 	}
 	return callFor(c, protocol.Request{Action: protocol.ActionCloseTab, TabID: tabID}, snapshotOf, "snapshot")
 }
 
 func (c *Client) RenameTab(tabID, name string) (model.Snapshot, error) {
-	supported, err := c.supports(protocol.CapabilityRenameTab)
-	if err != nil {
+	if err := c.require(protocol.CapabilityRenameTab, "renaming tabs"); err != nil {
 		return model.Snapshot{}, err
-	}
-	if !supported {
-		return model.Snapshot{}, fmt.Errorf("renaming tabs requires a newer daemon; %s", protocol.Remedy)
 	}
 	return callFor(c, protocol.Request{Action: protocol.ActionRenameTab, TabID: tabID, Name: name}, snapshotOf, "snapshot")
 }
@@ -342,9 +328,7 @@ func (c *Client) openAttach(tabID string) (net.Conn, *bufio.Reader, protocol.Res
 	}
 	// Bound the handshake alone. A daemon that accepts the connection and then
 	// says nothing — stopped, wedged, or another program holding the socket
-	// path — used to leave this read blocked for good, and with it the command
-	// goroutine that opens a terminal: the tab simply never appeared, with
-	// nothing on the status bar to say why.
+	// path — must fail the attach with an error, not block it forever.
 	if err := connection.SetDeadline(time.Now().Add(handshakeTimeout)); err != nil {
 		connection.Close()
 		return nil, nil, protocol.Response{}, fmt.Errorf("set daemon deadline: %w", err)
@@ -502,7 +486,7 @@ func (c *Client) negotiateProtocol() (*negotiatedProtocol, error) {
 	if response.MinVersion == 0 && len(advertised) == 0 {
 		advertised = protocol.CapabilitiesForVersion(daemonMax)
 	}
-	capabilities := intersectCapabilities(protocol.CapabilitiesForVersion(selected), advertised)
+	capabilities := protocol.IntersectCapabilities(protocol.CapabilitiesForVersion(selected), advertised)
 	c.protocol = &negotiatedProtocol{
 		selectedVersion: selected,
 		capabilities:    capabilities,
@@ -533,7 +517,7 @@ func (c *Client) probeProtocol() (protocol.Response, error) {
 	// A refusal that does carry a version is an ordinary mismatch, which
 	// negotiation reports in the sentence that also names the remedy.
 	if response.Error != "" && advertisedMaximum(response) == 0 {
-		return protocol.Response{}, fmt.Errorf("daemon: %s", response.Error)
+		return protocol.Response{}, &protocol.RefusedError{Message: response.Error}
 	}
 	return response, nil
 }
@@ -546,14 +530,17 @@ func (c *Client) supports(capability string) (bool, error) {
 	return protocol.HasCapability(negotiated.capabilities, capability), nil
 }
 
-func intersectCapabilities(first, second []string) []string {
-	var result []string
-	for _, capability := range first {
-		if protocol.HasCapability(second, capability) {
-			result = append(result, capability)
-		}
+// require refuses an action the running daemon has no capability for. what
+// names the action in the message, such as "closing tabs".
+func (c *Client) require(capability, what string) error {
+	supported, err := c.supports(capability)
+	if err != nil {
+		return err
 	}
-	return result
+	if !supported {
+		return fmt.Errorf("%s requires a newer daemon; %s", what, protocol.Remedy)
+	}
+	return nil
 }
 
 func validateDaemonSocket(path string) error {
@@ -586,7 +573,7 @@ func checkResponse(action string, response protocol.Response, expectedVersion in
 			expectedVersion, response.Version, protocol.Remedy)
 	}
 	if response.Error != "" {
-		return fmt.Errorf("daemon: %s", response.Error)
+		return &protocol.RefusedError{Message: response.Error}
 	}
 	return nil
 }

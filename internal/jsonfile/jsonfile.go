@@ -1,7 +1,6 @@
-// Package jsonfile reads and writes the small JSON documents romty keeps on
-// disk. Both of them — the daemon's state and the TUI's config — were written
-// by the same thirty-five lines, differing only in the noun in their error
-// messages, which is the kind of duplicate that gets fixed in one copy only.
+// Package jsonfile reads and writes the small files romty keeps on disk: the
+// daemon's state, the TUI's config, resume snapshots, and generated agent
+// hook files. Every write is atomic and private to the user.
 package jsonfile
 
 import (
@@ -63,9 +62,8 @@ func WriteBytes(path string, data []byte) error {
 	if err := os.Rename(temporaryPath, path); err != nil {
 		return fmt.Errorf("replace %s: %w", name, err)
 	}
-	// The rename is only durable once the directory entry is, which neither
-	// copy of this used to do: a crash could lose a file that Sync reported
-	// as written.
+	// The rename is only durable once the directory entry is synced too.
+	// Without it a crash can lose a file that Sync reported as written.
 	return syncDirectory(directory)
 }
 

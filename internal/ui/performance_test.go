@@ -3,6 +3,7 @@ package ui
 import (
 	"testing"
 
+	"github.com/opspresso/romty/internal/gitrepo"
 	"github.com/opspresso/romty/internal/model"
 )
 
@@ -11,7 +12,7 @@ func BenchmarkSplitDiffViewport(b *testing.B) {
 	value.width, value.height = 120, 30
 	value.gitDiff = gitDiffView{
 		active: true, split: true, target: model.Workspace{Path: "/workspace"},
-		files: []gitChangedFile{{Path: "large.txt"}}, request: 1,
+		files: []gitrepo.ChangedFile{{Path: "large.txt"}}, request: 1,
 	}
 	lines := make([]string, 0, 30000)
 	for range 10000 {

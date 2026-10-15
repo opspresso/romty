@@ -4,13 +4,25 @@
 // Git repository or an agent, and every one of them ends up written to the
 // user's terminal. A control character in one of those is not text: it moves
 // the cursor, clears the screen, or opens a sequence the terminal will answer.
-// The TUI and the command line each had their own copy of the same scrub, and
-// two copies of a rule like that agree only until one of them is fixed.
+// The TUI and the command line both use this package, so they scrub alike.
 package display
 
 import (
 	"strings"
 	"unicode"
+)
+
+// Control bytes the terminal parsers in romty look for. The C1 introducers
+// are the single-byte forms of ESC [, ESC ] and ESC P, and ST the single-byte
+// string terminator. A terminal accepts either form, so a scanner that only
+// knows the ESC form misses the same sequence in the other.
+const (
+	Escape = 0x1b
+	Bell   = 0x07
+	CSI    = 0x9b
+	OSC    = 0x9d
+	DCS    = 0x90
+	ST     = 0x9c
 )
 
 // replacement is what a control character becomes. It is one cell wide, so a

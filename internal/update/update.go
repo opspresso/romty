@@ -20,6 +20,11 @@ const LatestReleaseURL = "https://api.github.com/repos/opspresso/romty/releases/
 // few kilobytes; anything far larger is not one.
 const maxResponseBytes = 1 << 20
 
+// LatestRelease returns the tag of the newest published romty release.
+func LatestRelease(ctx context.Context) (string, error) {
+	return Latest(ctx, http.DefaultClient, LatestReleaseURL)
+}
+
 // Latest returns the tag of the newest release published at url.
 func Latest(ctx context.Context, client *http.Client, url string) (string, error) {
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)

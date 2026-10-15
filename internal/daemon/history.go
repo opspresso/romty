@@ -6,18 +6,6 @@ import (
 	"github.com/opspresso/romty/internal/display"
 )
 
-const (
-	escape = 0x1b
-	bell   = 0x07
-	// C1 introducers: the single-byte forms of ESC [, ESC ] and ESC P, plus the
-	// single-byte string terminator. A terminal accepts either form, so a filter
-	// that only knows the ESC form leaves the same query standing in the other.
-	controlIntroducer = 0x9b
-	commandIntroducer = 0x9d
-	stringIntroducer  = 0x90
-	stringTerminator  = 0x9c
-)
-
 // stripQueries removes terminal queries from recorded PTY output.
 //
 // The history exists so a reattaching client can restore the screen, but a
@@ -86,7 +74,7 @@ type historyScanner struct {
 // there is no complete sequence to skip, so a truncated tail is never dropped.
 func (s *historyScanner) scanSequence(data []byte, index int) (int, bool) {
 	switch data[index] {
-	case escape:
+	case display.Escape:
 		if index+1 >= len(data) {
 			return index, false
 		}
@@ -98,11 +86,11 @@ func (s *historyScanner) scanSequence(data []byte, index int) (int, bool) {
 		case 'P':
 			return s.scanDeviceControlString(data, index, index+2)
 		}
-	case controlIntroducer:
+	case display.CSI:
 		return scanControlSequence(data, index, index+1)
-	case commandIntroducer:
+	case display.OSC:
 		return s.scanOperatingSystemCommand(data, index, index+1)
-	case stringIntroducer:
+	case display.DCS:
 		return s.scanDeviceControlString(data, index, index+1)
 	}
 	return index, false
@@ -165,10 +153,10 @@ func (s *historyScanner) scanOperatingSystemCommand(data []byte, index, body int
 			cursor += length
 			continue
 		}
-		if data[cursor] == bell || data[cursor] == stringTerminator {
+		if data[cursor] == display.Bell || data[cursor] == display.ST {
 			return cursor + 1, isQueryPayload(data[body:cursor])
 		}
-		if data[cursor] == escape {
+		if data[cursor] == display.Escape {
 			if cursor+1 < len(data) && data[cursor+1] == '\\' {
 				return cursor + 2, isQueryPayload(data[body:cursor])
 			}
@@ -227,11 +215,11 @@ func (s *historyScanner) scanDeviceControlString(data []byte, index, body int) (
 			cursor += length
 			continue
 		}
-		if data[cursor] == stringTerminator {
+		if data[cursor] == display.ST {
 			// DECRQSS, the request for a setting's current value.
 			return cursor + 1, bytes.HasPrefix(data[body:cursor], []byte("$q"))
 		}
-		if data[cursor] == escape {
+		if data[cursor] == display.Escape {
 			if cursor+1 < len(data) && data[cursor+1] == '\\' {
 				return cursor + 2, bytes.HasPrefix(data[body:cursor], []byte("$q"))
 			}

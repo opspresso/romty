@@ -30,7 +30,9 @@ type gitDiffHunkLine struct {
 	text  string
 }
 
-func highlightGitDiffSyntax(path string, lines []string) ([]gitDiffLineSyntax, bool) {
+// syntaxLexer returns the lexer for path when lines are small enough to
+// highlight and the path names a language chroma knows.
+func syntaxLexer(path string, lines []string) (chroma.Lexer, bool) {
 	if len(lines) > maximumHighlightedDiffLines {
 		return nil, false
 	}
@@ -43,6 +45,14 @@ func highlightGitDiffSyntax(path string, lines []string) ([]gitDiffLineSyntax, b
 	}
 	lexer := lexers.Match(path)
 	if lexer == nil || lexer.Config().Name == "fallback" || lexer.Config().Name == "plaintext" {
+		return nil, false
+	}
+	return lexer, true
+}
+
+func highlightGitDiffSyntax(path string, lines []string) ([]gitDiffLineSyntax, bool) {
+	lexer, ok := syntaxLexer(path, lines)
+	if !ok {
 		return nil, false
 	}
 	return highlightGitDiffSyntaxWithLexer(lexer, lines)

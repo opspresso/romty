@@ -6,8 +6,6 @@ import (
 	"strings"
 )
 
-func selfPID() int { return os.Getpid() }
-
 // processInfo reads a process's parent and process group from /proc. The
 // command name can hold spaces and parentheses, so fields are counted from
 // the last closing parenthesis.

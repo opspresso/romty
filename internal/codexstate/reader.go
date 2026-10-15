@@ -21,8 +21,25 @@ import (
 	"github.com/opspresso/romty/internal/model"
 )
 
+// Codex shows a session ID in the terminal title either whole (36 characters)
+// or cut after its fifth group to 29 characters followed by "...".
+const (
+	sessionIDLength     = 36
+	shortSessionIDBytes = 29
+)
+
+// Bounds on what one Reader holds and accepts from an app-server.
+const (
+	maxConnections    = 16
+	loadedPageSize    = 128
+	maxLoadedSessions = 512
+)
+
 var titleID = regexp.MustCompile(`(?i)[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-(?:[0-9a-f]{12}|[0-9a-f]{5}\.\.\.)`)
 
+// SessionPrefix returns the lower-case session ID, whole or shortened, that a
+// terminal title shows. It returns "" when the title shows none or shows two
+// different ones, so an ambiguous title binds no session.
 func SessionPrefix(title string) string {
 	matches := titleID.FindAllStringIndex(title, -1)
 	prefix := ""
@@ -39,16 +56,17 @@ func SessionPrefix(title string) string {
 	return prefix
 }
 
+// IsSessionID reports whether value is one whole, lower-case Codex session ID.
+func IsSessionID(value string) bool {
+	return len(value) == sessionIDLength && SessionPrefix(value) == value
+}
+
 func identifierByte(b byte) bool {
 	return b >= 'a' && b <= 'z' || b >= 'A' && b <= 'Z' || b >= '0' && b <= '9' || b == '-' || b == '_'
 }
 
-type State struct {
-	model.AgentStatus
-	SessionID string
-	TurnID    string
-}
-
+// Reader keeps one app-server connection per Codex home and reads session
+// status through it. It is safe for concurrent use.
 type Reader struct {
 	mu          sync.Mutex
 	connections map[string]*rpc
@@ -56,6 +74,7 @@ type Reader struct {
 
 func NewReader() *Reader { return &Reader{connections: make(map[string]*rpc)} }
 
+// Close closes every open app-server connection.
 func (r *Reader) Close() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -65,9 +84,10 @@ func (r *Reader) Close() {
 	clear(r.connections)
 }
 
-// Read returns only uniquely matched loaded sessions. An absent, ambiguous or
+// Read returns the status of each loaded session that exactly one prefix
+// matches, keyed by that prefix. It returns only uniquely matched sessions. An absent, ambiguous or
 // unreachable session is not guessed from its directory or most recent file.
-func (r *Reader) Read(ctx context.Context, home string, prefixes []string) (map[string]State, error) {
+func (r *Reader) Read(ctx context.Context, home string, prefixes []string) (map[string]model.AgentStatus, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
@@ -79,7 +99,7 @@ func (r *Reader) Read(ctx context.Context, home string, prefixes []string) (map[
 		if err != nil {
 			return nil, err
 		}
-		if len(r.connections) >= 16 {
+		if len(r.connections) >= maxConnections {
 			for key, old := range r.connections {
 				old.conn.Close()
 				delete(r.connections, key)
@@ -202,7 +222,7 @@ func (c *rpc) call(ctx context.Context, method string, params any, out any) erro
 	}
 }
 
-func (c *rpc) read(ctx context.Context, prefixes []string) (map[string]State, error) {
+func (c *rpc) read(ctx context.Context, prefixes []string) (map[string]model.AgentStatus, error) {
 	var ids []string
 	cursor := ""
 	for {
@@ -210,7 +230,7 @@ func (c *rpc) read(ctx context.Context, prefixes []string) (map[string]State, er
 			Data       *[]string `json:"data"`
 			NextCursor *string   `json:"nextCursor"`
 		}
-		params := map[string]any{"limit": 128}
+		params := map[string]any{"limit": loadedPageSize}
 		if cursor != "" {
 			params["cursor"] = cursor
 		}
@@ -221,7 +241,7 @@ func (c *rpc) read(ctx context.Context, prefixes []string) (map[string]State, er
 			return nil, errors.New("Codex returned no loaded-session list")
 		}
 		ids = append(ids, (*page.Data)...)
-		if len(ids) > 512 {
+		if len(ids) > maxLoadedSessions {
 			return nil, errors.New("too many loaded Codex sessions to bind safely")
 		}
 		if page.NextCursor == nil {
@@ -232,7 +252,7 @@ func (c *rpc) read(ctx context.Context, prefixes []string) (map[string]State, er
 		}
 		cursor = *page.NextCursor
 	}
-	result := make(map[string]State)
+	result := make(map[string]model.AgentStatus)
 	for _, prefix := range prefixes {
 		if _, exists := result[prefix]; exists {
 			continue
@@ -251,12 +271,12 @@ func (c *rpc) read(ctx context.Context, prefixes []string) (map[string]State, er
 }
 
 func matchSession(prefix string, ids []string) string {
-	if len(prefix) != 29 && len(prefix) != 36 {
+	if len(prefix) != shortSessionIDBytes && len(prefix) != sessionIDLength {
 		return ""
 	}
 	matched := ""
 	for _, id := range ids {
-		if len(id) != 36 || SessionPrefix(id) != id || !strings.HasPrefix(id, prefix) {
+		if !IsSessionID(id) || !strings.HasPrefix(id, prefix) {
 			continue
 		}
 		if matched != "" && matched != id {
@@ -267,7 +287,7 @@ func matchSession(prefix string, ids []string) string {
 	return matched
 }
 
-func (c *rpc) readSession(ctx context.Context, id string) (State, error) {
+func (c *rpc) readSession(ctx context.Context, id string) (model.AgentStatus, error) {
 	var thread struct {
 		Thread struct {
 			ID     string `json:"id"`
@@ -278,30 +298,31 @@ func (c *rpc) readSession(ctx context.Context, id string) (State, error) {
 		} `json:"thread"`
 	}
 	if err := c.call(ctx, "thread/read", map[string]any{"threadId": id, "includeTurns": false}, &thread); err != nil {
-		return State{}, err
+		return model.AgentStatus{}, err
 	}
 	if thread.Thread.ID != id {
-		return State{}, errors.New("Codex returned a different thread")
+		return model.AgentStatus{}, errors.New("Codex returned a different thread")
 	}
-	state := State{SessionID: id, AgentStatus: model.AgentStatus{Agent: model.AgentCodex, Source: "runtime", Phase: model.AgentPhaseUnknown}}
+	state := model.AgentStatus{Agent: model.AgentCodex, Source: "runtime", Phase: model.AgentPhaseUnknown, SessionID: id}
 	switch thread.Thread.Status.Type {
 	case "active":
 		if thread.Thread.Status.Flags == nil {
-			return State{}, errors.New("Codex returned no active-state flags")
+			return model.AgentStatus{}, errors.New("Codex returned no active-state flags")
 		}
+		// An approval outranks a question. An unknown flag makes the
+		// phase unknown rather than a guess.
 		state.Phase, state.Active = model.AgentPhaseWorking, true
 		for _, flag := range *thread.Thread.Status.Flags {
-			if flag != "waitingOnUserInput" && flag != "waitingOnApproval" {
+			switch flag {
+			case "waitingOnApproval":
+				state.Phase = model.AgentPhaseWaitingApproval
+			case "waitingOnUserInput":
+				if state.Phase != model.AgentPhaseWaitingApproval {
+					state.Phase = model.AgentPhaseWaitingInput
+				}
+			default:
 				state.Phase = model.AgentPhaseUnknown
 				return state, nil
-			}
-			if flag == "waitingOnUserInput" {
-				state.Phase = model.AgentPhaseWaitingInput
-			}
-		}
-		for _, flag := range *thread.Thread.Status.Flags {
-			if flag == "waitingOnApproval" {
-				state.Phase = model.AgentPhaseWaitingApproval
 			}
 		}
 	case "systemError":
@@ -327,15 +348,15 @@ func (c *rpc) readSession(ctx context.Context, id string) (State, error) {
 		if errors.As(err, &failure) && failure.code == -32600 && failure.message == "thread "+id+" is not materialized yet; thread/turns/list is unavailable before first user message" {
 			return state, nil
 		}
-		return State{}, err
+		return model.AgentStatus{}, err
 	}
 	if turns.Data == nil {
-		return State{}, errors.New("Codex returned no turn metadata")
+		return model.AgentStatus{}, errors.New("Codex returned no turn metadata")
 	}
 	if len(*turns.Data) > 0 {
 		state.TurnID = (*turns.Data)[0].ID
 		if state.TurnID == "" || len(state.TurnID) > 512 {
-			return State{}, errors.New("Codex returned no valid turn identity")
+			return model.AgentStatus{}, errors.New("Codex returned no valid turn identity")
 		}
 		switch (*turns.Data)[0].Status {
 		case "completed":
@@ -354,16 +375,16 @@ func (c *rpc) readSession(ctx context.Context, id string) (State, error) {
 		Goal goalField `json:"goal"`
 	}
 	if err := c.call(ctx, "thread/goal/get", map[string]any{"threadId": id}, &goal); err != nil {
-		return State{}, err
+		return model.AgentStatus{}, err
 	}
 	if !goal.Goal.present {
-		return State{}, errors.New("Codex returned no goal metadata")
+		return model.AgentStatus{}, errors.New("Codex returned no goal metadata")
 	}
 	if goal.Goal.value != nil {
 		switch goal.Goal.value.Status {
 		case "active", "paused", "blocked", "usageLimited", "budgetLimited", "complete":
 		default:
-			return State{}, errors.New("Codex returned an unknown goal status")
+			return model.AgentStatus{}, errors.New("Codex returned an unknown goal status")
 		}
 	}
 	if goal.Goal.value != nil && !state.Active && (state.Phase == model.AgentPhaseIdle || state.Phase == model.AgentPhaseCompleted) {

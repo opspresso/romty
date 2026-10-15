@@ -110,13 +110,7 @@ func requestCapabilities(request protocol.Request) []string {
 	if request.MinVersion == 0 && len(request.Capabilities) == 0 {
 		return supported
 	}
-	result := make([]string, 0, len(supported))
-	for _, capability := range supported {
-		if protocol.HasCapability(request.Capabilities, capability) {
-			result = append(result, capability)
-		}
-	}
-	return result
+	return protocol.IntersectCapabilities(supported, request.Capabilities)
 }
 
 // reply is for requests without a selected revision, while replyFor echoes the

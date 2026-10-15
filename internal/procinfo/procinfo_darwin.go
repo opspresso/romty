@@ -1,12 +1,6 @@
 package procinfo
 
-import (
-	"os"
-
-	"golang.org/x/sys/unix"
-)
-
-func selfPID() int { return os.Getpid() }
+import "golang.org/x/sys/unix"
 
 // processInfo reads a process's parent and process group from the kernel.
 func processInfo(pid int) (parent, group int, ok bool) {

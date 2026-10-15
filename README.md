@@ -58,6 +58,6 @@ Use `romty stop` outside the TUI when you intend to stop the daemon and every ru
 - [Interface](docs/interface.md) — workspace behavior, keyboard shortcuts, scrollback, mouse, and Git state
 - [Runtime](docs/runtime.md) — session persistence, local data, security boundaries, and architecture
 - [Agent status hooks](docs/agent-hooks.md) — Claude Code, Codex, and OpenCode state reporting and hook installation
-- [Development](docs/development.md) — local checks, protocol compatibility, website deployment, and releases
+- [Development](docs/development.md) — local checks, code layout, protocol compatibility, website deployment, and releases
 
 The complete documentation index is in [docs/README.md](docs/README.md).

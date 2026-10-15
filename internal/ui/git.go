@@ -1,139 +1,12 @@
 package ui
 
 import (
-	"context"
-	"os"
-	"os/exec"
-	"path/filepath"
-	"strconv"
-	"strings"
-	"sync"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/opspresso/romty/internal/gitrepo"
 )
-
-const (
-	gitCommandTimeout = 2 * time.Second
-	gitFetchTimeout   = 10 * time.Second
-	gitStatusWorkers  = 4
-)
-
-// gitReadEnvironment and gitRemoteEnvironment are what romty adds to the
-// environment of the git it runs. A read must not take the index lock a user's
-// own git may be holding, and anything that reaches a remote must not stop on a
-// credential prompt: it would be waiting on a terminal romty never shows.
-//
-// Which of the two a command wants is the only thing that varies between the
-// five places romty runs git, and it was the one thing spelled out at each of
-// them rather than named.
-var (
-	gitReadEnvironment   = []string{"GIT_OPTIONAL_LOCKS=0"}
-	gitRemoteEnvironment = []string{"GIT_TERMINAL_PROMPT=0", "GCM_INTERACTIVE=Never"}
-)
-
-// gitCommand builds a git invocation inside a repository, bounded by ctx.
-func gitCommand(ctx context.Context, path string, environment []string, arguments ...string) *exec.Cmd {
-	command := exec.CommandContext(ctx, "git", append([]string{"-C", path}, arguments...)...)
-	command.Env = append(os.Environ(), environment...)
-	return command
-}
-
-type gitState struct {
-	Branch     string
-	Revision   string
-	Detached   bool
-	Dirty      bool
-	Conflicted bool
-	Ahead      int
-	Behind     int
-}
-
-func readGitState(path string, fetch bool) (gitState, bool) {
-	if _, err := os.Stat(filepath.Join(path, ".git")); err != nil {
-		return gitState{}, false
-	}
-	if fetch {
-		fetchGit(path)
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), gitCommandTimeout)
-	defer cancel()
-	output, err := gitStdout(ctx, path, gitReadEnvironment,
-		"status", "--porcelain=v2", "--branch", "--untracked-files=normal")
-	if err != nil {
-		return gitState{}, false
-	}
-	return parseGitState(string(output)), true
-}
-
-func parseGitState(output string) gitState {
-	var state gitState
-	for _, line := range strings.Split(output, "\n") {
-		switch {
-		case strings.HasPrefix(line, "# branch.oid "):
-			state.Revision = strings.TrimPrefix(line, "# branch.oid ")
-		case strings.HasPrefix(line, "# branch.head "):
-			state.Branch = strings.TrimPrefix(line, "# branch.head ")
-			if state.Branch == "(detached)" {
-				state.Branch = ""
-				state.Detached = true
-			}
-		case strings.HasPrefix(line, "# branch.ab "):
-			fields := strings.Fields(strings.TrimPrefix(line, "# branch.ab "))
-			if len(fields) == 2 {
-				state.Ahead, _ = strconv.Atoi(strings.TrimPrefix(fields[0], "+"))
-				state.Behind, _ = strconv.Atoi(strings.TrimPrefix(fields[1], "-"))
-			}
-		case strings.HasPrefix(line, "u "):
-			state.Dirty = true
-			state.Conflicted = true
-		case line != "" && !strings.HasPrefix(line, "# "):
-			state.Dirty = true
-		}
-	}
-	return state
-}
-
-func fetchGit(path string) {
-	ctx, cancel := context.WithTimeout(context.Background(), gitFetchTimeout)
-	defer cancel()
-	_ = gitCommand(ctx, path, gitRemoteEnvironment,
-		"fetch", "--quiet", "--no-tags", "--no-write-fetch-head").Run()
-}
-
-func gitStates(paths []string, fetch bool) map[string]gitState {
-	unique := make(map[string]struct{}, len(paths))
-	for _, path := range paths {
-		if path != "" {
-			unique[path] = struct{}{}
-		}
-	}
-	jobs := make(chan string, len(unique))
-	for path := range unique {
-		jobs <- path
-	}
-	close(jobs)
-
-	result := make(map[string]gitState)
-	var mu sync.Mutex
-	var workers sync.WaitGroup
-	for range min(len(unique), gitStatusWorkers) {
-		workers.Add(1)
-		go func() {
-			defer workers.Done()
-			for path := range jobs {
-				state, ok := readGitState(path, fetch)
-				if ok {
-					mu.Lock()
-					result[path] = state
-					mu.Unlock()
-				}
-			}
-		}()
-	}
-	workers.Wait()
-	return result
-}
 
 func (m dashboard) readGitStatus(forceFetch, reschedule bool) tea.Cmd {
 	paths := m.workspacePaths()
@@ -143,7 +16,7 @@ func (m dashboard) readGitStatus(forceFetch, reschedule bool) tea.Cmd {
 		fetchedAt = now()
 	}
 	return func() tea.Msg {
-		return gitStatusMsg{value: gitStates(paths, fetch), fetchedAt: fetchedAt, reschedule: reschedule}
+		return gitStatusMsg{value: gitrepo.States(paths, fetch), fetchedAt: fetchedAt, reschedule: reschedule}
 	}
 }
 

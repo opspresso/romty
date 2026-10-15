@@ -183,6 +183,15 @@ type Response struct {
 	ReplayRows    uint16 `json:"replay_rows,omitempty"`
 }
 
+// RefusedError is a request the daemon answered with an error. Message is the
+// daemon's reason as it wrote it, for a caller that shows the reason beside
+// the request and needs no "daemon:" prefix.
+type RefusedError struct {
+	Message string
+}
+
+func (e *RefusedError) Error() string { return "daemon: " + e.Message }
+
 // SelectVersion returns the highest revision both peers support.
 func SelectVersion(firstMin, firstMax, secondMin, secondMax int) (int, bool) {
 	selected := min(firstMax, secondMax)
@@ -206,6 +215,18 @@ func CapabilitiesForVersion(version int) []string {
 
 func HasCapability(capabilities []string, target string) bool {
 	return slices.Contains(capabilities, target)
+}
+
+// IntersectCapabilities returns the capabilities in first that second also
+// has, in the order of first.
+func IntersectCapabilities(first, second []string) []string {
+	var result []string
+	for _, capability := range first {
+		if HasCapability(second, capability) {
+			result = append(result, capability)
+		}
+	}
+	return result
 }
 
 func Write(w io.Writer, value any) error {

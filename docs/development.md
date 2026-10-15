@@ -27,6 +27,21 @@ Run an isolated development instance without using normal romty state:
 ROMTY_HOME=/tmp/romty-dev go run ./cmd/romty
 ```
 
+## Code layout
+
+`cmd/romty` parses the command line and starts the TUI, the daemon, or a CLI command. Everything else is under `internal/`. Dependencies point from the top of this table down; a package does not import a package above it.
+
+| Layer | Packages | Responsibility |
+|---|---|---|
+| Entry point | `cmd/romty` | Command line, `doctor`, `status`, `list`, `hooks`, and the hook command agents run |
+| Presentation | `ui` | Bubble Tea dashboard: layout, keys, mouse, modals, and the embedded terminal |
+| Application | `daemon`, `client` | The daemon that owns sessions and state, and the client that talks to it |
+| Wire contract | `protocol` | Framed messages, protocol revisions, and capabilities |
+| Domain | `model` | Roots, workspaces, tabs, agent phases, and snapshots |
+| Infrastructure | `agenthooks`, `codexstate`, `gitrepo`, `jsonfile`, `paths`, `procinfo`, `sound`, `state`, `transcript`, `update`, `workspacefs`, `display`, `version` | Files, processes, Git, agent integrations, and the network |
+
+Keep side effects such as running `git`, reading workspace files, or calling GitHub in an infrastructure package. The `ui` package decides what to show and when; it does not run commands or read the filesystem itself.
+
 ## Sound assets
 
 The original notification recordings are `internal/sound/assets/done.mp3` and `waiting.mp3`. Runtime playback embeds their PCM WAV derivatives from the same directory so macOS and common Linux audio tools can play them without an in-process decoder. Regenerate a derivative without changing the original:

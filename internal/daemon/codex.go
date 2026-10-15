@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/opspresso/romty/internal/codexstate"
@@ -9,13 +10,19 @@ import (
 )
 
 type codexStatusReader interface {
-	Read(context.Context, string, []string) (map[string]codexstate.State, error)
+	Read(context.Context, string, []string) (map[string]model.AgentStatus, error)
 	Close()
+}
+
+// ownsCodexSession reports whether a Codex session belongs to the terminal
+// whose title shows prefix. A title that names no single session owns none.
+func ownsCodexSession(prefix, sessionID string) bool {
+	return prefix != "" && strings.HasPrefix(sessionID, prefix)
 }
 
 type codexReport struct {
 	prefix string
-	state  codexstate.State
+	status model.AgentStatus
 }
 
 func (s *Server) readCodexStatuses(sessions map[string]*session, agents map[string]model.Agent) map[string]codexReport {
@@ -51,7 +58,7 @@ func (s *Server) readCodexStatuses(sessions map[string]*session, agents map[stri
 		for _, identity := range identities {
 			prefixes = append(prefixes, identity.prefix)
 		}
-		states, err := s.codex.Read(ctx, home, prefixes)
+		statuses, err := s.codex.Read(ctx, home, prefixes)
 		s.mu.Lock()
 		if s.codexErrors == nil {
 			s.codexErrors = make(map[string]string)
@@ -69,8 +76,8 @@ func (s *Server) readCodexStatuses(sessions map[string]*session, agents map[stri
 			continue
 		}
 		for _, identity := range identities {
-			if state, ok := states[identity.prefix]; ok {
-				result[identity.tab] = codexReport{prefix: identity.prefix, state: state}
+			if status, ok := statuses[identity.prefix]; ok {
+				result[identity.tab] = codexReport{prefix: identity.prefix, status: status}
 			}
 		}
 	}

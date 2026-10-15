@@ -19,13 +19,6 @@ package ui
 
 import "github.com/opspresso/romty/internal/display"
 
-const (
-	escape            = 0x1b
-	bell              = 0x07
-	commandIntroducer = 0x9d
-	stringTerminator  = 0x9c
-)
-
 // titleHoldLimit bounds a sequence held back between chunks. A window title
 // is a line of text; anything longer is not one being split, and holding it
 // forever would swallow the guest's output.
@@ -57,8 +50,8 @@ func (s *titleScrubber) scrub(data []byte) []byte {
 		return append(filtered, scan[copied:end]...)
 	}
 	// hold keeps the unterminated sequence for the next chunk, unless it has
-	// grown past what a title could be — then it goes through unfiltered,
-	// which is the old behaviour, rather than being withheld forever.
+	// grown past what a title could be — then it goes through unfiltered
+	// rather than being withheld forever.
 	hold := func(from int) []byte {
 		if len(scan)-from > titleHoldLimit {
 			return finish(len(scan))
@@ -95,9 +88,9 @@ func (s *titleScrubber) scrub(data []byte) []byte {
 		}
 		var body int
 		switch scan[index] {
-		case commandIntroducer:
+		case display.OSC:
 			body = index + 1
-		case escape:
+		case display.Escape:
 			if index+1 >= len(scan) {
 				return hold(index)
 			}
@@ -134,12 +127,12 @@ func (s *titleScrubber) scrub(data []byte) []byte {
 				position += length
 				continue
 			}
-			if scan[position] == bell || scan[position] == stringTerminator {
+			if scan[position] == display.Bell || scan[position] == display.ST {
 				drop(index, position+1)
 				index = position + 1
 				break
 			}
-			if scan[position] == escape {
+			if scan[position] == display.Escape {
 				if position+1 >= len(scan) {
 					return hold(index)
 				}

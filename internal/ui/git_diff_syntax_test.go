@@ -8,6 +8,7 @@ import (
 	"github.com/alecthomas/chroma/v2"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/opspresso/romty/internal/gitrepo"
 	"github.com/opspresso/romty/internal/model"
 )
 
@@ -33,7 +34,7 @@ func TestDashboardHighlightsCodeDiffsInBothLayouts(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, model.Snapshot{})
 	value.gitDiff = gitDiffView{
 		active:            true,
-		files:             []gitChangedFile{{Path: "main.go", WorkTreeStatus: 'M'}},
+		files:             []gitrepo.ChangedFile{{Path: "main.go", WorkTreeStatus: 'M'}},
 		diffLines:         lines,
 		splitRows:         splitGitDiffRows(lines),
 		diffSyntax:        syntax,

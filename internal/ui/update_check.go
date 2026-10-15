@@ -5,7 +5,6 @@ package ui
 
 import (
 	"context"
-	"net/http"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -27,9 +26,7 @@ var releaseCheckEnabled = version.IsRelease
 
 var currentVersion = version.String
 
-var latestRelease = func(ctx context.Context) (string, error) {
-	return update.Latest(ctx, http.DefaultClient, update.LatestReleaseURL)
-}
+var latestRelease = update.LatestRelease
 
 type releaseCheckedMsg struct {
 	latest string

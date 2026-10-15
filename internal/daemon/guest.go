@@ -97,7 +97,7 @@ func (t *guestTracker) observe(data []byte) {
 			index += length
 			continue
 		}
-		if scan[index] == escape {
+		if scan[index] == display.Escape {
 			if index+1 >= len(scan) {
 				t.hold(scan[index:], modeCarryLimit)
 				return
@@ -232,10 +232,10 @@ const (
 // both the ESC form and the single C1 byte, and distinguishing "not one" from
 // "cannot tell yet because the chunk ended".
 func modeIntroducer(data []byte, index int) (int, introducerState) {
-	if data[index] == controlIntroducer {
+	if data[index] == display.CSI {
 		return index + 1, introducerFound
 	}
-	if data[index] != escape {
+	if data[index] != display.Escape {
 		return 0, notAnIntroducer
 	}
 	if index+1 >= len(data) {
@@ -252,10 +252,10 @@ func modeIntroducer(data []byte, index int) (int, introducerState) {
 // of its own: the lone ESC that might begin one is held back by the mode scan
 // that follows.
 func titleIntroducer(data []byte, index int) (int, bool) {
-	if data[index] == commandIntroducer {
+	if data[index] == display.OSC {
 		return index + 1, true
 	}
-	if data[index] != escape || index+1 >= len(data) || data[index+1] != ']' {
+	if data[index] != display.Escape || index+1 >= len(data) || data[index+1] != ']' {
 		return 0, false
 	}
 	return index + 2, true
@@ -286,9 +286,9 @@ func scanTitleSequence(data []byte, body int) (end int, content string, state ti
 			continue
 		}
 		switch data[cursor] {
-		case bell, stringTerminator:
+		case display.Bell, display.ST:
 			return cursor + 1, string(data[body:cursor]), titleComplete
-		case escape:
+		case display.Escape:
 			if cursor+1 >= len(data) {
 				return 0, "", titleSplit
 			}

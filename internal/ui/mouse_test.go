@@ -6,6 +6,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/charmbracelet/x/ansi"
+
 	"github.com/opspresso/romty/internal/model"
 )
 
@@ -52,7 +53,7 @@ func TestMouseModeFollowsFocusAndPassthrough(t *testing.T) {
 			setup: func(m *dashboard) {
 				m.focus = terminalPane
 				m.terminal = terminal
-				m.mousePassthrough = true
+				m.config.MousePassthrough = true
 				terminal.guestMouse[ansi.ModeMouseAnyEvent] = true
 			},
 			want: tea.MouseModeAllMotion,
@@ -62,7 +63,7 @@ func TestMouseModeFollowsFocusAndPassthrough(t *testing.T) {
 			value := base
 			value.modal = noModal
 			value.terminal = nil
-			value.mousePassthrough = false
+			value.config.MousePassthrough = false
 			terminal.guestMouse = map[ansi.DECMode]bool{}
 			probe.setup(&value)
 			if got := value.mouseMode(); got != probe.want {

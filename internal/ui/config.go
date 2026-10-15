@@ -1,8 +1,10 @@
 package ui
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"reflect"
 	"strconv"
 	"strings"
@@ -38,10 +40,9 @@ type Config struct {
 }
 
 // knownConfigFields are the JSON names Config declares, read from its own tags
-// rather than listed a second time. A field added to the struct but forgotten
-// in a hand-kept list would be filed as unknown, and MarshalJSON would then
-// restore the old value of anything omitempty had just dropped — turning a
-// setting off would silently turn it back on.
+// rather than listed a second time. A field missing from this set would be
+// kept as unknown, and MarshalJSON would then restore its old value whenever
+// omitempty dropped it: turning a setting off would turn it back on.
 var knownConfigFields = configFieldNames()
 
 func configFieldNames() map[string]struct{} {
@@ -92,6 +93,20 @@ func (c Config) MarshalJSON() ([]byte, error) {
 	return json.Marshal(fields)
 }
 
+// clone returns a copy that shares nothing with c, so a save running in the
+// background cannot see a later change.
+func (c Config) clone() Config {
+	c.unknownFields = maps.Clone(c.unknownFields)
+	return c
+}
+
+// sameConfig reports whether two configs would write the same document.
+func sameConfig(a, b Config) bool {
+	first, firstErr := json.Marshal(a)
+	second, secondErr := json.Marshal(b)
+	return firstErr == nil && secondErr == nil && bytes.Equal(first, second)
+}
+
 func loadConfig(path string) (Config, error) {
 	if path == "" {
 		return Config{}, nil
@@ -131,9 +146,7 @@ func validateConfig(value Config) error {
 // does.
 //
 // The name and the value are separate so the modal can put each in a column of
-// its own. As one string — "Sound on done: off" — the values landed wherever
-// the names happened to end, and reading five settings meant reading five
-// sentences rather than glancing down a column.
+// its own, and the values line up under one another.
 type configRow struct {
 	name   string
 	value  func(dashboard) string
@@ -144,8 +157,7 @@ type configRow struct {
 
 // configRows are the settings in the order the modal draws them. Drawing a row,
 // answering its key, answering a click on it and highlighting it under the
-// pointer are four readings of one list; keeping four lists is how a setting
-// ends up drawn but dead, or answering for the row above it.
+// pointer all read this one list.
 //
 // The pane width has no action of its own: it is the one setting a click cannot
 // express, because there is no single value to click towards. The arrow keys
@@ -159,21 +171,21 @@ func configRows() []configRow {
 		},
 		{
 			name:   "Scrollback mouse",
-			value:  func(m dashboard) string { return onOff(m.scrollbackMouse) },
+			value:  func(m dashboard) string { return onOff(m.config.ScrollbackMouse) },
 			hint:   "m",
 			keys:   []string{"m"},
 			action: dashboard.toggleScrollbackMouse,
 		},
 		{
 			name:   "Sound on done",
-			value:  func(m dashboard) string { return onOff(m.soundOnDone) },
+			value:  func(m dashboard) string { return onOff(m.config.SoundOnDone) },
 			hint:   "d",
 			keys:   []string{"d"},
 			action: dashboard.toggleSoundOnDone,
 		},
 		{
 			name:   "Sound on waiting",
-			value:  func(m dashboard) string { return onOff(m.soundOnWaiting) },
+			value:  func(m dashboard) string { return onOff(m.config.SoundOnWaiting) },
 			hint:   "b",
 			keys:   []string{"b"},
 			action: dashboard.toggleSoundOnWaiting,
@@ -196,9 +208,8 @@ func (r configRow) text(m dashboard) string {
 	return r.value(m)
 }
 
-// moveConfig walks the settings, stopping at the ends. Every other list romty
-// draws is walked with the arrow keys and run with Enter; Config alone asked
-// the user to remember which letter belonged to which row.
+// moveConfig walks the settings, stopping at the ends, so Config is walked
+// with the arrow keys and run with Enter like every other list romty draws.
 func (m *dashboard) moveConfig(delta int) {
 	rows := configRows()
 	if len(rows) == 0 {

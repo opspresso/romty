@@ -454,14 +454,12 @@ func emulatorHandlesModifiedKey(code rune, mod tea.KeyMod) bool {
 // ctrl 4, meta 8, summed onto a base of 1.
 func modifierParameter(mod tea.KeyMod) int {
 	parameter := 1
-	for bit, weight := range map[tea.KeyMod]int{
-		tea.ModShift: 1,
-		tea.ModAlt:   2,
-		tea.ModCtrl:  4,
-		tea.ModMeta:  8,
-	} {
-		if mod&bit != 0 {
-			parameter += weight
+	for _, modifier := range [...]struct {
+		bit    tea.KeyMod
+		weight int
+	}{{tea.ModShift, 1}, {tea.ModAlt, 2}, {tea.ModCtrl, 4}, {tea.ModMeta, 8}} {
+		if mod&modifier.bit != 0 {
+			parameter += modifier.weight
 		}
 	}
 	return parameter
@@ -560,11 +558,8 @@ func (t *embeddedTerminal) cursorPosition() uv.Position {
 	return t.emulator.CursorPosition()
 }
 
-// close lets go of the daemon and of everything the emulator holds. It had two
-// names — disconnect and closeTerminal — that did exactly the same thing, only
-// because the sync.Once above was called close and left the plain name taken.
-// Two names for one operation are two things to keep straight that are not
-// actually different.
+// close lets go of the daemon and of everything the emulator holds. It is
+// safe to call more than once.
 func (t *embeddedTerminal) close() {
 	t.closeOnce.Do(func() {
 		t.closed.Store(true)

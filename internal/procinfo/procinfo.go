@@ -6,6 +6,8 @@
 // an agent in a terminal tab has that tab's foreground job among them.
 package procinfo
 
+import "os"
+
 // maxDepth bounds the walk up the process tree. A hook sits a few processes
 // below its agent; a deeper chain is not one romty needs to follow.
 const maxDepth = 16
@@ -16,7 +18,7 @@ const maxDepth = 16
 func AncestorGroups() []int {
 	var groups []int
 	seen := make(map[int]bool)
-	for pid, depth := selfPID(), 0; pid > 1 && depth < maxDepth; depth++ {
+	for pid, depth := os.Getpid(), 0; pid > 1 && depth < maxDepth; depth++ {
 		parent, group, ok := processInfo(pid)
 		if !ok {
 			break

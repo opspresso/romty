@@ -52,6 +52,26 @@ const (
 	AgentPhaseStopped         AgentPhase = "stopped"
 )
 
+// Running reports a turn that is working without waiting for the user.
+func (p AgentPhase) Running() bool {
+	switch p {
+	case AgentPhaseThinking, AgentPhaseWorking, AgentPhasePlanning, AgentPhaseCompacting:
+		return true
+	}
+	return false
+}
+
+// Waiting reports a turn that stopped for the user's answer or approval.
+func (p AgentPhase) Waiting() bool {
+	return p == AgentPhaseWaitingInput || p == AgentPhaseWaitingApproval
+}
+
+// Busy reports work in progress, including background work after a turn
+// ended. A busy phase is drawn as an animated marker.
+func (p AgentPhase) Busy() bool {
+	return p.Running() || p == AgentPhaseBackground
+}
+
 type AgentStatus struct {
 	Agent Agent      `json:"agent"`
 	Phase AgentPhase `json:"phase"`
@@ -84,6 +104,16 @@ type Tab struct {
 	// AgentStatus.
 	AgentContextTokens int     `json:"agent_context_tokens,omitempty"`
 	AgentCostUSD       float64 `json:"agent_cost_usd,omitempty"`
+}
+
+// SetAgentStatus copies an agent status onto the tab it describes.
+func (t *Tab) SetAgentStatus(status AgentStatus) {
+	t.Agent = status.Agent
+	t.AgentPhase = status.Phase
+	t.AgentSessionID = status.SessionID
+	t.AgentTurnID = status.TurnID
+	t.AgentContextTokens = status.ContextTokens
+	t.AgentCostUSD = status.CostUSD
 }
 
 type Snapshot struct {

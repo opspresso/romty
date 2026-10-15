@@ -6,6 +6,7 @@ package ui
 import (
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/opspresso/romty/internal/gitrepo"
 	"github.com/opspresso/romty/internal/model"
 )
 
@@ -13,7 +14,7 @@ type navItem struct {
 	root      model.Root
 	workspace model.Workspace
 	tabs      []model.Tab
-	git       gitState
+	git       gitrepo.State
 	hasGit    bool
 	isRoot    bool
 	separator bool
@@ -61,9 +62,8 @@ func (m *dashboard) moveNavigation(delta int) {
 		m.tabIndex = 0
 		return
 	}
-	// Stopping at the ends rather than wrapping, as the picker, help and
-	// scrollback all do; the tree used to be alone in sending a press past the
-	// last row back to the first.
+	// Stop at the ends rather than wrap, as the picker, help and scrollback
+	// do.
 	m.navIndex = min(max(m.navIndex+delta, 0), len(items)-1)
 	m.cursorPath = items[m.navIndex].workspace.Path
 	m.syncTabCursor(runningTabs(items[m.navIndex].tabs))
@@ -298,10 +298,9 @@ func (m *dashboard) clampTabIndex() {
 }
 
 // ensureWorkspaceCursor keeps the cursor on the item it was on, by path rather
-// than by position. The tree is rebuilt from the daemon on every refresh, so a
-// directory appearing above the cursor — a `git clone` finishing in another
-// terminal — used to slide the highlight onto its neighbour without the user
-// touching a key, and Enter then opened the wrong workspace.
+// than by position. The tree is rebuilt from the daemon on every refresh, and
+// a directory that appears above the cursor — a `git clone` finishing in
+// another terminal — must not move the highlight onto its neighbour.
 func (m *dashboard) ensureWorkspaceCursor() {
 	defer m.clampNavigationOffset()
 	items := m.navigationItems()
@@ -409,8 +408,8 @@ func (m *dashboard) restoreSelection() {
 			m.tabIndex = tabIndex
 			m.selectedWorkspaceID = tab.WorkspaceID
 			m.selectedPath = path
-			m.rememberedWorkspacePath = path
-			m.rememberedTabID = tabID
+			m.config.LastWorkspacePath = path
+			m.config.LastTabID = tabID
 			m.restorePending = true
 			return
 		}
@@ -426,9 +425,9 @@ func (m *dashboard) rememberSelection(tabID string) bool {
 			if tab.ID != tabID {
 				continue
 			}
-			changed := m.rememberedWorkspacePath != item.workspace.Path || m.rememberedTabID != tab.ID
-			m.rememberedWorkspacePath = item.workspace.Path
-			m.rememberedTabID = tab.ID
+			changed := m.config.LastWorkspacePath != item.workspace.Path || m.config.LastTabID != tab.ID
+			m.config.LastWorkspacePath = item.workspace.Path
+			m.config.LastTabID = tab.ID
 			return changed
 		}
 	}

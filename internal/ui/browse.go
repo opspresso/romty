@@ -5,14 +5,13 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"sort"
-	"strings"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/opspresso/romty/internal/display"
+	"github.com/opspresso/romty/internal/workspacefs"
 )
 
 // browser is the root picker's state: the directory it has open, the
@@ -96,7 +95,7 @@ func cleanPath(path string) string {
 
 func readDirectory(path string) browser {
 	value := browser{path: path}
-	entries, err := readSubdirectories(path)
+	entries, err := workspacefs.Subdirectories(path)
 	if err != nil {
 		value.failure = failureReason(err)
 		return value
@@ -109,42 +108,6 @@ func readDirectory(path string) browser {
 		value.cursor = 1
 	}
 	return value
-}
-
-// readSubdirectories lists the directories a root could be picked from.
-// Dot-directories are left out: home holds dozens of them and none of them is
-// a workspace. Typing a path still reaches those.
-func readSubdirectories(path string) ([]string, error) {
-	entries, err := os.ReadDir(path)
-	if err != nil {
-		return nil, err
-	}
-	names := make([]string, 0, len(entries))
-	for _, entry := range entries {
-		if strings.HasPrefix(entry.Name(), ".") {
-			continue
-		}
-		if !isDirectory(path, entry) {
-			continue
-		}
-		names = append(names, entry.Name())
-	}
-	sort.Strings(names)
-	return names, nil
-}
-
-// isDirectory follows a symlink before deciding. A root is stored by its
-// resolved path anyway, and a linked directory — a checkout on another volume,
-// say — is exactly the kind of place a root is picked from.
-func isDirectory(parent string, entry os.DirEntry) bool {
-	if entry.IsDir() {
-		return true
-	}
-	if entry.Type()&os.ModeSymlink == 0 {
-		return false
-	}
-	info, err := os.Stat(filepath.Join(parent, entry.Name()))
-	return err == nil && info.IsDir()
 }
 
 // failureReason drops the path a read error repeats. The box already shows

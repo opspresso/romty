@@ -649,7 +649,7 @@ func TestClientDegradesFeaturesMissingFromAnOlderDaemon(t *testing.T) {
 		t.Fatalf("AgentStatuses() = (%v, %v), want an empty supported fallback", statuses, err)
 	}
 	if _, err := backend.RemoveWorkspace("root-1", "/workspace"); err == nil ||
-		!strings.Contains(err.Error(), "does not support") ||
+		!strings.Contains(err.Error(), "requires a newer daemon") ||
 		!strings.Contains(err.Error(), protocol.Remedy) {
 		t.Fatalf("RemoveWorkspace() error = %v, want an unsupported capability and its remedy", err)
 	}
