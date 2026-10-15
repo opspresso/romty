@@ -231,10 +231,10 @@ func (m dashboard) handleGitActionsMouse(message tea.MouseMsg) (tea.Model, tea.C
 	if wheel, ok := message.(tea.MouseWheelMsg); ok && m.gitRun.complete {
 		switch wheel.Button {
 		case tea.MouseWheelUp:
-			updated, command := m.scrollGitAction(-3)
+			updated, command := m.scrollGitAction(-wheelLines)
 			return updated, command, true
 		case tea.MouseWheelDown:
-			updated, command := m.scrollGitAction(3)
+			updated, command := m.scrollGitAction(wheelLines)
 			return updated, command, true
 		}
 	}

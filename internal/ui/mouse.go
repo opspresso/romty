@@ -283,9 +283,9 @@ func (m dashboard) handleDashboardMouse(message tea.MouseMsg) (tea.Model, tea.Cm
 	if wheel, ok := message.(tea.MouseWheelMsg); ok && mouse.X < view.leftWidth && mouse.Y < view.bodyHeight {
 		switch wheel.Button {
 		case tea.MouseWheelUp:
-			m.scrollNavigation(-3)
+			m.scrollNavigation(-wheelLines)
 		case tea.MouseWheelDown:
-			m.scrollNavigation(3)
+			m.scrollNavigation(wheelLines)
 		default:
 			return m, nil, false
 		}
