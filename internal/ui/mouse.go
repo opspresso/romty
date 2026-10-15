@@ -330,6 +330,10 @@ func (m dashboard) handleDashboardMouse(message tea.MouseMsg) (tea.Model, tea.Cm
 			updated, command := m.confirmCloseTab(tabs[hit.index], hit.index)
 			return updated, command, true
 		}
+		if hit.index < len(tabs) && m.isDoubleClick(tabs[hit.index].ID) {
+			updated, command := m.startRenameTab(tabs[hit.index])
+			return updated, command, true
+		}
 		m.tabIndex = hit.index
 		if m.focus == leftPane {
 			return m, m.selectWorkspace(), true

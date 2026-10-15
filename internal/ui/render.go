@@ -270,8 +270,12 @@ func (m dashboard) renderStatus(width, bodyHeight int) []string {
 	var status string
 	switch {
 	case m.inputMode:
+		label := " ROOT "
+		if m.inputKind == tabNameInput {
+			label = " NAME "
+		}
 		status = truncate(
-			m.styles.promptLabel.Render(" ROOT ")+" "+m.styles.promptText.Render(display.Text(m.input))+m.styles.dividerActive.Render("█"),
+			m.styles.promptLabel.Render(label)+" "+m.styles.promptText.Render(display.Text(m.input))+m.styles.dividerActive.Render("█"),
 			width,
 		)
 	case m.errorMessage != "":

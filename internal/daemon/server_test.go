@@ -1147,3 +1147,46 @@ func TestStopSavesSessionsAndTheNextDaemonRestoresThem(t *testing.T) {
 		t.Fatalf("consumed snapshot still on disk: %v", err)
 	}
 }
+
+func TestRenameTabChangesOnlyTheName(t *testing.T) {
+	socket := startDaemon(t).socket
+	root := t.TempDir()
+	workspacePath := filepath.Join(root, "alpha")
+	if err := os.Mkdir(workspacePath, 0o755); err != nil {
+		t.Fatalf("Mkdir() error = %v", err)
+	}
+	backend := client.New(socket)
+	testutil.WaitForDaemon(t, backend)
+	_, workspace := openWorkspace(t, backend, root, workspacePath)
+	tab := createTab(t, backend, workspace)
+
+	snapshot, err := backend.RenameTab(tab.ID, "  server  ")
+	if err != nil {
+		t.Fatalf("RenameTab() error = %v", err)
+	}
+	tabs := snapshot.Roots[0].Directories[0].Tabs
+	if len(tabs) != 1 || tabs[0].ID != tab.ID || tabs[0].Name != "server" || !tabs[0].Running {
+		t.Fatalf("tabs after rename = %#v, want running %q named server", tabs, tab.ID)
+	}
+	stream, _, err := backend.OpenTerminal(tab.ID)
+	if err != nil {
+		t.Fatalf("OpenTerminal() renamed tab error = %v", err)
+	}
+	stream.Close()
+
+	for _, name := range []string{"", "   ", strings.Repeat("x", 33), "a\tb"} {
+		if _, err := backend.RenameTab(tab.ID, name); err == nil {
+			t.Fatalf("RenameTab(%q) succeeded, want an error", name)
+		}
+	}
+	if _, err := backend.RenameTab("missing", "name"); err == nil {
+		t.Fatal("RenameTab() of an unknown tab succeeded")
+	}
+	snapshot, err = backend.Snapshot()
+	if err != nil {
+		t.Fatalf("Snapshot() error = %v", err)
+	}
+	if name := snapshot.Roots[0].Directories[0].Tabs[0].Name; name != "server" {
+		t.Fatalf("name after rejected renames = %q, want server", name)
+	}
+}

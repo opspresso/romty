@@ -130,6 +130,8 @@ func TestCapabilitiesFollowTheirIntroducedVersion(t *testing.T) {
 		{version: 5, capability: protocol.CapabilityAgentStatus, want: true},
 		{version: 5, capability: protocol.CapabilityCloseTab, want: false},
 		{version: 6, capability: protocol.CapabilityCloseTab, want: true},
+		{version: 6, capability: protocol.CapabilityRenameTab, want: false},
+		{version: 7, capability: protocol.CapabilityRenameTab, want: true},
 	} {
 		capabilities := protocol.CapabilitiesForVersion(probe.version)
 		if got := protocol.HasCapability(capabilities, probe.capability); got != probe.want {

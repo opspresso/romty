@@ -14,9 +14,12 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/opspresso/romty/internal/codexstate"
 	"github.com/opspresso/romty/internal/model"
@@ -371,6 +374,58 @@ func (s *Server) closeTab(tabID string) protocol.Response {
 	}
 	value.close()
 	return s.snapshotResponse()
+}
+
+// maxTabNameLength bounds a tab name in runes. The tab bar is one row shared by
+// every tab of a workspace, so a long name pushes its siblings off screen.
+const maxTabNameLength = 32
+
+// renameTab replaces a tab's display name. Only the name changes: the shell,
+// its recording, and its agent status stay attached to the tab ID.
+func (s *Server) renameTab(tabID, name string) protocol.Response {
+	if tabID == "" {
+		return protocol.Response{Error: "tab is required"}
+	}
+	name = strings.TrimSpace(name)
+	if err := validateTabName(name); err != nil {
+		return protocol.Response{Error: err.Error()}
+	}
+	finish, ok := s.beginMutation()
+	if !ok {
+		return protocol.Response{Error: errShuttingDown}
+	}
+	s.mu.Lock()
+	index := slices.IndexFunc(s.value.Tabs, func(tab model.Tab) bool { return tab.ID == tabID })
+	if index < 0 {
+		s.mu.Unlock()
+		finish()
+		return protocol.Response{Error: errNoSession}
+	}
+	if s.value.Tabs[index].Name != name {
+		previous := cloneState(s.value)
+		s.value.Tabs[index].Name = name
+		if err := s.saveLocked(previous); err != nil {
+			s.mu.Unlock()
+			finish()
+			return protocol.Response{Error: err.Error()}
+		}
+	}
+	s.mu.Unlock()
+	finish()
+	return s.snapshotResponse()
+}
+
+func validateTabName(name string) error {
+	if name == "" {
+		return errors.New("tab name is required")
+	}
+	if utf8.RuneCountInString(name) > maxTabNameLength {
+		return fmt.Errorf("tab name must be at most %d characters", maxTabNameLength)
+	}
+	if strings.ContainsFunc(name, unicode.IsControl) {
+		return errors.New("tab name must not contain control characters")
+	}
+	return nil
 }
 
 func (s *Server) agents() map[string]model.Agent {

@@ -80,7 +80,7 @@ Both file views allow directory rows to take the cursor. Press `Enter` to toggle
 
 ## Keyboard shortcuts
 
-`F1` through `F7` work in both panes and with regular modals open. Alternatives listed beside them are contextual; file view assigns its own action to `F5`, and changed-file view also assigns `F6`. The root path prompt owns keyboard, paste, and mouse input until submitted or cancelled; clicks do not activate the dashboard behind it. While daemon shutdown, hook installation, or a Git command is running, only `F4` is accepted. Press `F1` for the in-app reference.
+`F1` through `F7` work in both panes and with regular modals open. Alternatives listed beside them are contextual; file view assigns its own action to `F5`, and changed-file view also assigns `F6`. The root path prompt and the tab name prompt own keyboard, paste, and mouse input until submitted or cancelled; clicks do not activate the dashboard behind it. While daemon shutdown, hook installation, or a Git command is running, only `F4` is accepted. Press `F1` for the in-app reference.
 
 ### Global
 
@@ -153,7 +153,7 @@ Both file views allow directory rows to take the cursor. Press `Enter` to toggle
 
 `F2` opens a picker on the home directory. The first row is the open directory itself, shown as `.`, so `Enter` always adds the highlighted row. Files and dot-directories are omitted; `/` opens a path prompt. Directory reads run in the background so a slow mount does not block the TUI or its terminals.
 
-Tabs have a wider click target and an `×` at the right edge. Clicking the label opens the tab; clicking `×` asks for confirmation, then terminates its shell and removes it. The `+` key is not a shortcut. Select the wider `+` tab with `←`/`→` and press `Enter`, or use `Ctrl`+`Shift`+`T`. From the workspace pane the shortcut uses the workspace under the cursor; from the terminal pane or scrollback it uses the open terminal workspace. The switch shortcuts wrap at both ends.
+Tabs have a wider click target and an `×` at the right edge. Clicking the label opens the tab; clicking `×` asks for confirmation, then terminates its shell and removes it. Double-clicking the label opens a `NAME` prompt in the status bar with the current name. Edit it and press `Enter` to rename the tab, or press `Esc` to keep the old name. A name is 1 to 32 characters after surrounding spaces are removed and cannot contain control characters. Renaming keeps the shell running, and the daemon saves the new name. The `+` key is not a shortcut. Select the wider `+` tab with `←`/`→` and press `Enter`, or use `Ctrl`+`Shift`+`T`. From the workspace pane the shortcut uses the workspace under the cursor; from the terminal pane or scrollback it uses the open terminal workspace. The switch shortcuts wrap at both ends.
 
 Pane focus and scrollback toggles are reversible. In the terminal pane only Global and Switch shortcuts are captured. Other keyboard and paste input, including `F8`, `F9`, and ordinary `Ctrl` combinations, is forwarded to the PTY.
 
