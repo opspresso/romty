@@ -157,8 +157,7 @@ type configRow struct {
 
 // configRows are the settings in the order the modal draws them. Drawing a row,
 // answering its key, answering a click on it and highlighting it under the
-// pointer are four readings of one list; keeping four lists is how a setting
-// ends up drawn but dead, or answering for the row above it.
+// pointer all read this one list.
 //
 // The pane width has no action of its own: it is the one setting a click cannot
 // express, because there is no single value to click towards. The arrow keys
@@ -209,9 +208,8 @@ func (r configRow) text(m dashboard) string {
 	return r.value(m)
 }
 
-// moveConfig walks the settings, stopping at the ends. Every other list romty
-// draws is walked with the arrow keys and run with Enter; Config alone asked
-// the user to remember which letter belonged to which row.
+// moveConfig walks the settings, stopping at the ends, so Config is walked
+// with the arrow keys and run with Enter like every other list romty draws.
 func (m *dashboard) moveConfig(delta int) {
 	rows := configRows()
 	if len(rows) == 0 {
