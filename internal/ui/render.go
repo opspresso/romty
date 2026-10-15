@@ -343,8 +343,8 @@ func (m dashboard) renderStatus(width, bodyHeight int) []string {
 			shortcut{key: "Enter", description: action},
 			shortcut{key: "Esc", description: "cancel"},
 		)
-	case m.modal == inputModal && m.inputPending:
-		status = m.renderActivityStatus("SAVING", m.inputKind.pending(), width)
+	case m.modal == inputModal && m.input.pending:
+		status = m.renderActivityStatus("SAVING", m.input.kind.pending(), width)
 	case m.modal == inputModal:
 		actions := m.inputActions()
 		status = renderShortcuts(m.styles, width, actions[0].shortcut, actions[1].shortcut)

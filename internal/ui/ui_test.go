@@ -3405,15 +3405,15 @@ func TestDashboardKeepsGlobalKeysAtOnePrecedence(t *testing.T) {
 	}
 
 	// Root input owns every key except its own cancel, so F4 cannot discard it.
-	value.input = "/projects"
+	value.input.text = "/projects"
 	command := send(&value, key(tea.KeyF4, ""))
-	if value.result.Quit || command != nil || value.input != "/projects" {
+	if value.result.Quit || command != nil || value.input.text != "/projects" {
 		t.Fatalf("F4 while typing = (quit %v, command %v, input %q), want the input kept",
-			value.result.Quit, command, value.input)
+			value.result.Quit, command, value.input.text)
 	}
 	send(&value, key(tea.KeyEscape, ""))
-	if value.modal != noModal || value.input != "" {
-		t.Fatalf("Esc while typing = (modal %v, input %q), want the modal cancelled", value.modal, value.input)
+	if value.modal != noModal || value.input.text != "" {
+		t.Fatalf("Esc while typing = (modal %v, input %q), want the modal cancelled", value.modal, value.input.text)
 	}
 }
 
@@ -4048,7 +4048,7 @@ func TestDashboardReplacesControlCharactersInLabels(t *testing.T) {
 	}
 
 	value.modal = inputModal
-	value.input = hostile
+	value.input.text = hostile
 	if rendered := strings.Join(value.renderModal(120, 36), "\n"); strings.Contains(rendered, "\x1b]8;;https://example.com") ||
 		!strings.Contains(ansi.Strip(rendered), safe) {
 		t.Fatalf("root input was not rendered safely: %q", rendered)

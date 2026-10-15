@@ -46,14 +46,14 @@ func TestRootInputOwnsMouse(t *testing.T) {
 	value.width, value.height = 100, 24
 	updated, _ := value.startRootInput()
 	value = updated.(dashboard)
-	value.input = "/typed/path"
+	value.input.text = "/typed/path"
 	for _, message := range []tea.Msg{
 		tea.MouseClickMsg{X: 2, Y: 2, Button: tea.MouseLeft},
 		tea.MouseClickMsg{X: 2, Y: 2, Button: tea.MouseRight},
 	} {
 		updated, command := value.Update(message)
 		got := updated.(dashboard)
-		if command != nil || got.modal != inputModal || got.input != value.input {
+		if command != nil || got.modal != inputModal || got.input.text != value.input.text {
 			t.Fatal("mouse activated the dashboard behind the path prompt")
 		}
 	}

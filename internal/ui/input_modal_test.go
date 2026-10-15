@@ -26,10 +26,10 @@ func clickInputAction(value *dashboard, index int) tea.Cmd {
 
 func TestInputModalActionsTakeClicks(t *testing.T) {
 	value, backend := renameModal(t)
-	value.input = "api"
+	value.input.text = "api"
 	command := clickInputAction(&value, 0)
-	if command == nil || !value.inputPending {
-		t.Fatalf("Enter click = (command %v, pending %v), want a rename request", command, value.inputPending)
+	if command == nil || !value.input.pending {
+		t.Fatalf("Enter click = (command %v, pending %v), want a rename request", command, value.input.pending)
 	}
 	send(&value, commandMessage[inputResultMsg](t, command))
 	if backend.renamedTabName != "api" || value.modal != noModal {
@@ -37,9 +37,9 @@ func TestInputModalActionsTakeClicks(t *testing.T) {
 	}
 
 	value, backend = renameModal(t)
-	if command := clickInputAction(&value, 1); command != nil || value.modal != noModal || value.renameTabID != "" {
+	if command := clickInputAction(&value, 1); command != nil || value.modal != noModal || value.input.tabID != "" {
 		t.Fatalf("Esc click = (command %v, modal %v, tab %q), want the modal cancelled",
-			command, value.modal, value.renameTabID)
+			command, value.modal, value.input.tabID)
 	}
 	if backend.renamedTabID != "" {
 		t.Fatalf("cancel reached the backend for %q", backend.renamedTabID)
@@ -60,7 +60,7 @@ func TestInputModalTitleCloseCancels(t *testing.T) {
 func TestInputModalKeepsTheEndOfLongText(t *testing.T) {
 	value, _ := renameModal(t)
 	short := value.renderModal(100, 18)
-	value.input = strings.Repeat("a", 80) + "END"
+	value.input.text = strings.Repeat("a", 80) + "END"
 	long := value.renderModal(100, 18)
 	if field := ansi.Strip(long[1]); !strings.Contains(field, "…") || !strings.Contains(field, "END") {
 		t.Fatalf("field = %q, want the end of the text after an ellipsis", field)
@@ -72,14 +72,14 @@ func TestInputModalKeepsTheEndOfLongText(t *testing.T) {
 
 func TestInputModalPasteClearsTheError(t *testing.T) {
 	value, _ := renameModal(t)
-	value.input = ""
+	value.input.text = ""
 	send(&value, tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
-	if value.inputError == "" {
+	if value.input.err == "" {
 		t.Fatal("empty submit set no error")
 	}
 	send(&value, tea.PasteMsg{Content: "api"})
-	if value.input != "api" || value.inputError != "" {
-		t.Fatalf("paste = (input %q, error %q), want the text appended and the error cleared", value.input, value.inputError)
+	if value.input.text != "api" || value.input.err != "" {
+		t.Fatalf("paste = (input %q, error %q), want the text appended and the error cleared", value.input.text, value.input.err)
 	}
 }
 
@@ -88,16 +88,16 @@ func TestInputModalPasteClearsTheError(t *testing.T) {
 func TestInputModalHoldsWhileTheSubmitIsOut(t *testing.T) {
 	value, _ := renameModal(t)
 	command := send(&value, tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
-	if command == nil || !value.inputPending {
-		t.Fatalf("enter = (command %v, pending %v), want a pending submit", command, value.inputPending)
+	if command == nil || !value.input.pending {
+		t.Fatalf("enter = (command %v, pending %v), want a pending submit", command, value.input.pending)
 	}
 	send(&value, tea.KeyPressMsg(tea.Key{Code: tea.KeyEscape}))
 	send(&value, tea.KeyPressMsg(tea.Key{Text: "x", Code: 'x'}))
 	send(&value, tea.PasteMsg{Content: "y"})
 	geometry := value.modalGeometry(value.bodySize())
 	send(&value, tea.MouseClickMsg{X: geometry.left + geometry.width - 3, Y: geometry.top, Button: tea.MouseLeft})
-	if value.modal != inputModal || value.input != "1" {
-		t.Fatalf("while pending = (modal %v, input %q), want the modal and text unchanged", value.modal, value.input)
+	if value.modal != inputModal || value.input.text != "1" {
+		t.Fatalf("while pending = (modal %v, input %q), want the modal and text unchanged", value.modal, value.input.text)
 	}
 	box := ansi.Strip(strings.Join(value.renderModal(80, 20), "\n"))
 	if !strings.Contains(box, "Renaming…") || strings.Contains(box, "Esc") || strings.Contains(box, "×") {
@@ -119,12 +119,12 @@ func TestInputModalShowsARejectedRootPath(t *testing.T) {
 	value.width, value.height = 100, 24
 	updated, _ := value.startRootInput()
 	value = updated.(dashboard)
-	value.input = "/missing"
+	value.input.text = "/missing"
 	command := send(&value, tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 	send(&value, commandMessage[inputResultMsg](t, command))
-	if value.modal != inputModal || value.input != "/missing" || value.errorMessage != "" {
+	if value.modal != inputModal || value.input.text != "/missing" || value.errorMessage != "" {
 		t.Fatalf("after a rejected path = (modal %v, input %q, status error %q), want the modal open with the text kept",
-			value.modal, value.input, value.errorMessage)
+			value.modal, value.input.text, value.errorMessage)
 	}
 	box := value.renderModal(100, 22)
 	plain := ansi.Strip(strings.Join(box, "\n"))

@@ -30,9 +30,9 @@ func TestDashboardDoubleClickRenamesTab(t *testing.T) {
 		t.Fatal("a single click opened the name prompt")
 	}
 	clickTabLabel(&value, 1)
-	if value.modal != inputModal || value.inputKind != tabNameInput || value.input != "2" || value.renameTabID != "tab-2" {
+	if value.modal != inputModal || value.input.kind != tabNameInput || value.input.text != "2" || value.input.tabID != "tab-2" {
 		t.Fatalf("double click = (modal %v, kind %v, text %q, tab %q), want the name modal for tab-2",
-			value.modal, value.inputKind, value.input, value.renameTabID)
+			value.modal, value.input.kind, value.input.text, value.input.tabID)
 	}
 	if box := ansi.Strip(strings.Join(value.renderModal(80, 20), "\n")); !strings.Contains(box, "Rename tab") ||
 		!strings.Contains(box, "Enter  rename") {
@@ -42,13 +42,13 @@ func TestDashboardDoubleClickRenamesTab(t *testing.T) {
 	send(&value, tea.KeyPressMsg(tea.Key{Code: tea.KeyBackspace}))
 	send(&value, tea.KeyPressMsg(tea.Key{Text: "api", Code: 'a'}))
 	command := send(&value, tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
-	if command == nil || value.modal != inputModal || !value.inputPending {
+	if command == nil || value.modal != inputModal || !value.input.pending {
 		t.Fatalf("enter = (command %v, modal %v, pending %v), want a rename request behind the open modal",
-			command, value.modal, value.inputPending)
+			command, value.modal, value.input.pending)
 	}
 	send(&value, commandMessage[inputResultMsg](t, command))
-	if value.modal != noModal || value.inputPending {
-		t.Fatalf("after the rename = (modal %v, pending %v), want the modal closed", value.modal, value.inputPending)
+	if value.modal != noModal || value.input.pending {
+		t.Fatalf("after the rename = (modal %v, pending %v), want the modal closed", value.modal, value.input.pending)
 	}
 	if backend.renamedTabID != "tab-2" || backend.renamedTabName != "api" {
 		t.Fatalf("renamed (%q, %q), want (tab-2, api)", backend.renamedTabID, backend.renamedTabName)
@@ -86,7 +86,7 @@ func TestDashboardTabRenamePromptCancelsAndReportsFailure(t *testing.T) {
 	updated, _ := value.startRenameTab(tabs[0])
 	value = updated.(dashboard)
 	send(&value, tea.KeyPressMsg(tea.Key{Code: tea.KeyEscape}))
-	if value.modal != noModal || value.renameTabID != "" {
+	if value.modal != noModal || value.input.tabID != "" {
 		t.Fatal("Esc left the name prompt open")
 	}
 
@@ -95,9 +95,9 @@ func TestDashboardTabRenamePromptCancelsAndReportsFailure(t *testing.T) {
 	backend.failures = map[string]error{"RenameTab": &protocol.RefusedError{Message: "tab name must not contain control characters"}}
 	command := send(&value, tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 	send(&value, commandMessage[inputResultMsg](t, command))
-	if value.modal != inputModal || value.input != "1" || value.inputPending {
+	if value.modal != inputModal || value.input.text != "1" || value.input.pending {
 		t.Fatalf("after a rejected rename = (modal %v, input %q, pending %v), want the modal open with the text kept",
-			value.modal, value.input, value.inputPending)
+			value.modal, value.input.text, value.input.pending)
 	}
 	box := ansi.Strip(strings.Join(value.renderModal(80, 20), "\n"))
 	if !strings.Contains(box, "tab name must not contain control characters") {
@@ -113,8 +113,8 @@ func TestDashboardTabRenamePromptCancelsAndReportsFailure(t *testing.T) {
 		t.Fatalf("tab name after failed rename = %q, want 1", value.visibleTabs()[0].Name)
 	}
 	send(&value, tea.KeyPressMsg(tea.Key{Text: "x", Code: 'x'}))
-	if value.inputError != "" {
-		t.Fatalf("error after typing = %q, want it cleared", value.inputError)
+	if value.input.err != "" {
+		t.Fatalf("error after typing = %q, want it cleared", value.input.err)
 	}
 }
 

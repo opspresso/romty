@@ -24,12 +24,25 @@ const (
 	tabNameInput
 )
 
+// inputState is what the input modal holds while it is open.
+type inputState struct {
+	kind inputKind
+	text string
+	// err is the reason the last submit was refused, shown under the field.
+	err string
+	// pending is set while a submit waits for the daemon's answer.
+	pending bool
+	// tabID is the tab a name is for, held so the answer applies to the tab
+	// the modal opened for.
+	tabID string
+}
+
 // inputModalWidth is the width the input box always takes. A box sized to its
 // text would grow and shrink under the cursor with every key.
 const inputModalWidth = 56
 
 func (m dashboard) startRootInput() (tea.Model, tea.Cmd) {
-	m.openInput(rootPathInput, "")
+	m.openInput(inputState{kind: rootPathInput})
 	return m, nil
 }
 
@@ -39,17 +52,13 @@ func (m dashboard) startRenameTab(tab model.Tab) (tea.Model, tea.Cmd) {
 	if tab.ID == "" {
 		return m, nil
 	}
-	m.openInput(tabNameInput, tab.Name)
-	m.renameTabID = tab.ID
+	m.openInput(inputState{kind: tabNameInput, text: tab.Name, tabID: tab.ID})
 	return m, nil
 }
 
-func (m *dashboard) openInput(kind inputKind, value string) {
+func (m *dashboard) openInput(state inputState) {
 	m.modal = inputModal
-	m.inputKind = kind
-	m.input = value
-	m.inputError = ""
-	m.renameTabID = ""
+	m.input = state
 	m.clearAnyError()
 }
 
@@ -58,7 +67,7 @@ func (m *dashboard) openInput(kind inputKind, value string) {
 // only F4 applies, as in every other pending state: the request cannot be
 // taken back, and its answer belongs to the text that was sent.
 func (m dashboard) handleInput(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	if m.inputPending {
+	if m.input.pending {
 		if message.String() == "f4" {
 			return m.quit()
 		}
@@ -68,17 +77,17 @@ func (m dashboard) handleInput(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "esc":
 		m.closeInput()
 	case "enter":
-		value := strings.TrimSpace(m.input)
+		value := strings.TrimSpace(m.input.text)
 		if value == "" {
-			m.inputError = m.inputKind.required()
+			m.input.err = m.input.kind.required()
 			return m, nil
 		}
-		m.inputError = ""
-		m.inputPending = true
+		m.input.err = ""
+		m.input.pending = true
 		return m, m.submitInput(value)
 	default:
-		m.input = editText(m.input, message)
-		m.inputError = ""
+		m.input.text = editText(m.input.text, message)
+		m.input.err = ""
 	}
 	return m, nil
 }
@@ -92,7 +101,7 @@ type inputResultMsg struct {
 
 func (m *dashboard) submitInput(value string) tea.Cmd {
 	order := m.nextSnapshotOrder()
-	backend, kind, tabID := m.backend, m.inputKind, m.renameTabID
+	backend, kind, tabID := m.backend, m.input.kind, m.input.tabID
 	return func() tea.Msg {
 		var snapshot model.Snapshot
 		var err error
@@ -109,14 +118,14 @@ func (m *dashboard) submitInput(value string) tea.Cmd {
 // A rejection keeps the modal open with the text as typed and the reason under
 // it.
 func (m dashboard) handleInputResult(message inputResultMsg) (tea.Model, tea.Cmd) {
-	m.inputPending = false
+	m.input.pending = false
 	if message.err != nil {
-		m.inputError = message.err.Error()
+		m.input.err = message.err.Error()
 		// The modal already says what was asked, so a refusal shows the
 		// daemon's reason alone.
 		var refused *protocol.RefusedError
 		if errors.As(message.err, &refused) {
-			m.inputError = refused.Message
+			m.input.err = refused.Message
 		}
 		return m, nil
 	}
@@ -124,13 +133,10 @@ func (m dashboard) handleInputResult(message inputResultMsg) (tea.Model, tea.Cmd
 	return m.update(message.snapshotMsg)
 }
 
-// closeInput closes the input modal. A validation error belongs to the modal,
-// so it leaves with it.
+// closeInput closes the input modal and forgets what it held.
 func (m *dashboard) closeInput() {
 	m.modal = noModal
-	m.input = ""
-	m.inputError = ""
-	m.renameTabID = ""
+	m.input = inputState{}
 }
 
 func (k inputKind) title() string {
@@ -162,11 +168,11 @@ func (k inputKind) required() string {
 }
 
 func (m dashboard) inputActions() []modalAction {
-	if m.inputPending {
+	if m.input.pending {
 		return nil
 	}
 	return []modalAction{
-		{shortcut: shortcut{key: "Enter", description: m.inputKind.submit()}, code: tea.KeyEnter},
+		{shortcut: shortcut{key: "Enter", description: m.input.kind.submit()}, code: tea.KeyEnter},
 		{shortcut: shortcut{key: "Esc", description: "cancel"}, code: tea.KeyEscape},
 	}
 }
@@ -181,23 +187,23 @@ func (m dashboard) renderInputModal(maximum int) []string {
 	contentWidth := max(width-6, 1)
 	lines := []string{m.renderInputField(contentWidth)}
 	switch {
-	case m.inputPending:
-		lines = append(lines, m.styles.empty.Render(m.inputKind.pending()))
-	case m.inputError != "":
-		for _, line := range strings.Split(ansi.Wrap(display.Text(m.inputError), contentWidth, ""), "\n") {
+	case m.input.pending:
+		lines = append(lines, m.styles.empty.Render(m.input.kind.pending()))
+	case m.input.err != "":
+		for _, line := range strings.Split(ansi.Wrap(display.Text(m.input.err), contentWidth, ""), "\n") {
 			lines = append(lines, m.styles.errorText.Render(line))
 		}
 	default:
 		lines = append(lines, "")
 	}
-	return m.withModalActions(modalBox(m.styles, width, m.inputKind.title(), lines...))
+	return m.withModalActions(modalBox(m.styles, width, m.input.kind.title(), lines...))
 }
 
 // renderInputField draws the typed text on a filled field with the cursor at
 // its end. Text wider than the field loses its start, not its end, because the
 // end is where the user is typing.
 func (m dashboard) renderInputField(width int) string {
-	text := display.Text(m.input)
+	text := display.Text(m.input.text)
 	room := max(width-1, 0)
 	if overflow := lipgloss.Width(text) - room; overflow > 0 {
 		text = ansi.TruncateLeft(text, overflow+1, "…")

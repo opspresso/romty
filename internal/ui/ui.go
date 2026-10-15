@@ -192,10 +192,7 @@ type dashboard struct {
 	rememberedWorkspacePath string
 	rememberedTabID         string
 	restorePending          bool
-	inputKind               inputKind
-	input                   string
-	inputError              string
-	inputPending            bool
+	input                   inputState
 	errorMessage            string
 	errorFrom               errorSource
 	noticeMessage           bool
@@ -219,9 +216,6 @@ type dashboard struct {
 	// newerRelease is the tag of a published release newer than this build,
 	// or empty when there is none or the check has not answered.
 	newerRelease string
-	// renameTabID is the tab the name modal renames, held so the answer
-	// applies to the tab the modal opened for.
-	renameTabID string
 	// lastTabClick is the previous click on a tab label, which is what turns
 	// a second click on the same tab into a double click.
 	lastTabClick   tabClick
@@ -582,9 +576,9 @@ func (m dashboard) update(message tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case tea.PasteMsg:
 		if m.modal == inputModal {
-			if !m.inputPending {
-				m.input += message.Content
-				m.inputError = ""
+			if !m.input.pending {
+				m.input.text += message.Content
+				m.input.err = ""
 			}
 		} else if m.modal != noModal || m.shutdownPending || m.gitActionPending || m.hookInstallPending {
 			return m, nil
@@ -1266,7 +1260,7 @@ func (m dashboard) refreshAll() (tea.Model, tea.Cmd) {
 
 func (m dashboard) hasPendingActivity() bool {
 	return m.tabPending || m.tabClosePending != "" || m.restorePending || m.gitActionPending || m.shutdownPending ||
-		m.hookInstallPending || m.inputPending || m.modal == browseModal && m.browse.loading
+		m.hookInstallPending || m.input.pending || m.modal == browseModal && m.browse.loading
 }
 
 func (m *dashboard) selectWorkspace() tea.Cmd {
