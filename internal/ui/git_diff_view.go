@@ -350,9 +350,9 @@ func (m dashboard) handleGitDiffMouse(message tea.MouseMsg) (tea.Model, tea.Cmd)
 		if mouse.X >= 0 && mouse.X < view.leftWidth {
 			switch wheel.Button {
 			case tea.MouseWheelUp:
-				return m.moveGitDiffFile(-3)
+				return m.moveGitDiffFile(-wheelLines)
 			case tea.MouseWheelDown:
-				return m.moveGitDiffFile(3)
+				return m.moveGitDiffFile(wheelLines)
 			}
 			return m, nil
 		}
