@@ -589,44 +589,53 @@ async function setup(ctx) {
   return () => controller.abort()
 }
 
-// OpenCode 1 hooks.
+// OpenCode 1 hooks. As in setup(), child sessions belong to the parent's
+// subagent tool call: a child's SessionStart would otherwise rebind the tab
+// to the child, and its idle Stop would end the parent's running turn.
 async function server() {
+  const children = new Set()
+  const send = (sessionID, hook_event_name, fields = {}) => {
+    if (!children.has(sessionID)) report({ session_id: sessionID || "", hook_event_name, ...fields })
+  }
   return {
     event: async ({ event }) => {
       const properties = event.properties || {}
+      const info = properties.info || {}
       switch (event.type) {
         case "session.created":
-          report({ session_id: (properties.info && properties.info.id) || "", hook_event_name: "SessionStart" })
+          if (info.parentID) children.add(info.id)
+          send(info.id, "SessionStart")
           break
         case "session.idle":
-          report({ session_id: properties.sessionID || "", hook_event_name: "Stop" })
+          send(properties.sessionID, "Stop")
           break
         case "session.deleted":
-          report({ session_id: (properties.info && properties.info.id) || "", hook_event_name: "SessionEnd" })
+          send(info.id, "SessionEnd")
+          children.delete(info.id)
           break
         case "session.error":
-          report({ session_id: properties.sessionID || "", hook_event_name: "StopFailure" })
+          send(properties.sessionID, "StopFailure")
           break
         case "session.compacted":
-          report({ session_id: properties.sessionID || "", hook_event_name: "PostCompact" })
+          send(properties.sessionID, "PostCompact")
           break
         case "permission.updated":
         case "permission.asked":
-          report({ session_id: properties.sessionID || "", hook_event_name: "PermissionRequest" })
+          send(properties.sessionID, "PermissionRequest", { tool_use_id: properties.callID || (properties.tool && properties.tool.callID) || "" })
           break
       }
     },
     "chat.message": async (input) => {
-      report({ session_id: input.sessionID || "", hook_event_name: "UserPromptSubmit" })
+      send(input.sessionID, "UserPromptSubmit")
     },
     "tool.execute.before": async (input) => {
-      report({ session_id: input.sessionID || "", hook_event_name: "PreToolUse", tool_name: input.tool || "", tool_use_id: input.callID || "" })
+      send(input.sessionID, "PreToolUse", { tool_name: input.tool || "", tool_use_id: input.callID || "" })
     },
     "tool.execute.after": async (input) => {
-      report({ session_id: input.sessionID || "", hook_event_name: "PostToolUse", tool_name: input.tool || "", tool_use_id: input.callID || "" })
+      send(input.sessionID, "PostToolUse", { tool_name: input.tool || "", tool_use_id: input.callID || "" })
     },
     "experimental.session.compacting": async (input) => {
-      report({ session_id: input.sessionID || "", hook_event_name: "PreCompact" })
+      send(input.sessionID, "PreCompact")
     },
   }
 }

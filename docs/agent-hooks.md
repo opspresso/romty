@@ -133,6 +133,8 @@ OpenCode 2 events map to phases as follows:
 - Each turn ends with one outcome: `session.execution.succeeded` is `completed`, `session.execution.failed` is `error`, and `session.execution.interrupted` is `interrupted`.
 - Child sessions (subagents) do not report; the parent's tool call represents them.
 
+OpenCode 1 maps `chat.message` to `UserPromptSubmit`, `tool.execute.before` and `tool.execute.after` to the tool events with their `callID`, `session.idle` to `Stop`, and `session.error` to `StopFailure`. A child session announced by `session.created` with a `parentID` does not report, so it cannot take the tab from its parent or end the parent's turn.
+
 OpenCode 2 runs plugins in a server process. By default this is the shared background service, which serves every terminal and can carry the `ROMTY_TAB_ID` of the terminal that started it. Each hook therefore reports the process groups above it, and romty accepts an OpenCode event only when the tab's foreground job is among them. Events from the shared service are dropped, so a tab running plain `opencode` shows the terminal-output estimate. Start OpenCode with `opencode --standalone` to run its server inside the tab and get lifecycle phases.
 
 The terminal-output fallback remains an estimate and never confirms completion.
