@@ -14,8 +14,22 @@ import (
 	"github.com/opspresso/romty/internal/model"
 )
 
+// foregroundProcessGroup reads the terminal's foreground process group.
+// SyscallConn holds the descriptor open during the call, so a concurrent
+// Close cannot race it, and unlike Fd it keeps the descriptor non-blocking.
 var foregroundProcessGroup = func(terminal *os.File) (int, error) {
-	return unix.IoctlGetInt(int(terminal.Fd()), unix.TIOCGPGRP)
+	conn, err := terminal.SyscallConn()
+	if err != nil {
+		return 0, err
+	}
+	var group int
+	var ioctlErr error
+	if err := conn.Control(func(fd uintptr) {
+		group, ioctlErr = unix.IoctlGetInt(int(fd), unix.TIOCGPGRP)
+	}); err != nil {
+		return 0, err
+	}
+	return group, ioctlErr
 }
 
 var processListTimeout = 2 * time.Second
