@@ -2564,16 +2564,6 @@ func TestDashboardReportsBackendFailures(t *testing.T) {
 			method: "EnsureWorkspace",
 			act:    func(m dashboard) (tea.Model, tea.Cmd) { return m.Update(key(tea.KeyEnter, "")) },
 		},
-		{
-			name:   "adding a root",
-			method: "AddRoot",
-			act: func(m dashboard) (tea.Model, tea.Cmd) {
-				send(&m, key(tea.KeyF2, ""))
-				send(&m, key('/', "/"))
-				send(&m, key(tea.KeyExtended, "/projects"))
-				return m.Update(key(tea.KeyEnter, ""))
-			},
-		},
 	} {
 		t.Run(probe.name, func(t *testing.T) {
 			backend := &fakeBackend{snapshot: snapshot, workspace: workspace}

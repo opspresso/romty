@@ -195,6 +195,7 @@ type dashboard struct {
 	inputKind               inputKind
 	input                   string
 	inputError              string
+	inputPending            bool
 	errorMessage            string
 	errorFrom               errorSource
 	noticeMessage           bool
@@ -581,8 +582,10 @@ func (m dashboard) update(message tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case tea.PasteMsg:
 		if m.modal == inputModal {
-			m.input += message.Content
-			m.inputError = ""
+			if !m.inputPending {
+				m.input += message.Content
+				m.inputError = ""
+			}
 		} else if m.modal != noModal || m.shutdownPending || m.gitActionPending || m.hookInstallPending {
 			return m, nil
 		} else if m.scrollback && m.searchMode {
@@ -709,6 +712,8 @@ func (m dashboard) update(message tea.Msg) (tea.Model, tea.Cmd) {
 		// disagree until the next successful resize.
 		m.setError(terminalError, "resize terminal: "+message.err.Error())
 		return m, nil
+	case inputResultMsg:
+		return m.handleInputResult(message)
 	case browserMsg:
 		return m.handleBrowserRead(message)
 	case reopenTerminalMsg:
@@ -1018,25 +1023,13 @@ func (m dashboard) saveConfig() tea.Cmd {
 	}
 }
 
-// addRoot is shared by the path modal and the picker: both name a directory
-// and both leave the daemon to canonicalise and judge it.
+// addRoot adds the directory the picker names and leaves the daemon to
+// canonicalise and judge it.
 func (m *dashboard) addRoot(path string) tea.Cmd {
 	order := m.nextSnapshotOrder()
 	backend := m.backend
 	return func() tea.Msg {
 		value, err := backend.AddRoot(path)
-		return snapshotMsg{value: value, order: order, err: err}
-	}
-}
-
-func (m *dashboard) renameTab(tabID, name string) tea.Cmd {
-	order := m.nextSnapshotOrder()
-	backend := m.backend
-	return func() tea.Msg {
-		value, err := backend.RenameTab(tabID, name)
-		if err != nil {
-			err = fmt.Errorf("rename tab: %w", err)
-		}
 		return snapshotMsg{value: value, order: order, err: err}
 	}
 }
@@ -1273,7 +1266,7 @@ func (m dashboard) refreshAll() (tea.Model, tea.Cmd) {
 
 func (m dashboard) hasPendingActivity() bool {
 	return m.tabPending || m.tabClosePending != "" || m.restorePending || m.gitActionPending || m.shutdownPending ||
-		m.hookInstallPending || m.modal == browseModal && m.browse.loading
+		m.hookInstallPending || m.inputPending || m.modal == browseModal && m.browse.loading
 }
 
 func (m *dashboard) selectWorkspace() tea.Cmd {
