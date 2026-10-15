@@ -122,9 +122,8 @@ func Read(path, filePath string) (string, error) {
 }
 
 // Subdirectories lists the directories under path a root could be picked
-// from, sorted.
-// Dot-directories are left out: home holds dozens of them and none of them is
-// a workspace. Typing a path still reaches those.
+// from, sorted. Dot-directories are left out: home holds dozens of them and
+// none of them is a workspace. Typing a path still reaches those.
 func Subdirectories(path string) ([]string, error) {
 	entries, err := os.ReadDir(path)
 	if err != nil {
