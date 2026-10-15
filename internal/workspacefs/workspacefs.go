@@ -1,6 +1,7 @@
-// Package workspacefs lists and reads the files of a workspace for the file
-// view. Reads stay inside the workspace even when a directory in it is
-// replaced by a symlink while the file is being opened.
+// Package workspacefs reads the filesystem for the TUI: the directories the
+// root picker offers, and the files of a workspace for the file view. File
+// reads stay inside the workspace even when a directory in it is replaced by
+// a symlink while the file is being opened.
 package workspacefs
 
 import (
@@ -118,4 +119,41 @@ func Read(path, filePath string) (string, error) {
 		return "", fmt.Errorf("read workspace file: exceeds %d MiB preview limit", maxFileBytes>>20)
 	}
 	return string(content), nil
+}
+
+// Subdirectories lists the directories under path a root could be picked
+// from, sorted.
+// Dot-directories are left out: home holds dozens of them and none of them is
+// a workspace. Typing a path still reaches those.
+func Subdirectories(path string) ([]string, error) {
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), ".") {
+			continue
+		}
+		if !isDirectory(path, entry) {
+			continue
+		}
+		names = append(names, entry.Name())
+	}
+	sort.Strings(names)
+	return names, nil
+}
+
+// isDirectory follows a symlink before deciding. A root is stored by its
+// resolved path anyway, and a linked directory — a checkout on another volume,
+// say — is exactly the kind of place a root is picked from.
+func isDirectory(parent string, entry os.DirEntry) bool {
+	if entry.IsDir() {
+		return true
+	}
+	if entry.Type()&os.ModeSymlink == 0 {
+		return false
+	}
+	info, err := os.Stat(filepath.Join(parent, entry.Name()))
+	return err == nil && info.IsDir()
 }

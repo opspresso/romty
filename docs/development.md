@@ -40,7 +40,7 @@ ROMTY_HOME=/tmp/romty-dev go run ./cmd/romty
 | Domain | `model` | Roots, workspaces, tabs, agent phases, and snapshots |
 | Infrastructure | `agenthooks`, `codexstate`, `gitrepo`, `jsonfile`, `paths`, `procinfo`, `sound`, `state`, `transcript`, `update`, `workspacefs`, `display`, `version` | Files, processes, Git, agent integrations, and the network |
 
-Keep side effects such as running `git`, reading workspace files, or calling GitHub in an infrastructure package. The `ui` package decides what to show and when; it does not build commands or file paths itself.
+Keep side effects such as running `git`, reading workspace files, or calling GitHub in an infrastructure package. The `ui` package decides what to show and when; it does not run commands or read the filesystem itself.
 
 ## Sound assets
 
