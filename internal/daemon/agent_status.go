@@ -47,7 +47,7 @@ func (s *Server) recordAgentEvent(tabID string, event *protocol.AgentEvent) prot
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if event.Agent == model.AgentCodex {
-		if len(event.SessionID) != 36 || codexstate.SessionPrefix(event.SessionID) != event.SessionID {
+		if !codexstate.IsSessionID(event.SessionID) {
 			return protocol.Response{}
 		}
 		// Shared-daemon hook environments do not identify a terminal. Route
