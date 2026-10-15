@@ -115,12 +115,14 @@ func readWorkspaceFile(path, filePath string) (string, error) {
 func normalizeWorkspaceFileLines(content string) []string {
 	lines := strings.Split(content, "\n")
 	for index, line := range lines {
-		lines[index] = expandWorkspaceFileTabs(line)
+		lines[index] = expandTabs(line)
 	}
 	return lines
 }
 
-func expandWorkspaceFileTabs(line string) string {
+// expandTabs replaces each tab with the spaces up to the next four-column
+// stop, measured in display cells.
+func expandTabs(line string) string {
 	if !strings.ContainsRune(line, '\t') {
 		return line
 	}

@@ -285,29 +285,13 @@ func normalizeGitDiffLines(diff string) []string {
 	return lines
 }
 
+// expandGitDiffTabs expands tabs after a diff line's marker column, so the
+// stops line up with the file's own columns.
 func expandGitDiffTabs(line string) string {
-	if !strings.ContainsRune(line, '\t') {
-		return line
-	}
-	const tabWidth = 4
-	prefix := ""
 	if strings.HasPrefix(line, "+") || strings.HasPrefix(line, "-") || strings.HasPrefix(line, " ") {
-		prefix, line = line[:1], line[1:]
+		return line[:1] + expandTabs(line[1:])
 	}
-	var result strings.Builder
-	result.WriteString(prefix)
-	column := 0
-	for _, character := range line {
-		if character == '\t' {
-			spaces := tabWidth - column%tabWidth
-			result.WriteString(strings.Repeat(" ", spaces))
-			column += spaces
-			continue
-		}
-		result.WriteRune(character)
-		column += lipgloss.Width(string(character))
-	}
-	return result.String()
+	return expandTabs(line)
 }
 
 func (m dashboard) handleGitDiffKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
