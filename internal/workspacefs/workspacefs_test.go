@@ -9,7 +9,7 @@ import (
 	"github.com/opspresso/romty/internal/testutil"
 )
 
-func TestReadWorkspaceFilesIncludesDotFilesAndExcludesDotDirectories(t *testing.T) {
+func TestListIncludesDotFilesAndExcludesDotDirectories(t *testing.T) {
 	workspace := t.TempDir()
 	for name, content := range map[string]string{
 		"README.md":                 "project\n",
@@ -33,14 +33,13 @@ func TestReadWorkspaceFilesIncludesDotFilesAndExcludesDotDirectories(t *testing.
 	if err != nil {
 		t.Fatalf("List() error = %v", err)
 	}
-	paths := files
 	want := []string{".env", "README.md", "node_modules/pkg/index.js", "src/.generated.go", "src/main.go"}
-	if !slices.Equal(paths, want) {
-		t.Fatalf("workspace files = %#v, want %#v", paths, want)
+	if !slices.Equal(files, want) {
+		t.Fatalf("workspace files = %#v, want %#v", files, want)
 	}
 }
 
-func TestReadWorkspaceFileReturnsContents(t *testing.T) {
+func TestReadReturnsContents(t *testing.T) {
 	workspace := t.TempDir()
 	testutil.WriteFile(t, workspace, "nested/file.txt", "first\nsecond\n")
 
@@ -50,7 +49,7 @@ func TestReadWorkspaceFileReturnsContents(t *testing.T) {
 	}
 }
 
-func TestReadWorkspaceFileRejectsReplacedParent(t *testing.T) {
+func TestReadRejectsAReplacedParent(t *testing.T) {
 	workspace, outside := t.TempDir(), t.TempDir()
 	testutil.WriteFile(t, workspace, "nested/file.txt", "inside")
 	testutil.WriteFile(t, outside, "file.txt", "outside")
@@ -69,7 +68,7 @@ func TestReadWorkspaceFileRejectsReplacedParent(t *testing.T) {
 	}
 }
 
-func TestReadWorkspaceFileRejectsReplacedWorkspace(t *testing.T) {
+func TestReadRejectsAReplacedWorkspace(t *testing.T) {
 	parent := t.TempDir()
 	workspace := filepath.Join(parent, "workspace")
 	outside := filepath.Join(parent, "outside")
@@ -90,7 +89,7 @@ func TestReadWorkspaceFileRejectsReplacedWorkspace(t *testing.T) {
 	}
 }
 
-func TestReadWorkspaceFileRejectsOversizedFile(t *testing.T) {
+func TestReadRejectsAnOversizedFile(t *testing.T) {
 	workspace := t.TempDir()
 	file, err := os.Create(filepath.Join(workspace, "large.log"))
 	if err != nil {
@@ -102,5 +101,31 @@ func TestReadWorkspaceFileRejectsOversizedFile(t *testing.T) {
 	}
 	if content, err := Read(workspace, "large.log"); err == nil || content != "" {
 		t.Fatalf("oversized file returned %d bytes, error %v", len(content), err)
+	}
+}
+
+// The root picker offers the directories under the open one, sorted, without
+// dot-directories, and follows a symlink to a directory.
+func TestSubdirectoriesListsPickableDirectories(t *testing.T) {
+	parent := t.TempDir()
+	for _, name := range []string{"beta/x", "alpha/x", ".hidden/x"} {
+		testutil.WriteFile(t, parent, name, "")
+	}
+	testutil.WriteFile(t, parent, "file.txt", "")
+	if err := os.Symlink(filepath.Join(parent, "alpha"), filepath.Join(parent, "linked")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(parent, "file.txt"), filepath.Join(parent, "linked-file")); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Subdirectories(parent)
+	if err != nil {
+		t.Fatalf("Subdirectories() error = %v", err)
+	}
+	if want := []string{"alpha", "beta", "linked"}; !slices.Equal(got, want) {
+		t.Fatalf("Subdirectories() = %v, want %v", got, want)
+	}
+	if _, err := Subdirectories(filepath.Join(parent, "missing")); err == nil {
+		t.Fatal("Subdirectories() of a missing directory reported no error")
 	}
 }
