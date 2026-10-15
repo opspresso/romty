@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"slices"
 	"strings"
 	"sync"
@@ -253,12 +254,14 @@ type dashboard struct {
 	navigationResize bool
 	hover            hoverTarget
 	search           scrollbackSearch
-	agentSoundReady  bool
-	gitStates        map[string]gitrepo.State
-	gitFetchedAt     time.Time
-	gitRun           gitActionRun
-	fileView         fileViewState
-	styles           *uiStyles
+	// agentSoundBaseline is the last agent poll. It is nil until the first
+	// poll, which sets the baseline and plays no sound.
+	agentSoundBaseline map[string]model.AgentStatus
+	gitStates          map[string]gitrepo.State
+	gitFetchedAt       time.Time
+	gitRun             gitActionRun
+	fileView           fileViewState
+	styles             *uiStyles
 }
 
 type snapshotMsg struct {
@@ -599,9 +602,12 @@ func (m dashboard) update(message tea.Msg) (tea.Model, tea.Cmd) {
 	case agentSnapshotMsg:
 		if message.err == nil {
 			kind, ring := m.soundForAgentTransitions(message.value)
-			ring = m.agentSoundReady && ring
+			ring = m.agentSoundBaseline != nil && ring
 			m.updateAgents(message.value)
-			m.agentSoundReady = true
+			m.agentSoundBaseline = maps.Clone(message.value)
+			if m.agentSoundBaseline == nil {
+				m.agentSoundBaseline = map[string]model.AgentStatus{}
+			}
 			if ring {
 				return m, tea.Batch(m.refreshAgents(), soundAlert(kind))
 			}

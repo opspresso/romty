@@ -51,21 +51,25 @@ func (m *dashboard) updateAgents(statuses map[string]model.AgentStatus) {
 	m.agentAnimationActive = m.hasAnimatedAgent()
 }
 
+// soundForAgentTransitions compares a poll with the previous poll, not with
+// the tabs. Snapshots also carry agent status, so a snapshot that lands
+// between two polls would otherwise hide the transition and lose its sound.
 func (m dashboard) soundForAgentTransitions(statuses map[string]model.AgentStatus) (sound.Kind, bool) {
 	changed := func(tab model.Tab) (sound.Kind, bool) {
 		status, ok := statuses[tab.ID]
 		if !ok || status.Agent != model.AgentClaude && status.Agent != model.AgentCodex && status.Agent != model.AgentOpenCode {
 			return "", false
 		}
-		changedTurn := status.TurnID != "" && tab.AgentTurnID != "" && status.TurnID != tab.AgentTurnID
-		if m.config.SoundOnDone && !status.Estimated && (tab.AgentPhase != status.Phase || changedTurn) &&
-			status.Agent == tab.Agent &&
-			(tab.AgentSessionID == "" || status.SessionID == tab.AgentSessionID) &&
-			tab.AgentPhase != model.AgentPhaseUnknown && tab.AgentPhase != "" &&
+		previous := m.agentSoundBaseline[tab.ID]
+		changedTurn := status.TurnID != "" && previous.TurnID != "" && status.TurnID != previous.TurnID
+		if m.config.SoundOnDone && !status.Estimated && (previous.Phase != status.Phase || changedTurn) &&
+			status.Agent == previous.Agent &&
+			(previous.SessionID == "" || status.SessionID == previous.SessionID) &&
+			previous.Phase != model.AgentPhaseUnknown && previous.Phase != "" &&
 			(status.Phase == model.AgentPhaseCompleted || status.Phase == model.AgentPhaseError) {
 			return sound.Done, true
 		}
-		if m.config.SoundOnWaiting && !tab.AgentPhase.Waiting() && status.Phase.Waiting() {
+		if m.config.SoundOnWaiting && !previous.Phase.Waiting() && status.Phase.Waiting() {
 			return sound.Waiting, true
 		}
 		return "", false

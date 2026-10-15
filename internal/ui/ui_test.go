@@ -1977,7 +1977,7 @@ func TestDashboardSoundsOnceForAgentTransitions(t *testing.T) {
 		Root:        model.Root{ID: "root-1", Name: "root", Path: "/"},
 		Directories: []model.WorkspaceView{{Workspace: workspace, Tabs: []model.Tab{tab}}},
 	}}}, "", Config{SoundOnDone: true, SoundOnWaiting: true})
-	value.agentSoundReady = true
+	armAgentSounds(&value)
 
 	idle := map[string]model.AgentStatus{"tab-1": {Agent: model.AgentCodex, Phase: model.AgentPhaseCompleted}}
 	command := send(&value, agentSnapshotMsg{value: idle})
@@ -1996,11 +1996,40 @@ func TestDashboardSoundsOnceForAgentTransitions(t *testing.T) {
 	}
 }
 
+// armAgentSounds makes the tabs' current agent status the previous poll.
+func armAgentSounds(value *dashboard) {
+	value.agentSoundBaseline = map[string]model.AgentStatus{}
+	for tab := range value.state.Tabs() {
+		value.agentSoundBaseline[tab.ID] = model.AgentStatus{
+			Agent: tab.Agent, Phase: tab.AgentPhase, SessionID: tab.AgentSessionID, TurnID: tab.AgentTurnID,
+		}
+	}
+}
+
+func TestDashboardSoundsWhenASnapshotLandsBetweenAgentPolls(t *testing.T) {
+	working := model.Tab{ID: "tab-1", WorkspaceID: "workspace-1", Running: true, Agent: model.AgentClaude, AgentPhase: model.AgentPhaseWorking}
+	value := newDashboardWithConfig(&fakeBackend{}, model.Snapshot{Revision: 1, Roots: []model.RootView{{
+		Root: model.Root{ID: "root-1"}, Tabs: []model.Tab{working},
+	}}}, "", Config{SoundOnDone: true})
+	send(&value, agentSnapshotMsg{value: map[string]model.AgentStatus{"tab-1": {Agent: model.AgentClaude, Phase: model.AgentPhaseWorking}}})
+
+	completed := working
+	completed.AgentPhase = model.AgentPhaseCompleted
+	send(&value, snapshotMsg{value: model.Snapshot{Revision: 2, Roots: []model.RootView{{
+		Root: model.Root{ID: "root-1"}, Tabs: []model.Tab{completed},
+	}}}})
+
+	command := send(&value, agentSnapshotMsg{value: map[string]model.AgentStatus{"tab-1": {Agent: model.AgentClaude, Phase: model.AgentPhaseCompleted}}})
+	if kind, ok := playedSound(command); !ok || kind != sound.Done {
+		t.Fatalf("completion after an intervening snapshot = (%q, %v), want done", kind, ok)
+	}
+}
+
 func TestDashboardDoesNotSoundOnTheFirstAgentSnapshot(t *testing.T) {
 	value := newDashboardWithConfig(&fakeBackend{}, model.Snapshot{}, "", Config{SoundOnWaiting: true})
 	waiting := map[string]model.AgentStatus{"tab-1": {Agent: model.AgentCodex, Phase: model.AgentPhaseWaitingInput}}
 	command := send(&value, agentSnapshotMsg{value: waiting})
-	if !value.agentSoundReady {
+	if value.agentSoundBaseline == nil {
 		t.Fatal("first successful agent snapshot did not arm later sounds")
 	}
 	if kind, ok := playedSound(command); ok {
@@ -2014,7 +2043,7 @@ func TestDashboardSeparatesProvisionalStopInterruptionAndCompletion(t *testing.T
 			value := newDashboardWithConfig(&fakeBackend{}, model.Snapshot{Roots: []model.RootView{{
 				Root: model.Root{ID: "root"}, Tabs: []model.Tab{{ID: "tab", Running: true, Agent: model.AgentCodex, AgentPhase: model.AgentPhaseWorking}},
 			}}}, "", Config{SoundOnDone: true})
-			value.agentSoundReady = true
+			armAgentSounds(&value)
 			command := send(&value, agentSnapshotMsg{value: map[string]model.AgentStatus{"tab": {Agent: model.AgentCodex, Phase: phase}}})
 			if value.hasAnimatedAgent() {
 				t.Fatal("terminal/non-authoritative state still animates")
@@ -2035,6 +2064,7 @@ func TestCompletionSoundTracksSessionAndTurnIdentity(t *testing.T) {
 	value := newDashboardWithConfig(&fakeBackend{}, model.Snapshot{Roots: []model.RootView{{
 		Root: model.Root{ID: "root"}, Tabs: []model.Tab{{ID: "tab", Running: true, Agent: model.AgentCodex, AgentPhase: model.AgentPhaseCompleted, AgentSessionID: "session", AgentTurnID: "old"}},
 	}}}, "", Config{SoundOnDone: true})
+	armAgentSounds(&value)
 	for _, testCase := range []struct {
 		session, turn string
 		want          bool
@@ -2053,7 +2083,7 @@ func TestDashboardDoesNotSoundForEstimatedIdle(t *testing.T) {
 		Root: model.Root{ID: "root-1"},
 		Tabs: []model.Tab{{ID: "tab-1", Running: true, Agent: model.AgentCodex, AgentPhase: model.AgentPhaseWorking}},
 	}}}, "", Config{SoundOnDone: true, SoundOnWaiting: true})
-	value.agentSoundReady = true
+	armAgentSounds(&value)
 
 	var statuses map[string]model.AgentStatus
 	if err := json.Unmarshal([]byte(`{"tab-1":{"agent":"codex","phase":"idle","estimated":true}}`), &statuses); err != nil {
