@@ -11,4 +11,4 @@ The website source is kept in `pages/`. This directory contains product and cont
 
 ## Contributor guide
 
-- [Development](development.md) — build and test changes, preserve protocol compatibility, update the website, and publish releases
+- [Development](development.md) — build and test changes, follow the code layout, preserve protocol compatibility, update the website, and publish releases
