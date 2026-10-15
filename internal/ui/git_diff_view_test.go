@@ -3,6 +3,7 @@ package ui
 import (
 	"errors"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -14,11 +15,7 @@ import (
 )
 
 func TestDashboardTogglesGitDiffViewForContextWorkspace(t *testing.T) {
-	workspace := model.Workspace{ID: "workspace-1", RootID: "root-1", Name: "alpha", Path: "/projects/alpha"}
-	snapshot := model.Snapshot{Roots: []model.RootView{{
-		Root:        model.Root{ID: "root-1", Name: "projects", Path: "/projects"},
-		Directories: []model.WorkspaceView{{Workspace: workspace}},
-	}}}
+	snapshot, workspace := alphaWorkspaceSnapshot(nil)
 	testutil.Set(t, &loadGitChangedFiles, func(path string) ([]gitChangedFile, error) {
 		if path != workspace.Path {
 			t.Fatalf("changed files path = %q, want %q", path, workspace.Path)
@@ -71,11 +68,7 @@ func TestDashboardTogglesGitDiffViewForContextWorkspace(t *testing.T) {
 }
 
 func TestDashboardLoadsAndRendersEveryWorkspaceFile(t *testing.T) {
-	workspace := model.Workspace{ID: "workspace-1", RootID: "root-1", Name: "alpha", Path: "/projects/alpha"}
-	snapshot := model.Snapshot{Roots: []model.RootView{{
-		Root:        model.Root{ID: "root-1", Name: "projects", Path: "/projects"},
-		Directories: []model.WorkspaceView{{Workspace: workspace}},
-	}}}
+	snapshot, workspace := alphaWorkspaceSnapshot(nil)
 	testutil.Set(t, &loadWorkspaceFiles, func(path string) ([]gitChangedFile, error) {
 		if path != workspace.Path {
 			t.Fatalf("workspace files path = %q, want %q", path, workspace.Path)
@@ -422,13 +415,8 @@ func TestSplitGitDiffRowsPairRemovedAndAddedLines(t *testing.T) {
 		{right: "+new three", fullIndex: -1, leftIndex: -1, rightIndex: 8},
 		{left: " tail", right: " tail", fullIndex: -1, leftIndex: 9, rightIndex: 9},
 	}
-	if len(rows) != len(want) {
+	if !slices.Equal(rows, want) {
 		t.Fatalf("split rows = %#v, want %#v", rows, want)
-	}
-	for index := range want {
-		if rows[index] != want[index] {
-			t.Fatalf("split row %d = %#v, want %#v", index, rows[index], want[index])
-		}
 	}
 }
 
@@ -457,14 +445,8 @@ func TestSplitGitDiffRowsKeepNoNewlineMarkersWithChanges(t *testing.T) {
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			rows := splitGitDiffRows(test.lines)
-			if len(rows) != len(test.want) {
+			if rows := splitGitDiffRows(test.lines); !slices.Equal(rows, test.want) {
 				t.Fatalf("split rows = %#v, want %#v", rows, test.want)
-			}
-			for index := range test.want {
-				if rows[index] != test.want[index] {
-					t.Fatalf("split row %d = %#v, want %#v", index, rows[index], test.want[index])
-				}
 			}
 		})
 	}
@@ -550,11 +532,7 @@ func TestDashboardRefreshesGitDiffWithF5Only(t *testing.T) {
 }
 
 func TestDashboardPersistsAndRestoresGitDiffViewMode(t *testing.T) {
-	workspace := model.Workspace{ID: "workspace-1", RootID: "root-1", Name: "alpha", Path: "/projects/alpha"}
-	snapshot := model.Snapshot{Roots: []model.RootView{{
-		Root:        model.Root{ID: "root-1", Name: "projects", Path: "/projects"},
-		Directories: []model.WorkspaceView{{Workspace: workspace}},
-	}}}
+	snapshot, workspace := alphaWorkspaceSnapshot(nil)
 	configPath := filepath.Join(t.TempDir(), "config.json")
 	value := newDashboardWithConfig(&fakeBackend{}, snapshot, configPath, Config{})
 	value.gitStates = map[string]gitState{workspace.Path: {Branch: "main", Dirty: true}}
@@ -636,11 +614,7 @@ func TestDashboardGitDiffViewHandlesCleanAndFailedReads(t *testing.T) {
 }
 
 func TestDashboardRecognisesCtrlShiftFForGitDiffAcrossInputLayouts(t *testing.T) {
-	workspace := model.Workspace{ID: "workspace-1", RootID: "root-1", Name: "alpha", Path: "/projects/alpha"}
-	snapshot := model.Snapshot{Roots: []model.RootView{{
-		Root:        model.Root{ID: "root-1", Name: "projects", Path: "/projects"},
-		Directories: []model.WorkspaceView{{Workspace: workspace}},
-	}}}
+	snapshot, workspace := alphaWorkspaceSnapshot(nil)
 	value := newDashboard(&fakeBackend{}, snapshot)
 	value.gitStates = map[string]gitState{workspace.Path: {Branch: "main"}}
 	value.setNavigation(1)

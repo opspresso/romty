@@ -620,11 +620,7 @@ func TestDashboardCreatesTabForWorkspaceCursorWithCtrlShiftT(t *testing.T) {
 }
 
 func TestDashboardIgnoresCtrlShiftTWhileTabCreationCannotStart(t *testing.T) {
-	workspace := model.Workspace{ID: "workspace-1", RootID: "root-1", Name: "alpha", Path: "/projects/alpha"}
-	snapshot := model.Snapshot{Roots: []model.RootView{{
-		Root:        model.Root{ID: "root-1", Name: "projects", Path: "/projects"},
-		Directories: []model.WorkspaceView{{Workspace: workspace}},
-	}}}
+	snapshot, _ := alphaWorkspaceSnapshot(nil)
 
 	for _, probe := range []struct {
 		name    string
@@ -651,11 +647,7 @@ func TestDashboardIgnoresCtrlShiftTWhileTabCreationCannotStart(t *testing.T) {
 }
 
 func TestDashboardRecognisesCtrlShiftTAcrossInputLayouts(t *testing.T) {
-	workspace := model.Workspace{ID: "workspace-1", RootID: "root-1", Name: "alpha", Path: "/projects/alpha"}
-	snapshot := model.Snapshot{Roots: []model.RootView{{
-		Root:        model.Root{ID: "root-1", Name: "projects", Path: "/projects"},
-		Directories: []model.WorkspaceView{{Workspace: workspace}},
-	}}}
+	snapshot, _ := alphaWorkspaceSnapshot(nil)
 	value := newDashboard(&fakeBackend{}, snapshot)
 	value.setNavigation(1)
 	physicalT := tea.KeyPressMsg(tea.Key{
@@ -2435,11 +2427,7 @@ func TestDashboardSwitchesPanesWithOneKey(t *testing.T) {
 // a terminal open on it, so a render can be searched for the tree by name.
 func narrowDashboard(t *testing.T, width int) dashboard {
 	t.Helper()
-	workspace := model.Workspace{ID: "workspace-1", RootID: "root-1", Name: "alpha", Path: "/projects/alpha"}
-	snapshot := model.Snapshot{Roots: []model.RootView{{
-		Root:        model.Root{ID: "root-1", Name: "projects", Path: "/projects"},
-		Directories: []model.WorkspaceView{{Workspace: workspace}},
-	}}}
+	snapshot, workspace := alphaWorkspaceSnapshot(nil)
 	value := newDashboard(&fakeBackend{snapshot: snapshot, workspace: workspace}, snapshot)
 	value.width, value.height = width, 24
 	value.selectedWorkspaceID = workspace.ID
@@ -2759,11 +2747,7 @@ func TestDashboardSettlesAnExitWhenTheSnapshotFails(t *testing.T) {
 // bar and leave the dashboard usable. None of these branches had a test,
 // because the fake could not fail.
 func TestDashboardReportsBackendFailures(t *testing.T) {
-	workspace := model.Workspace{ID: "workspace-1", RootID: "root-1", Name: "alpha", Path: "/projects/alpha"}
-	snapshot := model.Snapshot{Roots: []model.RootView{{
-		Root:        model.Root{ID: "root-1", Name: "projects", Path: "/projects"},
-		Directories: []model.WorkspaceView{{Workspace: workspace}},
-	}}}
+	snapshot, workspace := alphaWorkspaceSnapshot(nil)
 
 	for _, probe := range []struct {
 		name   string
@@ -3167,11 +3151,7 @@ func TestDashboardRemovesTheSelectedRoot(t *testing.T) {
 }
 
 func TestDashboardDeletesTheSelectedWorkspace(t *testing.T) {
-	workspace := model.Workspace{ID: "workspace-1", RootID: "root-1", Name: "alpha", Path: "/projects/alpha"}
-	snapshot := model.Snapshot{Roots: []model.RootView{{
-		Root:        model.Root{ID: "root-1", Name: "projects", Path: "/projects"},
-		Directories: []model.WorkspaceView{{Workspace: workspace}},
-	}}}
+	snapshot, workspace := alphaWorkspaceSnapshot(nil)
 	backend := &fakeBackend{snapshot: snapshot}
 	value := newDashboard(backend, snapshot)
 	value.width, value.height = 120, 40
