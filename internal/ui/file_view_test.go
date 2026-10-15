@@ -39,7 +39,7 @@ func TestDashboardTogglesTheFileViewForContextWorkspace(t *testing.T) {
 
 	filesCommand := send(&value, fileViewKey())
 	if filesCommand == nil || !value.fileView.active || value.fileView.target.Path != workspace.Path || !value.fileView.filesPending {
-		t.Fatalf("open diff view = (command %v, state %#v)", filesCommand, value.fileView)
+		t.Fatalf("open file view = (command %v, state %#v)", filesCommand, value.fileView)
 	}
 	diffCommand := send(&value, filesCommand())
 	if diffCommand == nil || len(value.fileView.files) != 2 || value.fileView.fileIndex != 0 || !value.fileView.diffPending {
@@ -54,13 +54,13 @@ func TestDashboardTogglesTheFileViewForContextWorkspace(t *testing.T) {
 	rendered := ansi.Strip(value.render())
 	for _, fragment := range []string{"Changes · alpha", "README.md", "▾ internal/", "▾ ui/", "view.go", "Diff · README.md", "-old", "+new"} {
 		if !strings.Contains(rendered, fragment) {
-			t.Fatalf("Git diff view does not contain %q:\n%s", fragment, rendered)
+			t.Fatalf("file view does not contain %q:\n%s", fragment, rendered)
 		}
 	}
 
 	command := send(&value, fileViewKey())
 	if command != nil || value.fileView.active {
-		t.Fatalf("close diff view = (command %v, state %#v)", command, value.fileView)
+		t.Fatalf("close file view = (command %v, state %#v)", command, value.fileView)
 	}
 }
 
@@ -556,7 +556,7 @@ func lineContainsInOrder(value string, fragments ...string) bool {
 	return false
 }
 
-func TestDashboardGitDiffViewHandlesCleanAndFailedReads(t *testing.T) {
+func TestDashboardFileViewHandlesCleanAndFailedReads(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, model.Snapshot{})
 	value.fileView = fileViewState{active: true, target: model.Workspace{Name: "alpha", Path: "/projects/alpha"}, filesPending: true, request: 1}
 
@@ -588,7 +588,7 @@ func TestDashboardRecognisesCtrlShiftFForGitDiffAcrossInputLayouts(t *testing.T)
 	}
 }
 
-func TestDashboardGitDiffViewOwnsInputAndKeepsHelpModalUsable(t *testing.T) {
+func TestDashboardFileViewOwnsInputAndKeepsHelpModalUsable(t *testing.T) {
 	stream := newMemoryStream("")
 	terminal := newEmbeddedTerminal("tab-1", stream, 40, 10)
 	defer terminal.close()
@@ -615,9 +615,8 @@ func TestDashboardGitDiffViewOwnsInputAndKeepsHelpModalUsable(t *testing.T) {
 
 // Scrollback is a view of the terminal, and the file view is what is on screen
 // instead of it. F6 is the file view's own layout toggle, but a modal drawn
-// over the view routes the function keys back to their global meanings — and
-// F6 there used to open a scrollback nothing drew, which the user then fell
-// into on closing the file view.
+// over the view routes the function keys back to their global meanings, so
+// F6 there must not open a scrollback nothing draws.
 func TestDashboardRefusesScrollbackWhileTheFileViewIsOpen(t *testing.T) {
 	terminal := newEmbeddedTerminal("tab-1", newMemoryStream(""), 40, 10)
 	defer terminal.close()
