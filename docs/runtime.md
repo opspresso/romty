@@ -21,6 +21,8 @@ Tailscale and SSH are transport and login layers, not romty dependencies. romty 
 
 The TUI communicates with a detached local daemon over a Unix socket. The daemon owns the shell PTYs, so closing the TUI or its host terminal does not terminate running sessions. Reopening romty reconnects and restores recent output before continuing with the live stream.
 
+If `daemon.sock` is removed while the daemon is running, the daemon recreates it without restarting shells or disconnecting existing terminal streams. A client waits for this recovery while the daemon holds `daemon.sock.lock`. Never delete the lock to force another daemon to start: both daemons would then own the same state. If an older daemon cannot restore its missing socket, identify its process and send it `SIGTERM` before restarting romty. This orderly shutdown saves session snapshots but stops the managed shells and agents.
+
 New terminals use the environment and `$SHELL` of the romty client that creates them. They do not inherit the potentially older environment of the detached daemon.
 
 Each session retains up to 8 MiB of terminal output. Terminal modes are tracked separately so a replay remains usable after older output is trimmed. Completed terminal queries are omitted from a replay to prevent an unsolicited response from reaching the shell command line. Reconnect replay starts at the PTY dimensions that produced the latest output, then resizes the local emulator to the current pane; width-sensitive shell redraws therefore keep the wrapping and erase behavior they had when recorded.

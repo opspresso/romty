@@ -14,6 +14,8 @@ import (
 // maxDaemonLogBytes is a variable so rotation tests need not create a multi-megabyte file.
 var maxDaemonLogBytes int64 = 3 << 20
 
+var daemonStartTimeout = 3 * time.Second
+
 func EnsureDaemon(runtime paths.Paths, executable string) error {
 	if err := runtime.Ensure(); err != nil {
 		return err
@@ -30,6 +32,37 @@ func EnsureDaemon(runtime paths.Paths, executable string) error {
 	if !Unavailable(err) {
 		return err
 	}
+	held, err := daemonLockHeld(runtime.Socket)
+	if err != nil {
+		return err
+	}
+	if !held {
+		if err := startDaemon(runtime, executable); err != nil {
+			return err
+		}
+	}
+	// A daemon with a missing socket repairs its own listener. Starting a
+	// competitor cannot help while that daemon owns the lock.
+	deadline := time.Now().Add(daemonStartTimeout)
+	for time.Now().Before(deadline) {
+		err = backend.Ping()
+		if err == nil {
+			return nil
+		}
+		if !Unavailable(err) {
+			return err
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	if held, lockErr := daemonLockHeld(runtime.Socket); lockErr != nil {
+		return lockErr
+	} else if held {
+		return fmt.Errorf("daemon holds its lock but its socket is unreachable; existing sessions may still be running; see %s: %w", runtime.Log, err)
+	}
+	return fmt.Errorf("daemon did not become ready; see %s: %w", runtime.Log, err)
+}
+
+func startDaemon(runtime paths.Paths, executable string) error {
 	logFile, err := openDaemonLog(runtime.Log)
 	if err != nil {
 		return fmt.Errorf("open daemon log: %w", err)
@@ -53,14 +86,7 @@ func EnsureDaemon(runtime paths.Paths, executable string) error {
 		return fmt.Errorf("release daemon process: %w", err)
 	}
 
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
-		if err := backend.Ping(); err == nil {
-			return nil
-		}
-		time.Sleep(25 * time.Millisecond)
-	}
-	return fmt.Errorf("daemon did not become ready; see %s", runtime.Log)
+	return nil
 }
 
 func openDaemonLog(path string) (*os.File, error) {

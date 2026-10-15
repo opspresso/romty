@@ -18,10 +18,47 @@ import (
 	"github.com/opspresso/romty/internal/client"
 	"github.com/opspresso/romty/internal/daemon"
 	"github.com/opspresso/romty/internal/model"
+	"github.com/opspresso/romty/internal/paths"
 	"github.com/opspresso/romty/internal/protocol"
 	"github.com/opspresso/romty/internal/state"
 	"github.com/opspresso/romty/internal/testutil"
 )
+
+func TestServeRecoversRemovedSocketWithoutLosingSession(t *testing.T) {
+	d := startDaemon(t)
+	backend := d.connect(t)
+	root := t.TempDir()
+	_, workspace := openWorkspace(t, backend, root, root)
+	tab := createTab(t, backend, workspace)
+	connection, reader := attach(t, backend, tab)
+	defer connection.Close()
+	writeCommand(t, connection, "saved_value=preserved; printf 'before-%s\\n' unlink")
+	readUntil(t, connection, reader, "before-unlink")
+
+	if err := os.Remove(d.socket); err != nil {
+		t.Fatalf("remove live socket: %v", err)
+	}
+	// An unlinked listener still owns its lock and existing streams. A new
+	// daemon cannot take over; the same daemon must restore its address.
+	runtime := paths.Paths{Directory: filepath.Dir(d.socket), Socket: d.socket}
+	if err := client.EnsureDaemon(runtime, "/nonexistent/romty"); err != nil {
+		t.Fatalf("EnsureDaemon() during socket recovery: %v", err)
+	}
+	info, err := os.Stat(d.socket)
+	if err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("restored socket permissions: info=%v, error=%v", info, err)
+	}
+	writeCommand(t, connection, "printf 'existing-%s\\n' \"$saved_value\"")
+	readUntil(t, connection, reader, "existing-preserved")
+	reconnected, replay := attach(t, client.New(d.socket), tab)
+	defer reconnected.Close()
+	readUntil(t, reconnected, replay, "before-unlink")
+	writeCommand(t, reconnected, "printf 'reconnected-%s\\n' \"$saved_value\"")
+	readUntil(t, reconnected, replay, "reconnected-preserved")
+	if err := backend.Shutdown(); err != nil {
+		t.Fatalf("Shutdown() after recovery: %v", err)
+	}
+}
 
 func TestServeRemovesPersistedTerminalTabs(t *testing.T) {
 	base := testutil.ShortTempDir(t)

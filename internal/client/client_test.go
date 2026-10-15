@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -161,10 +162,53 @@ func serveUnversioned(t *testing.T) string {
 	return socket
 }
 
-// Starting a second daemon is the answer to nothing listening, and to nothing
-// else. An outdated daemon is listening, so EnsureDaemon lets the caller reach
-// it and be told which side to restart, rather than starting a rival that
-// would lose the lock and exit.
+func TestEnsureDaemonReportsAnUnreachableLockOwner(t *testing.T) {
+	runtime := runtimeFor(filepath.Join(testutil.ShortTempDir(t), "daemon.sock"))
+	lock, err := os.OpenFile(runtime.Socket+".lock", os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Close()
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		t.Fatal(err)
+	}
+	testutil.Set(t, &daemonStartTimeout, 50*time.Millisecond)
+	err = EnsureDaemon(runtime, "/nonexistent/romty")
+	if err == nil || !strings.Contains(err.Error(), "daemon holds its lock but its socket is unreachable") {
+		t.Fatalf("EnsureDaemon() = %v, want unreachable lock owner", err)
+	}
+	if _, err := os.Stat(runtime.Log); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("EnsureDaemon() attempted to launch a rival daemon: %v", err)
+	}
+	if held, err := daemonLockHeld(runtime.Socket); err != nil || !held {
+		t.Fatalf("daemon ownership changed: held=%v, error=%v", held, err)
+	}
+}
+
+func TestDaemonLockProbeRejectsLinks(t *testing.T) {
+	for _, link := range []struct {
+		name   string
+		create func(string, string) error
+	}{{"symbolic", os.Symlink}, {"hard", os.Link}} {
+		t.Run(link.name, func(t *testing.T) {
+			base := testutil.ShortTempDir(t)
+			target := filepath.Join(base, "target")
+			if err := os.WriteFile(target, []byte("unchanged"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			socket := filepath.Join(base, "daemon.sock")
+			if err := link.create(target, socket+".lock"); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := daemonLockHeld(socket); err == nil {
+				t.Fatal("lock probe accepted a link")
+			}
+		})
+	}
+}
+
+// An outdated daemon is listening, so EnsureDaemon lets the caller reach it
+// and be told which side to restart rather than starting a rival.
 func TestEnsureDaemonAcceptsAnOutdatedDaemon(t *testing.T) {
 	socket := serveUnversioned(t)
 

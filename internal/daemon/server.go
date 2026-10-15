@@ -171,7 +171,9 @@ func (s *Server) Serve(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	listener.logger = s.logger
 	defer s.shutdown()
+	defer listener.Close()
 	s.logger.Printf("listening on %s", s.socket)
 	defer s.logger.Printf("stopped")
 
@@ -239,7 +241,6 @@ func (s *Server) shutdown() {
 		}
 	}
 	closeSessions(slices.Collect(maps.Values(sessions)))
-	_ = os.Remove(s.socket)
 }
 
 // sessionsLocked copies the running sessions, keyed by tab, so they can be
