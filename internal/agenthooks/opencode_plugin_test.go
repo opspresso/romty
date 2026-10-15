@@ -42,7 +42,13 @@ if (api === "2") {
 } else {
   const hooks = await plugin.server()
   await hooks["chat.message"]({ sessionID: "ses-1" })
-  await hooks["tool.execute.before"]({ sessionID: "ses-1", tool: "bash", callID: "call-1" })
+  await hooks["tool.execute.before"]({ sessionID: "ses-1", tool: "task", callID: "call-1" })
+  await hooks.event({ event: { type: "permission.asked", properties: { sessionID: "ses-1", callID: "call-1" } } })
+  await hooks.event({ event: { type: "session.created", properties: { info: { id: "child", parentID: "ses-1" } } } })
+  await hooks["chat.message"]({ sessionID: "child" })
+  await hooks["tool.execute.before"]({ sessionID: "child", tool: "read", callID: "call-2" })
+  await hooks.event({ event: { type: "session.idle", properties: { sessionID: "child" } } })
+  await hooks.event({ event: { type: "session.deleted", properties: { info: { id: "child", parentID: "ses-1" } } } })
   await hooks.event({ event: { type: "session.idle", properties: { sessionID: "ses-1" } } })
 }
 // Reporters receive their input over a pipe; stay alive until each one wrote.
@@ -142,11 +148,25 @@ func TestOpenCodePluginReportsOpenCode2Lifecycle(t *testing.T) {
 	}
 }
 
+// OpenCode 1 reports tool call IDs, and a child session cannot rebind the tab
+// or end its parent's turn.
 func TestOpenCodePluginReportsOpenCode1Hooks(t *testing.T) {
-	want := []string{"UserPromptSubmit", "PreToolUse", "Stop"}
-	got := hookEvents(runPluginHarness(t, "1", len(want)))
+	want := []string{"UserPromptSubmit", "PreToolUse", "PermissionRequest", "Stop"}
+	reports := runPluginHarness(t, "1", len(want))
+	got := hookEvents(reports)
 	if !reflect.DeepEqual(sorted(got), sorted(want)) {
 		t.Fatalf("OpenCode 1 events = %v, want %v", got, want)
+	}
+	for _, report := range reports {
+		if report["session_id"] != "ses-1" {
+			t.Fatalf("child session reported: %v", report)
+		}
+		switch report["hook_event_name"] {
+		case "PreToolUse", "PermissionRequest":
+			if report["tool_use_id"] != "call-1" {
+				t.Fatalf("%s tool_use_id = %q, want call-1", report["hook_event_name"], report["tool_use_id"])
+			}
+		}
 	}
 }
 
