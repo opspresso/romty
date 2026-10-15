@@ -1267,26 +1267,31 @@ func plainRows(lines []string) []string {
 	return rows
 }
 
+// terminalDashboard returns a 120x30 dashboard focused on an empty terminal
+// that fills the right pane.
+func terminalDashboard(t *testing.T) dashboard {
+	t.Helper()
+	value := newDashboard(&fakeBackend{}, model.Snapshot{})
+	value.width, value.height = 120, 30
+	view := value.dimensions()
+	value.terminal = newEmbeddedTerminal("tab-1", newMemoryStream(""), view.rightWidth, view.terminalHeight)
+	t.Cleanup(value.closeTerminal)
+	value.focus = terminalPane
+	return value
+}
+
 // scrolledDashboard returns a dashboard whose terminal holds `lines` rows of
 // numbered output, all but the last screen of which sits in the scrollback.
 func scrolledDashboard(t *testing.T, lines int) dashboard {
 	t.Helper()
-	value := newDashboard(&fakeBackend{}, model.Snapshot{})
-	value.width = 120
-	value.height = 30
-	view := value.dimensions()
-	rightWidth, terminalHeight := view.rightWidth, view.terminalHeight
-	value.terminal = newEmbeddedTerminal("tab-1", newMemoryStream(""), rightWidth, terminalHeight)
-	t.Cleanup(value.closeTerminal)
-	value.focus = terminalPane
-
+	value := terminalDashboard(t)
 	var output strings.Builder
 	for index := range lines {
 		fmt.Fprintf(&output, "line-%03d\r\n", index)
 	}
 	value.terminal.writeOutput([]byte(output.String()))
 	if value.terminal.scrollbackLen() == 0 {
-		t.Fatalf("terminal produced no scrollback for %d lines at height %d", lines, terminalHeight)
+		t.Fatalf("terminal produced no scrollback for %d lines at height %d", lines, value.dimensions().terminalHeight)
 	}
 	return value
 }
@@ -1609,13 +1614,7 @@ func TestDashboardRefusesScrollbackOnTheAlternateScreen(t *testing.T) {
 // suffered, so the status bar must not raise the red ERROR that a refused
 // daemon call or a dead terminal earns.
 func TestDashboardReportsEmptyScrollbackAsANotice(t *testing.T) {
-	value := newDashboard(&fakeBackend{}, model.Snapshot{})
-	value.width = 120
-	value.height = 30
-	view := value.dimensions()
-	value.terminal = newEmbeddedTerminal("tab-1", newMemoryStream(""), view.rightWidth, view.terminalHeight)
-	t.Cleanup(value.closeTerminal)
-	value.focus = terminalPane
+	value := terminalDashboard(t)
 
 	send(&value, key(tea.KeyF6, ""))
 	if value.scrollback || !strings.Contains(value.errorMessage, "scrolled off") {
@@ -1709,15 +1708,10 @@ func TestDashboardGivesTheWheelToAGuestThatOwnsTheScreen(t *testing.T) {
 // Silence is what a wheel that the host never reports looks like, so the one
 // state where romty has nothing to scroll has to say so instead.
 func TestDashboardSaysWhyTheWheelHasNothingToScroll(t *testing.T) {
-	value := newDashboard(&fakeBackend{}, model.Snapshot{})
-	value.width, value.height = 120, 30
-	view := value.dimensions()
-	value.terminal = newEmbeddedTerminal("tab-1", newMemoryStream(""), view.rightWidth, view.terminalHeight)
-	t.Cleanup(value.closeTerminal)
-	value.focus = terminalPane
+	value := terminalDashboard(t)
 
 	send(&value, tea.MouseWheelMsg{
-		X: view.leftWidth + separatorWidth + 4, Y: terminalTop + 2, Button: tea.MouseWheelUp,
+		X: value.dimensions().leftWidth + separatorWidth + 4, Y: terminalTop + 2, Button: tea.MouseWheelUp,
 	})
 	if value.scrollback {
 		t.Fatal("scrollback opened with no history to show")
