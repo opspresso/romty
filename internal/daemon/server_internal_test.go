@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -33,13 +34,140 @@ func newSessionForTest(terminal *os.File) *session {
 	}
 }
 
+// newServerAt builds a daemon on socket and statePath that logs nowhere.
+func newServerAt(t *testing.T, socket, statePath string) *Server {
+	t.Helper()
+	server, err := New(socket, statePath, "/bin/sh")
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	server.SetLogger(testutil.QuietLogger())
+	return server
+}
+
+// serveUntilCleanup serves until the test ends.
+func serveUntilCleanup(t *testing.T, server *Server) {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- server.Serve(ctx) }()
+	t.Cleanup(func() { cancel(); <-done })
+}
+
+// dialDaemon connects to socket once the daemon listens on it.
+func dialDaemon(t *testing.T, socket string) net.Conn {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		connection, err := net.Dial("unix", socket)
+		if err == nil {
+			return connection
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("could not reach the daemon: %v", err)
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+// gate holds a seam until the test opens it. Cleanup opens it too, so a
+// failing test does not leave the seam's goroutine blocked.
+type gate struct {
+	entered, release chan struct{}
+	once             sync.Once
+}
+
+func newGate(t *testing.T) *gate {
+	value := &gate{entered: make(chan struct{}), release: make(chan struct{})}
+	t.Cleanup(value.open)
+	return value
+}
+
+func (g *gate) hold() {
+	close(g.entered)
+	<-g.release
+}
+
+func (g *gate) open() { g.once.Do(func() { close(g.release) }) }
+
+// dispatchDuringShutdown dispatches request, begins shutdown while the request
+// is held at g, and expects shutdown not to wait for it. It returns the
+// response once g opens.
+func dispatchDuringShutdown(t *testing.T, server *Server, request protocol.Request, g *gate) protocol.Response {
+	t.Helper()
+	response := make(chan protocol.Response, 1)
+	go func() { response <- server.dispatch(request) }()
+	<-g.entered
+	server.beginShutdown()
+	drained := make(chan struct{})
+	go func() {
+		server.mutations.Wait()
+		close(drained)
+	}()
+	select {
+	case <-drained:
+	case <-time.After(time.Second):
+		t.Fatalf("shutdown waited for a held %s request", request.Action)
+	}
+	g.open()
+	return <-response
+}
+
+// attachAs attaches a client that speaks version to tab-1 of a server holding
+// value. It returns the attach response and a reader at the replay.
+func attachAs(t *testing.T, value *session, version int) (protocol.Response, *bufio.Reader) {
+	t.Helper()
+	client, daemonSide := net.Pipe()
+	server := &Server{sessions: map[string]*session{"tab-1": value}, logger: testutil.QuietLogger()}
+	done := make(chan struct{})
+	go func() {
+		server.handleAttach(client, protocol.Request{Action: protocol.ActionAttach, Version: version, TabID: "tab-1"})
+		close(done)
+	}()
+	t.Cleanup(func() {
+		daemonSide.Close()
+		<-done
+	})
+	reader := bufio.NewReader(daemonSide)
+	var response protocol.Response
+	if err := protocol.Read(reader, &response); err != nil {
+		t.Fatalf("Read() attach response error = %v", err)
+	}
+	return response, reader
+}
+
+// readReplay reads exactly len(want) bytes and expects them to be want.
+func readReplay(t *testing.T, reader io.Reader, want []byte) {
+	t.Helper()
+	replay := make([]byte, len(want))
+	if _, err := io.ReadFull(reader, replay); err != nil {
+		t.Fatalf("ReadFull() replay error = %v", err)
+	}
+	if !bytes.Equal(replay, want) {
+		t.Fatalf("replay = %q, want %q", replay, want)
+	}
+}
+
+// readUntil reads connection until done reports what was read is enough.
+func readUntil(t *testing.T, connection net.Conn, done func([]byte) bool) []byte {
+	t.Helper()
+	buffer := make([]byte, 4096)
+	var seen []byte
+	for !done(seen) {
+		connection.SetReadDeadline(time.Now().Add(3 * time.Second))
+		count, err := connection.Read(buffer)
+		seen = append(seen, buffer[:count]...)
+		if err != nil {
+			t.Fatalf("the stream ended after %d bytes: %v", len(seen), err)
+		}
+	}
+	return seen
+}
+
 func TestShutdownDoesNotWaitForDirectoryPreflight(t *testing.T) {
 	for _, action := range []string{protocol.ActionAddRoot, protocol.ActionEnsureWorkspace} {
 		t.Run(action, func(t *testing.T) {
-			server, err := New(filepath.Join(t.TempDir(), "daemon.sock"), filepath.Join(t.TempDir(), "state.json"), "/bin/sh")
-			if err != nil {
-				t.Fatalf("New() error = %v", err)
-			}
+			server := newServerAt(t, filepath.Join(t.TempDir(), "daemon.sock"), filepath.Join(t.TempDir(), "state.json"))
 			request := protocol.Request{Action: action, Path: "/root"}
 			if action == protocol.ActionEnsureWorkspace {
 				server.value.Roots = []model.Root{{ID: "root-1", Name: "root", Path: "/root"}}
@@ -47,38 +175,12 @@ func TestShutdownDoesNotWaitForDirectoryPreflight(t *testing.T) {
 				request.Path = "/root/child"
 			}
 
-			entered := make(chan struct{})
-			release := make(chan struct{})
-			released := false
+			preflight := newGate(t)
 			testutil.Set(t, &resolveDirectory, func(path string) (string, error) {
-				close(entered)
-				<-release
+				preflight.hold()
 				return path, nil
 			})
-			t.Cleanup(func() {
-				if !released {
-					close(release)
-				}
-			})
-
-			response := make(chan protocol.Response, 1)
-			go func() { response <- server.dispatch(request) }()
-			<-entered
-			server.beginShutdown()
-			drained := make(chan struct{})
-			go func() {
-				server.mutations.Wait()
-				close(drained)
-			}()
-			select {
-			case <-drained:
-			case <-time.After(time.Second):
-				t.Fatal("shutdown waited for directory preflight")
-			}
-
-			close(release)
-			released = true
-			result := <-response
+			result := dispatchDuringShutdown(t, server, request, preflight)
 			if result.Error != "daemon is shutting down" {
 				t.Fatalf("response error = %q, want shutdown rejection", result.Error)
 			}
@@ -96,10 +198,7 @@ func TestShutdownDoesNotWaitForResponseSnapshot(t *testing.T) {
 	for _, action := range []string{protocol.ActionAddRoot, protocol.ActionRemoveRoot} {
 		t.Run(action, func(t *testing.T) {
 			base := t.TempDir()
-			server, err := New(filepath.Join(base, "daemon.sock"), filepath.Join(base, "state.json"), "/bin/sh")
-			if err != nil {
-				t.Fatalf("New() error = %v", err)
-			}
+			server := newServerAt(t, filepath.Join(base, "daemon.sock"), filepath.Join(base, "state.json"))
 			request := protocol.Request{Action: action}
 			if action == protocol.ActionAddRoot {
 				request.Path = t.TempDir()
@@ -111,38 +210,12 @@ func TestShutdownDoesNotWaitForResponseSnapshot(t *testing.T) {
 				request.RootID = "remove"
 			}
 
-			entered := make(chan struct{})
-			release := make(chan struct{})
-			released := false
+			snapshot := newGate(t)
 			testutil.Set(t, &readDirectory, func(string) ([]os.DirEntry, error) {
-				close(entered)
-				<-release
+				snapshot.hold()
 				return nil, nil
 			})
-			t.Cleanup(func() {
-				if !released {
-					close(release)
-				}
-			})
-
-			response := make(chan protocol.Response, 1)
-			go func() { response <- server.dispatch(request) }()
-			<-entered
-			server.beginShutdown()
-			drained := make(chan struct{})
-			go func() {
-				server.mutations.Wait()
-				close(drained)
-			}()
-			select {
-			case <-drained:
-			case <-time.After(time.Second):
-				t.Fatal("shutdown waited for response snapshot")
-			}
-
-			close(release)
-			released = true
-			result := <-response
+			result := dispatchDuringShutdown(t, server, request, snapshot)
 			if result.Error != "" {
 				t.Fatalf("response error = %q", result.Error)
 			}
@@ -161,26 +234,8 @@ func TestHandshakeTimesOutOnASilentPeer(t *testing.T) {
 
 	base := testutil.ShortTempDir(t)
 	socket := filepath.Join(base, "daemon.sock")
-	server, err := New(socket, filepath.Join(base, "state.json"), "/bin/sh")
-	if err != nil {
-		t.Fatalf("New() error = %v", err)
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan error, 1)
-	go func() { done <- server.Serve(ctx) }()
-	defer func() { cancel(); <-done }()
-
-	deadline := time.Now().Add(3 * time.Second)
-	var silent net.Conn
-	for time.Now().Before(deadline) {
-		if silent, err = net.Dial("unix", socket); err == nil {
-			break
-		}
-		time.Sleep(time.Millisecond)
-	}
-	if silent == nil {
-		t.Fatalf("could not reach the daemon: %v", err)
-	}
+	serveUntilCleanup(t, newServerAt(t, socket, filepath.Join(base, "state.json")))
+	silent := dialDaemon(t, socket)
 	defer silent.Close()
 
 	if err := silent.SetReadDeadline(time.Now().Add(3 * time.Second)); err != nil {
@@ -202,32 +257,14 @@ func TestServeLimitsActiveConnectionsAndRecoversCapacity(t *testing.T) {
 
 	base := testutil.ShortTempDir(t)
 	socket := filepath.Join(base, "daemon.sock")
-	server, err := New(socket, filepath.Join(base, "state.json"), "/bin/sh")
-	if err != nil {
-		t.Fatalf("New() error = %v", err)
-	}
-	server.SetLogger(log.New(io.Discard, "", 0))
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan error, 1)
-	go func() { done <- server.Serve(ctx) }()
-	defer func() { cancel(); <-done }()
+	server := newServerAt(t, socket, filepath.Join(base, "state.json"))
+	serveUntilCleanup(t, server)
 
 	// The connection that proves the daemon is listening is the one that holds
 	// capacity. A separate probe would share the listen backlog with it, and
 	// the accept loop could spend the only slot on that probe — already closed,
 	// so it frees the slot again — and reject this one outright.
-	deadline := time.Now().Add(3 * time.Second)
-	var silent net.Conn
-	for {
-		silent, err = net.Dial("unix", socket)
-		if err == nil {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("could not reach daemon: %v", err)
-		}
-		time.Sleep(time.Millisecond)
-	}
+	silent := dialDaemon(t, socket)
 	defer silent.Close()
 	waitForConnections(t, server, 1, "silent connection never occupied capacity")
 
@@ -263,7 +300,7 @@ func TestAttachLimitRejectsOnlyExcessTerminalClients(t *testing.T) {
 	value := newSessionForTest(nil)
 	server := &Server{
 		sessions:    map[string]*session{"tab-1": value},
-		logger:      log.New(io.Discard, "", 0),
+		logger:      testutil.QuietLogger(),
 		accepting:   true,
 		attachments: make(chan struct{}, 1),
 	}
@@ -466,98 +503,35 @@ func TestAttachAnnouncesTheInitialReplayBoundary(t *testing.T) {
 	if got := <-announced; got != len(want) {
 		t.Fatalf("announced replay bytes = %d, want %d", got, len(want))
 	}
-	replay := make([]byte, len(want))
 	daemonSide.SetReadDeadline(time.Now().Add(3 * time.Second))
-	if _, err := io.ReadFull(daemonSide, replay); err != nil {
-		t.Fatalf("ReadFull() replay error = %v", err)
-	}
-	if !bytes.Equal(replay, want) {
-		t.Fatalf("replay = %q, want %q", replay, want)
-	}
+	readReplay(t, daemonSide, want)
 	daemonSide.Close()
 	<-attached
 }
 
 func TestAttachKeepsLegacyReplayOnTheTerminalStream(t *testing.T) {
-	client, daemonSide := net.Pipe()
-	defer daemonSide.Close()
-
 	value := newSessionForTest(nil)
 	value.history.append([]byte("legacy history"))
-	server := &Server{
-		sessions: map[string]*session{"tab-1": value},
-		logger:   log.New(io.Discard, "", 0),
-	}
-	done := make(chan struct{})
-	go func() {
-		server.handleAttach(client, protocol.Request{
-			Action:  protocol.ActionAttach,
-			Version: 4,
-			TabID:   "tab-1",
-		})
-		close(done)
-	}()
 
-	reader := bufio.NewReader(daemonSide)
-	var response protocol.Response
-	if err := protocol.Read(reader, &response); err != nil {
-		t.Fatalf("Read() attach response error = %v", err)
-	}
+	response, reader := attachAs(t, value, 4)
 	if response.Version != 4 || response.ReplayBytes != 0 {
 		t.Fatalf("legacy attach response = %#v, want version 4 without a replay boundary", response)
 	}
-	want := []byte(resetScreen + "legacy history")
-	replay := make([]byte, len(want))
-	if _, err := io.ReadFull(reader, replay); err != nil {
-		t.Fatalf("ReadFull() legacy replay error = %v", err)
-	}
-	if !bytes.Equal(replay, want) {
-		t.Fatalf("legacy replay = %q, want %q", replay, want)
-	}
-	daemonSide.Close()
-	<-done
+	readReplay(t, reader, []byte(resetScreen+"legacy history"))
 }
 
 func TestAttachInfersCapabilitiesForAPreNegotiationClient(t *testing.T) {
-	client, daemonSide := net.Pipe()
-	defer daemonSide.Close()
-
 	value := newSessionForTest(nil)
 	value.columns, value.rows = 90, 25
 	value.history.append([]byte("version five history"))
-	server := &Server{
-		sessions: map[string]*session{"tab-1": value},
-		logger:   log.New(io.Discard, "", 0),
-	}
-	done := make(chan struct{})
-	go func() {
-		server.handleAttach(client, protocol.Request{
-			Action:  protocol.ActionAttach,
-			Version: 5,
-			TabID:   "tab-1",
-		})
-		close(done)
-	}()
 
-	reader := bufio.NewReader(daemonSide)
-	var response protocol.Response
-	if err := protocol.Read(reader, &response); err != nil {
-		t.Fatalf("Read() attach response error = %v", err)
-	}
+	response, reader := attachAs(t, value, 5)
 	want := []byte(resetScreen + "version five history")
 	if response.Version != 5 || response.ReplayBytes != len(want) ||
 		response.ReplayColumns != 90 || response.ReplayRows != 25 {
 		t.Fatalf("version 5 attach response = %#v, want replay size %d at 90x25", response, len(want))
 	}
-	replay := make([]byte, len(want))
-	if _, err := io.ReadFull(reader, replay); err != nil {
-		t.Fatalf("ReadFull() replay error = %v", err)
-	}
-	if !bytes.Equal(replay, want) {
-		t.Fatalf("replay = %q, want %q", replay, want)
-	}
-	daemonSide.Close()
-	<-done
+	readReplay(t, reader, want)
 }
 
 // Output that arrives while the recording is still being written has to reach
@@ -583,15 +557,9 @@ func TestAttachHandsOffToLiveOutputInOrder(t *testing.T) {
 	seen := append([]byte(nil), buffer[:first]...)
 
 	value.broadcast([]byte("LIVE"))
-
-	for !bytes.Contains(seen, []byte("LIVE")) {
-		daemonSide.SetReadDeadline(time.Now().Add(3 * time.Second))
-		count, err := daemonSide.Read(buffer)
-		seen = append(seen, buffer[:count]...)
-		if err != nil {
-			t.Fatalf("the client never received the live output: %v", err)
-		}
-	}
+	seen = append(seen, readUntil(t, daemonSide, func(more []byte) bool {
+		return bytes.Contains(append(seen, more...), []byte("LIVE"))
+	})...)
 
 	live := bytes.Index(seen, []byte("LIVE"))
 	recording := bytes.Count(seen[:live], []byte("RECORDED"))
@@ -611,26 +579,8 @@ func TestServeReplacesASocketNothingAnswersOn(t *testing.T) {
 
 	leaveStaleSocket(t, socket)
 
-	server, err := New(socket, filepath.Join(base, "state.json"), "/bin/sh")
-	if err != nil {
-		t.Fatalf("New() error = %v", err)
-	}
-	server.SetLogger(log.New(io.Discard, "", 0))
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan error, 1)
-	go func() { done <- server.Serve(ctx) }()
-	defer func() { cancel(); <-done }()
-
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
-		connection, err := net.Dial("unix", socket)
-		if err == nil {
-			connection.Close()
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	t.Fatal("the daemon never bound over the socket its predecessor left behind")
+	serveUntilCleanup(t, newServerAt(t, socket, filepath.Join(base, "state.json")))
+	dialDaemon(t, socket).Close()
 }
 
 // The other half of the same decision: a socket that answers belongs to a
@@ -695,11 +645,7 @@ func TestShutdownDoesNotPersistTheTabsItIsKilling(t *testing.T) {
 	base := testutil.ShortTempDir(t)
 	statePath := filepath.Join(base, "state.json")
 
-	server, err := New(filepath.Join(base, "daemon.sock"), statePath, "/bin/sh")
-	if err != nil {
-		t.Fatalf("New() error = %v", err)
-	}
-	server.SetLogger(log.New(io.Discard, "", 0))
+	server := newServerAt(t, filepath.Join(base, "daemon.sock"), statePath)
 	server.value.Tabs = []model.Tab{{ID: "tab-1", WorkspaceID: "workspace-1", Name: "1", Running: true}}
 	if err := server.store.Save(server.value); err != nil {
 		t.Fatalf("Save() error = %v", err)
@@ -782,16 +728,7 @@ func TestAttachCopiesTheRecordingItReplays(t *testing.T) {
 	}
 	value.broadcast(bytes.Repeat([]byte("N"), maxHistoryBytes))
 
-	buffer = make([]byte, 64)
-	var seen []byte
-	for len(seen) < maxHistoryBytes {
-		daemonSide.SetReadDeadline(time.Now().Add(3 * time.Second))
-		count, err := daemonSide.Read(buffer)
-		seen = append(seen, buffer[:count]...)
-		if err != nil {
-			t.Fatalf("the replay stopped early after %d bytes: %v", len(seen), err)
-		}
-	}
+	seen := readUntil(t, daemonSide, func(seen []byte) bool { return len(seen) >= maxHistoryBytes })
 	if replaced := bytes.IndexByte(seen[:maxHistoryBytes], 'N'); replaced >= 0 {
 		t.Fatalf("the recording was rewritten %d bytes in, so the replay was reading the live buffer", replaced)
 	}
@@ -805,10 +742,7 @@ func TestAttachCopiesTheRecordingItReplays(t *testing.T) {
 func TestDaemonRecordsItsLifecycleAndFailures(t *testing.T) {
 	base := testutil.ShortTempDir(t)
 	socket := filepath.Join(base, "daemon.sock")
-	server, err := New(socket, filepath.Join(base, "state.json"), "/bin/sh")
-	if err != nil {
-		t.Fatalf("New() error = %v", err)
-	}
+	server := newServerAt(t, socket, filepath.Join(base, "state.json"))
 	var recorded syncBuffer
 	server.SetLogger(log.New(&recorded, "", 0))
 
@@ -840,10 +774,7 @@ func TestSessionExitIsRecordedWhenStateCannotBeSaved(t *testing.T) {
 		t.Fatalf("MkdirAll() error = %v", err)
 	}
 	statePath := filepath.Join(home, "state.json")
-	server, err := New(filepath.Join(home, "daemon.sock"), statePath, "/bin/sh")
-	if err != nil {
-		t.Fatalf("New() error = %v", err)
-	}
+	server := newServerAt(t, filepath.Join(home, "daemon.sock"), statePath)
 	// Read-only directory, so the temporary file the atomic save needs cannot
 	// be created — the shape of a full disk or a permissions change.
 	if err := os.Chmod(home, 0o500); err != nil {
@@ -886,16 +817,7 @@ func TestAttachRestoresModesTheRecordingNoLongerHolds(t *testing.T) {
 	attached := make(chan error, 1)
 	go func() { attached <- value.attach(client) }()
 
-	buffer := make([]byte, 4096)
-	var seen []byte
-	for !bytes.Contains(seen, []byte("xxx")) {
-		daemonSide.SetReadDeadline(time.Now().Add(3 * time.Second))
-		count, err := daemonSide.Read(buffer)
-		seen = append(seen, buffer[:count]...)
-		if err != nil {
-			t.Fatalf("the replay stopped early: %v", err)
-		}
-	}
+	seen := readUntil(t, daemonSide, func(seen []byte) bool { return bytes.Contains(seen, []byte("xxx")) })
 	for _, mode := range []string{"\x1b[?1h", "\x1b[?2004h"} {
 		position := bytes.Index(seen, []byte(mode))
 		if position < 0 {
@@ -1013,11 +935,7 @@ func TestServeReportsAlreadyRunningWhenAnotherDaemonHoldsTheLock(t *testing.T) {
 	}
 	defer held.Close()
 
-	server, err := New(socket, filepath.Join(base, "state.json"), "/bin/sh")
-	if err != nil {
-		t.Fatalf("New() error = %v", err)
-	}
-	server.SetLogger(log.New(io.Discard, "", 0))
+	server := newServerAt(t, socket, filepath.Join(base, "state.json"))
 
 	// Serve runs on its own goroutine because a daemon that takes the lock
 	// does not return: the failure this guards against is one that serves on
@@ -1112,11 +1030,7 @@ func TestServeClearsStaleTabsBeforeTouchingTheSocket(t *testing.T) {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
-	server, err := New(socket, statePath, "/bin/sh")
-	if err != nil {
-		t.Fatalf("New() error = %v", err)
-	}
-	server.SetLogger(log.New(io.Discard, "", 0))
+	server := newServerAt(t, socket, statePath)
 	if err := server.Serve(context.Background()); err == nil {
 		t.Fatal("Serve() started on a state file it could not clear")
 	}
@@ -1161,10 +1075,7 @@ func TestSnapshotRevisionAdvancesWithPersistedState(t *testing.T) {
 	if err := os.MkdirAll(workspacePath, 0o755); err != nil {
 		t.Fatalf("MkdirAll() error = %v", err)
 	}
-	server, err := New(filepath.Join(base, "daemon.sock"), filepath.Join(base, "state.json"), "/bin/sh")
-	if err != nil {
-		t.Fatalf("New() error = %v", err)
-	}
+	server := newServerAt(t, filepath.Join(base, "daemon.sock"), filepath.Join(base, "state.json"))
 
 	initial := server.snapshot().Revision
 	added := server.addRoot(rootPath)
