@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -581,5 +582,62 @@ func TestAgentStatusReadsTheTranscriptPathTheHookReports(t *testing.T) {
 	}
 	if got := server.agentStatusesSnapshot()["tab-1"]; got.ContextTokens != 12 {
 		t.Fatalf("status = %+v, want the 12 tokens of the reported transcript", got)
+	}
+}
+
+func TestScanAgentsForgetsTheStatusOfAnExitedAgent(t *testing.T) {
+	// tab-1: Kiro quit without SessionEnd; the shell is in the foreground.
+	// tab-2: Kiro still runs. tab-3: its foreground cannot be read.
+	// tab-4: Kiro reported after the scan began, so the scan cannot have seen it.
+	shellPTY, kiroPTY, closedPTY, newPTY := new(os.File), new(os.File), new(os.File), new(os.File)
+	testutil.Set(t, &foregroundProcessGroup, func(terminal *os.File) (int, error) {
+		switch terminal {
+		case kiroPTY:
+			return 202, nil
+		case closedPTY:
+			return 0, os.ErrClosed
+		}
+		return 101, nil
+	})
+	testutil.Set(t, &runProcessList, func(context.Context) ([]byte, error) {
+		return []byte("101 1 101 101 /bin/zsh\n202 1 202 202 kiro-cli\n"), nil
+	})
+	scanStart := time.Unix(100, 0)
+	testutil.Set(t, &agentNow, func() time.Time { return scanStart })
+	old := agentRuntime{AgentStatus: model.AgentStatus{Agent: model.AgentKiro, Phase: model.AgentPhaseCompleted, SessionID: "sess_old"}, UpdatedAt: scanStart.Add(-time.Second)}
+	fresh := old
+	fresh.UpdatedAt = scanStart
+	s := &Server{
+		sessions: map[string]*session{
+			"tab-1": newSessionForTest(shellPTY), "tab-2": newSessionForTest(kiroPTY),
+			"tab-3": newSessionForTest(closedPTY), "tab-4": newSessionForTest(newPTY),
+		},
+		agentStatuses: map[string]agentRuntime{"tab-1": old, "tab-2": old, "tab-3": old, "tab-4": fresh},
+	}
+
+	agents := s.scanAgents(s.sessions)
+	if want := map[string]model.Agent{"tab-2": model.AgentKiro}; !reflect.DeepEqual(agents, want) {
+		t.Fatalf("scanAgents() = %#v, want %#v", agents, want)
+	}
+	if _, ok := s.agentStatuses["tab-1"]; ok {
+		t.Fatal("status of an exited agent was kept")
+	}
+	for _, tabID := range []string{"tab-2", "tab-3", "tab-4"} {
+		if _, ok := s.agentStatuses[tabID]; !ok {
+			t.Fatalf("status of %s was forgotten", tabID)
+		}
+	}
+}
+
+func TestScanAgentsKeepsStatusesWhenTheProcessListFails(t *testing.T) {
+	testutil.Set(t, &foregroundProcessGroup, func(*os.File) (int, error) { return 101, nil })
+	testutil.Set(t, &runProcessList, func(context.Context) ([]byte, error) { return nil, errors.New("ps failed") })
+	s := &Server{
+		sessions:      map[string]*session{"tab": newSessionForTest(new(os.File))},
+		agentStatuses: map[string]agentRuntime{"tab": {AgentStatus: model.AgentStatus{Agent: model.AgentClaude}}},
+	}
+	s.scanAgents(s.sessions)
+	if _, ok := s.agentStatuses["tab"]; !ok {
+		t.Fatal("status was forgotten although no process was read")
 	}
 }

@@ -168,6 +168,26 @@ func (s *Server) recordAgentEvent(tabID string, event *protocol.AgentEvent) prot
 	return protocol.Response{}
 }
 
+// scanAgents returns the agent in the foreground of each tab. It also forgets
+// the hook-reported status of a checked tab whose agent has exited: not every
+// exit runs a SessionEnd hook, and a stale status would otherwise come back
+// when the same agent starts again and be saved as a session to resume. A
+// status reported after the scan began is kept, because the scan cannot have
+// seen the agent that reported it.
+func (s *Server) scanAgents(sessions map[string]*session) map[string]model.Agent {
+	scannedAt := agentNow()
+	agents, checked := sessionAgents(sessions)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for tabID := range checked {
+		runtime, ok := s.agentStatuses[tabID]
+		if ok && runtime.Agent != agents[tabID] && runtime.UpdatedAt.Before(scannedAt) {
+			delete(s.agentStatuses, tabID)
+		}
+	}
+	return agents
+}
+
 // runsInForeground reports whether the tab's foreground job is among the
 // process groups above the hook that sent an event.
 func runsInForeground(value *session, groups []int) bool {
