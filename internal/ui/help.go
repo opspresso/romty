@@ -38,9 +38,7 @@ func (m dashboard) maximumHelpOffset(height int) int {
 
 // helpEntry is one line of the reference: a section heading, or a shortcut and
 // the keys that run it. Keeping the keys as data rather than only as a rendered
-// string lets the reference be checked against the key table it documents —
-// counting rendered lines said nothing about whether a shortcut was documented
-// at all.
+// string lets the reference be checked against the key table it documents.
 type helpEntry struct {
 	section     string
 	note        string

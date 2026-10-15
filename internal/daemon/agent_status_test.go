@@ -28,8 +28,6 @@ func group(id int) func(*os.File) int {
 	return func(*os.File) int { return id }
 }
 
-// writeClaudeTranscript writes a Claude Code transcript for a session run in
-// workspace, under a configuration directory the test owns.
 // writeClaudeTranscript writes a session transcript under a fresh Claude
 // config directory and returns its path, the one a hook would report.
 func writeClaudeTranscript(t *testing.T, workspace, sessionID, records string) string {
@@ -344,8 +342,8 @@ func TestAgentStatusRequiresLifecycleReportsForCodexAndClaude(t *testing.T) {
 	}
 }
 
-// The counters need the session identifier, which only a hook reports. Without
-// one romty cannot tell which of a directory's transcripts belongs to which tab.
+// The counters need the session identifier and transcript path, which only a
+// hook reports. Without them romty cannot tell which transcript is the tab's.
 func TestAgentStatusReportsTheLedgerOnlyForAHookedSession(t *testing.T) {
 	workspace := "/projects/alpha"
 	path := writeClaudeTranscript(t, workspace, "session-1", `{"type":"assistant","message":{"usage":{"input_tokens":2,`+

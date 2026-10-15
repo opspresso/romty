@@ -10,7 +10,7 @@ import (
 func BenchmarkSplitDiffViewport(b *testing.B) {
 	value := newDashboard(&fakeBackend{}, model.Snapshot{})
 	value.width, value.height = 120, 30
-	value.gitDiff = gitDiffView{
+	value.fileView = fileViewState{
 		active: true, split: true, target: model.Workspace{Path: "/workspace"},
 		files: []gitrepo.ChangedFile{{Path: "large.txt"}}, request: 1,
 	}
@@ -18,14 +18,14 @@ func BenchmarkSplitDiffViewport(b *testing.B) {
 	for range 10000 {
 		lines = append(lines, "@@ -1 +1 @@", "-old content", "+new content")
 	}
-	updated, _ := value.handleGitFileDiff(gitFileDiffMsg{
+	updated, _ := value.handleFileContent(fileContentMsg{
 		path: "/workspace", filePath: "large.txt", request: 1, lines: lines,
 	})
 	value = updated.(dashboard)
-	value.gitDiff.diffOffset = 10000
+	value.fileView.diffOffset = 10000
 	b.ReportAllocs()
 	b.ResetTimer()
 	for b.Loop() {
-		value.renderGitFileDiff(88, 28)
+		value.renderFileViewContent(88, 28)
 	}
 }

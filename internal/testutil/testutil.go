@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/opspresso/romty/internal/paths"
+	"github.com/opspresso/romty/internal/version"
 )
 
 // QuietLogger keeps the daemon's diagnostics out of test output. They belong
@@ -96,4 +97,11 @@ func WriteFile(t *testing.T, directory, name, content string) {
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatalf("write fixture: %v", err)
 	}
+}
+
+// UseReleaseBuild makes the running test binary report a release version, so
+// code that refuses to act for a development build acts.
+func UseReleaseBuild(t *testing.T) {
+	t.Helper()
+	Set(t, &version.Value, "0.15.0")
 }

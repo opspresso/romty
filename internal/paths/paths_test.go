@@ -12,7 +12,7 @@ import (
 
 func TestResolveIncludesConfigPath(t *testing.T) {
 	// Not t.TempDir: on macOS the per-user temporary directory alone leaves a
-	// daemon socket at the kernel's ceiling, which Resolve now refuses.
+	// daemon socket at the kernel's ceiling, which Resolve refuses.
 	directory := testutil.ShortTempDir(t)
 	t.Setenv("ROMTY_HOME", directory)
 
@@ -28,10 +28,9 @@ func TestResolveIncludesConfigPath(t *testing.T) {
 
 // A unix socket path has a hard ceiling in the kernel — 104 bytes on macOS,
 // 108 on Linux — and ROMTY_HOME is documented for development and isolated
-// testing, which is exactly where a deep path comes from. Everything romty
-// does goes through that socket, so all three commands failed, each with
-// `invalid argument` from bind or connect: no length, no limit, and nothing
-// naming the one setting that causes it.
+// testing, which is exactly where a deep path comes from. Resolve refuses such
+// a path with an error that names ROMTY_HOME, rather than leaving bind or
+// connect to fail with `invalid argument`.
 func TestResolveRejectsADirectoryTooDeepForTheSocket(t *testing.T) {
 	deep := filepath.Join(t.TempDir(), strings.Repeat("d", 200))
 	t.Setenv("ROMTY_HOME", deep)

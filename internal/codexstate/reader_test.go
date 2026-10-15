@@ -178,6 +178,13 @@ func TestReadLifecycleWithOrdinaryCodexSessionIdentity(t *testing.T) {
 	read(model.AgentPhaseWaitingInput)
 	set("active", "two", "inProgress", "", "waitingOnApproval")
 	read(model.AgentPhaseWaitingApproval)
+	// An approval outranks a question whichever order Codex lists them in.
+	set("active", "two", "inProgress", "", "waitingOnApproval", "waitingOnUserInput")
+	read(model.AgentPhaseWaitingApproval)
+	set("active", "two", "inProgress", "", "waitingOnUserInput", "waitingOnApproval")
+	read(model.AgentPhaseWaitingApproval)
+	set("active", "two", "inProgress", "", "somethingNew")
+	read(model.AgentPhaseUnknown)
 	set("idle", "two", "completed", "active")
 	read(model.AgentPhaseBackground)
 	set("idle", "two", "completed", "blocked")

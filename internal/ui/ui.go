@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -256,7 +257,7 @@ type dashboard struct {
 	gitStates        map[string]gitrepo.State
 	gitFetchedAt     time.Time
 	gitRun           gitActionRun
-	gitDiff          gitDiffView
+	fileView         fileViewState
 	styles           *uiStyles
 }
 
@@ -522,8 +523,8 @@ func (m dashboard) update(message tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
-		if m.gitDiff.active {
-			return m.handleGitDiffMouse(mouse)
+		if m.fileView.active {
+			return m.handleFileViewMouse(mouse)
 		}
 		if updated, command, handled := m.handleDashboardMouse(mouse); handled {
 			return updated, command
@@ -548,7 +549,7 @@ func (m dashboard) update(message tea.Msg) (tea.Model, tea.Cmd) {
 		} else if m.scrollback && m.terminal != nil {
 			m.stopScrollback()
 			m.terminal.paste(message.Content)
-		} else if !m.gitDiff.active && m.focus == terminalPane && m.terminal != nil {
+		} else if !m.fileView.active && m.focus == terminalPane && m.terminal != nil {
 			m.terminal.paste(message.Content)
 		}
 		return m, nil
@@ -572,6 +573,7 @@ func (m dashboard) update(message tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
+		paths := m.workspacePaths()
 		if !m.applySnapshot(order, message.value) {
 			return m, nil
 		}
@@ -582,10 +584,18 @@ func (m dashboard) update(message tea.Msg) (tea.Model, tea.Cmd) {
 		// resize or a daemon that would not stop, so it clears tree errors
 		// only.
 		m.clearError(treeError)
-		if m.terminalExited {
-			return m.settleAfterExit()
+		// A workspace that just appeared, such as one under a root the user
+		// added, would otherwise show no Git state and offer no Git actions
+		// until the next periodic read.
+		var readGit tea.Cmd
+		if !slices.Equal(paths, m.workspacePaths()) {
+			readGit = m.readGitStatus(false, false)
 		}
-		return m, nil
+		if m.terminalExited {
+			settled, command := m.settleAfterExit()
+			return settled, tea.Batch(command, readGit)
+		}
+		return m, readGit
 	case agentSnapshotMsg:
 		if message.err == nil {
 			kind, ring := m.soundForAgentTransitions(message.value)
@@ -620,10 +630,10 @@ func (m dashboard) update(message tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case gitActionMsg:
 		return m.handleGitActionResult(message)
-	case gitChangedFilesMsg:
-		return m.handleGitChangedFiles(message)
-	case gitFileDiffMsg:
-		return m.handleGitFileDiff(message)
+	case fileListMsg:
+		return m.handleFileList(message)
+	case fileContentMsg:
+		return m.handleFileContent(message)
 	case workspaceMsg:
 		return m.handleWorkspace(message)
 	case tabMsg:
@@ -718,7 +728,7 @@ var globalKeys = map[string]func(dashboard) (tea.Model, tea.Cmd){
 	},
 	"ctrl+shift+t": func(m dashboard) (tea.Model, tea.Cmd) { return m.newTab() },
 	"ctrl+shift+g": func(m dashboard) (tea.Model, tea.Cmd) { return m.openGitActions() },
-	"ctrl+shift+f": func(m dashboard) (tea.Model, tea.Cmd) { return m.toggleGitDiffView() },
+	"ctrl+shift+f": func(m dashboard) (tea.Model, tea.Cmd) { return m.toggleFileView() },
 	// Switching tabs from the terminal pane took Ctrl+/ and then two more keys.
 	// Ctrl+Shift+Left/Right is the chord a terminal with tabs binds, and a
 	// terminal reports it distinctly — Ctrl+Shift+Tab is not, because most
@@ -756,17 +766,17 @@ func (m dashboard) handleKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		return m.handleModalKey(message)
 	}
-	if m.gitDiff.active && m.modal != noModal {
+	if m.fileView.active && m.modal != noModal {
 		if action, ok := globalKeys[message.String()]; ok {
 			return action(m)
 		}
 		return m.handleModalKey(message)
 	}
-	if m.gitDiff.active {
+	if m.fileView.active {
 		if message.String() == "ctrl+shift+f" {
-			return m.toggleGitDiffView()
+			return m.toggleFileView()
 		}
-		return m.handleGitDiffKey(message)
+		return m.handleFileViewKey(message)
 	}
 	if action, ok := globalKeys[message.String()]; ok {
 		return action(m)

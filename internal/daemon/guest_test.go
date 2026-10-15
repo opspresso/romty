@@ -3,6 +3,7 @@ package daemon
 import (
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/opspresso/romty/internal/testutil"
 )
@@ -286,5 +287,16 @@ func TestGuestTrackerIgnoresModesInsideText(t *testing.T) {
 	tracker.observe([]byte("욛?1049h"))
 	if len(tracker.restore()) != 0 {
 		t.Fatalf("restore = %q, want nothing tracked", tracker.restore())
+	}
+}
+
+// A title longer than the cap is cut at a character boundary, so what is kept
+// is still valid UTF-8 however the cap falls inside a character.
+func TestGuestTitleIsCutAtACharacterBoundary(t *testing.T) {
+	tracker := newGuestTracker()
+	title := strings.Repeat("a", maxTitleBytes-1) + "서"
+	tracker.observe([]byte("\x1b]0;" + title + "\a"))
+	if !utf8.ValidString(tracker.title) || tracker.title != strings.Repeat("a", maxTitleBytes-1) {
+		t.Fatalf("title = %q (%d bytes), want the ASCII run without a split character", tracker.title, len(tracker.title))
 	}
 }

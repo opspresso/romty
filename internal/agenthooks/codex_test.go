@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	"github.com/pelletier/go-toml/v2"
+
+	"github.com/opspresso/romty/internal/testutil"
 )
 
 func TestCodexTitleAddsIdentityWithoutChangingOtherSettings(t *testing.T) {
@@ -71,7 +73,7 @@ func TestCodexTitlePreservesExplicitChoicesAndRefusesMalformedConfig(t *testing.
 			t.Fatalf("explicit selection changed: %s, %v", got, err)
 		}
 	}
-	useReleaseBuild(t)
+	testutil.UseReleaseBuild(t)
 	home := t.TempDir()
 	t.Setenv("CODEX_HOME", home)
 	broken := []byte("[tui\n")

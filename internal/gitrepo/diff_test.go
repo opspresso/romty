@@ -9,7 +9,7 @@ import (
 	"github.com/opspresso/romty/internal/testutil"
 )
 
-func TestReadGitChangedFilesBuildsCompleteSortedList(t *testing.T) {
+func TestChangedFilesBuildsCompleteSortedList(t *testing.T) {
 	repository := initializeDiffRepository(t)
 
 	testutil.WriteFile(t, repository, "modified.txt", "before\nafter\n")
@@ -36,7 +36,7 @@ func TestReadGitChangedFilesBuildsCompleteSortedList(t *testing.T) {
 	}
 }
 
-func TestReadGitChangedFilesPreservesRenameSource(t *testing.T) {
+func TestChangedFilesPreservesRenameSource(t *testing.T) {
 	repository := initializeDiffRepository(t)
 	testutil.RunGit(t, "-C", repository, "mv", "staged.txt", "renamed.txt")
 
@@ -53,7 +53,7 @@ func TestReadGitChangedFilesPreservesRenameSource(t *testing.T) {
 	}
 }
 
-func TestReadGitFileDiffCombinesStagedAndUnstagedChanges(t *testing.T) {
+func TestFileDiffCombinesStagedAndUnstagedChanges(t *testing.T) {
 	repository := initializeDiffRepository(t)
 	testutil.WriteFile(t, repository, "modified.txt", "before\nstaged\n")
 	testutil.RunGit(t, "-C", repository, "add", "modified.txt")
@@ -75,7 +75,7 @@ func TestReadGitFileDiffCombinesStagedAndUnstagedChanges(t *testing.T) {
 	}
 }
 
-func TestReadGitFileDiffShowsUntrackedFile(t *testing.T) {
+func TestFileDiffShowsUntrackedFile(t *testing.T) {
 	repository := initializeDiffRepository(t)
 	testutil.WriteFile(t, repository, "nested/new file.txt", "first\nsecond\n")
 
@@ -92,7 +92,7 @@ func TestReadGitFileDiffShowsUntrackedFile(t *testing.T) {
 	}
 }
 
-func TestReadGitFileDiffDoesNotRunTextconv(t *testing.T) {
+func TestFileDiffDoesNotRunTextconv(t *testing.T) {
 	repository := initializeDiffRepository(t)
 	testutil.WriteFile(t, repository, ".gitattributes", "*.txt diff=romty-test\n")
 	testutil.WriteFile(t, repository, "converter.sh", "printf invoked > converter-ran\ncat \"$1\"\n")
@@ -107,7 +107,7 @@ func TestReadGitFileDiffDoesNotRunTextconv(t *testing.T) {
 	}
 }
 
-func TestReadGitFileDiffTreatsFilenameLiterally(t *testing.T) {
+func TestFileDiffTreatsFilenameLiterally(t *testing.T) {
 	repository := initializeDiffRepository(t)
 	for _, name := range []string{"[ab].txt", "a.txt"} {
 		testutil.WriteFile(t, repository, name, "before\n")

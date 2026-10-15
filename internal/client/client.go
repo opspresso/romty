@@ -68,6 +68,8 @@ func (s *terminalStream) ReplaySize() (uint16, uint16) {
 
 var _ io.ReadWriteCloser = (*terminalStream)(nil)
 
+// New returns a client for the daemon listening on socket. It does not
+// connect until the first call.
 func New(socket string) *Client {
 	return &Client{socket: socket, id: fmt.Sprintf("%d-%d", os.Getpid(), nextClientID.Add(1))}
 }
@@ -99,6 +101,7 @@ func workspaceOf(response protocol.Response) *model.Workspace { return response.
 
 func tabOf(response protocol.Response) *model.Tab { return response.Tab }
 
+// Ping reports whether a daemon answers on the socket.
 func (c *Client) Ping() error {
 	_, err := c.probeProtocol()
 	return err
@@ -113,10 +116,12 @@ func (c *Client) ProtocolVersion() (int, error) {
 	return advertisedMaximum(response), nil
 }
 
+// Snapshot returns the workspace tree with every tab and its agent status.
 func (c *Client) Snapshot() (model.Snapshot, error) {
 	return c.snapshotCall(protocol.Request{Action: protocol.ActionSnapshot})
 }
 
+// Agents returns the agent detected in each tab, keyed by tab ID.
 func (c *Client) Agents() (map[string]model.Agent, error) {
 	supported, err := c.supports(protocol.CapabilityAgents)
 	if err != nil {
@@ -132,6 +137,8 @@ func (c *Client) Agents() (map[string]model.Agent, error) {
 	return response.Agents, nil
 }
 
+// AgentStatuses returns each tab's agent and phase, keyed by tab ID. A daemon
+// without phase reporting answers with the agent and an unknown phase.
 func (c *Client) AgentStatuses() (map[string]model.AgentStatus, error) {
 	supported, err := c.supports(protocol.CapabilityAgentStatus)
 	if err != nil {
@@ -155,6 +162,8 @@ func (c *Client) AgentStatuses() (map[string]model.AgentStatus, error) {
 	return response.AgentStatuses, nil
 }
 
+// ReportAgentEvent sends one hook event. A daemon without phase reporting
+// ignores it.
 func (c *Client) ReportAgentEvent(tabID string, event protocol.AgentEvent) error {
 	supported, err := c.supports(protocol.CapabilityAgentStatus)
 	if err != nil || !supported {
@@ -168,6 +177,8 @@ func (c *Client) ReportAgentEvent(tabID string, event protocol.AgentEvent) error
 	return err
 }
 
+// AddRoot adds the directory at path as a root. A relative path is resolved
+// against the working directory, and ~ against the home directory.
 func (c *Client) AddRoot(path string) (model.Snapshot, error) {
 	normalized, err := normalizePath(path)
 	if err != nil {
@@ -176,13 +187,15 @@ func (c *Client) AddRoot(path string) (model.Snapshot, error) {
 	return c.snapshotCall(protocol.Request{Action: protocol.ActionAddRoot, Path: normalized})
 }
 
+// normalizePath makes a root path absolute, expanding a leading ~ to the
+// user's home directory.
 func normalizePath(path string) (string, error) {
 	if path == "~" || strings.HasPrefix(path, "~/") {
 		home, err := os.UserHomeDir()
 		if err != nil {
 			return "", fmt.Errorf("resolve home directory: %w", err)
 		}
-		path = filepath.Join(home, strings.TrimPrefix(path, "~/"))
+		path = filepath.Join(home, strings.TrimPrefix(path[1:], "/"))
 	}
 	absolute, err := filepath.Abs(path)
 	if err != nil {
@@ -191,10 +204,12 @@ func normalizePath(path string) (string, error) {
 	return filepath.Clean(absolute), nil
 }
 
+// RemoveRoot forgets a root and closes its terminals. Its directory stays.
 func (c *Client) RemoveRoot(rootID string) (model.Snapshot, error) {
 	return c.snapshotCall(protocol.Request{Action: protocol.ActionRemoveRoot, RootID: rootID})
 }
 
+// RemoveWorkspace deletes a workspace directory and closes its terminals.
 func (c *Client) RemoveWorkspace(rootID, path string) (model.Snapshot, error) {
 	if err := c.require(protocol.CapabilityRemoveWorkspace, "removing workspaces"); err != nil {
 		return model.Snapshot{}, err
@@ -206,6 +221,8 @@ func (c *Client) RemoveWorkspace(rootID, path string) (model.Snapshot, error) {
 	})
 }
 
+// EnsureWorkspace returns the workspace at path under a root, creating its
+// record on first use.
 func (c *Client) EnsureWorkspace(rootID, path string) (model.Workspace, error) {
 	return callFor(c, protocol.Request{
 		Action: protocol.ActionEnsureWorkspace,
@@ -214,6 +231,7 @@ func (c *Client) EnsureWorkspace(rootID, path string) (model.Workspace, error) {
 	}, workspaceOf, "workspace")
 }
 
+// CreateTab starts a shell in a workspace at the given size.
 func (c *Client) CreateTab(workspaceID string, columns, rows uint16) (model.Tab, error) {
 	// The daemon may predate this shell by days, so the environment and the
 	// shell to run come from here rather than from whatever the daemon
@@ -228,6 +246,7 @@ func (c *Client) CreateTab(workspaceID string, columns, rows uint16) (model.Tab,
 	}, tabOf, "tab")
 }
 
+// CloseTab terminates a tab's shell and removes the tab.
 func (c *Client) CloseTab(tabID string) (model.Snapshot, error) {
 	if err := c.require(protocol.CapabilityCloseTab, "closing tabs"); err != nil {
 		return model.Snapshot{}, err
@@ -235,6 +254,7 @@ func (c *Client) CloseTab(tabID string) (model.Snapshot, error) {
 	return c.snapshotCall(protocol.Request{Action: protocol.ActionCloseTab, TabID: tabID})
 }
 
+// RenameTab changes a tab's display name.
 func (c *Client) RenameTab(tabID, name string) (model.Snapshot, error) {
 	if err := c.require(protocol.CapabilityRenameTab, "renaming tabs"); err != nil {
 		return model.Snapshot{}, err
@@ -242,6 +262,8 @@ func (c *Client) RenameTab(tabID, name string) (model.Snapshot, error) {
 	return c.snapshotCall(protocol.Request{Action: protocol.ActionRenameTab, TabID: tabID, Name: name})
 }
 
+// Resize reports this client's terminal size for a tab. The daemon applies
+// it when this client is the one the user last typed into.
 func (c *Client) Resize(tabID string, columns, rows uint16) error {
 	_, err := c.call(protocol.Request{
 		Action:   protocol.ActionResize,
@@ -253,6 +275,8 @@ func (c *Client) Resize(tabID string, columns, rows uint16) error {
 	return err
 }
 
+// Shutdown stops the daemon and waits until it has released its socket and
+// lock.
 func (c *Client) Shutdown() error {
 	response, probeErr := c.probeProtocol()
 	version := protocol.Version
@@ -367,6 +391,8 @@ func (c *Client) openAttach(tabID string) (net.Conn, *bufio.Reader, protocol.Res
 	return connection, reader, response, nil
 }
 
+// OpenTerminal attaches to a tab and returns the live stream and the recorded
+// history to restore before it.
 func (c *Client) OpenTerminal(tabID string) (io.ReadWriteCloser, []byte, error) {
 	connection, reader, response, err := c.openAttach(tabID)
 	if err != nil {

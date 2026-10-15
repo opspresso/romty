@@ -13,7 +13,7 @@ import (
 
 func TestModalFitsNarrowScreen(t *testing.T) {
 	for _, width := range []int{12, 24, 32, 40, 80} {
-		for _, kind := range []modal{helpModal, browseModal, configModal, aboutModal, gitActionsModal, shutdownModal} {
+		for _, kind := range []modal{helpModal, browseModal, configModal, aboutModal, gitActionsModal, shutdownModal, inputModal} {
 			value := newDashboard(&fakeBackend{}, model.Snapshot{})
 			value.width, value.height, value.modal = width, 24, kind
 			for _, line := range value.renderModal(value.bodySize()) {
@@ -60,7 +60,7 @@ func TestRootInputOwnsMouse(t *testing.T) {
 }
 
 func TestModalTitleClose(t *testing.T) {
-	for _, kind := range []modal{helpModal, browseModal, configModal, aboutModal, gitActionsModal, shutdownModal, closeTabModal, removeSelectionModal, hookInstallModal} {
+	for _, kind := range []modal{helpModal, browseModal, configModal, aboutModal, gitActionsModal, shutdownModal, closeTabModal, removeSelectionModal, hookInstallModal, inputModal} {
 		value := newDashboard(&fakeBackend{}, model.Snapshot{})
 		value.width, value.height, value.modal = 80, 24, kind
 		geometry := value.modalGeometry(value.bodySize())
@@ -83,12 +83,13 @@ func TestModalTitleClose(t *testing.T) {
 }
 
 func TestPendingModalCannotCloseWithMouse(t *testing.T) {
-	for _, kind := range []modal{gitActionsModal, shutdownModal, hookInstallModal} {
+	for _, kind := range []modal{gitActionsModal, shutdownModal, hookInstallModal, inputModal} {
 		value := newDashboard(&fakeBackend{}, model.Snapshot{})
 		value.width, value.height, value.modal = 80, 24, kind
 		value.gitRun.pending = kind == gitActionsModal
 		value.shutdownPending = kind == shutdownModal
 		value.hookInstallPending = kind == hookInstallModal
+		value.input.pending = kind == inputModal
 		value.agentAnimationPending = true
 		geometry := value.modalGeometry(value.bodySize())
 		if strings.Contains(ansi.Strip(geometry.lines[0]), "×") {

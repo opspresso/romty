@@ -3,17 +3,11 @@ package daemon
 // recording keeps the last maxHistoryBytes a shell printed, which is what a
 // reattaching client is shown so its screen matches the one it left.
 //
-// It is a ring. The obvious shape — append, then shift the front off once the
-// buffer is over its limit — copies the entire recording on every chunk the
-// PTY hands over: 8 MiB moved for each 32 KiB read, all of it holding the
-// session lock. That capped a terminal's output at the speed of a memmove
-// rather than the speed of the shell, around 200 MB/s on a fast machine, and
-// every attach, detach and resize queued behind it. A `cat` of a large file or
-// a verbose build is well inside the range where that shows.
-//
-// A ring writes each byte once and never moves it again. The cost of ordering
-// the bytes moves to bytes(), which runs once per attach — and attach already
-// had to copy the recording, so nothing was added there.
+// It is a ring, so each byte is written once and never moved again. A flat
+// buffer that shifts its front off would copy the whole recording on every
+// chunk the PTY hands over (8 MiB per 32 KiB read) while holding the session
+// lock. The ring puts the cost of ordering the bytes in bytes(), which runs
+// once per attach, where the recording is copied anyway.
 type recording struct {
 	// data is the ring. It grows into the limit rather than starting there:
 	// every tab holds one, and most of them hold a prompt and a command or

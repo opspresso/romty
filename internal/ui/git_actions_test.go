@@ -305,7 +305,7 @@ func gitActionsKey() tea.KeyPressMsg {
 }
 
 // The Git action list is where Push and Pull live, so its cursor is the same
-// highlighted bar the root picker draws rather than a bold row behind a chevron.
+// highlighted bar the root picker draws.
 func TestDashboardHighlightsTheSelectedGitAction(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, model.Snapshot{})
 	value.modal = gitActionsModal
@@ -315,7 +315,7 @@ func TestDashboardHighlightsTheSelectedGitAction(t *testing.T) {
 	lines := value.renderModal(100, 30)
 	rendered := strings.Join(lines, "\n")
 	// The box fits its content, so the row width is read back from what was
-	// drawn rather than pinned to the old fixed width.
+	// drawn.
 	width := lipgloss.Width(lines[0]) - 6
 	selected := value.styles.navigationSelected.Render(
 		pad("▌ "+pad("Fetch", gitActionLabelWidth)+"Update remote refs", width))
@@ -334,8 +334,8 @@ func TestDashboardHighlightsTheSelectedGitAction(t *testing.T) {
 }
 
 // The result of a Git action is a block of text the eye has to find structure
-// in. Status codes and a diffstat's + and - are that structure, and drawn flat
-// they had to be read rather than glanced at.
+// in. Status codes and a diffstat's + and - are that structure, so each is
+// drawn in its own colour.
 func TestGitActionResultIsColoured(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, model.Snapshot{})
 	value.width, value.height = 100, 24

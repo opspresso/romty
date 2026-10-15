@@ -163,8 +163,8 @@
           <div class="pane-divider"><span>│<b>▶</b></span><span>│</span></div>
           <div class="pane">
             <div class="tabs">
-              <div class="tabs-line"><span class="active"> 1 </span><span> 2 </span><span> 3 </span><span> + </span></div>
-              <div class="tab-rail"><b>━━━</b><span>─</span><i>───</i><span>─</span><i>───</i><span>─</span><i>───</i><span class="fill"></span></div>
+              <div class="tabs-line"><span class="active">  <i class="codex working" aria-label="Codex working"></i> 1  × </span> <span>  <i class="claude">■</i> 2  × </span> <span>  <i class="shell">●</i> 3  × </span> <span>  +  </span></div>
+              <div class="tab-rail"><b>━━━━━━━━━</b><span>─</span><i>─────────</i><span>─</span><i>─────────</i><span>─</span><i>─────</i><span class="fill"></span></div>
             </div>
             <pre class="agent-session"><span class="codex">╭─ Codex ─────────────────────────────────────────────────────╮</span>
 <span class="codex">│</span>  Update the homepage demo to match the current romty UI.     <span class="codex">│</span>
@@ -261,8 +261,8 @@
           </span>
           <h3>Function keys that survive IME</h3>
           <p>
-            F1 through F7 drive the whole interface, while F8 and F9 protect destructive
-            workspace actions. Physical key reporting keeps them working in any keyboard input
+            F1 through F7 drive the whole interface, while F8 opens workspace actions and F9
+            asks before stopping every session. Physical key reporting keeps them working in any keyboard input
             mode, so a Korean or Japanese IME never swallows a shortcut mid-session.
           </p>
         </div>
@@ -338,7 +338,7 @@
         <h2>Shortcut map</h2>
         <p>
           F1 through F7 work from either pane and with regular modals open. Alternatives shown
-          beside them are contextual, and file view assigns its own actions to F5 and F6.
+          beside them are contextual; file view assigns its own action to F5, and the changed-file view also assigns F6.
           Destructive actions ask first.
         </p>
       </div>
@@ -360,8 +360,8 @@
         <section class="shortcut-group">
           <h3>Workspace</h3>
           <div class="keys">
-            <div class="key-row"><span class="caps"><kbd>F8</kbd></span><span>Delete the selected workspace or forget the selected root</span></div>
-            <div class="key-row"><span class="caps"><kbd>F9</kbd></span><span>Stop the daemon and every running shell</span></div>
+            <div class="key-row"><span class="caps"><kbd>F8</kbd></span><span>Open actions for the selected workspace or root</span></div>
+            <div class="key-row"><span class="caps"><kbd>F9</kbd></span><span>Stop the daemon and every running shell after confirmation</span></div>
             <div class="key-row"><span class="caps"><kbd>i</kbd></span><span>Open About</span></div>
             <div class="key-row"><span class="caps"><kbd>Tab</kbd></span><span>Focus the terminal</span></div>
           </div>
@@ -375,6 +375,7 @@
             <div class="key-row"><span class="caps"><kbd>Ctrl+Shift+F</kbd></span><span>Toggle changed files and Git diff</span></div>
             <div class="key-row"><span class="caps"><kbd>Ctrl+Shift+←/→</kbd></span><span>Switch terminal tab</span></div>
             <div class="key-row"><span class="caps"><kbd>Ctrl+Shift+↑/↓</kbd></span><span>Switch to a workspace with a running terminal</span></div>
+            <div class="key-row"><span class="caps"><kbd>Ctrl+Shift+A</kbd></span><span>Open the next terminal whose agent is waiting</span></div>
           </div>
         </section>
 
@@ -382,31 +383,36 @@
           <h3>Move</h3>
           <div class="keys">
             <div class="key-row"><span class="caps"><kbd>↑/↓</kbd><kbd>k/j</kbd></span><span>Move one item or line</span></div>
-            <div class="key-row"><span class="caps"><kbd>←/→</kbd><kbd>h/l</kbd></span><span>Select a tab, or open a picker child or parent</span></div>
+            <div class="key-row"><span class="caps"><kbd>←/→</kbd><kbd>h/l</kbd></span><span>Select a tab, open a picker child or parent, or collapse or expand a file tree directory</span></div>
             <div class="key-row"><span class="caps"><kbd>PgUp/PgDn</kbd><kbd>Ctrl+B/F</kbd></span><span>Move one page</span></div>
             <div class="key-row"><span class="caps"><kbd>Home/End</kbd><kbd>g/G</kbd></span><span>Move to the first or last item or line</span></div>
             <div class="key-row"><span class="caps"><kbd>Shift+PgUp/PgDn</kbd></span><span>Enter scrollback or move one page</span></div>
-            <div class="key-row"><span class="caps"><kbd>Wheel</kbd></span><span>Scroll Help, history, a file diff, or the terminal</span></div>
+            <div class="key-row"><span class="caps"><kbd>Wheel</kbd></span><span>Scroll Help, a Git result, history, file view, or the terminal</span></div>
           </div>
         </section>
 
         <section class="shortcut-group">
-          <h3>File diff</h3>
+          <h3>File view</h3>
           <div class="keys">
-            <div class="key-row"><span class="caps"><kbd>F6</kbd></span><span>Toggle inline and split layouts; the last layout is remembered</span></div>
-            <div class="key-row"><span class="caps"><kbd>Ctrl+↑/↓</kbd></span><span>Move through the diff one line at a time</span></div>
+            <div class="key-row"><span class="caps"><kbd>Enter</kbd></span><span>Toggle the selected directory</span></div>
+            <div class="key-row"><span class="caps"><kbd>←/→</kbd><kbd>h/l</kbd></span><span>Collapse or expand the selected directory</span></div>
+            <div class="key-row"><span class="caps"><kbd>F6</kbd></span><span>Toggle inline and split diff layouts; the last layout is remembered</span></div>
+            <div class="key-row"><span class="caps"><kbd>Ctrl+↑/↓</kbd></span><span>Move through the content one line at a time</span></div>
           </div>
         </section>
 
         <section class="shortcut-group">
           <h3>Context</h3>
           <div class="keys">
-            <div class="key-row"><span class="caps"><kbd>Enter</kbd></span><span>Open, run, return, submit, or confirm in the workspace, picker, Git views, and prompts</span></div>
-            <div class="key-row"><span class="caps"><kbd>Esc</kbd></span><span>Close a modal or file view, cancel a prompt, or leave scrollback</span></div>
-            <div class="key-row"><span class="caps"><kbd>/</kbd></span><span>Type a path in the root picker</span></div>
-            <div class="key-row"><span class="caps"><kbd>Backspace</kbd></span><span>Erase a path character</span></div>
+            <div class="key-row"><span class="caps"><kbd>Enter</kbd></span><span>Open, run, return, submit, confirm, or toggle a setting in the workspace, picker, Config, Git views, and input modals</span></div>
+            <div class="key-row"><span class="caps"><kbd>Esc</kbd></span><span>Close a modal or file view, cancel an input modal, or leave scrollback</span></div>
+            <div class="key-row"><span class="caps"><kbd>/</kbd></span><span>Find in scrollback, or type a path in the root picker</span></div>
+            <div class="key-row"><span class="caps"><kbd>n/N</kbd></span><span>Move to the next or previous scrollback match</span></div>
+            <div class="key-row"><span class="caps"><kbd>Backspace</kbd></span><span>Erase the last typed character</span></div>
             <div class="key-row"><span class="caps"><kbd>←/→</kbd><kbd>[/]</kbd></span><span>Resize the workspace pane in Config</span></div>
             <div class="key-row"><span class="caps"><kbd>m</kbd></span><span>Toggle the scrollback mouse in Config</span></div>
+            <div class="key-row"><span class="caps"><kbd>d</kbd><kbd>b</kbd></span><span>Toggle the done and waiting sounds in Config</span></div>
+            <div class="key-row"><span class="caps"><kbd>s</kbd></span><span>Play the done sound in Config</span></div>
           </div>
         </section>
       </div>

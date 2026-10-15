@@ -172,9 +172,9 @@ func TestWorkspaceActionsRunTerminalAndFileCommands(t *testing.T) {
 		value.gitStates = map[string]gitrepo.State{workspace.Path: {Branch: "main", Dirty: true}}
 		value.setNavigation(1)
 		value, command := runWorkspaceAction(t, value, workspaceFileChangesAction)
-		if command == nil || value.modal != noModal || !value.gitDiff.active || value.gitDiff.target.Path != workspace.Path {
+		if command == nil || value.modal != noModal || !value.fileView.active || value.fileView.target.Path != workspace.Path {
 			t.Fatalf("file changes = (command %v, modal %v, active %v, target %q)",
-				command, value.modal, value.gitDiff.active, value.gitDiff.target.Path)
+				command, value.modal, value.fileView.active, value.fileView.target.Path)
 		}
 	})
 
@@ -183,9 +183,9 @@ func TestWorkspaceActionsRunTerminalAndFileCommands(t *testing.T) {
 		value := newDashboard(&fakeBackend{}, snapshot)
 		value.setNavigation(1)
 		value, command := runWorkspaceAction(t, value, workspaceAllFilesAction)
-		if command == nil || value.modal != noModal || !value.gitDiff.active ||
-			value.gitDiff.mode != allFilesView || value.gitDiff.target.Path != workspace.Path {
-			t.Fatalf("all files = (command %v, modal %v, state %#v)", command, value.modal, value.gitDiff)
+		if command == nil || value.modal != noModal || !value.fileView.active ||
+			value.fileView.mode != allFilesView || value.fileView.target.Path != workspace.Path {
+			t.Fatalf("all files = (command %v, modal %v, state %#v)", command, value.modal, value.fileView)
 		}
 	})
 }

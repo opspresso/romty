@@ -92,7 +92,7 @@ func TestVersionAndHelpDoNotNeedARuntime(t *testing.T) {
 }
 
 func TestHooksCommandInstallsDetectedAgentHooksWithoutARuntime(t *testing.T) {
-	useReleaseBuild(t)
+	testutil.UseReleaseBuild(t)
 	bin := fakeAgents(t, "claude", "codex")
 	claudeHome := filepath.Join(t.TempDir(), "claude")
 	codexHome := filepath.Join(t.TempDir(), "codex")
@@ -118,7 +118,7 @@ func TestHooksCommandInstallsDetectedAgentHooksWithoutARuntime(t *testing.T) {
 }
 
 func TestHooksCommandDoesNotOverwriteInvalidSettings(t *testing.T) {
-	useReleaseBuild(t)
+	testutil.UseReleaseBuild(t)
 	bin := fakeAgents(t, "claude")
 	home := t.TempDir()
 	settings := filepath.Join(home, "settings.json")
@@ -165,11 +165,6 @@ func TestHooksCommandSkipsDevelopmentBuild(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(home, "settings.json")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("development hooks created settings: %v", err)
 	}
-}
-
-func useReleaseBuild(t *testing.T) {
-	t.Helper()
-	testutil.Set(t, &version.Value, "0.15.0")
 }
 
 func TestStatusAndListDoNotStartAMissingDaemon(t *testing.T) {

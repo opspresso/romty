@@ -2,8 +2,10 @@ package daemon
 
 import (
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/opspresso/romty/internal/display"
 )
@@ -168,7 +170,12 @@ func (t *guestTracker) applyTitle(content string) {
 		return
 	}
 	if len(text) > maxTitleBytes {
-		text = text[:maxTitleBytes]
+		// Cut at a character boundary, so the kept title is valid UTF-8.
+		cut := maxTitleBytes
+		for cut > 0 && !utf8.RuneStart(text[cut]) {
+			cut--
+		}
+		text = text[:cut]
 	}
 	t.title = text
 }
@@ -179,13 +186,8 @@ func (t *guestTracker) apply(params string, enabled bool) {
 	}
 	for _, field := range strings.Split(params[1:], ";") {
 		mode, err := strconv.Atoi(field)
-		if err != nil {
-			continue
-		}
-		for _, tracked := range trackedModes {
-			if mode == tracked {
-				t.set[mode] = enabled
-			}
+		if err == nil && slices.Contains(trackedModes, mode) {
+			t.set[mode] = enabled
 		}
 	}
 }

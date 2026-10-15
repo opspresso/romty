@@ -62,10 +62,9 @@ func (s *resumeStore) recordingPath(id string) string {
 // save writes one tab's snapshot under its tab ID. The ID only names the
 // files; matching at restore goes by the workspace inside the metadata.
 func (s *resumeStore) save(id string, meta resumeSnapshot, recording []byte) error {
-	if err := os.MkdirAll(s.directory, 0o700); err != nil {
-		return fmt.Errorf("create resume directory: %w", err)
-	}
-	if err := os.WriteFile(s.recordingPath(id), recording, 0o600); err != nil {
+	// The recording is written first and atomically, so the metadata that
+	// makes a snapshot visible to take never names a partial recording.
+	if err := jsonfile.WriteBytes(s.recordingPath(id), recording); err != nil {
 		return fmt.Errorf("save resume recording: %w", err)
 	}
 	if err := jsonfile.Write(s.metaPath(id), meta); err != nil {

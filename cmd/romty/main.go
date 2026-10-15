@@ -114,9 +114,9 @@ func runDaemon(runtime paths.Paths) error {
 	if err := server.Serve(ctx); err != nil {
 		if errors.Is(err, daemon.ErrAlreadyRunning) {
 			// Losing the race for the socket is the ordinary outcome of two
-			// clients starting at once, not a failure — but exiting in
-			// silence left daemon.log empty, and the caller that gives up
-			// with "see daemon.log" pointing at nothing.
+			// clients starting at once, not a failure. The line goes to
+			// daemon.log, which is where "daemon did not become ready" sends
+			// the user.
 			fmt.Fprintln(os.Stderr, "romty: another daemon already owns the socket; exiting")
 			return nil
 		}

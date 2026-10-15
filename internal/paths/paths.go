@@ -43,11 +43,9 @@ func Resolve() (Paths, error) {
 	}
 	socket := filepath.Join(absolute, "daemon.sock")
 	// Checked here, where the path is built, because everything romty does
-	// goes through this socket: the TUI, `romty stop` and the daemon all fail
-	// on a path the kernel will not take. What they failed with was `bind:
-	// invalid argument` or `connect: invalid argument`, which says nothing
-	// about a length, names no limit, and offers nothing to change — and the
-	// only way to reach it is ROMTY_HOME, which the error can name.
+	// goes through this socket. The kernel refuses a path that is too long with
+	// a bare `invalid argument`; this error names the limit and ROMTY_HOME,
+	// the one setting that can cause it.
 	if len(socket) >= SocketPathLimit {
 		return Paths{}, fmt.Errorf(
 			"romty directory is too deep: its daemon socket %s is %d bytes and a unix socket path must be under %d; set ROMTY_HOME to a shorter directory",

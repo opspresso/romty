@@ -525,26 +525,32 @@ pre {
   font-style: normal;
 }
 
-.markers .claude {
+.markers .claude,
+.tabs-line .claude {
   color: var(--agent-claude);
 }
 
-.markers .codex {
+.markers .codex,
+.tabs-line .codex {
   color: var(--agent-codex);
 }
 
-.markers .shell {
-  color: var(--accent);
+/* A tab without a detected agent is neutral; teal is romty's own accent. */
+.markers .shell,
+.tabs-line .shell {
+  color: var(--text);
 }
 
-.markers .working {
+.markers .working,
+.tabs-line .working {
   display: inline-block;
   flex: 0 0 1ch;
   width: 1ch;
   text-align: center;
 }
 
-.markers .working::before {
+.markers .working::before,
+.tabs-line .working::before {
   content: "◐";
   animation: agent-phase 1s steps(1) infinite;
 }
@@ -579,15 +585,19 @@ pre {
   color: var(--muted);
 }
 
+/* Labels and rail are drawn cell for cell as romty draws them, so the rail
+   lines up under each label in the monospace font. */
 .tabs-line {
-  display: flex;
-  gap: 0.35rem;
+  white-space: pre;
+  overflow: hidden;
 }
 
 .tabs-line span {
-  min-width: 2rem;
-  text-align: center;
   background: var(--surface);
+}
+
+.tabs-line i {
+  font-style: normal;
 }
 
 .tabs-line .active {
@@ -600,15 +610,16 @@ pre {
   display: flex;
   color: var(--border);
   line-height: 1;
+  white-space: pre;
 }
 
 .tab-rail b {
   color: var(--accent);
+  /* The bold face draws box rules wider than a cell. */
+  font-weight: 400;
 }
 
 .tab-rail i {
-  min-width: 2rem;
-  text-align: center;
   font-style: normal;
 }
 
