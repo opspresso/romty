@@ -10,7 +10,8 @@ import (
 	"github.com/opspresso/romty/internal/model"
 )
 
-func workspaceActionsSnapshot(tabs []model.Tab) (model.Snapshot, model.Workspace) {
+// alphaWorkspaceSnapshot holds one workspace, alpha, with tabs.
+func alphaWorkspaceSnapshot(tabs []model.Tab) (model.Snapshot, model.Workspace) {
 	workspace := model.Workspace{
 		ID: "workspace-1", RootID: "root-1", Name: "alpha", Path: "/projects/alpha",
 	}
@@ -31,8 +32,19 @@ func workspaceActionIndexFor(t *testing.T, value dashboard, action workspaceActi
 	return 0
 }
 
+// runWorkspaceAction opens the actions for the selected workspace with F8 and
+// runs action with Enter.
+func runWorkspaceAction(t *testing.T, value dashboard, action workspaceAction) (dashboard, tea.Cmd) {
+	t.Helper()
+	updated, _ := value.Update(key(tea.KeyF8, ""))
+	value = updated.(dashboard)
+	value.workspaceActionIndex = workspaceActionIndexFor(t, value, action)
+	updated, command := value.Update(key(tea.KeyEnter, ""))
+	return updated.(dashboard), command
+}
+
 func TestWorkspaceActionsStartWithThePrimaryTerminalAction(t *testing.T) {
-	running := []model.Tab{{ID: "tab-1", WorkspaceID: "workspace-1", Name: "1", Running: true}}
+	running := openTabs(1)
 	for _, probe := range []struct {
 		name    string
 		tabs    []model.Tab
@@ -47,7 +59,7 @@ func TestWorkspaceActionsStartWithThePrimaryTerminalAction(t *testing.T) {
 		{name: "unreadable root", failure: "not found", want: workspaceRemoveAction},
 	} {
 		t.Run(probe.name, func(t *testing.T) {
-			snapshot, workspace := workspaceActionsSnapshot(probe.tabs)
+			snapshot, workspace := alphaWorkspaceSnapshot(probe.tabs)
 			value := newDashboard(&fakeBackend{}, snapshot)
 			value.setNavigation(1)
 			target, _ := value.navigationItem()
@@ -62,7 +74,7 @@ func TestWorkspaceActionsStartWithThePrimaryTerminalAction(t *testing.T) {
 }
 
 func TestWorkspaceActionsExposeEveryGitOperationDirectly(t *testing.T) {
-	snapshot, workspace := workspaceActionsSnapshot(nil)
+	snapshot, workspace := alphaWorkspaceSnapshot(nil)
 	value := newDashboard(&fakeBackend{}, snapshot)
 	value.gitStates = map[string]gitState{workspace.Path: {Branch: "main", Dirty: true}}
 	value.setNavigation(1)
@@ -91,16 +103,11 @@ func TestWorkspaceActionsExposeEveryGitOperationDirectly(t *testing.T) {
 }
 
 func TestWorkspaceActionsRunAGitOperationAndReturnToThePalette(t *testing.T) {
-	snapshot, workspace := workspaceActionsSnapshot(nil)
+	snapshot, workspace := alphaWorkspaceSnapshot(nil)
 	value := newDashboard(&fakeBackend{}, snapshot)
 	value.gitStates = map[string]gitState{workspace.Path: {Branch: "main"}}
 	value.setNavigation(1)
-	updated, _ := value.Update(key(tea.KeyF8, ""))
-	value = updated.(dashboard)
-	value.workspaceActionIndex = workspaceActionIndexFor(t, value, workspaceGitPullAction)
-
-	updated, command := value.Update(key(tea.KeyEnter, ""))
-	value = updated.(dashboard)
+	value, command := runWorkspaceAction(t, value, workspaceGitPullAction)
 	if command == nil || value.modal != gitActionsModal || !value.gitActionPending || value.gitAction != gitPullAction ||
 		value.gitActionTarget.Path != workspace.Path {
 		t.Fatalf("Git pull = (command %v, modal %v, pending %v, action %v, target %q)",
@@ -110,7 +117,7 @@ func TestWorkspaceActionsRunAGitOperationAndReturnToThePalette(t *testing.T) {
 	value.gitActionPending = false
 	value.gitActionComplete = true
 	value.gitActionOutput = "Already up to date."
-	updated, _ = value.Update(key(tea.KeyEnter, ""))
+	updated, _ := value.Update(key(tea.KeyEnter, ""))
 	value = updated.(dashboard)
 	if value.modal != workspaceActionsModal || value.gitActionComplete {
 		t.Fatalf("Git result returned to modal %v with complete=%v, want workspace actions", value.modal, value.gitActionComplete)
@@ -119,58 +126,40 @@ func TestWorkspaceActionsRunAGitOperationAndReturnToThePalette(t *testing.T) {
 
 func TestWorkspaceActionsRunTerminalAndFileCommands(t *testing.T) {
 	t.Run("new tab", func(t *testing.T) {
-		snapshot, _ := workspaceActionsSnapshot(nil)
+		snapshot, _ := alphaWorkspaceSnapshot(nil)
 		value := newDashboard(&fakeBackend{}, snapshot)
 		value.setNavigation(1)
-		updated, _ := value.Update(key(tea.KeyF8, ""))
-		value = updated.(dashboard)
-		value.workspaceActionIndex = workspaceActionIndexFor(t, value, workspaceNewTabAction)
-
-		updated, command := value.Update(key(tea.KeyEnter, ""))
-		value = updated.(dashboard)
+		value, command := runWorkspaceAction(t, value, workspaceNewTabAction)
 		if command == nil || value.modal != noModal || value.tabIndex != 0 {
 			t.Fatalf("new tab = (command %v, modal %v, tab %d)", command, value.modal, value.tabIndex)
 		}
 	})
 
 	t.Run("open terminal", func(t *testing.T) {
-		tabs := []model.Tab{{ID: "tab-1", WorkspaceID: "workspace-1", Name: "1", Running: true}}
-		snapshot, _ := workspaceActionsSnapshot(tabs)
+		tabs := openTabs(1)
+		snapshot, _ := alphaWorkspaceSnapshot(tabs)
 		value := newDashboard(&fakeBackend{}, snapshot)
 		value.setNavigation(1)
-		updated, _ := value.Update(key(tea.KeyF8, ""))
-		value = updated.(dashboard)
-		value.workspaceActionIndex = workspaceActionIndexFor(t, value, workspaceOpenTerminalAction)
-
-		updated, command := value.Update(key(tea.KeyEnter, ""))
-		value = updated.(dashboard)
+		value, command := runWorkspaceAction(t, value, workspaceOpenTerminalAction)
 		if command == nil || value.modal != noModal || value.tabIndex != 0 {
 			t.Fatalf("open terminal = (command %v, modal %v, tab %d)", command, value.modal, value.tabIndex)
 		}
 	})
 
 	t.Run("close tab", func(t *testing.T) {
-		tabs := []model.Tab{
-			{ID: "tab-1", WorkspaceID: "workspace-1", Name: "1", Running: true},
-			{ID: "tab-2", WorkspaceID: "workspace-1", Name: "2", Running: true},
-		}
-		snapshot, _ := workspaceActionsSnapshot(tabs)
+		tabs := openTabs(2)
+		snapshot, _ := alphaWorkspaceSnapshot(tabs)
 		value := newDashboard(&fakeBackend{}, snapshot)
 		value.setNavigation(1)
 		value.tabIndex = 1
-		updated, _ := value.Update(key(tea.KeyF8, ""))
-		value = updated.(dashboard)
-		value.workspaceActionIndex = workspaceActionIndexFor(t, value, workspaceCloseTabAction)
-
-		updated, command := value.Update(key(tea.KeyEnter, ""))
-		value = updated.(dashboard)
+		value, command := runWorkspaceAction(t, value, workspaceCloseTabAction)
 		if command != nil || value.modal != closeTabModal || value.closeTabTarget.ID != tabs[1].ID {
 			t.Fatalf("close tab = (command %v, modal %v, target %q)", command, value.modal, value.closeTabTarget.ID)
 		}
 	})
 
 	t.Run("no tab to close", func(t *testing.T) {
-		snapshot, _ := workspaceActionsSnapshot(nil)
+		snapshot, _ := alphaWorkspaceSnapshot(nil)
 		value := newDashboard(&fakeBackend{}, snapshot)
 		value.setNavigation(1)
 		updated, _ := value.Update(key(tea.KeyF8, ""))
@@ -184,16 +173,11 @@ func TestWorkspaceActionsRunTerminalAndFileCommands(t *testing.T) {
 	})
 
 	t.Run("file changes", func(t *testing.T) {
-		snapshot, workspace := workspaceActionsSnapshot(nil)
+		snapshot, workspace := alphaWorkspaceSnapshot(nil)
 		value := newDashboard(&fakeBackend{}, snapshot)
 		value.gitStates = map[string]gitState{workspace.Path: {Branch: "main", Dirty: true}}
 		value.setNavigation(1)
-		updated, _ := value.Update(key(tea.KeyF8, ""))
-		value = updated.(dashboard)
-		value.workspaceActionIndex = workspaceActionIndexFor(t, value, workspaceFileChangesAction)
-
-		updated, command := value.Update(key(tea.KeyEnter, ""))
-		value = updated.(dashboard)
+		value, command := runWorkspaceAction(t, value, workspaceFileChangesAction)
 		if command == nil || value.modal != noModal || !value.gitDiff.active || value.gitDiff.target.Path != workspace.Path {
 			t.Fatalf("file changes = (command %v, modal %v, active %v, target %q)",
 				command, value.modal, value.gitDiff.active, value.gitDiff.target.Path)
@@ -201,15 +185,10 @@ func TestWorkspaceActionsRunTerminalAndFileCommands(t *testing.T) {
 	})
 
 	t.Run("all files", func(t *testing.T) {
-		snapshot, workspace := workspaceActionsSnapshot(nil)
+		snapshot, workspace := alphaWorkspaceSnapshot(nil)
 		value := newDashboard(&fakeBackend{}, snapshot)
 		value.setNavigation(1)
-		updated, _ := value.Update(key(tea.KeyF8, ""))
-		value = updated.(dashboard)
-		value.workspaceActionIndex = workspaceActionIndexFor(t, value, workspaceAllFilesAction)
-
-		updated, command := value.Update(key(tea.KeyEnter, ""))
-		value = updated.(dashboard)
+		value, command := runWorkspaceAction(t, value, workspaceAllFilesAction)
 		if command == nil || value.modal != noModal || !value.gitDiff.active ||
 			value.gitDiff.mode != allFilesView || value.gitDiff.target.Path != workspace.Path {
 			t.Fatalf("all files = (command %v, modal %v, state %#v)", command, value.modal, value.gitDiff)
@@ -218,22 +197,17 @@ func TestWorkspaceActionsRunTerminalAndFileCommands(t *testing.T) {
 }
 
 func TestWorkspaceActionsOpenRemovalConfirmationForCapturedTarget(t *testing.T) {
-	snapshot, workspace := workspaceActionsSnapshot(nil)
+	snapshot, workspace := alphaWorkspaceSnapshot(nil)
 	value := newDashboard(&fakeBackend{}, snapshot)
 	value.setNavigation(1)
-	updated, _ := value.Update(key(tea.KeyF8, ""))
-	value = updated.(dashboard)
-	value.workspaceActionIndex = workspaceActionIndexFor(t, value, workspaceRemoveAction)
-
-	updated, command := value.Update(key(tea.KeyEnter, ""))
-	value = updated.(dashboard)
+	value, command := runWorkspaceAction(t, value, workspaceRemoveAction)
 	if command != nil || value.modal != removeSelectionModal || value.removeTarget.workspace.Path != workspace.Path {
 		t.Fatalf("remove action = (command %v, modal %v, target %q)", command, value.modal, value.removeTarget.workspace.Path)
 	}
 }
 
 func TestDashboardRightClickOpensActionsForThePointedWorkspace(t *testing.T) {
-	snapshot, workspace := workspaceActionsSnapshot(nil)
+	snapshot, workspace := alphaWorkspaceSnapshot(nil)
 	value := newDashboard(&fakeBackend{}, snapshot)
 	value.width, value.height = 120, 30
 
@@ -264,8 +238,8 @@ func TestDashboardRightClickOpensActionsForThePointedWorkspace(t *testing.T) {
 }
 
 func TestWorkspaceActionsWindowACompactScreen(t *testing.T) {
-	tabs := []model.Tab{{ID: "tab-1", WorkspaceID: "workspace-1", Name: "1", Running: true}}
-	snapshot, workspace := workspaceActionsSnapshot(tabs)
+	tabs := openTabs(1)
+	snapshot, workspace := alphaWorkspaceSnapshot(tabs)
 	value := newDashboard(&fakeBackend{}, snapshot)
 	value.width, value.height = 80, 10
 	value.gitStates = map[string]gitState{workspace.Path: {Branch: "main"}}
@@ -284,7 +258,7 @@ func TestWorkspaceActionsWindowACompactScreen(t *testing.T) {
 }
 
 func TestWorkspaceActionsOverlayOnlyItsPopupRectangle(t *testing.T) {
-	snapshot, _ := workspaceActionsSnapshot(nil)
+	snapshot, _ := alphaWorkspaceSnapshot(nil)
 	value := newDashboard(&fakeBackend{}, snapshot)
 	value.width, value.height = 120, 30
 	value.setNavigation(1)
@@ -305,7 +279,7 @@ func TestWorkspaceActionsOverlayOnlyItsPopupRectangle(t *testing.T) {
 }
 
 func TestWorkspaceActionsClampThePopupToTheScreen(t *testing.T) {
-	snapshot, _ := workspaceActionsSnapshot(nil)
+	snapshot, _ := alphaWorkspaceSnapshot(nil)
 	value := newDashboard(&fakeBackend{}, snapshot)
 	value.width, value.height = 80, 10
 	value.setNavigation(1)

@@ -26,13 +26,7 @@ func openTabs(count int) []model.Tab {
 
 // tabCloseDashboard selects a workspace holding tabs.
 func tabCloseDashboard(tabs []model.Tab) (dashboard, *fakeBackend) {
-	workspace := model.Workspace{
-		ID: "workspace-1", RootID: "root-1", Name: "alpha", Path: "/projects/alpha",
-	}
-	snapshot := model.Snapshot{Roots: []model.RootView{{
-		Root:        model.Root{ID: "root-1", Name: "projects", Path: "/projects"},
-		Directories: []model.WorkspaceView{{Workspace: workspace, Tabs: tabs}},
-	}}}
+	snapshot, workspace := alphaWorkspaceSnapshot(tabs)
 	backend := &fakeBackend{snapshot: snapshot}
 	value := newDashboard(backend, snapshot)
 	value.selectedWorkspaceID, value.selectedPath = workspace.ID, workspace.Path
