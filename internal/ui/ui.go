@@ -535,12 +535,12 @@ func (m dashboard) update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case tea.PasteMsg:
-		if m.modal == inputModal {
-			if !m.input.pending {
-				m.input.text += message.Content
-				m.input.err = ""
-			}
-		} else if m.modal != noModal || m.shutdownPending || m.gitRun.pending || m.hookInstallPending {
+		if m.requestPending() {
+			return m, nil
+		} else if m.modal == inputModal {
+			m.input.text += message.Content
+			m.input.err = ""
+		} else if m.modal != noModal {
 			return m, nil
 		} else if m.scrollback && m.search.typing {
 			m.search.query += message.Content
@@ -743,17 +743,16 @@ var globalKeys = map[string]func(dashboard) (tea.Model, tea.Cmd){
 }
 
 func (m dashboard) handleKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	if m.modal == inputModal {
-		return m.handleInput(message)
-	}
-	// A shutdown already asked for, a Git command already running, an installer
-	// already writing: the request is out and no key can take it back, so the
-	// only one that still applies is the one that leaves romty.
-	if m.shutdownPending || m.gitRun.pending || m.hookInstallPending {
+	// While a request is out no key can take it back, so the only one that
+	// still applies is the one that leaves romty.
+	if m.requestPending() {
 		if message.String() == "f4" {
 			return m.quit()
 		}
 		return m, nil
+	}
+	if m.modal == inputModal {
+		return m.handleInput(message)
 	}
 	if m.modal == hookInstallModal {
 		if message.String() == "f4" {
@@ -1196,9 +1195,16 @@ func (m dashboard) refreshAll() (tea.Model, tea.Cmd) {
 	return m, tea.Batch(tree, m.readGitStatus(false, false), m.readGitStatus(true, false))
 }
 
+// requestPending reports a request a modal is waiting on: a daemon shutdown, a
+// Git command, a hook install, or an input modal's submit. The modal stays on
+// screen and takes no input until the answer arrives.
+func (m dashboard) requestPending() bool {
+	return m.shutdownPending || m.gitRun.pending || m.hookInstallPending || m.input.pending
+}
+
 func (m dashboard) hasPendingActivity() bool {
-	return m.tabPending || m.tabClosePending != "" || m.restorePending || m.gitRun.pending || m.shutdownPending ||
-		m.hookInstallPending || m.input.pending || m.modal == browseModal && m.browse.loading
+	return m.requestPending() || m.tabPending || m.tabClosePending != "" || m.restorePending ||
+		m.modal == browseModal && m.browse.loading
 }
 
 func (m *dashboard) selectWorkspace() tea.Cmd {

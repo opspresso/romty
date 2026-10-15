@@ -63,16 +63,8 @@ func (m *dashboard) openInput(state inputState) {
 }
 
 // handleInput takes every key while the input modal is open, F4 included, so
-// a stray function key cannot discard what was typed. While a submit is out,
-// only F4 applies, as in every other pending state: the request cannot be
-// taken back, and its answer belongs to the text that was sent.
+// a stray function key cannot discard what was typed.
 func (m dashboard) handleInput(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	if m.input.pending {
-		if message.String() == "f4" {
-			return m.quit()
-		}
-		return m, nil
-	}
 	switch message.String() {
 	case "esc":
 		m.closeInput()

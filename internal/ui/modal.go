@@ -243,8 +243,7 @@ func (m dashboard) renderModal(width, height int) []string {
 }
 
 func (m dashboard) modalCanClose() bool {
-	return m.modal != noModal && m.modal != workspaceActionsModal &&
-		!m.shutdownPending && !m.hookInstallPending && !m.gitRun.pending && !m.input.pending
+	return m.modal != noModal && m.modal != workspaceActionsModal && !m.requestPending()
 }
 
 func (m dashboard) renderModalBody(width, height int) []string {
