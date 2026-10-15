@@ -3019,8 +3019,8 @@ func TestDashboardBacksOffRepeatedReattaches(t *testing.T) {
 		if value.terminal == nil {
 			t.Fatal("the reattach did not open a terminal")
 		}
-		updated, _ := value.Update(terminalOutputMsg{terminal: value.terminal, err: io.EOF})
-		return updated.(dashboard)
+		send(&value, terminalOutputMsg{terminal: value.terminal, err: io.EOF})
+		return value
 	}
 
 	// The first drop reconnects at once: a one-off should recover unnoticed.
@@ -3068,7 +3068,6 @@ func TestDashboardBacksOffRepeatedReattaches(t *testing.T) {
 	if backend.openedTab != "tab-1" {
 		t.Fatalf("opened %q, want the dropping tab", backend.openedTab)
 	}
-
 }
 
 // Opening a workspace is the user asking again, so pending retries start over
@@ -3170,35 +3169,35 @@ func TestDashboardKeepsErrorsARefreshDoesNotAnswer(t *testing.T) {
 				// has to be the one on screen.
 				m.terminal = newEmbeddedTerminal("tab-1", newMemoryStream(""), 40, 10)
 				t.Cleanup(m.closeTerminal)
-				updated, _ := m.Update(resizeFailedMsg{
+				send(&m, resizeFailedMsg{
 					tabID: "tab-1",
 					err:   errors.New("terminal session not found"),
 				})
-				return updated.(dashboard)
+				return m
 			},
 			survives: true,
 		},
 		{
 			name: "a daemon that would not stop",
 			raise: func(m dashboard) dashboard {
-				updated, _ := m.Update(daemonStoppedMsg{err: errors.New("connection reset")})
-				return updated.(dashboard)
+				send(&m, daemonStoppedMsg{err: errors.New("connection reset")})
+				return m
 			},
 			survives: true,
 		},
 		{
 			name: "config that could not be written",
 			raise: func(m dashboard) dashboard {
-				updated, _ := m.Update(configSavedMsg{err: errors.New("read-only file system")})
-				return updated.(dashboard)
+				send(&m, configSavedMsg{err: errors.New("read-only file system")})
+				return m
 			},
 			survives: true,
 		},
 		{
 			name: "a snapshot that failed",
 			raise: func(m dashboard) dashboard {
-				updated, _ := m.Update(snapshotMsg{err: errors.New("daemon: read root")})
-				return updated.(dashboard)
+				send(&m, snapshotMsg{err: errors.New("daemon: read root")})
+				return m
 			},
 			survives: false,
 		},
