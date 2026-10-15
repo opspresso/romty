@@ -12,6 +12,19 @@ import (
 	"unicode"
 )
 
+// Control bytes the terminal parsers in romty look for. The C1 introducers
+// are the single-byte forms of ESC [, ESC ] and ESC P, and ST the single-byte
+// string terminator. A terminal accepts either form, so a scanner that only
+// knows the ESC form misses the same sequence in the other.
+const (
+	Escape = 0x1b
+	Bell   = 0x07
+	CSI    = 0x9b
+	OSC    = 0x9d
+	DCS    = 0x90
+	ST     = 0x9c
+)
+
 // replacement is what a control character becomes. It is one cell wide, so a
 // line that held one still measures the width romty laid out for it.
 const replacement = '�'
