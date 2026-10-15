@@ -916,7 +916,11 @@ func installedHooksNotice(results []agenthooks.Result) string {
 	for _, result := range results {
 		names = append(names, result.Provider.DisplayName())
 	}
-	return strings.Join(names, " and ") + " hooks installed; restart running agent sessions"
+	list := strings.Join(names, " and ")
+	if len(names) > 2 {
+		list = strings.Join(names[:len(names)-1], ", ") + " and " + names[len(names)-1]
+	}
+	return list + " hooks installed; restart running agent sessions"
 }
 
 // isDoubleClick records a click on a tab label and reports whether it is the

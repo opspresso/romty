@@ -5520,3 +5520,25 @@ func TestDashboardOrdersResizesAcrossReattachments(t *testing.T) {
 		t.Fatalf("stale command changed PTY columns to %d", backend.columns)
 	}
 }
+
+func TestInstalledHooksNoticeListsProvidersAsASentence(t *testing.T) {
+	results := func(providers ...agenthooks.Provider) []agenthooks.Result {
+		value := make([]agenthooks.Result, len(providers))
+		for index, provider := range providers {
+			value[index] = agenthooks.Result{Provider: provider}
+		}
+		return value
+	}
+	for _, probe := range []struct {
+		results []agenthooks.Result
+		want    string
+	}{
+		{results(agenthooks.ProviderKiro), "Kiro hooks installed"},
+		{results(agenthooks.ProviderClaude, agenthooks.ProviderCodex), "Claude Code and Codex hooks installed"},
+		{results(agenthooks.ProviderClaude, agenthooks.ProviderCodex, agenthooks.ProviderKiro), "Claude Code, Codex and Kiro hooks installed"},
+	} {
+		if got := installedHooksNotice(probe.results); !strings.HasPrefix(got, probe.want+";") {
+			t.Fatalf("installedHooksNotice() = %q, want it to start with %q", got, probe.want)
+		}
+	}
+}
