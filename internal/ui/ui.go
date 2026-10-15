@@ -256,19 +256,13 @@ type dashboard struct {
 	workspaceActionAnchorY int
 	// config is the document as loaded, kept so saving edits it instead of
 	// reconstructing it from fields.
-	config           Config
-	leftWidth        int
-	navigationResize bool
-	hover            hoverTarget
-	mousePassthrough bool
-	scrollbackMouse  bool
-	// searchMode is scrollback's find prompt; searchQuery what has been typed
-	// into it. searchMatches are the absolute lines the confirmed query is on,
-	// oldest first, and searchIndex which of them the viewport sits on.
-	searchMode        bool
-	searchQuery       string
-	searchMatches     []int
-	searchIndex       int
+	config            Config
+	leftWidth         int
+	navigationResize  bool
+	hover             hoverTarget
+	mousePassthrough  bool
+	scrollbackMouse   bool
+	search            scrollbackSearch
 	soundOnDone       bool
 	soundOnWaiting    bool
 	agentSoundReady   bool
@@ -582,8 +576,8 @@ func (m dashboard) update(message tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		} else if m.modal != noModal || m.shutdownPending || m.gitActionPending || m.hookInstallPending {
 			return m, nil
-		} else if m.scrollback && m.searchMode {
-			m.searchQuery += message.Content
+		} else if m.scrollback && m.search.typing {
+			m.search.query += message.Content
 		} else if m.scrollback && m.terminal != nil {
 			m.stopScrollback()
 			m.terminal.paste(message.Content)

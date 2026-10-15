@@ -137,7 +137,7 @@ func TestScrollbackSearchOwnsPaste(t *testing.T) {
 	send(&value, key(tea.KeyF6, ""))
 	send(&value, key('/', "/"))
 	send(&value, tea.PasteMsg{Content: "search text"})
-	if !value.scrollback || !value.searchMode || value.searchQuery != "search text" {
+	if !value.scrollback || !value.search.typing || value.search.query != "search text" {
 		t.Fatal("paste left the search prompt instead of editing its query")
 	}
 	waitForGuestSilence(t, value.terminal, "")

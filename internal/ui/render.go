@@ -382,10 +382,10 @@ func (m dashboard) renderStatus(width, bodyHeight int) []string {
 			shortcut{key: "Esc", description: "close"},
 		)
 		status = renderShortcuts(m.styles, width, shortcuts...)
-	case m.scrollback && m.searchMode:
+	case m.scrollback && m.search.typing:
 		status = truncate(
 			m.styles.promptLabel.Render(" FIND ")+" "+
-				m.styles.promptText.Render(display.Text(m.searchQuery))+
+				m.styles.promptText.Render(display.Text(m.search.query))+
 				m.styles.dividerActive.Render("█"),
 			width,
 		)
@@ -396,10 +396,10 @@ func (m dashboard) renderStatus(width, bodyHeight int) []string {
 			{key: "/", description: "find"},
 		}
 		position := m.scrollbackPosition()
-		if len(m.searchMatches) > 0 {
+		if len(m.search.matches) > 0 {
 			shortcuts = append(shortcuts, shortcut{key: "n/N", description: "match"})
-			position += fmt.Sprintf("  %s %d/%d", display.Text(m.searchQuery),
-				len(m.searchMatches)-m.searchIndex, len(m.searchMatches))
+			position += fmt.Sprintf("  %s %d/%d", display.Text(m.search.query),
+				len(m.search.matches)-m.search.index, len(m.search.matches))
 		}
 		shortcuts = append(shortcuts, shortcut{key: "Ctrl+Shift+\\", description: "exit"})
 		status = truncate(

@@ -4718,8 +4718,8 @@ func TestDashboardFindsAndWalksScrollbackMatches(t *testing.T) {
 	}
 
 	value = typeSearch(t, value, "line-004")
-	if len(value.searchMatches) != 1 {
-		t.Fatalf("matches = %v, want the one line-004", value.searchMatches)
+	if len(value.search.matches) != 1 {
+		t.Fatalf("matches = %v, want the one line-004", value.search.matches)
 	}
 	if !strings.Contains(plainStatus(value), "line-004 1/1") {
 		t.Fatalf("status = %q, want the match counted", plainStatus(value))
@@ -4731,8 +4731,8 @@ func TestDashboardFindsAndWalksScrollbackMatches(t *testing.T) {
 
 	// A query on many lines starts at the newest and walks towards the oldest.
 	value = typeSearch(t, value, "line-01")
-	if len(value.searchMatches) != 10 {
-		t.Fatalf("matches = %d, want the ten line-01x rows", len(value.searchMatches))
+	if len(value.search.matches) != 10 {
+		t.Fatalf("matches = %d, want the ten line-01x rows", len(value.search.matches))
 	}
 	if !scrollbackShows(value, "line-019") {
 		t.Fatal("search did not start at the newest match")
@@ -4752,8 +4752,8 @@ func TestDashboardSaysWhenScrollbackHasNoMatch(t *testing.T) {
 	send(&value, tea.KeyPressMsg(tea.Key{Code: tea.KeyPgUp, Mod: tea.ModShift}))
 
 	value = typeSearch(t, value, "nothing-here")
-	if len(value.searchMatches) != 0 {
-		t.Fatalf("matches = %v, want none", value.searchMatches)
+	if len(value.search.matches) != 0 {
+		t.Fatalf("matches = %v, want none", value.search.matches)
 	}
 	if value.errorMessage == "" || !value.noticeMessage {
 		t.Fatalf("status = (%q, notice %v), want a note that nothing matched",
@@ -4775,9 +4775,9 @@ func TestDashboardForgetsTheSearchOnLeavingScrollback(t *testing.T) {
 	value = typeSearch(t, value, "line-004")
 
 	send(&value, key(tea.KeyEscape, ""))
-	if value.scrollback || value.searchMode || value.searchQuery != "" || len(value.searchMatches) != 0 {
+	if value.scrollback || value.search.typing || value.search.query != "" || len(value.search.matches) != 0 {
 		t.Fatalf("after leaving = (scrollback %v, mode %v, query %q, matches %v), want the search forgotten",
-			value.scrollback, value.searchMode, value.searchQuery, value.searchMatches)
+			value.scrollback, value.search.typing, value.search.query, value.search.matches)
 	}
 }
 
@@ -4786,17 +4786,17 @@ func TestDashboardForgetsTheSearchOnLeavingScrollback(t *testing.T) {
 func typeSearch(t *testing.T, value dashboard, query string) dashboard {
 	t.Helper()
 	send(&value, key('/', "/"))
-	if !value.searchMode {
+	if !value.search.typing {
 		t.Fatal("/ did not open the find prompt")
 	}
 	for _, letter := range query {
 		send(&value, key(letter, string(letter)))
 	}
-	if value.searchQuery != query {
-		t.Fatalf("typed query = %q, want %q", value.searchQuery, query)
+	if value.search.query != query {
+		t.Fatalf("typed query = %q, want %q", value.search.query, query)
 	}
 	send(&value, key(tea.KeyEnter, ""))
-	if value.searchMode {
+	if value.search.typing {
 		t.Fatal("Enter did not close the find prompt")
 	}
 	return value
