@@ -89,7 +89,7 @@ var definitions = []definition{
 		filename:    "settings.json",
 		events: []string{
 			"SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse",
-			"PostToolUseFailure", "PermissionRequest", "Notification", "Elicitation",
+			"PostToolUseFailure", "PermissionRequest", "PermissionDenied", "Notification", "Elicitation",
 			"ElicitationResult", "PreCompact", "PostCompact", "Stop", "StopFailure", "SessionEnd",
 		},
 	},

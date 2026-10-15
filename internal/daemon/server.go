@@ -22,7 +22,7 @@ import (
 	"github.com/opspresso/romty/internal/model"
 	"github.com/opspresso/romty/internal/protocol"
 	"github.com/opspresso/romty/internal/state"
-	"github.com/opspresso/romty/internal/usage"
+	"github.com/opspresso/romty/internal/transcript"
 )
 
 var ErrAlreadyRunning = errors.New("romty daemon is already running")
@@ -80,7 +80,7 @@ type Server struct {
 	connections chan struct{}
 	attachments chan struct{}
 
-	usage       *usage.Reader
+	transcripts *transcript.Reader
 	codex       codexStatusReader
 	codexErrors map[string]string
 }
@@ -112,7 +112,7 @@ func New(socket, statePath, shell string) (*Server, error) {
 		accepting:     true,
 		connections:   make(chan struct{}, maxActiveConnections),
 		attachments:   make(chan struct{}, maxTerminalAttachments),
-		usage:         usage.NewReader(),
+		transcripts:   transcript.NewReader(),
 		codex:         codexstate.NewReader(),
 	}, nil
 }
@@ -398,7 +398,7 @@ func (s *Server) agentStatusesSnapshot() map[string]model.AgentStatus {
 	agents := sessionAgents(sessions)
 	native := s.readCodexStatuses(sessions, agents)
 	inferred := inferPhases(sessions, agents, reported)
-	ledgers := s.sessionUsage(reported, workspaces)
+	readings := s.sessionTranscripts(reported, workspaces)
 
 	result := make(map[string]model.AgentStatus, len(agents))
 	s.mu.Lock()
@@ -437,10 +437,17 @@ func (s *Server) agentStatusesSnapshot() map[string]model.AgentStatus {
 		}
 		switch runtime, ok := s.agentStatuses[tabID]; {
 		case ok && runtime.Agent == agent:
+			reading, read := readings[tabID]
+			if read {
+				if interrupted, changed := applyTranscriptInterrupt(runtime, reading.InterruptedAt); changed {
+					runtime = interrupted
+					s.agentStatuses[tabID] = runtime
+				}
+			}
 			status = runtime.AgentStatus
 			status.SessionID, status.TurnID = runtime.SessionID, runtime.TurnID
-			if ledger, ok := ledgers[tabID]; ok {
-				status.ContextTokens, status.CostUSD = ledger.ContextTokens, ledger.CostUSD
+			if read {
+				status.ContextTokens, status.CostUSD = reading.ContextTokens, reading.CostUSD
 			}
 		default:
 			if phase, ok := inferred[tabID]; ok {

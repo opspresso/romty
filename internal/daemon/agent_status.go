@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"strings"
+	"time"
 
 	"github.com/opspresso/romty/internal/codexstate"
 
@@ -11,11 +12,20 @@ import (
 
 type agentRuntime struct {
 	model.AgentStatus
-	SessionID           string
-	TurnID              string
-	PendingTools        map[string]model.AgentPhase
+	SessionID string
+	TurnID    string
+	// Tools holds every tool call that has started and not finished, with the
+	// phase it puts the turn in: work, or a wait for the user's answer or
+	// approval. A finished tool cannot see that a sibling still runs.
+	Tools               map[string]model.AgentPhase
 	PendingElicitations int
+	// UpdatedAt is when the newest hook event was recorded. A transcript
+	// interrupt counts only if it is newer.
+	UpdatedAt time.Time
 }
+
+// agentNow is the clock hook events are stamped with.
+var agentNow = time.Now
 
 func (s *Server) recordAgentEvent(tabID string, event *protocol.AgentEvent) protocol.Response {
 	if event == nil || tabID == "" && event.Agent != model.AgentCodex {
@@ -95,14 +105,29 @@ func (s *Server) recordAgentEvent(tabID string, event *protocol.AgentEvent) prot
 	}
 	// A delayed tool result cannot restart a stopped response. A continued
 	// Stop hook can still report fresh work through PreToolUse.
-	if (current.Phase == model.AgentPhaseStopped || current.Phase == model.AgentPhaseCompleted || current.Phase == model.AgentPhaseInterrupted || current.Phase == model.AgentPhaseError) &&
-		(event.HookEvent == "PostToolUse" || event.HookEvent == "PostToolUseFailure") {
+	if turnEnded(current.Phase) && toolFinished(event.HookEvent) {
 		return protocol.Response{}
+	}
+	if event.HookEvent == "Notification" && event.NotificationType == "idle_prompt" {
+		// Claude Code finished responding about a minute ago. After a Stop
+		// that confirms completion; with no Stop the turn was interrupted,
+		// because Claude Code runs no Stop hook for an interrupt.
+		switch {
+		case current.Phase == model.AgentPhaseStopped || current.Phase == model.AgentPhaseBackground:
+			phase = model.AgentPhaseCompleted
+		case activePhase(current.Phase):
+			phase = model.AgentPhaseInterrupted
+		default:
+			return protocol.Response{}
+		}
 	}
 	current.Phase = phase
 	current.Source = ""
-	if event.HookEvent == "UserPromptSubmit" {
-		current.PendingTools = nil
+	current.UpdatedAt = agentNow()
+	if event.HookEvent == "UserPromptSubmit" || event.HookEvent == "Stop" || turnEnded(phase) {
+		// A new or ended turn has no running tools or open elicitations. A
+		// Stop that waits for background work waits for no tool call.
+		current.Tools = nil
 		current.PendingElicitations = 0
 	}
 	switch event.HookEvent {
@@ -112,30 +137,18 @@ func (s *Server) recordAgentEvent(tabID string, event *protocol.AgentEvent) prot
 		current.PendingElicitations = max(current.PendingElicitations-1, 0)
 	}
 	if event.ToolUseID != "" {
-		switch event.HookEvent {
-		case "PreToolUse", "PermissionRequest":
-			if phase == model.AgentPhaseWaitingInput || phase == model.AgentPhaseWaitingApproval {
-				if current.PendingTools == nil {
-					current.PendingTools = make(map[string]model.AgentPhase)
-				}
-				current.PendingTools[event.ToolUseID] = phase
+		switch {
+		case event.HookEvent == "PreToolUse" || event.HookEvent == "PermissionRequest":
+			if current.Tools == nil {
+				current.Tools = make(map[string]model.AgentPhase)
 			}
-		case "PostToolUse", "PostToolUseFailure":
-			delete(current.PendingTools, event.ToolUseID)
+			current.Tools[event.ToolUseID] = phase
+		case toolFinished(event.HookEvent):
+			delete(current.Tools, event.ToolUseID)
 		}
 	}
-	if event.HookEvent == "Stop" || event.HookEvent == "StopFailure" || event.HookEvent == "Interrupt" {
-		current.PendingTools = nil
-		current.PendingElicitations = 0
-	}
-	if current.PendingElicitations > 0 {
-		current.Phase = model.AgentPhaseWaitingInput
-	}
-	for _, pending := range current.PendingTools {
-		current.Phase = pending
-		if pending == model.AgentPhaseWaitingApproval {
-			break
-		}
+	if activePhase(current.Phase) || waitingPhase(current.Phase) {
+		current.Phase = resolveTurnPhase(current.Phase, current.Tools, current.PendingElicitations)
 	}
 	if event.HookEvent == "UserPromptSubmit" || current.TurnID == "" {
 		current.TurnID = event.TurnID
@@ -145,6 +158,80 @@ func (s *Server) recordAgentEvent(tabID string, event *protocol.AgentEvent) prot
 	}
 	s.agentStatuses[tabID] = current
 	return protocol.Response{}
+}
+
+// resolveTurnPhase lets the turn's open waits and running tools outrank the
+// phase of the event that just arrived. An approval outranks a question, a
+// question outranks work, and running work outranks thinking.
+func resolveTurnPhase(phase model.AgentPhase, tools map[string]model.AgentPhase, elicitations int) model.AgentPhase {
+	waiting := model.AgentPhase("")
+	running := model.AgentPhase("")
+	for _, tool := range tools {
+		switch tool {
+		case model.AgentPhaseWaitingApproval:
+			waiting = tool
+		case model.AgentPhaseWaitingInput:
+			if waiting == "" {
+				waiting = tool
+			}
+		default:
+			running = tool
+		}
+	}
+	switch {
+	case waiting == model.AgentPhaseWaitingApproval:
+		return waiting
+	case elicitations > 0:
+		return model.AgentPhaseWaitingInput
+	case waiting != "":
+		return waiting
+	case running != "" && (phase == model.AgentPhaseThinking || phase == model.AgentPhasePlanning):
+		if phase == model.AgentPhasePlanning {
+			return model.AgentPhasePlanning
+		}
+		return running
+	}
+	return phase
+}
+
+func toolFinished(hookEvent string) bool {
+	return hookEvent == "PostToolUse" || hookEvent == "PostToolUseFailure" || hookEvent == "PermissionDenied"
+}
+
+// activePhase reports a turn that is running without waiting for the user.
+func activePhase(phase model.AgentPhase) bool {
+	switch phase {
+	case model.AgentPhaseThinking, model.AgentPhaseWorking, model.AgentPhasePlanning, model.AgentPhaseCompacting:
+		return true
+	}
+	return false
+}
+
+func waitingPhase(phase model.AgentPhase) bool {
+	return phase == model.AgentPhaseWaitingInput || phase == model.AgentPhaseWaitingApproval
+}
+
+func turnEnded(phase model.AgentPhase) bool {
+	switch phase {
+	case model.AgentPhaseStopped, model.AgentPhaseCompleted, model.AgentPhaseInterrupted, model.AgentPhaseError:
+		return true
+	}
+	return false
+}
+
+// applyTranscriptInterrupt ends a running or waiting turn that the user
+// interrupted after its newest hook event. Claude Code runs no hook for an
+// interrupt or a rejected tool; its transcript records both.
+func applyTranscriptInterrupt(runtime agentRuntime, interruptedAt time.Time) (agentRuntime, bool) {
+	if interruptedAt.IsZero() || !interruptedAt.After(runtime.UpdatedAt) ||
+		!activePhase(runtime.Phase) && !waitingPhase(runtime.Phase) {
+		return runtime, false
+	}
+	runtime.Phase = model.AgentPhaseInterrupted
+	runtime.Tools = nil
+	runtime.PendingElicitations = 0
+	runtime.UpdatedAt = interruptedAt
+	return runtime, true
 }
 
 func phaseForAgentEvent(event protocol.AgentEvent) (model.AgentPhase, bool, bool) {
@@ -166,7 +253,7 @@ func phaseForAgentEvent(event protocol.AgentEvent) (model.AgentPhase, bool, bool
 			return model.AgentPhaseWaitingInput, false, true
 		}
 		return working, false, true
-	case "PostToolUse", "PostToolUseFailure", "ElicitationResult", "PostCompact":
+	case "PostToolUse", "PostToolUseFailure", "PermissionDenied", "ElicitationResult", "PostCompact":
 		return thinking, false, true
 	case "PermissionRequest":
 		return model.AgentPhaseWaitingApproval, false, true

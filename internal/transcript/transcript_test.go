@@ -1,4 +1,4 @@
-package usage
+package transcript
 
 import (
 	"encoding/json"
@@ -214,5 +214,43 @@ func TestReadClaudeKeepsARecordThatStartsAtTheTailBoundary(t *testing.T) {
 	value, ok := NewReader().ReadClaude(configDir, workspace, "session-1")
 	if !ok || value.ContextTokens != 6 {
 		t.Fatalf("ReadClaude() = (%+v, %v), want the 6 tokens on the boundary record", value, ok)
+	}
+}
+
+func interruptLine(timestamp, text string, parts bool) string {
+	content := any(text)
+	if parts {
+		content = []map[string]string{{"type": "text", "text": text}}
+	}
+	line, _ := json.Marshal(map[string]any{"type": "user", "timestamp": timestamp, "message": map[string]any{"content": content}})
+	return string(line)
+}
+
+// Claude Code runs no hook for an interrupt or a rejected tool. The record it
+// writes counts only while it is the newest conversation record.
+func TestReadClaudeReportsAnInterruptOnlyAsTheNewestConversationRecord(t *testing.T) {
+	const at = "2026-10-15T09:00:00.500Z"
+	want, _ := time.Parse(time.RFC3339Nano, at)
+	for _, testCase := range []struct {
+		name  string
+		lines []string
+		want  time.Time
+	}{
+		{name: "interrupt", lines: []string{assistantLine(1, 2, 3), interruptLine(at, "[Request interrupted by user]", true)}, want: want},
+		{name: "rejected tool", lines: []string{interruptLine(at, "[Request interrupted by user for tool use]", true)}, want: want},
+		{name: "string content", lines: []string{interruptLine(at, "[Request interrupted by user]", false)}, want: want},
+		{name: "system note after", lines: []string{interruptLine(at, "[Request interrupted by user]", true), `{"type":"system","subtype":"note"}`}, want: want},
+		{name: "resumed by a prompt", lines: []string{interruptLine(at, "[Request interrupted by user]", true), `{"type":"user","message":{"content":"go on"}}`}},
+		{name: "resumed by a response", lines: []string{interruptLine(at, "[Request interrupted by user]", true), assistantLine(1, 2, 3)}},
+		{name: "quoted marker", lines: []string{interruptLine(at, "why did [Request interrupted by user] appear?", true)}},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			configDir := t.TempDir()
+			writeTranscript(t, configDir, "/w", "session-1", testCase.lines...)
+			value, _ := NewReader().ReadClaude(configDir, "/w", "session-1")
+			if !value.InterruptedAt.Equal(testCase.want) {
+				t.Fatalf("InterruptedAt = %v, want %v", value.InterruptedAt, testCase.want)
+			}
+		})
 	}
 }

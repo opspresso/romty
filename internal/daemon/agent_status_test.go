@@ -11,7 +11,7 @@ import (
 
 	"github.com/opspresso/romty/internal/model"
 	"github.com/opspresso/romty/internal/protocol"
-	"github.com/opspresso/romty/internal/usage"
+	"github.com/opspresso/romty/internal/transcript"
 )
 
 func TestAgentHookEventsMapToPhases(t *testing.T) {
@@ -179,8 +179,92 @@ func TestQuestionRemainsPendingWhileOtherToolsFinish(t *testing.T) {
 		t.Fatalf("another elicitation is still pending: %s", got)
 	}
 	report("ElicitationResult", "", "")
+	if got := s.agentStatuses["tab"].Phase; got != model.AgentPhaseWorking {
+		t.Fatalf("all elicitations resolved while a tool still runs: %s", got)
+	}
+	report("PostToolUse", "Bash", "continuation")
 	if got := s.agentStatuses["tab"].Phase; got != model.AgentPhaseThinking {
-		t.Fatalf("all elicitations resolved: %s", got)
+		t.Fatalf("every tool and elicitation resolved: %s", got)
+	}
+}
+
+// A tool that finishes cannot see a sibling that still runs. The turn stays
+// working until the last running tool ends, and plan mode stays planning.
+func TestAFinishedParallelToolKeepsTheTurnWorking(t *testing.T) {
+	s := &Server{sessions: map[string]*session{"tab": nil}, agentStatuses: make(map[string]agentRuntime)}
+	report := func(hook, id, mode string, want model.AgentPhase) {
+		t.Helper()
+		if r := s.recordAgentEvent("tab", &protocol.AgentEvent{Agent: model.AgentClaude, SessionID: "session", TurnID: "prompt", HookEvent: hook, ToolName: "Bash", ToolUseID: id, PermissionMode: mode}); r.Error != "" {
+			t.Fatal(r.Error)
+		}
+		if got := s.agentStatuses["tab"].Phase; got != want {
+			t.Fatalf("%s %s: phase = %s, want %s", hook, id, got, want)
+		}
+	}
+	report("UserPromptSubmit", "", "", model.AgentPhaseThinking)
+	report("PreToolUse", "slow", "", model.AgentPhaseWorking)
+	report("PreToolUse", "fast", "", model.AgentPhaseWorking)
+	report("PostToolUse", "fast", "", model.AgentPhaseWorking)
+	report("PermissionRequest", "gated", "", model.AgentPhaseWaitingApproval)
+	report("PermissionDenied", "gated", "", model.AgentPhaseWorking)
+	report("PostToolUseFailure", "slow", "", model.AgentPhaseThinking)
+	report("PreToolUse", "plan-a", "plan", model.AgentPhasePlanning)
+	report("PreToolUse", "plan-b", "plan", model.AgentPhasePlanning)
+	report("PostToolUse", "plan-a", "plan", model.AgentPhasePlanning)
+	report("Stop", "", "", model.AgentPhaseStopped)
+	if tools := s.agentStatuses["tab"].Tools; len(tools) != 0 {
+		t.Fatalf("an ended turn kept running tools: %v", tools)
+	}
+}
+
+// Claude Code runs no Stop hook for an interrupt. Its idle notification then
+// ends the open turn as interrupted, and confirms only a turn that stopped.
+func TestIdleNotificationSettlesTheTurnItFollows(t *testing.T) {
+	for _, testCase := range []struct {
+		name   string
+		before string
+		want   model.AgentPhase
+	}{
+		{name: "after stop", before: "Stop", want: model.AgentPhaseCompleted},
+		{name: "without stop", before: "PreToolUse", want: model.AgentPhaseInterrupted},
+		{name: "after interrupt", before: "Interrupt", want: model.AgentPhaseInterrupted},
+		{name: "after failure", before: "StopFailure", want: model.AgentPhaseError},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			s := &Server{sessions: map[string]*session{"tab": nil}, agentStatuses: make(map[string]agentRuntime)}
+			for _, hook := range []string{"UserPromptSubmit", testCase.before} {
+				s.recordAgentEvent("tab", &protocol.AgentEvent{Agent: model.AgentClaude, SessionID: "session", HookEvent: hook, ToolUseID: "tool"})
+			}
+			s.recordAgentEvent("tab", &protocol.AgentEvent{Agent: model.AgentClaude, SessionID: "session", HookEvent: "Notification", NotificationType: "idle_prompt"})
+			if got := s.agentStatuses["tab"].Phase; got != testCase.want {
+				t.Fatalf("phase = %s, want %s", got, testCase.want)
+			}
+		})
+	}
+}
+
+func TestTranscriptInterruptEndsOnlyANewerOpenTurn(t *testing.T) {
+	at := time.Date(2026, 10, 15, 9, 0, 0, 0, time.UTC)
+	running := agentRuntime{
+		AgentStatus: model.AgentStatus{Agent: model.AgentClaude, Phase: model.AgentPhaseWorking},
+		Tools:       map[string]model.AgentPhase{"tool": model.AgentPhaseWorking},
+		UpdatedAt:   at,
+	}
+	if got, changed := applyTranscriptInterrupt(running, at.Add(time.Second)); !changed || got.Phase != model.AgentPhaseInterrupted || len(got.Tools) != 0 {
+		t.Fatalf("newer interrupt = (%+v, %v), want interrupted without tools", got, changed)
+	}
+	if _, changed := applyTranscriptInterrupt(running, at.Add(-time.Second)); changed {
+		t.Fatal("an interrupt older than the newest hook ended the turn")
+	}
+	waiting := running
+	waiting.Phase = model.AgentPhaseWaitingApproval
+	if got, changed := applyTranscriptInterrupt(waiting, at.Add(time.Second)); !changed || got.Phase != model.AgentPhaseInterrupted {
+		t.Fatalf("rejected approval = (%+v, %v), want interrupted", got, changed)
+	}
+	stopped := running
+	stopped.Phase = model.AgentPhaseStopped
+	if _, changed := applyTranscriptInterrupt(stopped, at.Add(time.Second)); changed {
+		t.Fatal("an interrupt replaced a turn that already stopped")
 	}
 }
 
@@ -248,10 +332,10 @@ func TestAgentStatusReportsTheLedgerOnlyForAHookedSession(t *testing.T) {
 	if err := os.MkdirAll(directory, 0o700); err != nil {
 		t.Fatalf("MkdirAll() error = %v", err)
 	}
-	transcript := `{"type":"assistant","message":{"usage":{"input_tokens":2,` +
+	record := `{"type":"assistant","message":{"usage":{"input_tokens":2,` +
 		`"cache_creation_input_tokens":1288,"cache_read_input_tokens":342813}}}` + "\n" +
 		`{"type":"summary","totalCostUSD":1.25}` + "\n"
-	if err := os.WriteFile(filepath.Join(directory, "session-1.jsonl"), []byte(transcript), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(directory, "session-1.jsonl"), []byte(record), 0o600); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
@@ -281,7 +365,7 @@ func TestAgentStatusReportsTheLedgerOnlyForAHookedSession(t *testing.T) {
 				SessionID:   "session-1",
 			},
 		},
-		usage: usage.NewReader(),
+		transcripts: transcript.NewReader(),
 	}
 	server.value.Roots = []model.Root{{ID: "root-1", Path: workspace}}
 	server.value.Workspaces = []model.Workspace{{ID: "workspace-1", RootID: "root-1", Path: workspace}}
@@ -404,5 +488,46 @@ func TestAgentStatusUsesForegroundProcessAsPresenceAuthority(t *testing.T) {
 	}
 	if got := server.agentStatusesSnapshot(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("agentStatusesSnapshot() = %#v, want %#v", got, want)
+	}
+}
+
+// An interrupt runs no Claude Code hook. The snapshot reads it from the
+// session's transcript and keeps the interrupted phase for later snapshots.
+func TestAgentStatusEndsATurnTheTranscriptRecordsAsInterrupted(t *testing.T) {
+	configDir := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", configDir)
+	workspace := "/projects/alpha"
+	directory := filepath.Join(configDir, "projects", strings.NewReplacer("/", "-", ".", "-").Replace(workspace))
+	if err := os.MkdirAll(directory, 0o700); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	record := `{"type":"user","timestamp":"2026-10-15T09:00:05.000Z","message":{"content":[{"type":"text","text":"[Request interrupted by user]"}]}}` + "\n"
+	if err := os.WriteFile(filepath.Join(directory, "session-1.jsonl"), []byte(record), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	terminal := new(os.File)
+	previousGroup, previousList := foregroundProcessGroup, runProcessList
+	foregroundProcessGroup = func(*os.File) (int, error) { return 101, nil }
+	runProcessList = func(context.Context) ([]byte, error) { return []byte("101 claude\n"), nil }
+	t.Cleanup(func() { foregroundProcessGroup, runProcessList = previousGroup, previousList })
+
+	server := &Server{
+		sessions: map[string]*session{"tab-1": newSessionForTest(terminal)},
+		agentStatuses: map[string]agentRuntime{"tab-1": {
+			AgentStatus: model.AgentStatus{Agent: model.AgentClaude, Phase: model.AgentPhaseWorking},
+			SessionID:   "session-1",
+			Tools:       map[string]model.AgentPhase{"build": model.AgentPhaseWorking},
+			UpdatedAt:   time.Date(2026, 10, 15, 9, 0, 0, 0, time.UTC),
+		}},
+		transcripts: transcript.NewReader(),
+	}
+	server.value.Workspaces = []model.Workspace{{ID: "workspace-1", Path: workspace}}
+	server.value.Tabs = []model.Tab{{ID: "tab-1", WorkspaceID: "workspace-1"}}
+
+	if got := server.agentStatusesSnapshot()["tab-1"].Phase; got != model.AgentPhaseInterrupted {
+		t.Fatalf("snapshot phase = %s, want interrupted", got)
+	}
+	if runtime := server.agentStatuses["tab-1"]; runtime.Phase != model.AgentPhaseInterrupted || len(runtime.Tools) != 0 {
+		t.Fatalf("recorded runtime = %+v, want interrupted without tools", runtime)
 	}
 }
