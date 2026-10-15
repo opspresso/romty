@@ -586,10 +586,6 @@ func (m dashboard) renderTerminal(width int) []string {
 	return append(lines, m.styles.empty.Render("  Select a tab and press Enter"))
 }
 
-func renderTabBar(styles *uiStyles, tabs []model.Tab, active, width int) []string {
-	return renderTabBarWithHover(styles, tabs, active, -1, -1, 0, width)
-}
-
 // tabLabel is a tab's text in the tab bar. A running tab leaves one cell
 // after the leading gap for its status marker, which is drawn in its own
 // color, so the text here only reserves the width the hit test also measures.

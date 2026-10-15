@@ -398,10 +398,6 @@ func Run(backend Backend, initial model.Snapshot, configPath string, hookStatuse
 	return value.result, nil
 }
 
-func newDashboard(backend Backend, initial model.Snapshot) dashboard {
-	return newDashboardWithConfig(backend, initial, "", Config{})
-}
-
 func newDashboardWithConfig(backend Backend, initial model.Snapshot, configPath string, config Config) dashboard {
 	value := dashboard{
 		backend:          backend,

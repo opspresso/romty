@@ -852,10 +852,6 @@ type gitDiffTreeRow struct {
 	fileIndex int
 }
 
-func gitDiffTreeRows(files []gitChangedFile) []gitDiffTreeRow {
-	return buildFileViewTreeRows(files, false)
-}
-
 func fileViewTreeRows(files []gitChangedFile, mode fileViewMode) []gitDiffTreeRow {
 	return buildFileViewTreeRows(files, mode == allFilesView)
 }

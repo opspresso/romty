@@ -27,10 +27,6 @@ func run() error {
 	return runCommandWithInput(os.Args[1:], os.Stdout, os.Stdin)
 }
 
-func runCommand(arguments []string, output io.Writer) error {
-	return runCommandWithInput(arguments, output, os.Stdin)
-}
-
 func runCommandWithInput(arguments []string, output io.Writer, input io.Reader) error {
 	if len(arguments) == 2 && arguments[0] == "hook" {
 		switch arguments[1] {
