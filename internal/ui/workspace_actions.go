@@ -258,7 +258,7 @@ func (m dashboard) runWorkspaceAction(action workspaceAction) (tea.Model, tea.Cm
 		return m.confirmCloseTab(tabs[m.tabIndex], m.tabIndex)
 	case workspaceFileChangesAction:
 		m.modal = noModal
-		return m.openGitDiffView(target)
+		return m.openChangedFilesView(target)
 	case workspaceAllFilesAction:
 		m.modal = noModal
 		return m.openAllFilesView(target)

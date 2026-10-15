@@ -140,12 +140,12 @@ func (m dashboard) navigationHidden() bool {
 	return m.focus == terminalPane && m.terminal != nil
 }
 
-// gitDiffLayout is the file view's own split. The file view has two panes of
+// fileViewLayout is the file view's own split. The file view has two panes of
 // its own, so the narrow layout does not apply to it, and it is kept out of
 // dimensions rather than folded into it: the terminal is not on screen while
 // the view is open, and sizing the PTY to a split it never appears in made a
 // full-screen guest reflow on the way in and again on the way out.
-func (m dashboard) gitDiffLayout() layout {
+func (m dashboard) fileViewLayout() layout {
 	width := m.screenWidth()
 	view := m.dimensions()
 	view.leftWidth = m.paneWidth()
@@ -183,7 +183,7 @@ func (m dashboard) View() tea.View {
 	view.WindowTitle = "romty"
 	view.MouseMode = m.mouseMode()
 	view.KeyboardEnhancements.ReportAlternateKeys = true
-	if !m.gitDiff.active && !m.scrollback && m.focus == terminalPane && m.terminal != nil {
+	if !m.fileView.active && !m.scrollback && m.focus == terminalPane && m.terminal != nil {
 		originX, originY := m.dimensions().terminalOrigin()
 		position := m.terminal.cursorPosition()
 		view.Cursor = tea.NewCursor(originX+position.X, originY+position.Y)
@@ -198,9 +198,9 @@ func (m dashboard) render() string {
 	// it hides are not built at all.
 	var lines []string
 	switch {
-	case m.gitDiff.active:
-		diff := m.gitDiffLayout()
-		lines = m.renderGitDiffPanes(diff.leftWidth, diff.rightWidth, diff.bodyHeight)
+	case m.fileView.active:
+		diff := m.fileViewLayout()
+		lines = m.renderFileViewPanes(diff.leftWidth, diff.rightWidth, diff.bodyHeight)
 	case m.scrollback || m.navigationHidden():
 		// The narrow layout lays out the way scrollback does, because a pane
 		// that is hidden is not a pane to leave empty beside a divider.
@@ -365,13 +365,13 @@ func (m dashboard) renderStatus(width, bodyHeight int) []string {
 			shortcuts[index] = action.shortcut
 		}
 		status = renderShortcuts(m.styles, width, shortcuts...)
-	case m.gitDiff.active:
+	case m.fileView.active:
 		rail = renderShortcutRail(m.styles, width,
 			shortcut{key: "Ctrl+Shift+F", description: "close file view"},
 		)
 		shortcuts := []shortcut{{key: "↑/↓", description: "item"}}
 		shortcuts = append(shortcuts, shortcut{key: "←/→/Enter", description: "folder"})
-		if m.gitDiff.mode == changedFilesView {
+		if m.fileView.mode == changedFilesView {
 			shortcuts = append(shortcuts, shortcut{key: "F6", description: "layout"})
 		}
 		shortcuts = append(shortcuts,

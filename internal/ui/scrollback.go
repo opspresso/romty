@@ -157,7 +157,7 @@ func pagingKey(pages int) tea.KeyPressMsg {
 func (m *dashboard) startScrollback() bool {
 	// Scrollback is a view of the terminal, and the file view is what is on
 	// screen instead of it, so it does not open behind the file view.
-	if m.gitDiff.active || m.terminal == nil || m.terminal.scrollbackLen() == 0 {
+	if m.fileView.active || m.terminal == nil || m.terminal.scrollbackLen() == 0 {
 		return false
 	}
 	m.scrollback = true
@@ -170,7 +170,7 @@ func (m *dashboard) startScrollback() bool {
 // show, so an application that owns the screen is not mistaken for a bug.
 func (m dashboard) scrollbackUnavailable() string {
 	switch {
-	case m.gitDiff.active:
+	case m.fileView.active:
 		return "close the file view with Ctrl+Shift+F to scroll the terminal"
 	case m.terminal == nil:
 		return "open a terminal to scroll its output"

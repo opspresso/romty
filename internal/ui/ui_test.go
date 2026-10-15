@@ -2358,13 +2358,13 @@ func TestDashboardKeepsTheFileViewSplitOnANarrowScreen(t *testing.T) {
 	value := narrowDashboard(t, 60)
 	before, _ := value.terminalSize()
 
-	value.gitDiff = gitDiffView{
+	value.fileView = fileViewState{
 		active:    true,
 		target:    model.Workspace{Name: "alpha", Path: "/projects/alpha"},
 		files:     []gitrepo.ChangedFile{{Path: "file.go", WorkTreeStatus: 'M'}},
 		fileIndex: 0,
 	}
-	if view := value.gitDiffLayout(); view.leftWidth == 0 || view.separator != separatorWidth {
+	if view := value.fileViewLayout(); view.leftWidth == 0 || view.separator != separatorWidth {
 		t.Fatalf("file view layout = (left %d, separator %d), want the split",
 			view.leftWidth, view.separator)
 	}

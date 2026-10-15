@@ -410,7 +410,7 @@ func (m dashboard) mouseMode() tea.MouseMode {
 	if m.modal != noModal {
 		return tea.MouseModeAllMotion
 	}
-	if m.gitDiff.active {
+	if m.fileView.active {
 		return tea.MouseModeCellMotion
 	}
 	if m.scrollback {

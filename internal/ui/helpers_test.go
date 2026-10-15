@@ -15,7 +15,7 @@ func executeGitAction(path string, action gitAction) (string, error) {
 	return executeGitActionContext(context.Background(), path, action)
 }
 
-func gitDiffTreeRows(files []gitrepo.ChangedFile) []gitDiffTreeRow {
+func fileTreeRowsOf(files []gitrepo.ChangedFile) []fileTreeRow {
 	return buildFileViewTreeRows(files, false)
 }
 

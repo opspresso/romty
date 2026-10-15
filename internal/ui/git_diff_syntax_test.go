@@ -32,7 +32,7 @@ func TestDashboardHighlightsCodeDiffsInBothLayouts(t *testing.T) {
 	}
 
 	value := newDashboard(&fakeBackend{}, model.Snapshot{})
-	value.gitDiff = gitDiffView{
+	value.fileView = fileViewState{
 		active:            true,
 		files:             []gitrepo.ChangedFile{{Path: "main.go", WorkTreeStatus: 'M'}},
 		diffLines:         lines,
@@ -48,7 +48,7 @@ func TestDashboardHighlightsCodeDiffsInBothLayouts(t *testing.T) {
 		}
 	}
 	for _, split := range []bool{false, true} {
-		value.gitDiff.split = split
+		value.fileView.split = split
 		rendered := strings.Join(value.renderGitFileDiff(100, 20), "\n")
 		for _, fragment := range []string{
 			value.styles.syntaxKeyword.Render("package"),
