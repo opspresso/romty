@@ -53,14 +53,14 @@ func TestDashboardRunsGitActionForContextWorkspace(t *testing.T) {
 			probe.prepare(&value)
 
 			command := send(&value, gitActionsKey())
-			if command != nil || value.modal != gitActionsModal || value.gitActionTarget.Path != probe.wantTarget.Path {
+			if command != nil || value.modal != gitActionsModal || value.gitRun.target.Path != probe.wantTarget.Path {
 				t.Fatalf("Ctrl+Shift+G = (command %v, modal %v, target %q), want Git actions for %q",
-					command, value.modal, value.gitActionTarget.Path, probe.wantTarget.Path)
+					command, value.modal, value.gitRun.target.Path, probe.wantTarget.Path)
 			}
 
 			send(&value, key(tea.KeyDown, ""))
-			if value.gitActionIndex != 1 {
-				t.Fatalf("Git action index = %d, want Fetch at 1", value.gitActionIndex)
+			if value.gitRun.index != 1 {
+				t.Fatalf("Git action index = %d, want Fetch at 1", value.gitRun.index)
 			}
 		})
 	}
@@ -75,8 +75,8 @@ func TestDashboardRunsSelectedGitActionAndShowsResult(t *testing.T) {
 	send(&value, gitActionsKey())
 	send(&value, key(tea.KeyDown, ""))
 	command := send(&value, key(tea.KeyEnter, ""))
-	if command == nil || !value.gitActionPending || value.gitAction != gitFetchAction {
-		t.Fatalf("Fetch selection = (command %v, pending %t, action %v)", command, value.gitActionPending, value.gitAction)
+	if command == nil || !value.gitRun.pending || value.gitRun.action != gitFetchAction {
+		t.Fatalf("Fetch selection = (command %v, pending %t, action %v)", command, value.gitRun.pending, value.gitRun.action)
 	}
 
 	refresh := send(&value, gitActionMsg{
@@ -84,8 +84,8 @@ func TestDashboardRunsSelectedGitActionAndShowsResult(t *testing.T) {
 		action: gitFetchAction,
 		output: "Fetched origin",
 	})
-	if refresh == nil || value.gitActionPending || value.gitActionOutput != "Fetched origin" {
-		t.Fatalf("Fetch result = (refresh %v, pending %t, output %q)", refresh, value.gitActionPending, value.gitActionOutput)
+	if refresh == nil || value.gitRun.pending || value.gitRun.output != "Fetched origin" {
+		t.Fatalf("Fetch result = (refresh %v, pending %t, output %q)", refresh, value.gitRun.pending, value.gitRun.output)
 	}
 	plain := ansi.Strip(strings.Join(value.renderModal(100, 30), "\n"))
 	if !strings.Contains(plain, "Fetch") || !strings.Contains(plain, "Fetched origin") {
@@ -96,9 +96,9 @@ func TestDashboardRunsSelectedGitActionAndShowsResult(t *testing.T) {
 func TestDashboardReportsGitActionFailure(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, model.Snapshot{})
 	value.modal = gitActionsModal
-	value.gitActionPending = true
-	value.gitActionTarget = model.Workspace{Path: "/projects/alpha"}
-	value.gitAction = gitPushAction
+	value.gitRun.pending = true
+	value.gitRun.target = model.Workspace{Path: "/projects/alpha"}
+	value.gitRun.action = gitPushAction
 
 	refresh := send(&value, gitActionMsg{
 		path:   "/projects/alpha",
@@ -106,8 +106,8 @@ func TestDashboardReportsGitActionFailure(t *testing.T) {
 		output: "rejected",
 		err:    errors.New("exit status 1"),
 	})
-	if refresh == nil || value.gitActionPending || value.gitActionError == "" {
-		t.Fatalf("Push failure = (refresh %v, pending %t, error %q)", refresh, value.gitActionPending, value.gitActionError)
+	if refresh == nil || value.gitRun.pending || value.gitRun.err == "" {
+		t.Fatalf("Push failure = (refresh %v, pending %t, error %q)", refresh, value.gitRun.pending, value.gitRun.err)
 	}
 	plain := ansi.Strip(strings.Join(value.renderModal(100, 30), "\n"))
 	if !strings.Contains(plain, "rejected") || !strings.Contains(plain, "exit status 1") {
@@ -120,15 +120,15 @@ func TestDashboardScrollsGitActionResult(t *testing.T) {
 	value.width = 100
 	value.height = 10
 	value.modal = gitActionsModal
-	value.gitActionComplete = true
-	value.gitActionTarget = model.Workspace{Name: "alpha", Path: "/projects/alpha"}
-	value.gitActionOutput = strings.Join([]string{"one", "two", "three", "four", "five", "six", "seven"}, "\n")
+	value.gitRun.complete = true
+	value.gitRun.target = model.Workspace{Name: "alpha", Path: "/projects/alpha"}
+	value.gitRun.output = strings.Join([]string{"one", "two", "three", "four", "five", "six", "seven"}, "\n")
 
 	before := ansi.Strip(strings.Join(value.renderModal(value.width, value.dimensions().bodyHeight), "\n"))
 	send(&value, key(tea.KeyEnd, ""))
 	after := ansi.Strip(strings.Join(value.renderModal(value.width, value.dimensions().bodyHeight), "\n"))
-	if value.gitActionOffset == 0 || strings.Contains(before, "seven") || !strings.Contains(after, "seven") {
-		t.Fatalf("Git result scroll = (offset %d)\nbefore:\n%s\nafter:\n%s", value.gitActionOffset, before, after)
+	if value.gitRun.offset == 0 || strings.Contains(before, "seven") || !strings.Contains(after, "seven") {
+		t.Fatalf("Git result scroll = (offset %d)\nbefore:\n%s\nafter:\n%s", value.gitRun.offset, before, after)
 	}
 }
 
@@ -138,11 +138,11 @@ func TestDashboardClosesGitResultWithMouse(t *testing.T) {
 			value := newDashboard(&fakeBackend{}, model.Snapshot{})
 			value.width, value.height = 80, 10
 			value.modal = gitActionsModal
-			value.gitAction = gitPullAction
-			value.gitActionComplete = true
-			value.gitActionTarget = model.Workspace{Name: "alpha", Path: "/projects/alpha"}
-			value.gitActionOutput = output
-			value.gitActionError = failure
+			value.gitRun.action = gitPullAction
+			value.gitRun.complete = true
+			value.gitRun.target = model.Workspace{Name: "alpha", Path: "/projects/alpha"}
+			value.gitRun.output = output
+			value.gitRun.err = failure
 			send(&value, key(tea.KeyEnd, ""))
 			geometry := value.modalGeometry(value.bodySize())
 			if len(geometry.lines) > value.dimensions().bodyHeight {
@@ -177,20 +177,20 @@ func TestDashboardClicksAndScrollsGitActions(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, model.Snapshot{})
 	value.width, value.height = 100, 12
 	value.modal = gitActionsModal
-	value.gitActionTarget = model.Workspace{Name: "alpha", Path: "/projects/alpha"}
+	value.gitRun.target = model.Workspace{Name: "alpha", Path: "/projects/alpha"}
 	left, top := value.modalGeometry(value.width, value.dimensions().bodyHeight).contentOrigin()
 
 	command := send(&value, tea.MouseClickMsg{X: left + 2, Y: top + 4, Button: tea.MouseLeft})
-	if value.gitActionIndex != 2 || !value.gitActionPending || command == nil {
+	if value.gitRun.index != 2 || !value.gitRun.pending || command == nil {
 		t.Fatalf("Git action click = (index %d, pending %v, command %v)",
-			value.gitActionIndex, value.gitActionPending, command)
+			value.gitRun.index, value.gitRun.pending, command)
 	}
 	value.cancelGitAction()
-	value.gitActionPending = false
-	value.gitActionComplete = true
-	value.gitActionOutput = strings.Join([]string{"one", "two", "three", "four", "five", "six", "seven"}, "\n")
+	value.gitRun.pending = false
+	value.gitRun.complete = true
+	value.gitRun.output = strings.Join([]string{"one", "two", "three", "four", "five", "six", "seven"}, "\n")
 	send(&value, tea.MouseWheelMsg{X: left + 2, Y: top + 3, Button: tea.MouseWheelDown})
-	if value.gitActionOffset == 0 {
+	if value.gitRun.offset == 0 {
 		t.Fatal("Git result wheel did not scroll")
 	}
 }
@@ -199,7 +199,7 @@ func TestDashboardHighlightsHoveredGitActionAndResult(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, model.Snapshot{})
 	value.width, value.height = 100, 12
 	value.modal = gitActionsModal
-	value.gitActionTarget = model.Workspace{Name: "alpha", Path: "/projects/alpha"}
+	value.gitRun.target = model.Workspace{Name: "alpha", Path: "/projects/alpha"}
 	left, top := value.modalGeometry(value.width, value.dimensions().bodyHeight).contentOrigin()
 	before := value.render()
 
@@ -208,8 +208,8 @@ func TestDashboardHighlightsHoveredGitActionAndResult(t *testing.T) {
 		t.Fatalf("Git action hover = %#v", value.hover)
 	}
 
-	value.gitActionComplete = true
-	value.gitActionOutput = "one\ntwo\nthree\nfour\nfive\nsix"
+	value.gitRun.complete = true
+	value.gitRun.output = "one\ntwo\nthree\nfour\nfive\nsix"
 	left, top = value.modalGeometry(value.width, value.dimensions().bodyHeight).contentOrigin()
 	before = value.render()
 	send(&value, tea.MouseMotionMsg{X: left + 2, Y: top + 3})
@@ -221,10 +221,10 @@ func TestDashboardHighlightsHoveredGitActionAndResult(t *testing.T) {
 func TestDashboardHoldsGitActionModalWhileCommandRuns(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, model.Snapshot{})
 	value.modal = gitActionsModal
-	value.gitActionPending = true
-	value.gitAction = gitPullAction
+	value.gitRun.pending = true
+	value.gitRun.action = gitPullAction
 	cancelled := false
-	value.gitActionCancel = func() { cancelled = true }
+	value.gitRun.cancel = func() { cancelled = true }
 
 	for _, message := range []tea.KeyPressMsg{key(tea.KeyEscape, ""), key(tea.KeyF1, "")} {
 		command := send(&value, message)
@@ -307,8 +307,8 @@ func gitActionsKey() tea.KeyPressMsg {
 func TestDashboardHighlightsTheSelectedGitAction(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, model.Snapshot{})
 	value.modal = gitActionsModal
-	value.gitActionTarget = model.Workspace{Name: "alpha", Path: "/projects/alpha"}
-	value.gitActionIndex = 1
+	value.gitRun.target = model.Workspace{Name: "alpha", Path: "/projects/alpha"}
+	value.gitRun.index = 1
 
 	lines := value.renderModal(100, 30)
 	rendered := strings.Join(lines, "\n")
@@ -338,8 +338,8 @@ func TestGitActionResultIsColoured(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, model.Snapshot{})
 	value.width, value.height = 100, 24
 	value.modal = gitActionsModal
-	value.gitActionTarget = model.Workspace{Name: "alpha", Path: "/projects/alpha"}
-	value.gitActionComplete = true
+	value.gitRun.target = model.Workspace{Name: "alpha", Path: "/projects/alpha"}
+	value.gitRun.complete = true
 
 	for _, probe := range []struct {
 		name    string
@@ -369,7 +369,7 @@ func TestGitActionResultIsColoured(t *testing.T) {
 		},
 	} {
 		t.Run(probe.name, func(t *testing.T) {
-			value.gitActionOutput = probe.line
+			value.gitRun.output = probe.line
 			rendered := strings.Join(value.renderModal(value.width, value.dimensions().bodyHeight), "\n")
 			if want := probe.style(value.styles).Render(probe.segment); !strings.Contains(rendered, want) {
 				t.Fatalf("%q is not drawn in its own colour:\n%s", probe.segment, rendered)
@@ -379,7 +379,7 @@ func TestGitActionResultIsColoured(t *testing.T) {
 
 	// A diffstat's marks are split so additions and removals do not share one
 	// colour, which is the only thing the run actually says.
-	value.gitActionOutput = " main.go | 3 ++-"
+	value.gitRun.output = " main.go | 3 ++-"
 	rendered := strings.Join(value.renderModal(value.width, value.dimensions().bodyHeight), "\n")
 	if !strings.Contains(rendered, value.styles.diffAdded.Render("+")) {
 		t.Fatalf("diffstat additions are not green:\n%s", rendered)

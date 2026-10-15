@@ -55,14 +55,14 @@ func (m dashboard) handleModalKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 	case workspaceActionsModal:
 		return m.handleWorkspaceActionKey(message)
 	case gitActionsModal:
-		if m.gitActionComplete {
+		if m.gitRun.complete {
 			page := max(gitActionResultCapacity(m.dimensions().bodyHeight)-1, 1)
 			switch message.String() {
 			case "enter":
 				m = m.resetGitActionResult()
-				if m.gitActionReturn == workspaceActionsModal {
+				if m.gitRun.returnTo == workspaceActionsModal {
 					m.modal = workspaceActionsModal
-					m.gitActionReturn = noModal
+					m.gitRun.returnTo = noModal
 				}
 				return m, nil
 			case "up", "k":
@@ -82,9 +82,9 @@ func (m dashboard) handleModalKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 		}
 		switch message.String() {
 		case "up", "k":
-			m.gitActionIndex = (m.gitActionIndex - 1 + len(gitActionChoices)) % len(gitActionChoices)
+			m.gitRun.index = (m.gitRun.index - 1 + len(gitActionChoices)) % len(gitActionChoices)
 		case "down", "j":
-			m.gitActionIndex = (m.gitActionIndex + 1) % len(gitActionChoices)
+			m.gitRun.index = (m.gitRun.index + 1) % len(gitActionChoices)
 		case "enter":
 			return m.startGitAction()
 		}
@@ -244,7 +244,7 @@ func (m dashboard) renderModal(width, height int) []string {
 
 func (m dashboard) modalCanClose() bool {
 	return m.modal != noModal && m.modal != workspaceActionsModal &&
-		!m.shutdownPending && !m.hookInstallPending && !m.gitActionPending && !m.input.pending
+		!m.shutdownPending && !m.hookInstallPending && !m.gitRun.pending && !m.input.pending
 }
 
 func (m dashboard) renderModalBody(width, height int) []string {

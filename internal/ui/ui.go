@@ -256,31 +256,22 @@ type dashboard struct {
 	workspaceActionAnchorY int
 	// config is the document as loaded, kept so saving edits it instead of
 	// reconstructing it from fields.
-	config            Config
-	leftWidth         int
-	navigationResize  bool
-	hover             hoverTarget
-	mousePassthrough  bool
-	scrollbackMouse   bool
-	search            scrollbackSearch
-	soundOnDone       bool
-	soundOnWaiting    bool
-	agentSoundReady   bool
-	gitStates         map[string]gitState
-	gitFetchedAt      time.Time
-	gitActionTarget   model.Workspace
-	gitActionReturn   modal
-	gitActionIndex    int
-	gitAction         gitAction
-	gitActionPending  bool
-	gitActionComplete bool
-	gitActionOutput   string
-	gitActionError    string
-	gitActionOffset   int
-	gitActionCancel   func()
-	gitDiff           gitDiffView
-	gitDiffSplit      bool
-	styles            *uiStyles
+	config           Config
+	leftWidth        int
+	navigationResize bool
+	hover            hoverTarget
+	mousePassthrough bool
+	scrollbackMouse  bool
+	search           scrollbackSearch
+	soundOnDone      bool
+	soundOnWaiting   bool
+	agentSoundReady  bool
+	gitStates        map[string]gitState
+	gitFetchedAt     time.Time
+	gitRun           gitActionRun
+	gitDiff          gitDiffView
+	gitDiffSplit     bool
+	styles           *uiStyles
 }
 
 type snapshotMsg struct {
@@ -574,7 +565,7 @@ func (m dashboard) update(message tea.Msg) (tea.Model, tea.Cmd) {
 				m.input.text += message.Content
 				m.input.err = ""
 			}
-		} else if m.modal != noModal || m.shutdownPending || m.gitActionPending || m.hookInstallPending {
+		} else if m.modal != noModal || m.shutdownPending || m.gitRun.pending || m.hookInstallPending {
 			return m, nil
 		} else if m.scrollback && m.search.typing {
 			m.search.query += message.Content
@@ -787,7 +778,7 @@ func (m dashboard) handleKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	// A shutdown already asked for, a Git command already running, an installer
 	// already writing: the request is out and no key can take it back, so the
 	// only one that still applies is the one that leaves romty.
-	if m.shutdownPending || m.gitActionPending || m.hookInstallPending {
+	if m.shutdownPending || m.gitRun.pending || m.hookInstallPending {
 		if message.String() == "f4" {
 			return m.quit()
 		}
@@ -1253,7 +1244,7 @@ func (m dashboard) refreshAll() (tea.Model, tea.Cmd) {
 }
 
 func (m dashboard) hasPendingActivity() bool {
-	return m.tabPending || m.tabClosePending != "" || m.restorePending || m.gitActionPending || m.shutdownPending ||
+	return m.tabPending || m.tabClosePending != "" || m.restorePending || m.gitRun.pending || m.shutdownPending ||
 		m.hookInstallPending || m.input.pending || m.modal == browseModal && m.browse.loading
 }
 

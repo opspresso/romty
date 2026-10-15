@@ -86,7 +86,7 @@ func TestPendingModalCannotCloseWithMouse(t *testing.T) {
 	for _, kind := range []modal{gitActionsModal, shutdownModal, hookInstallModal} {
 		value := newDashboard(&fakeBackend{}, model.Snapshot{})
 		value.width, value.height, value.modal = 80, 24, kind
-		value.gitActionPending = kind == gitActionsModal
+		value.gitRun.pending = kind == gitActionsModal
 		value.shutdownPending = kind == shutdownModal
 		value.hookInstallPending = kind == hookInstallModal
 		value.agentAnimationPending = true

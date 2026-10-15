@@ -182,10 +182,10 @@ func (m dashboard) hoverTargetAt(mouse tea.Mouse) hoverTarget {
 				return hoverTarget{kind: hoverBrowseRow, index: index}
 			}
 		case gitActionsModal:
-			if m.gitActionComplete && row >= gitActionHeaderRows {
+			if m.gitRun.complete && row >= gitActionHeaderRows {
 				return hoverTarget{kind: hoverGitResult, index: row}
 			}
-			if !m.gitActionPending && row >= gitActionHeaderRows &&
+			if !m.gitRun.pending && row >= gitActionHeaderRows &&
 				row < gitActionHeaderRows+len(gitActionChoices) {
 				return hoverTarget{kind: hoverGitAction, index: row - gitActionHeaderRows}
 			}

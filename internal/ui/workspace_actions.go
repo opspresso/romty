@@ -47,7 +47,7 @@ type workspaceActionRow struct {
 }
 
 func (m dashboard) openWorkspaceActions() (tea.Model, tea.Cmd) {
-	if m.modal != noModal || m.gitActionPending {
+	if m.modal != noModal || m.gitRun.pending {
 		return m, nil
 	}
 	target, ok := m.navigationItem()
@@ -293,12 +293,9 @@ func (m dashboard) startWorkspaceGitAction(action workspaceAction, target navIte
 		return m, nil
 	}
 	m.modal = gitActionsModal
-	m.gitActionTarget = target.workspace
-	m.gitActionIndex = int(gitAction)
-	m.gitAction = gitAction
-	m.gitActionPending = false
-	m = m.resetGitActionResult()
-	m.gitActionReturn = workspaceActionsModal
+	m.gitRun = gitActionRun{
+		target: target.workspace, index: int(gitAction), action: gitAction, returnTo: workspaceActionsModal,
+	}
 	m.clearAnyError()
 	return m.startGitAction()
 }

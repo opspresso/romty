@@ -103,18 +103,18 @@ func TestWorkspaceActionsRunAGitOperationAndReturnToThePalette(t *testing.T) {
 	value.gitStates = map[string]gitState{workspace.Path: {Branch: "main"}}
 	value.setNavigation(1)
 	value, command := runWorkspaceAction(t, value, workspaceGitPullAction)
-	if command == nil || value.modal != gitActionsModal || !value.gitActionPending || value.gitAction != gitPullAction ||
-		value.gitActionTarget.Path != workspace.Path {
+	if command == nil || value.modal != gitActionsModal || !value.gitRun.pending || value.gitRun.action != gitPullAction ||
+		value.gitRun.target.Path != workspace.Path {
 		t.Fatalf("Git pull = (command %v, modal %v, pending %v, action %v, target %q)",
-			command, value.modal, value.gitActionPending, value.gitAction, value.gitActionTarget.Path)
+			command, value.modal, value.gitRun.pending, value.gitRun.action, value.gitRun.target.Path)
 	}
 	value.cancelGitAction()
-	value.gitActionPending = false
-	value.gitActionComplete = true
-	value.gitActionOutput = "Already up to date."
+	value.gitRun.pending = false
+	value.gitRun.complete = true
+	value.gitRun.output = "Already up to date."
 	send(&value, key(tea.KeyEnter, ""))
-	if value.modal != workspaceActionsModal || value.gitActionComplete {
-		t.Fatalf("Git result returned to modal %v with complete=%v, want workspace actions", value.modal, value.gitActionComplete)
+	if value.modal != workspaceActionsModal || value.gitRun.complete {
+		t.Fatalf("Git result returned to modal %v with complete=%v, want workspace actions", value.modal, value.gitRun.complete)
 	}
 }
 

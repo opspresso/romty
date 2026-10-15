@@ -11,6 +11,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/opspresso/romty/internal/display"
+	"github.com/opspresso/romty/internal/model"
 )
 
 const gitActionTimeout = 2 * time.Minute
@@ -76,6 +77,23 @@ func (a gitAction) arguments() ([]string, error) {
 	}
 }
 
+// gitActionRun is the Git actions modal: the workspace it acts on, the action
+// chosen, and the run and its result.
+type gitActionRun struct {
+	target model.Workspace
+	// returnTo is the modal Enter goes back to after a result.
+	returnTo modal
+	index    int
+	action   gitAction
+	pending  bool
+	complete bool
+	output   string
+	err      string
+	offset   int
+	// cancel stops a running command when the TUI closes.
+	cancel func()
+}
+
 type gitActionMsg struct {
 	path   string
 	action gitAction
@@ -99,7 +117,7 @@ func executeGitActionContext(parent context.Context, path string, action gitActi
 }
 
 func (m dashboard) openGitActions() (tea.Model, tea.Cmd) {
-	if m.modal != noModal || m.gitActionPending {
+	if m.modal != noModal || m.gitRun.pending {
 		return m, nil
 	}
 	target, ok := m.gitActionWorkspace()
@@ -108,12 +126,7 @@ func (m dashboard) openGitActions() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.modal = gitActionsModal
-	m.gitActionTarget = target.workspace
-	m.gitActionIndex = 0
-	m.gitAction = gitStatusAction
-	m.gitActionPending = false
-	m = m.resetGitActionResult()
-	m.gitActionReturn = noModal
+	m.gitRun = gitActionRun{target: target.workspace, action: gitStatusAction}
 	m.clearAnyError()
 	return m, nil
 }
@@ -131,18 +144,18 @@ func (m dashboard) gitActionWorkspace() (navItem, bool) {
 }
 
 func (m dashboard) startGitAction() (tea.Model, tea.Cmd) {
-	if m.gitActionPending || m.gitActionComplete || m.gitActionTarget.Path == "" {
+	if m.gitRun.pending || m.gitRun.complete || m.gitRun.target.Path == "" {
 		return m, nil
 	}
-	m.gitAction = gitActionChoices[m.gitActionIndex]
-	m.gitActionPending = true
-	m.gitActionOutput = ""
-	m.gitActionError = ""
-	m.gitActionOffset = 0
-	path := m.gitActionTarget.Path
-	action := m.gitAction
+	m.gitRun.action = gitActionChoices[m.gitRun.index]
+	m.gitRun.pending = true
+	m.gitRun.output = ""
+	m.gitRun.err = ""
+	m.gitRun.offset = 0
+	path := m.gitRun.target.Path
+	action := m.gitRun.action
 	ctx, cancel := context.WithCancel(context.Background())
-	m.gitActionCancel = cancel
+	m.gitRun.cancel = cancel
 	return m, func() tea.Msg {
 		output, err := executeGitActionContext(ctx, path, action)
 		return gitActionMsg{path: path, action: action, output: output, err: err}
@@ -150,44 +163,44 @@ func (m dashboard) startGitAction() (tea.Model, tea.Cmd) {
 }
 
 func (m dashboard) handleGitActionResult(message gitActionMsg) (tea.Model, tea.Cmd) {
-	if message.path != m.gitActionTarget.Path || message.action != m.gitAction {
+	if message.path != m.gitRun.target.Path || message.action != m.gitRun.action {
 		return m, nil
 	}
-	m.gitActionPending = false
+	m.gitRun.pending = false
 	m.cancelGitAction()
-	m.gitActionComplete = true
-	m.gitActionOutput = message.output
+	m.gitRun.complete = true
+	m.gitRun.output = message.output
 	if message.err != nil {
-		m.gitActionError = message.err.Error()
+		m.gitRun.err = message.err.Error()
 	}
 	return m, m.readGitStatus(false, false)
 }
 
 func (m *dashboard) cancelGitAction() {
-	if m.gitActionCancel == nil {
+	if m.gitRun.cancel == nil {
 		return
 	}
-	m.gitActionCancel()
-	m.gitActionCancel = nil
+	m.gitRun.cancel()
+	m.gitRun.cancel = nil
 }
 
 func (m dashboard) resetGitActionResult() dashboard {
-	m.gitActionComplete = false
-	m.gitActionOutput = ""
-	m.gitActionError = ""
-	m.gitActionOffset = 0
+	m.gitRun.complete = false
+	m.gitRun.output = ""
+	m.gitRun.err = ""
+	m.gitRun.offset = 0
 	return m
 }
 
 func (m dashboard) gitActionResultLines() []string {
 	lines := make([]string, 0)
-	if m.gitActionOutput != "" {
-		for _, line := range strings.Split(m.gitActionOutput, "\n") {
+	if m.gitRun.output != "" {
+		for _, line := range strings.Split(m.gitRun.output, "\n") {
 			lines = append(lines, display.Text(line))
 		}
 	}
-	if m.gitActionError != "" {
-		lines = append(lines, "Error: "+display.Text(m.gitActionError))
+	if m.gitRun.err != "" {
+		lines = append(lines, "Error: "+display.Text(m.gitRun.err))
 	}
 	if len(lines) == 0 {
 		return []string{"Completed successfully."}
@@ -206,7 +219,7 @@ func gitActionResultCapacity(height int) int {
 
 func (m dashboard) scrollGitAction(delta int) (tea.Model, tea.Cmd) {
 	maximum := m.maximumGitActionOffset(m.dimensions().bodyHeight)
-	m.gitActionOffset = min(max(m.gitActionOffset+delta, 0), maximum)
+	m.gitRun.offset = min(max(m.gitRun.offset+delta, 0), maximum)
 	return m, nil
 }
 
@@ -215,7 +228,7 @@ func (m dashboard) handleGitActionsMouse(message tea.MouseMsg) (tea.Model, tea.C
 	if !inside {
 		return m, nil, false
 	}
-	if wheel, ok := message.(tea.MouseWheelMsg); ok && m.gitActionComplete {
+	if wheel, ok := message.(tea.MouseWheelMsg); ok && m.gitRun.complete {
 		switch wheel.Button {
 		case tea.MouseWheelUp:
 			updated, command := m.scrollGitAction(-3)
@@ -226,14 +239,14 @@ func (m dashboard) handleGitActionsMouse(message tea.MouseMsg) (tea.Model, tea.C
 		}
 	}
 	click, ok := message.(tea.MouseClickMsg)
-	if !ok || click.Button != tea.MouseLeft || m.gitActionPending || m.gitActionComplete {
+	if !ok || click.Button != tea.MouseLeft || m.gitRun.pending || m.gitRun.complete {
 		return m, nil, false
 	}
 	index := row - gitActionHeaderRows
 	if index < 0 || index >= len(gitActionChoices) {
 		return m, nil, true
 	}
-	m.gitActionIndex = index
+	m.gitRun.index = index
 	updated, command := m.startGitAction()
 	return updated, command, true
 }
@@ -243,17 +256,17 @@ func (m dashboard) handleGitActionsMouse(message tea.MouseMsg) (tea.Model, tea.C
 const gitActionHeaderRows = 2
 
 func (m dashboard) renderGitActionsModal(maximum, height int) []string {
-	target := m.styles.modalStrong.Render(display.Text(m.gitActionTarget.Name)) +
-		m.styles.empty.Render("  "+display.Text(m.gitActionTarget.Path))
-	if m.gitActionPending {
-		return modalBoxFit(m.styles, minimumModalWidth, maximum, "Git · "+m.gitAction.label(),
+	target := m.styles.modalStrong.Render(display.Text(m.gitRun.target.Name)) +
+		m.styles.empty.Render("  "+display.Text(m.gitRun.target.Path))
+	if m.gitRun.pending {
+		return modalBoxFit(m.styles, minimumModalWidth, maximum, "Git · "+m.gitRun.action.label(),
 			target,
 			"",
 			m.styles.modalBody.Render("Running…"),
 			"",
 		)
 	}
-	if !m.gitActionComplete {
+	if !m.gitRun.complete {
 		// The same highlighted bar the root picker draws. A bold row behind a
 		// chevron was the whole of the selection here, which is the least
 		// visible cursor romty has for the list whose rows push and delete.
@@ -268,7 +281,7 @@ func (m dashboard) renderGitActionsModal(maximum, height int) []string {
 		for index, label := range labels {
 			prefix := "  "
 			style := m.styles.modalBody
-			if index == m.gitActionIndex {
+			if index == m.gitRun.index {
 				prefix = "▌ "
 				style = m.styles.navigationSelected
 			} else if m.hover.kind == hoverGitAction && m.hover.index == index {
@@ -281,9 +294,9 @@ func (m dashboard) renderGitActionsModal(maximum, height int) []string {
 
 	result := m.gitActionResultLines()
 	capacity := gitActionResultCapacity(height)
-	offset := min(max(m.gitActionOffset, 0), max(len(result)-capacity, 0))
+	offset := min(max(m.gitRun.offset, 0), max(len(result)-capacity, 0))
 	end := min(offset+capacity, len(result))
-	title := "Git · " + m.gitAction.label()
+	title := "Git · " + m.gitRun.action.label()
 	if len(result) > capacity {
 		title += fmt.Sprintf(" %d-%d/%d", offset+1, end, len(result))
 	}
