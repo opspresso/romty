@@ -1,6 +1,6 @@
 # Agent status hooks
 
-romty identifies foreground Claude Code, Codex, and OpenCode processes in its terminal tabs. This guide explains how to connect each agent's lifecycle reports to its tab, how to verify the result, and what each report means.
+romty identifies foreground Claude Code, Codex, OpenCode, and Kiro CLI processes in its terminal tabs. This guide explains how to connect each agent's lifecycle reports to its tab, how to verify the result, and what each report means.
 
 Process detection alone gives a tab its agent color and the `●` marker. The phase behind every other marker comes from a reporting channel:
 
@@ -9,12 +9,13 @@ Process detection alone gives a tab its agent color and the `●` marker. The ph
 | Codex | The local app-server's read-only APIs, with hooks for standalone sessions | `romty hooks`, then restart Codex and trust the hooks in `/hooks` |
 | Claude Code | Hooks in its user settings | `romty hooks` |
 | OpenCode | A generated plugin; OpenCode 2 needs `opencode --standalone` | `romty hooks`, then restart OpenCode |
+| Kiro CLI | Generated global hook files (V3 engine) | `romty hooks`, then start a new Kiro session |
 
 Terminal output and silence do not establish Codex or Claude Code completion. Without a reporting channel, their status is unavailable. The [agent marker table](interface.md#agent-and-service-markers) lists every marker with its status rail label and `romty list` phase.
 
 ## Install or update
 
-When the TUI starts, romty looks for `claude`, `claude-code`, `codex`, and `opencode` on `PATH`. If a detected agent has missing or outdated romty hooks, the TUI opens a confirmation dialog:
+When the TUI starts, romty looks for `claude`, `claude-code`, `codex`, `opencode`, and `kiro-cli` on `PATH`. If a detected agent has missing or outdated romty hooks, the TUI opens a confirmation dialog:
 
 - Press `Enter` to install or update every listed provider.
 - Press `Esc` to leave the files unchanged for that run. The status rail then shows `Status unavailable · run romty hooks` for a skipped provider's agent until romty restarts or the agent reports an event.
@@ -30,12 +31,14 @@ The command reports `installed`, `updated`, or `current` for each detected provi
 - Claude Code user hooks to `${CLAUDE_CONFIG_DIR:-~/.claude}/settings.json`
 - Codex user hooks to `${CODEX_HOME:-~/.codex}/hooks.json`, and the `thread-id` title item to `tui.terminal_title` in `config.toml` in the same directory
 - an OpenCode plugin to `${OPENCODE_CONFIG_DIR:-~/.config/opencode}/plugins/romty.js`
+- Kiro hook files to `${KIRO_HOME:-~/.kiro}/hooks/romty.json` and `romty-session-end.json`
 
 After installation, each agent picks up the change differently:
 
 - **Claude Code** applies direct user-settings edits automatically, subject to its workspace trust rules.
 - **Codex** requires review and trust for a new or changed non-managed hook. Open `/hooks` in Codex after installation, and restart Codex to pick up the title identity field.
 - **OpenCode** loads plugins only at startup. Restart it to pick up the plugin.
+- **Kiro CLI** reads hook files when a session starts. Start a new session to pick up the files.
 
 Restart an already running agent session if it does not pick up the new hook configuration.
 
@@ -49,6 +52,8 @@ Claude Code and Codex are configured by structurally merging JSON instead of rep
 
 OpenCode has no JSON hook settings; its plugin API is the extension point. romty generates the whole plugin file, which bridges OpenCode's lifecycle events to `romty hook opencode`. A `plugins/romty.js` that romty did not write is refused rather than overwritten.
 
+Kiro CLI loads standalone hook files. romty generates both files whole; each hook runs `romty hook kiro`. A file at either path that romty did not write is refused rather than overwritten.
+
 All writes are atomic and preserve a settings-file symlink by updating its target.
 
 Installed handlers use the absolute path of the current romty executable so an untrusted working directory or modified `PATH` cannot substitute another command. Re-run `romty hooks` after moving a manually installed romty binary; the installer updates an old executable path.
@@ -59,7 +64,7 @@ Claude Code can disable all hooks with `disableAllHooks`, and Codex can set `[fe
 
 ## Verify
 
-1. Start `codex`, `claude`, or `opencode` normally in a new tab after setup.
+1. Start `codex`, `claude`, `opencode`, or `kiro-cli` normally in a new tab after setup.
 2. Submit a prompt, answer a question, approve a tool, and interrupt a separate turn.
 3. Check both the tab marker and the status rail after each step.
 
@@ -139,9 +144,22 @@ OpenCode 2 runs plugins in a server process. By default this is the shared backg
 
 The terminal-output fallback remains an estimate and never confirms completion.
 
+### Kiro CLI hooks
+
+Kiro CLI 3, and Kiro CLI 2 started with `kiro-cli --v3`, run the global hook files. `romty.json` reports `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, and `Stop`. `romty-session-end.json` reports `SessionEnd` and is a separate file: Kiro IDE and the V2 engine do not list that trigger, so a surface that rejects it skips only that file.
+
+Kiro runs hooks from its agent server, a child of the `kiro-cli` process. Each hook therefore reports the process groups above it, and romty accepts a Kiro event only when the tab's foreground job is among them. Kiro runs `Stop` only for a completed turn, so `Stop` is `completed`.
+
+A cancelled turn runs no hook. romty reads the session record that the hook's session ID names, and a newer cancellation there ends the turn as `interrupted`:
+
+- V3 writes `${KIRO_HOME:-~/.kiro}/sessions/<workspace>/<session_id>/messages.jsonl`. A `turn_end` with `stopReason` `cancelled` dates the interrupt.
+- V2 writes `${KIRO_HOME:-~/.kiro}/sessions/cli/<session_id>.jsonl`. A record that starts with `Response was interrupted by the user` or `Tool use was cancelled by the user` ends the turn. V2 records carry no time, so the file's modification time dates the interrupt.
+
+Kiro CLI 2's default V2 engine runs no global hooks. To report V2 sessions, add hooks that run `romty hook kiro` for `agentSpawn`, `userPromptSubmit`, `preToolUse`, `postToolUse`, and `stop` to the custom agent you use, then start it with `kiro-cli --v2 chat --agent <name>`. Without hooks, a Kiro tab shows the terminal-output estimate.
+
 ## What a hook sends
 
-The hook command sends only tab, provider, session, turn/prompt, subagent and tool-use identifiers, event name, tool name, notification type, permission mode, whether background work remains, for Claude Code the transcript file path, and, for OpenCode, the process groups above the hook. It does not send or retain prompts, transcript contents, tool inputs, tool outputs, or assistant messages. It is silent outside a romty tab or when the daemon is unavailable.
+The hook command sends only tab, provider, session, turn/prompt, subagent and tool-use identifiers, event name, tool name, notification type, permission mode, whether background work remains, for Claude Code the transcript file path, and, for OpenCode and Kiro, the process groups above the hook. It does not send or retain prompts, transcript contents, tool inputs, tool outputs, or assistant messages. It is silent outside a romty tab or when the daemon is unavailable.
 
 ## Token and cost readings
 
