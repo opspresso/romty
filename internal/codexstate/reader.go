@@ -43,12 +43,6 @@ func identifierByte(b byte) bool {
 	return b >= 'a' && b <= 'z' || b >= 'A' && b <= 'Z' || b >= '0' && b <= '9' || b == '-' || b == '_'
 }
 
-type State struct {
-	model.AgentStatus
-	SessionID string
-	TurnID    string
-}
-
 type Reader struct {
 	mu          sync.Mutex
 	connections map[string]*rpc
@@ -67,7 +61,7 @@ func (r *Reader) Close() {
 
 // Read returns only uniquely matched loaded sessions. An absent, ambiguous or
 // unreachable session is not guessed from its directory or most recent file.
-func (r *Reader) Read(ctx context.Context, home string, prefixes []string) (map[string]State, error) {
+func (r *Reader) Read(ctx context.Context, home string, prefixes []string) (map[string]model.AgentStatus, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
@@ -202,7 +196,7 @@ func (c *rpc) call(ctx context.Context, method string, params any, out any) erro
 	}
 }
 
-func (c *rpc) read(ctx context.Context, prefixes []string) (map[string]State, error) {
+func (c *rpc) read(ctx context.Context, prefixes []string) (map[string]model.AgentStatus, error) {
 	var ids []string
 	cursor := ""
 	for {
@@ -232,7 +226,7 @@ func (c *rpc) read(ctx context.Context, prefixes []string) (map[string]State, er
 		}
 		cursor = *page.NextCursor
 	}
-	result := make(map[string]State)
+	result := make(map[string]model.AgentStatus)
 	for _, prefix := range prefixes {
 		if _, exists := result[prefix]; exists {
 			continue
@@ -267,7 +261,7 @@ func matchSession(prefix string, ids []string) string {
 	return matched
 }
 
-func (c *rpc) readSession(ctx context.Context, id string) (State, error) {
+func (c *rpc) readSession(ctx context.Context, id string) (model.AgentStatus, error) {
 	var thread struct {
 		Thread struct {
 			ID     string `json:"id"`
@@ -278,16 +272,16 @@ func (c *rpc) readSession(ctx context.Context, id string) (State, error) {
 		} `json:"thread"`
 	}
 	if err := c.call(ctx, "thread/read", map[string]any{"threadId": id, "includeTurns": false}, &thread); err != nil {
-		return State{}, err
+		return model.AgentStatus{}, err
 	}
 	if thread.Thread.ID != id {
-		return State{}, errors.New("Codex returned a different thread")
+		return model.AgentStatus{}, errors.New("Codex returned a different thread")
 	}
-	state := State{SessionID: id, AgentStatus: model.AgentStatus{Agent: model.AgentCodex, Source: "runtime", Phase: model.AgentPhaseUnknown}}
+	state := model.AgentStatus{Agent: model.AgentCodex, Source: "runtime", Phase: model.AgentPhaseUnknown, SessionID: id}
 	switch thread.Thread.Status.Type {
 	case "active":
 		if thread.Thread.Status.Flags == nil {
-			return State{}, errors.New("Codex returned no active-state flags")
+			return model.AgentStatus{}, errors.New("Codex returned no active-state flags")
 		}
 		state.Phase, state.Active = model.AgentPhaseWorking, true
 		for _, flag := range *thread.Thread.Status.Flags {
@@ -327,15 +321,15 @@ func (c *rpc) readSession(ctx context.Context, id string) (State, error) {
 		if errors.As(err, &failure) && failure.code == -32600 && failure.message == "thread "+id+" is not materialized yet; thread/turns/list is unavailable before first user message" {
 			return state, nil
 		}
-		return State{}, err
+		return model.AgentStatus{}, err
 	}
 	if turns.Data == nil {
-		return State{}, errors.New("Codex returned no turn metadata")
+		return model.AgentStatus{}, errors.New("Codex returned no turn metadata")
 	}
 	if len(*turns.Data) > 0 {
 		state.TurnID = (*turns.Data)[0].ID
 		if state.TurnID == "" || len(state.TurnID) > 512 {
-			return State{}, errors.New("Codex returned no valid turn identity")
+			return model.AgentStatus{}, errors.New("Codex returned no valid turn identity")
 		}
 		switch (*turns.Data)[0].Status {
 		case "completed":
@@ -354,16 +348,16 @@ func (c *rpc) readSession(ctx context.Context, id string) (State, error) {
 		Goal goalField `json:"goal"`
 	}
 	if err := c.call(ctx, "thread/goal/get", map[string]any{"threadId": id}, &goal); err != nil {
-		return State{}, err
+		return model.AgentStatus{}, err
 	}
 	if !goal.Goal.present {
-		return State{}, errors.New("Codex returned no goal metadata")
+		return model.AgentStatus{}, errors.New("Codex returned no goal metadata")
 	}
 	if goal.Goal.value != nil {
 		switch goal.Goal.value.Status {
 		case "active", "paused", "blocked", "usageLimited", "budgetLimited", "complete":
 		default:
-			return State{}, errors.New("Codex returned an unknown goal status")
+			return model.AgentStatus{}, errors.New("Codex returned an unknown goal status")
 		}
 	}
 	if goal.Goal.value != nil && !state.Active && (state.Phase == model.AgentPhaseIdle || state.Phase == model.AgentPhaseCompleted) {

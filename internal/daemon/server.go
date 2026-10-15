@@ -481,8 +481,7 @@ func (s *Server) agentStatusesSnapshot() map[string]model.AgentStatus {
 			title, _ := sessions[tabID].agentIdentity()
 			prefix := codexstate.SessionPrefix(title)
 			if report, ok := native[tabID]; ok && report.prefix == prefix {
-				value := report.state
-				s.agentStatuses[tabID] = agentRuntime{AgentStatus: value.AgentStatus, SessionID: value.SessionID, TurnID: value.TurnID}
+				s.agentStatuses[tabID] = agentRuntime{AgentStatus: report.status}
 			} else if current, ok := s.agentStatuses[tabID]; ok && current.Agent == model.AgentCodex {
 				if prefix == "" || !strings.HasPrefix(current.SessionID, prefix) {
 					delete(s.agentStatuses, tabID)
@@ -502,7 +501,6 @@ func (s *Server) agentStatusesSnapshot() map[string]model.AgentStatus {
 				}
 			}
 			status = runtime.AgentStatus
-			status.SessionID, status.TurnID = runtime.SessionID, runtime.TurnID
 			if read {
 				status.ContextTokens, status.CostUSD = reading.ContextTokens, reading.CostUSD
 			}

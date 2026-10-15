@@ -13,8 +13,6 @@ import (
 
 type agentRuntime struct {
 	model.AgentStatus
-	SessionID string
-	TurnID    string
 	// Tools holds every tool call that has started and not finished, with the
 	// phase it puts the turn in: work, or a wait for the user's answer or
 	// approval. A finished tool cannot see that a sibling still runs.
@@ -96,9 +94,9 @@ func (s *Server) recordAgentEvent(tabID string, event *protocol.AgentEvent) prot
 	}
 	if event.HookEvent == "SessionStart" || !exists || event.Agent == model.AgentCodex && current.SessionID != event.SessionID {
 		current = agentRuntime{
-			AgentStatus: model.AgentStatus{Agent: event.Agent, Phase: phase},
-			SessionID:   event.SessionID,
-			TurnID:      event.TurnID,
+			AgentStatus: model.AgentStatus{
+				Agent: event.Agent, Phase: phase, SessionID: event.SessionID, TurnID: event.TurnID,
+			},
 		}
 	}
 	if current.Agent != event.Agent {

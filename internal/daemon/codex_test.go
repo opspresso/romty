@@ -7,7 +7,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/opspresso/romty/internal/codexstate"
 	"github.com/opspresso/romty/internal/model"
 	"github.com/opspresso/romty/internal/protocol"
 	"github.com/opspresso/romty/internal/testutil"
@@ -17,12 +16,12 @@ const codexSessionA = "01234567-89ab-7000-8000-123456789abc"
 const codexSessionB = "fedcba98-7654-7000-8000-123456789abc"
 
 type fakeCodexReader struct {
-	states map[string]codexstate.State
+	states map[string]model.AgentStatus
 	err    error
 	onRead func()
 }
 
-func (r *fakeCodexReader) Read(context.Context, string, []string) (map[string]codexstate.State, error) {
+func (r *fakeCodexReader) Read(context.Context, string, []string) (map[string]model.AgentStatus, error) {
 	if r.onRead != nil {
 		r.onRead()
 	}
@@ -69,8 +68,8 @@ func TestNativeCodexReadUpdatesPlainCodexAndInvalidatesStaleState(t *testing.T) 
 	process := "codex"
 	testutil.Set(t, &runProcessList, func(context.Context) ([]byte, error) { return []byte("101 " + process + "\n"), nil })
 	value := codexSession(codexSessionA)
-	reader := &fakeCodexReader{states: map[string]codexstate.State{codexSessionA[:29]: {
-		AgentStatus: model.AgentStatus{Agent: model.AgentCodex, Phase: model.AgentPhaseWorking, Source: "runtime", Active: true}, SessionID: codexSessionA,
+	reader := &fakeCodexReader{states: map[string]model.AgentStatus{codexSessionA[:29]: {
+		Agent: model.AgentCodex, Phase: model.AgentPhaseWorking, Source: "runtime", Active: true, SessionID: codexSessionA,
 	}}}
 	s := &Server{sessions: map[string]*session{"tab": value}, agentStatuses: make(map[string]agentRuntime), codex: reader}
 	if got := s.agentStatusesSnapshot()["tab"]; got.Phase != model.AgentPhaseWorking || got.SessionID != codexSessionA {
@@ -113,7 +112,7 @@ func TestSessionCodexHomeUsesTheClientEnvironment(t *testing.T) {
 func TestCodexResumeDoesNotNameAThreadThatLeftTheTerminal(t *testing.T) {
 	value := codexSession(codexSessionB)
 	s := &Server{sessions: map[string]*session{"tab": value}, agentStatuses: map[string]agentRuntime{
-		"tab": {AgentStatus: model.AgentStatus{Agent: model.AgentCodex, Source: "runtime"}, SessionID: codexSessionA},
+		"tab": {AgentStatus: model.AgentStatus{Agent: model.AgentCodex, Source: "runtime", SessionID: codexSessionA}},
 	}}
 	s.value.Tabs = []model.Tab{{ID: "tab", WorkspaceID: "workspace"}}
 	if saves := s.resumeSnapshotsLocked(); len(saves) != 1 || saves[0].meta.AgentSessionID != "" || saves[0].meta.Agent != model.AgentCodex {

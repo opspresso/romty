@@ -363,8 +363,7 @@ func TestAgentStatusReportsTheLedgerOnlyForAHookedSession(t *testing.T) {
 		},
 		agentStatuses: map[string]agentRuntime{
 			"tab-1": {
-				AgentStatus: model.AgentStatus{Agent: model.AgentClaude, Phase: model.AgentPhaseWorking},
-				SessionID:   "session-1",
+				AgentStatus: model.AgentStatus{Agent: model.AgentClaude, Phase: model.AgentPhaseWorking, SessionID: "session-1"},
 			},
 		},
 		transcripts: transcript.NewReader(),
@@ -481,8 +480,7 @@ func TestAgentStatusEndsATurnTheTranscriptRecordsAsInterrupted(t *testing.T) {
 	server := &Server{
 		sessions: map[string]*session{"tab-1": newSessionForTest(new(os.File))},
 		agentStatuses: map[string]agentRuntime{"tab-1": {
-			AgentStatus: model.AgentStatus{Agent: model.AgentClaude, Phase: model.AgentPhaseWorking},
-			SessionID:   "session-1",
+			AgentStatus: model.AgentStatus{Agent: model.AgentClaude, Phase: model.AgentPhaseWorking, SessionID: "session-1"},
 			Tools:       map[string]model.AgentPhase{"build": model.AgentPhaseWorking},
 			UpdatedAt:   time.Date(2026, 10, 15, 9, 0, 0, 0, time.UTC),
 		}},

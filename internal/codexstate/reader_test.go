@@ -139,7 +139,7 @@ func TestReadLifecycleWithOrdinaryCodexSessionIdentity(t *testing.T) {
 	r := NewReader()
 	defer r.Close()
 	prefix := SessionPrefix(sessionID[:29] + "... | project")
-	read := func(want model.AgentPhase) State {
+	read := func(want model.AgentPhase) model.AgentStatus {
 		t.Helper()
 		states, err := r.Read(context.Background(), home, []string{prefix})
 		if err != nil {
