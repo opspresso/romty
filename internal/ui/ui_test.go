@@ -320,7 +320,7 @@ func TestDashboardSelectsWorkspaceAndCreatesTerminal(t *testing.T) {
 }
 
 func TestDashboardSelectsRootAndCreatesTerminal(t *testing.T) {
-	root := model.Root{ID: "root-1", Name: "projects", Path: "/projects"}
+	root := projectsRoot
 	rootWorkspace := model.Workspace{ID: "root-workspace", RootID: root.ID, Name: root.Name, Path: root.Path}
 	tab := model.Tab{ID: "root-tab", WorkspaceID: rootWorkspace.ID, Name: "1", Running: true}
 	snapshot := model.Snapshot{Roots: []model.RootView{{
@@ -361,7 +361,7 @@ func TestDashboardSelectsRootAndCreatesTerminal(t *testing.T) {
 }
 
 func TestDashboardReloadsWorkspacesWhenReturningFromTerminal(t *testing.T) {
-	root := model.Root{ID: "root-1", Name: "projects", Path: "/projects"}
+	root := projectsRoot
 	rootWorkspace := model.Workspace{ID: "root-workspace", RootID: root.ID, Name: root.Name, Path: root.Path}
 	tab := model.Tab{ID: "root-tab", WorkspaceID: rootWorkspace.ID, Name: "1", Running: true}
 	initial := model.Snapshot{Roots: []model.RootView{{Root: root, Tabs: []model.Tab{tab}}}}
@@ -439,7 +439,7 @@ func TestDashboardIgnoresAnOlderWorkspaceSelection(t *testing.T) {
 			})
 		}
 		return model.Snapshot{Revision: revision, Roots: []model.RootView{{
-			Root:        model.Root{ID: "root-1", Name: "projects", Path: "/projects"},
+			Root:        projectsRoot,
 			Directories: directories,
 		}}}
 	}
@@ -535,7 +535,7 @@ func TestDashboardCreatesTabWithCtrlShiftT(t *testing.T) {
 }
 
 func TestDashboardCreatesTabForWorkspaceCursorWithCtrlShiftT(t *testing.T) {
-	root := model.Root{ID: "root-1", Name: "projects", Path: "/projects"}
+	root := projectsRoot
 	alpha := model.Workspace{ID: "workspace-1", RootID: root.ID, Name: "alpha", Path: "/projects/alpha"}
 	bravo := model.Workspace{ID: "workspace-2", RootID: root.ID, Name: "bravo", Path: "/projects/bravo"}
 	alphaTab := model.Tab{ID: "tab-1", WorkspaceID: alpha.ID, Name: "1", Running: true}
@@ -665,13 +665,10 @@ func TestDashboardSupportsRemainingWorkspaceShortcuts(t *testing.T) {
 // keys — three per notch, through the terminal's alternate scroll — so a tree
 // that wrapped sent one notch at the bottom back to the top.
 func TestDashboardNavigationStopsAtBothEnds(t *testing.T) {
-	snapshot := model.Snapshot{Roots: []model.RootView{{
-		Root: model.Root{ID: "root-1", Name: "projects", Path: "/projects"},
-		Directories: []model.WorkspaceView{
-			{Workspace: model.Workspace{RootID: "root-1", Name: "api", Path: "/projects/api"}},
-			{Workspace: model.Workspace{RootID: "root-1", Name: "web", Path: "/projects/web"}},
-		},
-	}}}
+	snapshot := projectsSnapshot([]model.WorkspaceView{
+		{Workspace: model.Workspace{RootID: "root-1", Name: "api", Path: "/projects/api"}},
+		{Workspace: model.Workspace{RootID: "root-1", Name: "web", Path: "/projects/web"}},
+	})
 	value := newDashboard(&fakeBackend{}, snapshot)
 
 	for range 3 {
@@ -829,7 +826,7 @@ func TestDashboardMouseWheelScrollsTheWorkspaceWithoutMovingItsCursor(t *testing
 		}})
 	}
 	value := newDashboard(&fakeBackend{}, model.Snapshot{Roots: []model.RootView{{
-		Root: model.Root{ID: "root-1", Name: "projects", Path: "/projects"}, Directories: directories,
+		Root: projectsRoot, Directories: directories,
 	}}})
 	value.width, value.height = 120, 10
 	value.focus = terminalPane
@@ -3152,10 +3149,7 @@ func TestLayoutMatchesWhatIsRendered(t *testing.T) {
 // it. So the F5 a user presses right after a failure erased the reason for it,
 // and an in-flight refresh could erase one at random.
 func TestDashboardKeepsErrorsARefreshDoesNotAnswer(t *testing.T) {
-	snapshot := model.Snapshot{Roots: []model.RootView{{
-		Root:        model.Root{ID: "root-1", Name: "projects", Path: "/projects"},
-		Directories: []model.WorkspaceView{{Workspace: model.Workspace{ID: "w", Name: "alpha", Path: "/projects/alpha"}}},
-	}}}
+	snapshot := projectsSnapshot([]model.WorkspaceView{{Workspace: model.Workspace{ID: "w", Name: "alpha", Path: "/projects/alpha"}}})
 
 	for _, probe := range []struct {
 		name     string
@@ -3320,7 +3314,7 @@ func TestDashboardKeepsTheCursorOnTheSameWorkspace(t *testing.T) {
 			})
 		}
 		return model.Snapshot{Roots: []model.RootView{{
-			Root:        model.Root{ID: "root-1", Name: "projects", Path: "/projects"},
+			Root:        projectsRoot,
 			Directories: directories,
 		}}}
 	}
@@ -3468,13 +3462,10 @@ func TestDashboardMovesWorkspaceAndTabCursorBeforeConfirming(t *testing.T) {
 	firstTab := model.Tab{ID: "tab-1", WorkspaceID: firstWorkspace.ID, Name: "one", Running: true}
 	secondTab := model.Tab{ID: "tab-2", WorkspaceID: secondWorkspace.ID, Name: "two", Running: true}
 	thirdTab := model.Tab{ID: "tab-3", WorkspaceID: secondWorkspace.ID, Name: "three", Running: true}
-	snapshot := model.Snapshot{Roots: []model.RootView{{
-		Root: model.Root{ID: "root-1", Name: "projects", Path: "/projects"},
-		Directories: []model.WorkspaceView{
-			{Workspace: firstWorkspace, Tabs: []model.Tab{firstTab}},
-			{Workspace: secondWorkspace, Tabs: []model.Tab{secondTab, thirdTab}},
-		},
-	}}}
+	snapshot := projectsSnapshot([]model.WorkspaceView{
+		{Workspace: firstWorkspace, Tabs: []model.Tab{firstTab}},
+		{Workspace: secondWorkspace, Tabs: []model.Tab{secondTab, thirdTab}},
+	})
 	backend := &fakeBackend{snapshot: snapshot, workspace: secondWorkspace}
 	terminal := newEmbeddedTerminal(firstTab.ID, newMemoryStream(""), 40, 10)
 	defer terminal.close()
@@ -3594,7 +3585,7 @@ func TestDashboardSwitchesTabsWithCtrlShiftArrows(t *testing.T) {
 // tree and pressing Enter. Only workspaces with a terminal running are stops,
 // because a root lists every child directory whether it has been used or not.
 func TestDashboardSwitchesWorkspacesWithCtrlShiftArrows(t *testing.T) {
-	root := model.Root{ID: "root-1", Name: "projects", Path: "/projects"}
+	root := projectsRoot
 	// alpha and charlie have terminals; bravo is an empty directory between
 	// them, and delta an empty one after.
 	alpha := model.Workspace{ID: "workspace-1", RootID: root.ID, Name: "alpha", Path: "/projects/alpha"}
@@ -3655,7 +3646,7 @@ func TestDashboardSwitchesWorkspacesWithCtrlShiftArrows(t *testing.T) {
 // cursor anchor makes the key do nothing whenever it points at the workspace
 // before the open one, which from the workspace pane is where it often sits.
 func TestDashboardSwitchesWorkspacesFromTheOpenOneNotTheCursor(t *testing.T) {
-	root := model.Root{ID: "root-1", Name: "projects", Path: "/projects"}
+	root := projectsRoot
 	alpha := model.Workspace{ID: "workspace-1", RootID: root.ID, Name: "alpha", Path: "/projects/alpha"}
 	bravo := model.Workspace{ID: "workspace-2", RootID: root.ID, Name: "bravo", Path: "/projects/bravo"}
 	alphaTab := model.Tab{ID: "tab-1", WorkspaceID: alpha.ID, Name: "1", Running: true}
@@ -3690,7 +3681,7 @@ func TestDashboardSwitchesWorkspacesFromTheOpenOneNotTheCursor(t *testing.T) {
 // nowhere to go, and reopening the one that is open would tear a live terminal
 // down and attach a new one in its place.
 func TestDashboardKeepsTheWorkspaceWhenThereIsNowhereToSwitch(t *testing.T) {
-	root := model.Root{ID: "root-1", Name: "projects", Path: "/projects"}
+	root := projectsRoot
 	only := model.Workspace{ID: "workspace-1", RootID: root.ID, Name: "alpha", Path: "/projects/alpha"}
 	empty := model.Workspace{RootID: root.ID, Name: "bravo", Path: "/projects/bravo"}
 
@@ -3728,7 +3719,7 @@ func TestDashboardKeepsTheWorkspaceWhenThereIsNowhereToSwitch(t *testing.T) {
 // A sound and a tab marker say an agent stopped to ask something; without a way
 // to reach it the user still has to walk the tree to find which one.
 func TestDashboardJumpsToTheNextWaitingAgent(t *testing.T) {
-	root := model.Root{ID: "root-1", Name: "projects", Path: "/projects"}
+	root := projectsRoot
 	alpha := model.Workspace{ID: "workspace-1", RootID: root.ID, Name: "alpha", Path: "/projects/alpha"}
 	bravo := model.Workspace{ID: "workspace-2", RootID: root.ID, Name: "bravo", Path: "/projects/bravo"}
 	charlie := model.Workspace{ID: "workspace-3", RootID: root.ID, Name: "charlie", Path: "/projects/charlie"}
@@ -3785,7 +3776,7 @@ func TestDashboardJumpsToTheNextWaitingAgent(t *testing.T) {
 // Reopening the terminal that is already attached would tear it down to attach
 // a new one in its place, so the only waiting agent gets the keyboard instead.
 func TestDashboardJumpToTheOnlyWaitingAgentMovesTheFocus(t *testing.T) {
-	root := model.Root{ID: "root-1", Name: "projects", Path: "/projects"}
+	root := projectsRoot
 	alpha := model.Workspace{ID: "workspace-1", RootID: root.ID, Name: "alpha", Path: "/projects/alpha"}
 	alphaTab := model.Tab{ID: "tab-1", WorkspaceID: alpha.ID, Name: "1", Running: true,
 		Agent: model.AgentClaude, AgentPhase: model.AgentPhaseWaitingInput}
@@ -3813,7 +3804,7 @@ func TestDashboardJumpToTheOnlyWaitingAgentMovesTheFocus(t *testing.T) {
 }
 
 func TestDashboardJumpSaysWhenNoAgentIsWaiting(t *testing.T) {
-	root := model.Root{ID: "root-1", Name: "projects", Path: "/projects"}
+	root := projectsRoot
 	alpha := model.Workspace{ID: "workspace-1", RootID: root.ID, Name: "alpha", Path: "/projects/alpha"}
 	alphaTab := model.Tab{ID: "tab-1", WorkspaceID: alpha.ID, Name: "1", Running: true,
 		Agent: model.AgentClaude, AgentPhase: model.AgentPhaseWorking}
@@ -3845,13 +3836,7 @@ func pressJumpToWaitingAgent(t *testing.T, value dashboard) dashboard {
 	if command == nil {
 		t.Fatal("Ctrl+Shift+A produced no command")
 	}
-	for step := 0; command != nil && step < 4; step++ {
-		message := command()
-		if _, reading := message.(terminalOutputMsg); reading {
-			break
-		}
-		command = send(&value, message)
-	}
+	settleSwitch(&value, command)
 	return value
 }
 
@@ -3863,24 +3848,29 @@ func newTabKey() tea.KeyPressMsg {
 	return tea.KeyPressMsg(tea.Key{Code: 't', ShiftedCode: 'T', Mod: tea.ModCtrl | tea.ModShift})
 }
 
-// pressSwitchTab presses Ctrl+Shift+code and runs the commands the switch
-// produces until it has settled: the workspace pane selects a workspace before
-// opening a tab, the terminal pane opens one straight away, and either way the
-// terminal that comes back has to be attached. The read command that ends the
-// chain is left alone; reading is what the terminal does from then on.
+// settleSwitch runs the commands a switch produces until it has settled: the
+// workspace pane selects a workspace before opening a tab, the terminal pane
+// opens one straight away, and either way the terminal that comes back has to
+// be attached. The read command that ends the chain is left alone; reading is
+// what the terminal does from then on.
+func settleSwitch(value *dashboard, command tea.Cmd) {
+	for step := 0; command != nil && step < 4; step++ {
+		message := command()
+		if _, reading := message.(terminalOutputMsg); reading {
+			return
+		}
+		command = send(value, message)
+	}
+}
+
+// pressSwitchTab presses Ctrl+Shift+code and settles the switch.
 func pressSwitchTab(t *testing.T, value dashboard, code rune) dashboard {
 	t.Helper()
 	command := send(&value, switchTabKey(code))
 	if command == nil {
 		t.Fatalf("Ctrl+Shift+%s produced no command", switchTabKey(code).String())
 	}
-	for step := 0; command != nil && step < 4; step++ {
-		message := command()
-		if _, reading := message.(terminalOutputMsg); reading {
-			break
-		}
-		command = send(&value, message)
-	}
+	settleSwitch(&value, command)
 	return value
 }
 
@@ -3895,13 +3885,10 @@ func TestDashboardSwitchesTabsOfTheOpenTerminalNotTheCursor(t *testing.T) {
 		{ID: "tab-2", WorkspaceID: open.ID, Name: "2", Running: true},
 	}
 	otherTab := model.Tab{ID: "tab-3", WorkspaceID: other.ID, Name: "1", Running: true}
-	snapshot := model.Snapshot{Roots: []model.RootView{{
-		Root: model.Root{ID: "root-1", Name: "projects", Path: "/projects"},
-		Directories: []model.WorkspaceView{
-			{Workspace: open, Tabs: openTabs},
-			{Workspace: other, Tabs: []model.Tab{otherTab}},
-		},
-	}}}
+	snapshot := projectsSnapshot([]model.WorkspaceView{
+		{Workspace: open, Tabs: openTabs},
+		{Workspace: other, Tabs: []model.Tab{otherTab}},
+	})
 	backend := &fakeBackend{snapshot: snapshot, workspace: other}
 	value := newDashboard(backend, snapshot)
 	value.selectedWorkspaceID = open.ID
@@ -4223,13 +4210,10 @@ func TestAgentAnimationRunsOnlyWhileWorkIsActive(t *testing.T) {
 
 func TestNavigationShowsGitStateOnSecondLine(t *testing.T) {
 	workspace := model.Workspace{ID: "workspace-1", RootID: "root-1", Name: "SnowClash", Path: "/projects/SnowClash"}
-	snapshot := model.Snapshot{Roots: []model.RootView{{
-		Root: model.Root{ID: "root-1", Name: "projects", Path: "/projects"},
-		Directories: []model.WorkspaceView{{
-			Workspace: workspace,
-			Tabs:      []model.Tab{{ID: "tab-1", Running: true}},
-		}},
-	}}}
+	snapshot := projectsSnapshot([]model.WorkspaceView{{
+		Workspace: workspace,
+		Tabs:      []model.Tab{{ID: "tab-1", Running: true}},
+	}})
 	value := newDashboard(&fakeBackend{}, snapshot)
 	value.gitStates = map[string]gitState{workspace.Path: {
 		Branch: "main",
@@ -4257,13 +4241,10 @@ func TestNavigationShowsGitStateOnSecondLine(t *testing.T) {
 }
 
 func TestNavigationUsesOneRootLineAndTwoWorkspaceLines(t *testing.T) {
-	value := newDashboard(&fakeBackend{}, model.Snapshot{Roots: []model.RootView{{
-		Root: model.Root{ID: "root-1", Name: "projects", Path: "/projects"},
-		Directories: []model.WorkspaceView{
-			{Workspace: model.Workspace{ID: "workspace-1", RootID: "root-1", Name: "first", Path: "/projects/first"}},
-			{Workspace: model.Workspace{ID: "workspace-2", RootID: "root-1", Name: "last", Path: "/projects/last"}},
-		},
-	}}})
+	value := newDashboard(&fakeBackend{}, projectsSnapshot([]model.WorkspaceView{
+		{Workspace: model.Workspace{ID: "workspace-1", RootID: "root-1", Name: "first", Path: "/projects/first"}},
+		{Workspace: model.Workspace{ID: "workspace-2", RootID: "root-1", Name: "last", Path: "/projects/last"}},
+	}))
 	value.focus = terminalPane
 	value.selectedPath = "/projects/first"
 	value.gitStates = map[string]gitState{"/projects/first": {Branch: "main"}}
@@ -4285,7 +4266,7 @@ func TestNavigationUsesOneRootLineAndTwoWorkspaceLines(t *testing.T) {
 
 func TestNavigationSeparatesRootsWithOneBlankLine(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, model.Snapshot{Roots: []model.RootView{
-		{Root: model.Root{ID: "root-1", Name: "projects", Path: "/projects"}},
+		{Root: projectsRoot},
 		{Root: model.Root{ID: "root-2", Name: "archive", Path: "/archive"}},
 	}})
 	lines := value.renderNavigation(28, 20)
@@ -4357,7 +4338,7 @@ func TestInitialGitStatusSeparatesLocalReadFromFetch(t *testing.T) {
 
 func TestAgentSnapshotUpdatesStateAndSchedulesAnotherRefresh(t *testing.T) {
 	snapshot := model.Snapshot{Roots: []model.RootView{{
-		Root: model.Root{ID: "root-1", Name: "projects", Path: "/projects"},
+		Root: projectsRoot,
 		Tabs: []model.Tab{{ID: "tab-1", Running: true}},
 	}}}
 	value := newDashboard(&fakeBackend{}, snapshot)
@@ -4403,13 +4384,10 @@ func TestDashboardRestoresTheLastWorkspaceAndTab(t *testing.T) {
 		{ID: "tab-2", WorkspaceID: bravo.ID, Name: "1", Running: true},
 		{ID: "tab-3", WorkspaceID: bravo.ID, Name: "2", Running: true},
 	}
-	snapshot := model.Snapshot{Roots: []model.RootView{{
-		Root: model.Root{ID: "root-1", Name: "projects", Path: "/projects"},
-		Directories: []model.WorkspaceView{
-			{Workspace: alpha, Tabs: []model.Tab{{ID: "tab-1", WorkspaceID: alpha.ID, Name: "1", Running: true}}},
-			{Workspace: bravo, Tabs: tabs},
-		},
-	}}}
+	snapshot := projectsSnapshot([]model.WorkspaceView{
+		{Workspace: alpha, Tabs: []model.Tab{{ID: "tab-1", WorkspaceID: alpha.ID, Name: "1", Running: true}}},
+		{Workspace: bravo, Tabs: tabs},
+	})
 	backend := &fakeBackend{snapshot: snapshot}
 	value := newDashboardWithConfig(backend, snapshot, "", Config{
 		LastWorkspacePath: bravo.Path,
@@ -4440,16 +4418,13 @@ func TestDashboardRestoresTheLastWorkspaceAndTab(t *testing.T) {
 
 func TestDashboardDoesNotRestoreAMissingWorkspaceOrTab(t *testing.T) {
 	workspace := model.Workspace{ID: "workspace-1", RootID: "root-1", Name: "alpha", Path: "/projects/alpha"}
-	snapshot := model.Snapshot{Roots: []model.RootView{{
-		Root: model.Root{ID: "root-1", Name: "projects", Path: "/projects"},
-		Directories: []model.WorkspaceView{{
-			Workspace: workspace,
-			Tabs: []model.Tab{
-				{ID: "running", WorkspaceID: workspace.ID, Running: true},
-				{ID: "stopped", WorkspaceID: workspace.ID},
-			},
-		}},
-	}}}
+	snapshot := projectsSnapshot([]model.WorkspaceView{{
+		Workspace: workspace,
+		Tabs: []model.Tab{
+			{ID: "running", WorkspaceID: workspace.ID, Running: true},
+			{ID: "stopped", WorkspaceID: workspace.ID},
+		},
+	}})
 
 	for _, probe := range []Config{
 		{LastWorkspacePath: "/projects/missing", LastTabID: "running"},
@@ -4842,7 +4817,7 @@ func plainStatus(value dashboard) string {
 }
 
 func TestDashboardShowsTheOpenAgentLedgerInTheRail(t *testing.T) {
-	root := model.Root{ID: "root-1", Name: "projects", Path: "/projects"}
+	root := projectsRoot
 	alpha := model.Workspace{ID: "workspace-1", RootID: root.ID, Name: "alpha", Path: "/projects/alpha"}
 	tab := model.Tab{ID: "tab-1", WorkspaceID: alpha.ID, Name: "1", Running: true,
 		Agent: model.AgentClaude, AgentPhase: model.AgentPhaseWorking,
@@ -5440,10 +5415,7 @@ func TestDashboardPreservesReplayRightEdgeWhenOpeningOnPhone(t *testing.T) {
 			t.Run(fmt.Sprintf("width=%d/alternate=%t", width, alternate), func(t *testing.T) {
 				workspace := model.Workspace{ID: "workspace-1", RootID: "root-1", Name: "alpha", Path: "/projects/alpha"}
 				tab := model.Tab{ID: "tab-1", WorkspaceID: workspace.ID, Name: "1", Running: true}
-				snapshot := model.Snapshot{Roots: []model.RootView{{
-					Root:        model.Root{ID: "root-1", Name: "projects", Path: "/projects"},
-					Directories: []model.WorkspaceView{{Workspace: workspace, Tabs: []model.Tab{tab}}},
-				}}}
+				snapshot := projectsSnapshot([]model.WorkspaceView{{Workspace: workspace, Tabs: []model.Tab{tab}}})
 				value := newDashboard(&fakeBackend{snapshot: snapshot}, snapshot)
 				value.width, value.height = width, 24
 				value.selectedWorkspaceID, value.selectedPath = workspace.ID, workspace.Path

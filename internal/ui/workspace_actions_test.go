@@ -15,10 +15,7 @@ func alphaWorkspaceSnapshot(tabs []model.Tab) (model.Snapshot, model.Workspace) 
 	workspace := model.Workspace{
 		ID: "workspace-1", RootID: "root-1", Name: "alpha", Path: "/projects/alpha",
 	}
-	return model.Snapshot{Roots: []model.RootView{{
-		Root:        model.Root{ID: "root-1", Name: "projects", Path: "/projects"},
-		Directories: []model.WorkspaceView{{Workspace: workspace, Tabs: tabs}},
-	}}}, workspace
+	return projectsSnapshot([]model.WorkspaceView{{Workspace: workspace, Tabs: tabs}}), workspace
 }
 
 func workspaceActionIndexFor(t *testing.T, value dashboard, action workspaceAction) int {

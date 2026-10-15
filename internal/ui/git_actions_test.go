@@ -16,13 +16,10 @@ import (
 func TestDashboardRunsGitActionForContextWorkspace(t *testing.T) {
 	alpha := model.Workspace{ID: "workspace-1", RootID: "root-1", Name: "alpha", Path: "/projects/alpha"}
 	bravo := model.Workspace{ID: "workspace-2", RootID: "root-1", Name: "bravo", Path: "/projects/bravo"}
-	snapshot := model.Snapshot{Roots: []model.RootView{{
-		Root: model.Root{ID: "root-1", Name: "projects", Path: "/projects"},
-		Directories: []model.WorkspaceView{
-			{Workspace: alpha},
-			{Workspace: bravo},
-		},
-	}}}
+	snapshot := projectsSnapshot([]model.WorkspaceView{
+		{Workspace: alpha},
+		{Workspace: bravo},
+	})
 
 	for _, probe := range []struct {
 		name       string

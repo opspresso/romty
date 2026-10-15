@@ -33,3 +33,11 @@ func send(value *dashboard, message tea.Msg) tea.Cmd {
 	*value = updated.(dashboard)
 	return command
 }
+
+// projectsRoot is the root the dashboard fixtures open.
+var projectsRoot = model.Root{ID: "root-1", Name: "projects", Path: "/projects"}
+
+// projectsSnapshot is a snapshot of projectsRoot holding directories.
+func projectsSnapshot(directories []model.WorkspaceView) model.Snapshot {
+	return model.Snapshot{Roots: []model.RootView{{Root: projectsRoot, Directories: directories}}}
+}

@@ -183,7 +183,7 @@ func TestDashboardClosesARootTabAndMovesItsCursor(t *testing.T) {
 		{ID: "tab-2", WorkspaceID: "workspace-root", Name: "2", Running: true},
 	}
 	snapshot := model.Snapshot{Roots: []model.RootView{{
-		Root: model.Root{ID: "root-1", Name: "projects", Path: "/projects"},
+		Root: projectsRoot,
 		Tabs: tabs,
 	}}}
 	backend := &fakeBackend{snapshot: snapshot}
