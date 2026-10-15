@@ -15,11 +15,12 @@ import (
 	"time"
 )
 
-// listTimeout bounds walking a workspace, and maxFileBytes the file a preview
-// reads.
-const listTimeout = 10 * time.Second
-
-const maxFileBytes = 8 << 20
+const (
+	// listTimeout bounds walking a workspace.
+	listTimeout = 10 * time.Second
+	// maxFileBytes bounds the file a preview reads.
+	maxFileBytes = 8 << 20
+)
 
 // List returns every regular file under path as a slash-separated relative
 // path, sorted. It skips dot-directories but keeps dot-files, and does not
