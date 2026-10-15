@@ -1742,7 +1742,7 @@ func TestDashboardSaysWhyTheWheelHasNothingToScroll(t *testing.T) {
 // terminals. Keeping the mouse is the trade the option makes.
 func TestDashboardKeepsTheMouseInScrollbackWhenAsked(t *testing.T) {
 	value := scrolledDashboard(t, 200)
-	value.scrollbackMouse = true
+	value.config.ScrollbackMouse = true
 
 	command := send(&value, key(tea.KeyF6, ""))
 	if !value.scrollback {
@@ -1761,7 +1761,7 @@ func TestDashboardKeepsTheMouseInScrollbackWhenAsked(t *testing.T) {
 	}
 
 	// Off again, the host gets the mouse back for its own drag selection.
-	value.scrollbackMouse = false
+	value.config.ScrollbackMouse = false
 	if view := value.View(); view.MouseMode != tea.MouseModeNone {
 		t.Fatalf("scrollback mouse mode = %v, want the mouse returned to the host", view.MouseMode)
 	}
@@ -1772,8 +1772,8 @@ func TestDashboardKeepsTheMouseInScrollbackWhenAsked(t *testing.T) {
 // history the user opened.
 func TestDashboardScrollsHistoryNotTheGuestWithBothMouseOptions(t *testing.T) {
 	value := scrolledDashboard(t, 200)
-	value.scrollbackMouse = true
-	value.mousePassthrough = true
+	value.config.ScrollbackMouse = true
+	value.config.MousePassthrough = true
 	value.terminal.writeOutput([]byte("\x1b[?1003h\x1b[?1006h"))
 
 	send(&value, key(tea.KeyF6, ""))
@@ -1921,16 +1921,16 @@ func TestDashboardTogglesScrollbackMouseFromConfig(t *testing.T) {
 	}
 
 	command := send(&value, key('m', "m"))
-	if !value.scrollbackMouse || command == nil {
+	if !value.config.ScrollbackMouse || command == nil {
 		t.Fatalf("m = (scrollback mouse %v, command %v), want the setting on and saved",
-			value.scrollbackMouse, command)
+			value.config.ScrollbackMouse, command)
 	}
 	if !configRowReads(ansi.Strip(value.render()), "Scrollback mouse", "on") {
 		t.Fatalf("config modal does not report the setting:\n%s", ansi.Strip(value.render()))
 	}
 
 	send(&value, key('m', "m"))
-	if value.scrollbackMouse {
+	if value.config.ScrollbackMouse {
 		t.Fatal("m did not turn the setting back off")
 	}
 }
@@ -1941,9 +1941,9 @@ func TestDashboardConfiguresAndTestsSoundAlerts(t *testing.T) {
 
 	saveDone := send(&value, key('d', "d"))
 	saveWaiting := send(&value, key('b', "b"))
-	if !value.soundOnDone || !value.soundOnWaiting || saveDone == nil || saveWaiting == nil {
+	if !value.config.SoundOnDone || !value.config.SoundOnWaiting || saveDone == nil || saveWaiting == nil {
 		t.Fatalf("sound toggles = (done %v, waiting %v, saves %v/%v)",
-			value.soundOnDone, value.soundOnWaiting, saveDone, saveWaiting)
+			value.config.SoundOnDone, value.config.SoundOnWaiting, saveDone, saveWaiting)
 	}
 
 	soundCommand := send(&value, key('s', "s"))
@@ -1959,9 +1959,9 @@ func TestDashboardClicksConfigControls(t *testing.T) {
 	left, top := value.modalGeometry(value.width, value.dimensions().bodyHeight).contentOrigin()
 
 	save := send(&value, tea.MouseClickMsg{X: left + 2, Y: top + 2, Button: tea.MouseLeft})
-	if !value.scrollbackMouse || save == nil || value.configIndex != 1 {
+	if !value.config.ScrollbackMouse || save == nil || value.configIndex != 1 {
 		t.Fatalf("scrollback mouse click = (enabled %v, save %v, cursor %d)",
-			value.scrollbackMouse, save, value.configIndex)
+			value.config.ScrollbackMouse, save, value.configIndex)
 	}
 	soundCommand := send(&value, tea.MouseClickMsg{X: left + 2, Y: top + 5, Button: tea.MouseLeft})
 	if played := commandMessage[soundPlayedMsg](t, soundCommand); played.kind != sound.Done {
@@ -2090,7 +2090,7 @@ func TestDashboardWithholdsUnrequestedMotionFromTheGuest(t *testing.T) {
 	value := scrolledDashboard(t, 200)
 	// ?1000h is click tracking: button press and release, no motion.
 	value.terminal.writeOutput([]byte("\x1b[?1000h\x1b[?1006h"))
-	value.mousePassthrough = true
+	value.config.MousePassthrough = true
 	if value.terminal.guestMouseMode() != tea.MouseModeCellMotion {
 		t.Fatalf("guest mouse mode = %v, want click tracking", value.terminal.guestMouseMode())
 	}
@@ -2133,7 +2133,7 @@ func TestDashboardKeepsMouseWithTheHostUnlessPassthroughIsOn(t *testing.T) {
 	waitForGuestSilence(t, value.terminal, "")
 	send(&value, key(tea.KeyEscape, ""))
 
-	value.mousePassthrough = true
+	value.config.MousePassthrough = true
 	if value.View().MouseMode != tea.MouseModeAllMotion {
 		t.Fatalf("mouse mode = %v, want the guest's own mode mirrored", value.View().MouseMode)
 	}
@@ -3259,11 +3259,11 @@ func TestDashboardReportsAFailedResizeAsItsOwnFailure(t *testing.T) {
 func TestDashboardReportsAConfigFailureTheWidthMovedPast(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, model.Snapshot{})
 	value.width, value.height = 120, 40
-	value.leftWidth = 24
+	value.config.LeftWidth = 24
 
 	command := send(&value, configSavedMsg{
-		leftWidth: 22,
-		err:       errors.New("read-only file system"),
+		saved: Config{LeftWidth: 22},
+		err:   errors.New("read-only file system"),
 	})
 	if !strings.Contains(value.errorMessage, "read-only file system") {
 		t.Fatalf("error message = %q, want the save failure", value.errorMessage)
@@ -4120,7 +4120,7 @@ func TestNodeSnapshotUpdatesMarkersWithoutAgentActivity(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, model.Snapshot{Roots: []model.RootView{{
 		Root: model.Root{ID: "root"}, Tabs: []model.Tab{{ID: "tab", Running: true}},
 	}}})
-	value.soundOnDone, value.soundOnWaiting = true, true
+	value.config.SoundOnDone, value.config.SoundOnWaiting = true, true
 	value.updateAgents(map[string]model.AgentStatus{"tab": {Agent: model.AgentNode, Phase: model.AgentPhaseUnknown}})
 	if value.hasAnimatedAgent() || len(value.waitingAgentStops()) != 0 {
 		t.Fatal("Node service activated agent animation or waiting navigation")
@@ -4482,12 +4482,11 @@ func TestDashboardRewritesAStaleSelectionSave(t *testing.T) {
 	snapshot, workspace := alphaWorkspaceSnapshot(tabs)
 	configPath := filepath.Join(t.TempDir(), "config.json")
 	value := newDashboardWithConfig(&fakeBackend{}, snapshot, configPath, Config{})
-	value.rememberedWorkspacePath = workspace.Path
-	value.rememberedTabID = tabs[1].ID
+	value.config.LastWorkspacePath = workspace.Path
+	value.config.LastTabID = tabs[1].ID
 
 	rewrite := send(&value, configSavedMsg{
-		lastWorkspacePath: workspace.Path,
-		lastTabID:         tabs[0].ID,
+		saved: Config{LastWorkspacePath: workspace.Path, LastTabID: tabs[0].ID},
 	})
 	if rewrite == nil {
 		t.Fatal("an older selection save was accepted as current")
@@ -5386,7 +5385,7 @@ func TestDashboardOrdersInFlightResizes(t *testing.T) {
 	backend := &delayedResizeBackend{fakeBackend: &fakeBackend{}, started: make(chan struct{}), release: make(chan struct{})}
 	value := narrowDashboard(t, 160)
 	value.backend = backend
-	value.leftWidth = 37
+	value.config.LeftWidth = 37
 	// Start a wide request before the viewport shrinks, and delay its response.
 	wide := send(&value, tea.WindowSizeMsg{Width: 160, Height: 24})
 	wideDone := make(chan struct{})
@@ -5447,7 +5446,7 @@ func TestDashboardPreservesReplayRightEdgeWhenOpeningOnPhone(t *testing.T) {
 func TestDashboardOrdersResizesAcrossReattachments(t *testing.T) {
 	backend := &delayedResizeBackend{fakeBackend: &fakeBackend{}, started: make(chan struct{}), release: make(chan struct{})}
 	value := narrowDashboard(t, 160)
-	value.backend, value.leftWidth = backend, 37
+	value.backend, value.config.LeftWidth = backend, 37
 	wide := value.resizeTerminal()
 	wideDone := make(chan struct{})
 	go func() { wide(); close(wideDone) }()

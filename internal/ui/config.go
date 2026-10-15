@@ -1,8 +1,10 @@
 package ui
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"reflect"
 	"strconv"
 	"strings"
@@ -92,6 +94,20 @@ func (c Config) MarshalJSON() ([]byte, error) {
 	return json.Marshal(fields)
 }
 
+// clone returns a copy that shares nothing with c, so a save running in the
+// background cannot see a later change.
+func (c Config) clone() Config {
+	c.unknownFields = maps.Clone(c.unknownFields)
+	return c
+}
+
+// sameConfig reports whether two configs would write the same document.
+func sameConfig(a, b Config) bool {
+	first, firstErr := json.Marshal(a)
+	second, secondErr := json.Marshal(b)
+	return firstErr == nil && secondErr == nil && bytes.Equal(first, second)
+}
+
 func loadConfig(path string) (Config, error) {
 	if path == "" {
 		return Config{}, nil
@@ -159,21 +175,21 @@ func configRows() []configRow {
 		},
 		{
 			name:   "Scrollback mouse",
-			value:  func(m dashboard) string { return onOff(m.scrollbackMouse) },
+			value:  func(m dashboard) string { return onOff(m.config.ScrollbackMouse) },
 			hint:   "m",
 			keys:   []string{"m"},
 			action: dashboard.toggleScrollbackMouse,
 		},
 		{
 			name:   "Sound on done",
-			value:  func(m dashboard) string { return onOff(m.soundOnDone) },
+			value:  func(m dashboard) string { return onOff(m.config.SoundOnDone) },
 			hint:   "d",
 			keys:   []string{"d"},
 			action: dashboard.toggleSoundOnDone,
 		},
 		{
 			name:   "Sound on waiting",
-			value:  func(m dashboard) string { return onOff(m.soundOnWaiting) },
+			value:  func(m dashboard) string { return onOff(m.config.SoundOnWaiting) },
 			hint:   "b",
 			keys:   []string{"b"},
 			action: dashboard.toggleSoundOnWaiting,

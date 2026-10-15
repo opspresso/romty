@@ -103,7 +103,7 @@ func (l layout) terminalOrigin() (int, int) {
 // because a hidden pane still has a width to come back to.
 func (m dashboard) paneWidth() int {
 	width := m.screenWidth()
-	leftWidth := m.leftWidth
+	leftWidth := m.config.LeftWidth
 	if leftWidth == 0 {
 		leftWidth = min(max(width/4, minimumLeftWidth), 28)
 	}

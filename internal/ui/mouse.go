@@ -423,7 +423,7 @@ func (m dashboard) mouseMode() tea.MouseMode {
 		// with no alternate scroll, which is what a phone SSH client and some
 		// desktop terminals are. It costs the drag selection, so it is asked
 		// for rather than assumed.
-		if m.scrollbackMouse {
+		if m.config.ScrollbackMouse {
 			return tea.MouseModeCellMotion
 		}
 		return tea.MouseModeNone
@@ -449,6 +449,6 @@ func (m dashboard) mouseMode() tea.MouseMode {
 // Scrollback is romty's own view of output the guest has already printed, so
 // the guest does not own the mouse there however the passthrough is set.
 func (m dashboard) guestOwnsMouse() bool {
-	return m.mousePassthrough && !m.scrollback &&
+	return m.config.MousePassthrough && !m.scrollback &&
 		m.terminal != nil && m.terminal.guestMouseMode() != tea.MouseModeNone
 }

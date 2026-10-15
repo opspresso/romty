@@ -106,7 +106,7 @@ func (m dashboard) openGitDiffView(target navItem) (tea.Model, tea.Cmd) {
 	m.stopScrollback()
 	m.gitDiff = gitDiffView{
 		active: true, target: target.workspace, request: m.gitDiff.request,
-		split: m.gitDiffSplit,
+		split: m.config.GitDiffView == gitDiffViewSplit,
 	}
 	m.clearAnyError()
 	return m, m.loadChangedFiles()
@@ -325,7 +325,7 @@ func (m dashboard) handleGitDiffKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd
 			return m, nil
 		}
 		m.gitDiff.split = !m.gitDiff.split
-		m.gitDiffSplit = m.gitDiff.split
+		m.config.GitDiffView = gitDiffViewSetting(m.gitDiff.split)
 		m.gitDiff.diffOffset = min(m.gitDiff.diffOffset, m.maximumGitDiffOffset())
 		return m, m.saveConfig()
 	case "up", "k":

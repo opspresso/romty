@@ -185,26 +185,24 @@ type dashboard struct {
 	// cursorPath is what the cursor is actually on. navIndex is only where
 	// that lands in the tree as it stands, and the tree is rebuilt on every
 	// refresh.
-	cursorPath              string
-	tabIndex                int
-	selectedWorkspaceID     string
-	selectedPath            string
-	rememberedWorkspacePath string
-	rememberedTabID         string
-	restorePending          bool
-	input                   inputState
-	errorMessage            string
-	errorFrom               errorSource
-	noticeMessage           bool
-	terminal                *embeddedTerminal
-	modal                   modal
-	shutdownPending         bool
-	hookStatuses            []agenthooks.Status
-	hooksSkipped            map[model.Agent]bool
-	hookInstallPending      bool
-	agentAnimationFrame     int
-	agentAnimationActive    bool
-	agentAnimationPending   bool
+	cursorPath            string
+	tabIndex              int
+	selectedWorkspaceID   string
+	selectedPath          string
+	restorePending        bool
+	input                 inputState
+	errorMessage          string
+	errorFrom             errorSource
+	noticeMessage         bool
+	terminal              *embeddedTerminal
+	modal                 modal
+	shutdownPending       bool
+	hookStatuses          []agenthooks.Status
+	hooksSkipped          map[model.Agent]bool
+	hookInstallPending    bool
+	agentAnimationFrame   int
+	agentAnimationActive  bool
+	agentAnimationPending bool
 	// removeTarget is the item the confirmation modal is asking about, held so
 	// the answer applies to the item the question named.
 	removeTarget navItem
@@ -248,23 +246,17 @@ type dashboard struct {
 	// renders from it and the keys move it.
 	browse  browser
 	palette workspacePalette
-	// config is the document as loaded, kept so saving edits it instead of
-	// reconstructing it from fields.
+	// config holds every persisted setting. It is the document as loaded,
+	// so saving keeps the fields this build does not know.
 	config           Config
-	leftWidth        int
 	navigationResize bool
 	hover            hoverTarget
-	mousePassthrough bool
-	scrollbackMouse  bool
 	search           scrollbackSearch
-	soundOnDone      bool
-	soundOnWaiting   bool
 	agentSoundReady  bool
 	gitStates        map[string]gitState
 	gitFetchedAt     time.Time
 	gitRun           gitActionRun
 	gitDiff          gitDiffView
-	gitDiffSplit     bool
 	styles           *uiStyles
 }
 
@@ -325,15 +317,10 @@ type terminalOpenedMsg struct {
 	err    error
 }
 
+// configSavedMsg reports one save and the settings it wrote.
 type configSavedMsg struct {
-	leftWidth         int
-	scrollbackMouse   bool
-	soundOnDone       bool
-	soundOnWaiting    bool
-	gitDiffView       string
-	lastWorkspacePath string
-	lastTabID         string
-	err               error
+	saved Config
+	err   error
 }
 
 type daemonStoppedMsg struct {
@@ -395,22 +382,16 @@ func Run(backend Backend, initial model.Snapshot, configPath string, hookStatuse
 
 func newDashboardWithConfig(backend Backend, initial model.Snapshot, configPath string, config Config) dashboard {
 	value := dashboard{
-		backend:          backend,
-		resizeMu:         &sync.Mutex{},
-		state:            initial,
-		width:            80,
-		height:           24,
-		configPath:       configPath,
-		homePath:         userHomeDirectory(),
-		config:           config,
-		leftWidth:        config.LeftWidth,
-		mousePassthrough: config.MousePassthrough,
-		scrollbackMouse:  config.ScrollbackMouse,
-		soundOnDone:      config.SoundOnDone,
-		soundOnWaiting:   config.SoundOnWaiting,
-		gitDiffSplit:     config.GitDiffView == gitDiffViewSplit,
-		styles:           newUIStyles(true),
-		gitFetchedAt:     now(),
+		backend:      backend,
+		resizeMu:     &sync.Mutex{},
+		state:        initial,
+		width:        80,
+		height:       24,
+		configPath:   configPath,
+		homePath:     userHomeDirectory(),
+		config:       config,
+		styles:       newUIStyles(true),
+		gitFetchedAt: now(),
 	}
 	value.ensureWorkspaceCursor()
 	value.restoreSelection()
@@ -490,7 +471,7 @@ func (m dashboard) syncAgentAnimation(command tea.Cmd) (dashboard, tea.Cmd) {
 // because a host that is reporting the mouse sends the wheel as mouse events
 // and never as those arrow keys.
 func (m dashboard) syncAltScroll(command tea.Cmd) (tea.Model, tea.Cmd) {
-	wanted := m.scrollback && !m.scrollbackMouse
+	wanted := m.scrollback && !m.config.ScrollbackMouse
 	if m.altScroll == wanted {
 		return m, command
 	}
@@ -664,14 +645,10 @@ func (m dashboard) update(message tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.clearError(settingError)
 		}
-		viewChanged := message.gitDiffView != "" && message.gitDiffView != gitDiffViewSetting(m.gitDiffSplit)
-		selectionChanged := message.lastWorkspacePath != m.rememberedWorkspacePath ||
-			message.lastTabID != m.rememberedTabID
-		if message.leftWidth != m.leftWidth || message.scrollbackMouse != m.scrollbackMouse ||
-			message.soundOnDone != m.soundOnDone || message.soundOnWaiting != m.soundOnWaiting ||
-			viewChanged || selectionChanged {
-			// The width moved while this one was being written, so it is
-			// already out of date. A later save answers whatever this one said.
+		if !sameConfig(message.saved, m.config) {
+			// A setting changed while this save was being written, so the
+			// file is already out of date. A later save answers whatever
+			// this one said.
 			return m, m.saveConfig()
 		}
 		return m, m.resizeTerminal()
@@ -953,46 +930,28 @@ func (m dashboard) adjustLeftWidth(delta int) (tea.Model, tea.Cmd) {
 
 func (m *dashboard) setLeftWidth(width int) {
 	maximum := max(min(maximumLeftWidth, m.screenWidth()-20), 0)
-	m.leftWidth = min(max(width, minimumLeftWidth), maximum)
+	m.config.LeftWidth = min(max(width, minimumLeftWidth), maximum)
 }
 
 func (m dashboard) toggleScrollbackMouse() (tea.Model, tea.Cmd) {
-	m.scrollbackMouse = !m.scrollbackMouse
+	m.config.ScrollbackMouse = !m.config.ScrollbackMouse
 	return m, m.saveConfig()
 }
 
 func (m dashboard) toggleSoundOnDone() (tea.Model, tea.Cmd) {
-	m.soundOnDone = !m.soundOnDone
+	m.config.SoundOnDone = !m.config.SoundOnDone
 	return m, m.saveConfig()
 }
 
 func (m dashboard) toggleSoundOnWaiting() (tea.Model, tea.Cmd) {
-	m.soundOnWaiting = !m.soundOnWaiting
+	m.config.SoundOnWaiting = !m.config.SoundOnWaiting
 	return m, m.saveConfig()
 }
 
 func (m dashboard) saveConfig() tea.Cmd {
-	path := m.configPath
-	// Edit the document romty loaded rather than rebuilding it from fields.
-	// Rebuilding meant a setting nobody remembered to copy here was erased the
-	// moment the user touched the pane width, and an older romty would erase
-	// whatever a newer one had written.
-	config := m.config
-	config.LeftWidth = m.leftWidth
-	config.ScrollbackMouse = m.scrollbackMouse
-	config.SoundOnDone = m.soundOnDone
-	config.SoundOnWaiting = m.soundOnWaiting
-	config.GitDiffView = gitDiffViewSetting(m.gitDiffSplit)
-	config.LastWorkspacePath = m.rememberedWorkspacePath
-	config.LastTabID = m.rememberedTabID
+	path, config := m.configPath, m.config.clone()
 	return func() tea.Msg {
-		return configSavedMsg{
-			leftWidth: config.LeftWidth, scrollbackMouse: config.ScrollbackMouse,
-			soundOnDone: config.SoundOnDone, soundOnWaiting: config.SoundOnWaiting,
-			gitDiffView:       config.GitDiffView,
-			lastWorkspacePath: config.LastWorkspacePath, lastTabID: config.LastTabID,
-			err: saveConfig(path, config),
-		}
+		return configSavedMsg{saved: config, err: saveConfig(path, config)}
 	}
 }
 

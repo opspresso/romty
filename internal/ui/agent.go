@@ -68,14 +68,14 @@ func (m dashboard) soundForAgentTransitions(statuses map[string]model.AgentStatu
 			return "", false
 		}
 		changedTurn := status.TurnID != "" && tab.AgentTurnID != "" && status.TurnID != tab.AgentTurnID
-		if m.soundOnDone && !status.Estimated && (tab.AgentPhase != status.Phase || changedTurn) &&
+		if m.config.SoundOnDone && !status.Estimated && (tab.AgentPhase != status.Phase || changedTurn) &&
 			status.Agent == tab.Agent &&
 			(tab.AgentSessionID == "" || status.SessionID == tab.AgentSessionID) &&
 			tab.AgentPhase != model.AgentPhaseUnknown && tab.AgentPhase != "" &&
 			(status.Phase == model.AgentPhaseCompleted || status.Phase == model.AgentPhaseError) {
 			return sound.Done, true
 		}
-		if m.soundOnWaiting && !waitingAgentPhase(tab.AgentPhase) && waitingAgentPhase(status.Phase) {
+		if m.config.SoundOnWaiting && !waitingAgentPhase(tab.AgentPhase) && waitingAgentPhase(status.Phase) {
 			return sound.Waiting, true
 		}
 		return "", false

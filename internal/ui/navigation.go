@@ -409,8 +409,8 @@ func (m *dashboard) restoreSelection() {
 			m.tabIndex = tabIndex
 			m.selectedWorkspaceID = tab.WorkspaceID
 			m.selectedPath = path
-			m.rememberedWorkspacePath = path
-			m.rememberedTabID = tabID
+			m.config.LastWorkspacePath = path
+			m.config.LastTabID = tabID
 			m.restorePending = true
 			return
 		}
@@ -426,9 +426,9 @@ func (m *dashboard) rememberSelection(tabID string) bool {
 			if tab.ID != tabID {
 				continue
 			}
-			changed := m.rememberedWorkspacePath != item.workspace.Path || m.rememberedTabID != tab.ID
-			m.rememberedWorkspacePath = item.workspace.Path
-			m.rememberedTabID = tab.ID
+			changed := m.config.LastWorkspacePath != item.workspace.Path || m.config.LastTabID != tab.ID
+			m.config.LastWorkspacePath = item.workspace.Path
+			m.config.LastTabID = tab.ID
 			return changed
 		}
 	}
