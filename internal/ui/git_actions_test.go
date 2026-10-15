@@ -2,9 +2,6 @@ package ui
 
 import (
 	"errors"
-	"os"
-	"os/exec"
-	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -75,11 +72,7 @@ func TestDashboardRunsGitActionForContextWorkspace(t *testing.T) {
 }
 
 func TestDashboardRunsSelectedGitActionAndShowsResult(t *testing.T) {
-	workspace := model.Workspace{ID: "workspace-1", RootID: "root-1", Name: "alpha", Path: "/projects/alpha"}
-	snapshot := model.Snapshot{Roots: []model.RootView{{
-		Root:        model.Root{ID: "root-1", Name: "projects", Path: "/projects"},
-		Directories: []model.WorkspaceView{{Workspace: workspace}},
-	}}}
+	snapshot, workspace := alphaWorkspaceSnapshot(nil)
 	value := newDashboard(&fakeBackend{}, snapshot)
 	value.gitStates = map[string]gitState{workspace.Path: {Branch: "main"}}
 	value.setNavigation(1)
@@ -268,11 +261,7 @@ func TestDashboardHoldsGitActionModalWhileCommandRuns(t *testing.T) {
 }
 
 func TestDashboardDoesNotOpenGitActionsOutsideRepository(t *testing.T) {
-	workspace := model.Workspace{ID: "workspace-1", RootID: "root-1", Name: "alpha", Path: "/projects/alpha"}
-	snapshot := model.Snapshot{Roots: []model.RootView{{
-		Root:        model.Root{ID: "root-1", Name: "projects", Path: "/projects"},
-		Directories: []model.WorkspaceView{{Workspace: workspace}},
-	}}}
+	snapshot, _ := alphaWorkspaceSnapshot(nil)
 	value := newDashboard(&fakeBackend{}, snapshot)
 	value.setNavigation(1)
 
@@ -284,11 +273,7 @@ func TestDashboardDoesNotOpenGitActionsOutsideRepository(t *testing.T) {
 }
 
 func TestDashboardRecognisesCtrlShiftGAcrossInputLayouts(t *testing.T) {
-	workspace := model.Workspace{ID: "workspace-1", RootID: "root-1", Name: "alpha", Path: "/projects/alpha"}
-	snapshot := model.Snapshot{Roots: []model.RootView{{
-		Root:        model.Root{ID: "root-1", Name: "projects", Path: "/projects"},
-		Directories: []model.WorkspaceView{{Workspace: workspace}},
-	}}}
+	snapshot, workspace := alphaWorkspaceSnapshot(nil)
 	value := newDashboard(&fakeBackend{}, snapshot)
 	value.gitStates = map[string]gitState{workspace.Path: {Branch: "main"}}
 	value.setNavigation(1)
@@ -325,18 +310,9 @@ func TestGitActionArguments(t *testing.T) {
 }
 
 func TestExecuteGitStatusAction(t *testing.T) {
-	if _, err := exec.LookPath("git"); err != nil {
-		t.Skip("git is not installed")
-	}
 	repository := t.TempDir()
-	command := exec.CommandContext(t.Context(), "git", "init", "--initial-branch=main", repository)
-	command.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1")
-	if output, err := command.CombinedOutput(); err != nil {
-		t.Fatalf("initialize Git repository: %v\n%s", err, output)
-	}
-	if err := os.WriteFile(filepath.Join(repository, "untracked.txt"), []byte("new"), 0o600); err != nil {
-		t.Fatalf("write untracked file: %v", err)
-	}
+	runGit(t, "init", "--initial-branch=main", repository)
+	writeDiffFile(t, repository, "untracked.txt", "new")
 
 	output, err := executeGitAction(repository, gitStatusAction)
 	if err != nil || !strings.Contains(output, "## No commits yet on main") || !strings.Contains(output, "?? untracked.txt") {

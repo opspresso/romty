@@ -55,6 +55,22 @@ func walk(t *testing.T, value dashboard, message tea.KeyPressMsg) dashboard {
 	return load(t, value, command)
 }
 
+// assertAddsRoot presses Enter in the picker and expects it to close and add want.
+func assertAddsRoot(t *testing.T, value dashboard, backend *fakeBackend, want string) {
+	t.Helper()
+	value, command := press(t, value, key(tea.KeyEnter, ""))
+	if command == nil {
+		t.Fatal("add root command = nil")
+	}
+	if value.modal != noModal {
+		t.Fatalf("modal after Enter = %v, want the picker closed", value.modal)
+	}
+	command()
+	if backend.addedPath != want {
+		t.Fatalf("added path = %q, want %q", backend.addedPath, want)
+	}
+}
+
 func makeDirectories(t *testing.T, parent string, names ...string) {
 	t.Helper()
 	for _, name := range names {
@@ -164,17 +180,7 @@ func TestBrowsePickerAddsTheOpenDirectoryFromItsOwnRow(t *testing.T) {
 		t.Fatalf("→ on the open directory = %v, want no read", command)
 	}
 
-	value, command := press(t, value, key(tea.KeyEnter, ""))
-	if command == nil {
-		t.Fatal("add root command = nil")
-	}
-	if value.modal != noModal {
-		t.Fatalf("modal after Enter = %v, want the picker closed", value.modal)
-	}
-	command()
-	if backend.addedPath != home {
-		t.Fatalf("added path = %q, want the open directory", backend.addedPath)
-	}
+	assertAddsRoot(t, value, backend, home)
 }
 
 func TestBrowsePickerWalksInAndOut(t *testing.T) {
@@ -207,17 +213,7 @@ func TestBrowsePickerAddsHighlightedDirectory(t *testing.T) {
 	backend := &fakeBackend{}
 	value := browsing(t, backend, home)
 	value, _ = press(t, value, key(tea.KeyDown, ""))
-	value, command := press(t, value, key(tea.KeyEnter, ""))
-	if command == nil {
-		t.Fatal("add root command = nil")
-	}
-	if value.modal != noModal {
-		t.Fatalf("modal after Enter = %v, want the picker closed", value.modal)
-	}
-	command()
-	if backend.addedPath != filepath.Join(home, "beta") {
-		t.Fatalf("added path = %q, want beta", backend.addedPath)
-	}
+	assertAddsRoot(t, value, backend, filepath.Join(home, "beta"))
 }
 
 func TestBrowsePickerAddsAnEmptyDirectoryItWalkedInto(t *testing.T) {
@@ -234,14 +230,7 @@ func TestBrowsePickerAddsAnEmptyDirectoryItWalkedInto(t *testing.T) {
 		t.Fatalf("the picker does not say the directory is empty:\n%s", rendered)
 	}
 
-	_, command := press(t, value, key(tea.KeyEnter, ""))
-	if command == nil {
-		t.Fatal("add root command = nil")
-	}
-	command()
-	if backend.addedPath != filepath.Join(home, "alpha") {
-		t.Fatalf("added path = %q, want the open directory", backend.addedPath)
-	}
+	assertAddsRoot(t, value, backend, filepath.Join(home, "alpha"))
 }
 
 // The cursor stops at both ends. The wheel arrives as three arrow keys per
@@ -404,9 +393,7 @@ func TestShortenPathKeepsTheEnd(t *testing.T) {
 func TestBrowseClicksFollowTheScrolledWindow(t *testing.T) {
 	home := t.TempDir()
 	for index := range 40 {
-		if err := os.Mkdir(filepath.Join(home, fmt.Sprintf("child-%02d", index)), 0o755); err != nil {
-			t.Fatalf("Mkdir() error = %v", err)
-		}
+		makeDirectories(t, home, fmt.Sprintf("child-%02d", index))
 	}
 	value := browsing(t, &fakeBackend{}, home)
 	// Deep enough into the list that the window has scrolled off the first row.
