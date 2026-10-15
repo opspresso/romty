@@ -386,7 +386,7 @@ type tabHit struct {
 
 func tabHitAtX(tabs []model.Tab, x int) (tabHit, bool) {
 	position := 0
-	newTabWidth := lipgloss.Width("  +  ")
+	newTabWidth := lipgloss.Width(newTabLabel)
 	for index := 0; index <= len(tabs); index++ {
 		width := newTabWidth
 		if index < len(tabs) {
