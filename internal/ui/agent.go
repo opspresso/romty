@@ -54,7 +54,7 @@ func (m *dashboard) updateAgents(statuses map[string]model.AgentStatus) {
 func (m dashboard) soundForAgentTransitions(statuses map[string]model.AgentStatus) (sound.Kind, bool) {
 	changed := func(tabID string) (sound.Kind, bool) {
 		status, ok := statuses[tabID]
-		if !ok || status.Agent != model.AgentClaude && status.Agent != model.AgentCodex && status.Agent != model.AgentOpenCode {
+		if !ok || status.Agent != model.AgentClaude && status.Agent != model.AgentCodex && status.Agent != model.AgentOpenCode && status.Agent != model.AgentKiro {
 			return "", false
 		}
 		heard := m.heardAgents[tabID]

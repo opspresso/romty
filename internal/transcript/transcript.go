@@ -8,8 +8,9 @@
 // percentage could only come from a table of model limits that romty would have
 // to keep correct as models change.
 //
-// Claude Code runs no hook when the user interrupts a turn or rejects a tool.
-// The record it writes for that is the only signal the turn has ended.
+// Claude Code runs no hook when the user interrupts a turn or rejects a tool,
+// and Kiro CLI runs no Stop hook for a cancelled turn. The record each agent
+// writes for that is the only signal the turn has ended.
 package transcript
 
 import (
@@ -100,6 +101,32 @@ func (r *Reader) ReadClaude(configDir, path, sessionID string) (Reading, bool) {
 	if !claudeTranscriptPath(configDir, path, sessionID) {
 		return Reading{}, false
 	}
+	return r.read(path, applyRecord)
+}
+
+// ReadKiro returns whether one Kiro CLI session's last turn was cancelled.
+// The session identifier names the record: Kiro CLI V3 keeps
+// <home>/sessions/<workspace>/<sess_…>/messages.jsonl, and V2 keeps
+// <home>/sessions/cli/<UUID>.jsonl.
+func (r *Reader) ReadKiro(home, sessionID string) (Reading, bool) {
+	if home == "" || !SafeSessionID(sessionID) {
+		return Reading{}, false
+	}
+	sessions := filepath.Join(home, "sessions")
+	if strings.HasPrefix(sessionID, "sess_") {
+		matches, _ := filepath.Glob(filepath.Join(sessions, "*", sessionID, "messages.jsonl"))
+		if len(matches) == 0 {
+			return Reading{}, false
+		}
+		return r.read(matches[0], applyKiroV3Record)
+	}
+	return r.read(filepath.Join(sessions, "cli", sessionID+".jsonl"), applyKiroV2Record)
+}
+
+// read returns one record file's reading, re-reading it only when it changed.
+// apply folds each record in file order; it receives the file's modification
+// time for records that carry no time of their own.
+func (r *Reader) read(path string, apply func(*Reading, []byte, time.Time)) (Reading, bool) {
 	info, err := os.Lstat(path)
 	if err != nil || !info.Mode().IsRegular() {
 		return Reading{}, false
@@ -110,7 +137,7 @@ func (r *Reader) ReadClaude(configDir, path, sessionID string) (Reading, bool) {
 	if ok && cached.modified.Equal(info.ModTime()) && cached.size == info.Size() {
 		return cached.value, cached.found
 	}
-	value, found := readTranscript(path)
+	value, found := readTranscript(path, apply)
 	r.mu.Lock()
 	if len(r.entries) >= maxCachedTranscripts {
 		// Every entry is a cache of something re-readable, so dropping them all
@@ -179,7 +206,7 @@ type interruptRecord struct {
 	} `json:"message"`
 }
 
-func readTranscript(path string) (Reading, bool) {
+func readTranscript(path string, apply func(*Reading, []byte, time.Time)) (Reading, bool) {
 	file, err := os.Open(path)
 	if err != nil {
 		return Reading{}, false
@@ -212,15 +239,15 @@ func readTranscript(path string) (Reading, bool) {
 	var result Reading
 	for {
 		line, err := readRecord(reader)
-		applyRecord(&result, line)
+		apply(&result, line, info.ModTime())
 		if err != nil {
 			return result, !result.Empty()
 		}
 	}
 }
 
-// applyRecord folds one record into the reading, in file order.
-func applyRecord(result *Reading, line []byte) {
+// applyRecord folds one Claude Code record into the reading, in file order.
+func applyRecord(result *Reading, line []byte, _ time.Time) {
 	if len(line) == 0 {
 		return
 	}
@@ -250,6 +277,92 @@ func applyRecord(result *Reading, line []byte) {
 			result.InterruptedAt, _ = time.Parse(time.RFC3339Nano, record.Timestamp)
 		}
 	}
+}
+
+// kiroCancelMarkers start the text Kiro CLI V2 records when the user cancels a
+// response or a tool call.
+var kiroCancelMarkers = []string{"Response was interrupted by the user", "Tool use was cancelled by the user"}
+
+// kiroMarkerDepth bounds the search for a marker inside a record's data. A
+// tool result nests its text five levels deep; the bound leaves room for that
+// and stops a hostile record from forcing an unbounded walk.
+const kiroMarkerDepth = 8
+
+// applyKiroV3Record folds one Kiro CLI V3 record. Every turn ends with
+// turn_end; a cancelled one carries stopReason "cancelled" and runs no Stop
+// hook. A later prompt or response means the session went on.
+func applyKiroV3Record(result *Reading, line []byte, _ time.Time) {
+	var record struct {
+		Timestamp string `json:"timestamp"`
+		Payload   *struct {
+			Type       string `json:"type"`
+			StopReason string `json:"stopReason"`
+		} `json:"payload"`
+	}
+	if len(line) == 0 || json.Unmarshal(line, &record) != nil || record.Payload == nil {
+		return
+	}
+	switch record.Payload.Type {
+	case "user", "turn_start", "assistant":
+		result.InterruptedAt = time.Time{}
+	case "turn_end":
+		result.InterruptedAt = time.Time{}
+		if record.Payload.StopReason == "cancelled" {
+			result.InterruptedAt, _ = time.Parse(time.RFC3339Nano, record.Timestamp)
+		}
+	}
+}
+
+// applyKiroV2Record folds one Kiro CLI V2 record. V2 records carry no time, so
+// a cancellation is dated by the file's modification time: the newest record
+// is the last thing written to the file.
+func applyKiroV2Record(result *Reading, line []byte, modified time.Time) {
+	var record struct {
+		Kind string          `json:"kind"`
+		Data json.RawMessage `json:"data"`
+	}
+	if len(line) == 0 || json.Unmarshal(line, &record) != nil || record.Kind == "" {
+		return
+	}
+	// A prompt or a response continues the conversation. Other records, such
+	// as tool results, can report a cancellation but cannot clear one.
+	if record.Kind == "Prompt" || record.Kind == "AssistantMessage" {
+		result.InterruptedAt = time.Time{}
+	}
+	if record.Kind == "Prompt" {
+		return
+	}
+	var data any
+	if json.Unmarshal(record.Data, &data) == nil && hasKiroCancelMarker(data, kiroMarkerDepth) {
+		result.InterruptedAt = modified
+	}
+}
+
+// hasKiroCancelMarker reports whether a string within depth levels of value
+// starts with a cancellation marker. The response and the tool-result records
+// nest their text differently.
+func hasKiroCancelMarker(value any, depth int) bool {
+	switch typed := value.(type) {
+	case string:
+		for _, marker := range kiroCancelMarkers {
+			if strings.HasPrefix(typed, marker) {
+				return true
+			}
+		}
+	case map[string]any:
+		for _, child := range typed {
+			if depth > 0 && hasKiroCancelMarker(child, depth-1) {
+				return true
+			}
+		}
+	case []any:
+		for _, child := range typed {
+			if depth > 0 && hasKiroCancelMarker(child, depth-1) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // isInterrupt reports whether a user record's content starts with the marker,

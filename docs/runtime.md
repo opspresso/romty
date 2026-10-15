@@ -40,7 +40,7 @@ romty refuses to start inside one of its own terminal sessions.
 The next daemon offers a saved snapshot back through the first tab created in its workspace:
 
 1. The old output replays behind a `── restored from the previous romty session ──` marker.
-2. When Claude Code, Codex, or OpenCode was running, its resume command is typed at the prompt.
+2. When Claude Code, Codex, OpenCode, or Kiro CLI was running, its resume command is typed at the prompt.
 3. Press `Enter` to continue the conversation, or `Ctrl+C` to decline.
 
 | Agent | With a saved session identifier | Without one |
@@ -48,6 +48,7 @@ The next daemon offers a saved snapshot back through the first tab created in it
 | Claude Code | `claude --resume <id>` | `claude --continue` |
 | Codex | `codex resume <id>` | `codex resume` |
 | OpenCode | `opencode --session <id>` | `opencode --continue` |
+| Kiro CLI | `kiro-cli --resume-id <id>` | `kiro-cli --resume` |
 
 Without an identifier, the agent chooses its most recent session. Unconsumed snapshots are discarded after seven days.
 

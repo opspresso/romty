@@ -99,6 +99,8 @@ func commandAgent(command string) model.Agent {
 		return model.AgentCodex
 	case name == "opencode" || strings.HasPrefix(name, "opencode-"):
 		return model.AgentOpenCode
+	case name == "kiro-cli" || strings.HasPrefix(name, "kiro-cli-"):
+		return model.AgentKiro
 	case name == "npm" || name == "pnpm" || name == "yarn" || name == "next-server":
 		// Node.js tools can replace their process title, hiding the runtime.
 		return model.AgentNode

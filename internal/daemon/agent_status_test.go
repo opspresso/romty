@@ -528,6 +528,34 @@ func TestOpenCodeEventsCountOnlyFromTheTabsForegroundJob(t *testing.T) {
 	}
 }
 
+// Kiro runs hooks from its agent server below the tab's foreground job. Stop
+// runs only for a completed turn; a cancelled one runs no hook.
+func TestKiroEventsCountFromTheForegroundJobAndStopCompletes(t *testing.T) {
+	terminal := new(os.File)
+	testutil.Set(t, &foregroundProcessGroup, func(*os.File) (int, error) { return 4242, nil })
+	server := &Server{sessions: map[string]*session{"tab": newSessionForTest(terminal)}, agentStatuses: make(map[string]agentRuntime)}
+	report := func(name string, groups ...int) {
+		t.Helper()
+		event := protocol.AgentEvent{Agent: model.AgentKiro, SessionID: "sess_1", HookEvent: name, ProcessGroups: groups}
+		if response := server.recordAgentEvent("tab", &event); response.Error != "" {
+			t.Fatal(response.Error)
+		}
+	}
+	report("UserPromptSubmit", 7, 1)
+	if _, ok := server.agentStatuses["tab"]; ok {
+		t.Fatal("a Kiro hook outside the tab's foreground job reported for it")
+	}
+	report("UserPromptSubmit", 8304, 4242, 1)
+	report("PreToolUse", 8304, 4242, 1)
+	if got := server.agentStatuses["tab"].Phase; got != model.AgentPhaseWorking {
+		t.Fatalf("tool phase = %s, want working", got)
+	}
+	report("Stop", 8304, 4242, 1)
+	if got := server.agentStatuses["tab"].Phase; got != model.AgentPhaseCompleted {
+		t.Fatalf("Stop phase = %s, want completed", got)
+	}
+}
+
 // Claude Code names a project's transcript folder by its own rules, which
 // change between versions. The daemon reads the path the hook reports, so a
 // workspace whose name holds an underscore or a space still gets its counters

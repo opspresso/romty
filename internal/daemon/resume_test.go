@@ -145,6 +145,12 @@ func TestResumeCommandInterpolatesOnlyWellFormedSessionIDs(t *testing.T) {
 			want:      "opencode --continue"},
 		{name: "opencode without a session", agent: model.AgentOpenCode,
 			want: "opencode --continue"},
+		{name: "kiro with a V3 session", agent: model.AgentKiro,
+			sessionID: "sess_7883db40-0d55-4ed6-8be3-f62e0ac5d223",
+			want:      "kiro-cli --resume-id sess_7883db40-0d55-4ed6-8be3-f62e0ac5d223"},
+		{name: "kiro with a hostile session", agent: model.AgentKiro,
+			sessionID: "sess_1234$(id)",
+			want:      "kiro-cli --resume"},
 		{name: "no agent", want: ""},
 	} {
 		t.Run(probe.name, func(t *testing.T) {

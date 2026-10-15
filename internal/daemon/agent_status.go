@@ -76,7 +76,7 @@ func (s *Server) recordAgentEvent(tabID string, event *protocol.AgentEvent) prot
 	if !ok {
 		return protocol.Response{Error: errNoSession}
 	}
-	if event.Agent == model.AgentOpenCode && !runsInForeground(value, event.ProcessGroups) {
+	if (event.Agent == model.AgentOpenCode || event.Agent == model.AgentKiro) && !runsInForeground(value, event.ProcessGroups) {
 		// The event came from a process outside this tab's foreground job,
 		// such as OpenCode's shared background service.
 		return protocol.Response{}
@@ -281,7 +281,8 @@ func phaseForAgentEvent(event protocol.AgentEvent) (model.AgentPhase, bool, bool
 		if event.Background {
 			return model.AgentPhaseBackground, false, true
 		}
-		if event.Agent == model.AgentOpenCode {
+		// OpenCode and Kiro run Stop only for a turn that completed.
+		if event.Agent == model.AgentOpenCode || event.Agent == model.AgentKiro {
 			return model.AgentPhaseCompleted, false, true
 		}
 		return model.AgentPhaseStopped, false, true

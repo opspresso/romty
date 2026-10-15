@@ -516,9 +516,10 @@ func inferPhases(
 		if reported[tabID].Agent == agent {
 			continue
 		}
-		// Only OpenCode uses terminal-derived phases. Node.js has no agent
-		// lifecycle, and Codex and Claude expose lifecycle channels.
-		if agent != model.AgentOpenCode {
+		// Only OpenCode and Kiro use terminal-derived phases, for a tab their
+		// hooks do not report. Node.js has no agent lifecycle, and Codex and
+		// Claude expose lifecycle channels.
+		if agent != model.AgentOpenCode && agent != model.AgentKiro {
 			continue
 		}
 		value, ok := sessions[tabID]

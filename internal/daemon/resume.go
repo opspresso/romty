@@ -161,6 +161,11 @@ func resumeCommand(agent model.Agent, sessionID string) string {
 			return "opencode --session " + sessionID
 		}
 		return "opencode --continue"
+	case model.AgentKiro:
+		if known {
+			return "kiro-cli --resume-id " + sessionID
+		}
+		return "kiro-cli --resume"
 	}
 	return ""
 }

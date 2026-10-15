@@ -40,9 +40,9 @@ func TestDetectReportsOnlyAvailableAgentsAsPending(t *testing.T) {
 	testutil.Set(t, &userHomeDirectory, func() (string, error) { return home, nil })
 
 	statuses := Detect()
-	if len(statuses) != 3 || statuses[0].State != StateMissing ||
-		statuses[1].State != StateUnavailable || statuses[2].State != StateUnavailable {
-		t.Fatalf("Detect() = %#v, want missing Claude and unavailable Codex and OpenCode", statuses)
+	if len(statuses) != 4 || statuses[0].State != StateMissing ||
+		statuses[1].State != StateUnavailable || statuses[2].State != StateUnavailable || statuses[3].State != StateUnavailable {
+		t.Fatalf("Detect() = %#v, want missing Claude and unavailable Codex, OpenCode and Kiro", statuses)
 	}
 	if got := Pending(statuses); !slices.Equal(got, []Provider{ProviderClaude}) {
 		t.Fatalf("Pending() = %v, want Claude", got)
@@ -170,7 +170,7 @@ func TestInstallCreatesOpenCodePluginAndHonorsConfigDirectory(t *testing.T) {
 	// Moving romty makes the plugin name a stale path, which is an update.
 	findRomtyExecutable = func() (string, error) { return "/opt/romty", nil }
 	statuses := Detect()
-	if len(statuses) != 3 || statuses[2].Provider != ProviderOpenCode || statuses[2].State != StateOutdated {
+	if len(statuses) != 4 || statuses[2].Provider != ProviderOpenCode || statuses[2].State != StateOutdated {
 		t.Fatalf("Detect() = %#v, want OpenCode outdated", statuses)
 	}
 }
@@ -269,8 +269,7 @@ func TestDevelopmentBuildDoesNotInspectOrInstallHooks(t *testing.T) {
 	})
 
 	statuses := Detect()
-	if len(statuses) != 3 || statuses[0].State != StateDevelopment ||
-		statuses[1].State != StateDevelopment || statuses[2].State != StateDevelopment {
+	if len(statuses) != 4 || slices.ContainsFunc(statuses, func(status Status) bool { return status.State != StateDevelopment }) {
 		t.Fatalf("Detect() = %#v, want development state for every agent", statuses)
 	}
 	if pending := Pending(statuses); len(pending) != 0 {

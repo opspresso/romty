@@ -119,6 +119,8 @@ func (t commandTheme) agent(agent model.Agent, value string) string {
 		return t.paint("38;2;59;130;246", value)
 	case model.AgentOpenCode:
 		return t.paint("38;2;192;132;252", value)
+	case model.AgentKiro:
+		return t.paint("38;2;244;114;182", value)
 	default:
 		return value
 	}
@@ -210,6 +212,7 @@ type snapshotSummary struct {
 	claude     int
 	codex      int
 	opencode   int
+	kiro       int
 	shell      int
 }
 
@@ -236,8 +239,8 @@ func printStatus(output io.Writer, runtime paths.Paths, theme commandTheme) erro
 		{label: "protocol", value: fmt.Sprint(daemonProtocol)},
 		{label: "roots", value: fmt.Sprint(summary.roots)},
 		{label: "workspaces", value: fmt.Sprint(summary.workspaces)},
-		{label: "sessions", value: fmt.Sprintf("%d (claude: %d, codex: %d, opencode: %d, shell: %d)",
-			summary.sessions, summary.claude, summary.codex, summary.opencode, summary.shell)},
+		{label: "sessions", value: fmt.Sprintf("%d (claude: %d, codex: %d, opencode: %d, kiro: %d, shell: %d)",
+			summary.sessions, summary.claude, summary.codex, summary.opencode, summary.kiro, summary.shell)},
 	}
 	for _, field := range fields {
 		if err := printField(output, theme, field.label, field.value); err != nil {
@@ -264,6 +267,8 @@ func summarizeSnapshot(snapshot model.Snapshot) snapshotSummary {
 			summary.codex++
 		case model.AgentOpenCode:
 			summary.opencode++
+		case model.AgentKiro:
+			summary.kiro++
 		default:
 			summary.shell++
 		}
