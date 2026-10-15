@@ -1,13 +1,14 @@
 package ui
 
 import (
-	"errors"
 	"strings"
 	"testing"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
+
+	"github.com/opspresso/romty/internal/protocol"
 )
 
 // clickTabLabel clicks inside a tab's label, clear of its close button.
@@ -91,7 +92,7 @@ func TestDashboardTabRenamePromptCancelsAndReportsFailure(t *testing.T) {
 
 	updated, _ = value.startRenameTab(tabs[0])
 	value = updated.(dashboard)
-	backend.failures = map[string]error{"RenameTab": errors.New("tab name must not contain control characters")}
+	backend.failures = map[string]error{"RenameTab": &protocol.RefusedError{Message: "tab name must not contain control characters"}}
 	command := send(&value, tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 	send(&value, commandMessage[inputResultMsg](t, command))
 	if value.modal != inputModal || value.input != "1" || value.inputPending {
@@ -104,6 +105,9 @@ func TestDashboardTabRenamePromptCancelsAndReportsFailure(t *testing.T) {
 	}
 	if value.errorMessage != "" {
 		t.Fatalf("status bar error = %q, want the failure only in the modal", value.errorMessage)
+	}
+	if strings.Contains(box, "daemon:") {
+		t.Fatalf("modal = %q, want the daemon's reason without the transport prefix", box)
 	}
 	if value.visibleTabs()[0].Name != "1" {
 		t.Fatalf("tab name after failed rename = %q, want 1", value.visibleTabs()[0].Name)

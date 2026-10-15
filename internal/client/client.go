@@ -533,7 +533,7 @@ func (c *Client) probeProtocol() (protocol.Response, error) {
 	// A refusal that does carry a version is an ordinary mismatch, which
 	// negotiation reports in the sentence that also names the remedy.
 	if response.Error != "" && advertisedMaximum(response) == 0 {
-		return protocol.Response{}, fmt.Errorf("daemon: %s", response.Error)
+		return protocol.Response{}, &protocol.RefusedError{Message: response.Error}
 	}
 	return response, nil
 }
@@ -586,7 +586,7 @@ func checkResponse(action string, response protocol.Response, expectedVersion in
 			expectedVersion, response.Version, protocol.Remedy)
 	}
 	if response.Error != "" {
-		return fmt.Errorf("daemon: %s", response.Error)
+		return &protocol.RefusedError{Message: response.Error}
 	}
 	return nil
 }

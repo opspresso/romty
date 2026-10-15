@@ -4,6 +4,7 @@
 package ui
 
 import (
+	"errors"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/opspresso/romty/internal/display"
 	"github.com/opspresso/romty/internal/model"
+	"github.com/opspresso/romty/internal/protocol"
 )
 
 // inputKind names what the input modal is asking for.
@@ -110,6 +112,12 @@ func (m dashboard) handleInputResult(message inputResultMsg) (tea.Model, tea.Cmd
 	m.inputPending = false
 	if message.err != nil {
 		m.inputError = message.err.Error()
+		// The modal already says what was asked, so a refusal shows the
+		// daemon's reason alone.
+		var refused *protocol.RefusedError
+		if errors.As(message.err, &refused) {
+			m.inputError = refused.Message
+		}
 		return m, nil
 	}
 	m.closeInput()
