@@ -1,25 +1,27 @@
-package ui
+package gitrepo
 
 import (
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/opspresso/romty/internal/testutil"
 )
 
 func TestReadGitChangedFilesBuildsCompleteSortedList(t *testing.T) {
 	repository := initializeDiffRepository(t)
 
-	writeDiffFile(t, repository, "modified.txt", "before\nafter\n")
-	writeDiffFile(t, repository, "staged.txt", "before\nstaged\n")
-	runGit(t, "-C", repository, "add", "staged.txt")
-	writeDiffFile(t, repository, "nested/untracked.txt", "new\n")
+	testutil.WriteFile(t, repository, "modified.txt", "before\nafter\n")
+	testutil.WriteFile(t, repository, "staged.txt", "before\nstaged\n")
+	testutil.RunGit(t, "-C", repository, "add", "staged.txt")
+	testutil.WriteFile(t, repository, "nested/untracked.txt", "new\n")
 
-	files, err := readGitChangedFiles(repository)
+	files, err := ChangedFiles(repository)
 	if err != nil {
-		t.Fatalf("readGitChangedFiles() error = %v", err)
+		t.Fatalf("ChangedFiles() error = %v", err)
 	}
-	want := []gitChangedFile{
+	want := []ChangedFile{
 		{Path: "modified.txt", IndexStatus: ' ', WorkTreeStatus: 'M'},
 		{Path: "nested/untracked.txt", IndexStatus: '?', WorkTreeStatus: '?'},
 		{Path: "staged.txt", IndexStatus: 'M', WorkTreeStatus: ' '},
@@ -36,16 +38,16 @@ func TestReadGitChangedFilesBuildsCompleteSortedList(t *testing.T) {
 
 func TestReadGitChangedFilesPreservesRenameSource(t *testing.T) {
 	repository := initializeDiffRepository(t)
-	runGit(t, "-C", repository, "mv", "staged.txt", "renamed.txt")
+	testutil.RunGit(t, "-C", repository, "mv", "staged.txt", "renamed.txt")
 
-	files, err := readGitChangedFiles(repository)
+	files, err := ChangedFiles(repository)
 	if err != nil || len(files) != 1 {
 		t.Fatalf("renamed files = (%#v, %v), want one file", files, err)
 	}
 	if files[0].Path != "renamed.txt" || files[0].OldPath != "staged.txt" || files[0].IndexStatus != 'R' {
 		t.Fatalf("renamed file = %#v", files[0])
 	}
-	diff, err := readGitFileDiff(repository, files[0])
+	diff, err := FileDiff(repository, files[0])
 	if err != nil || !strings.Contains(diff, "rename from staged.txt") || !strings.Contains(diff, "rename to renamed.txt") {
 		t.Fatalf("renamed file diff = (%q, %v)", diff, err)
 	}
@@ -53,18 +55,18 @@ func TestReadGitChangedFilesPreservesRenameSource(t *testing.T) {
 
 func TestReadGitFileDiffCombinesStagedAndUnstagedChanges(t *testing.T) {
 	repository := initializeDiffRepository(t)
-	writeDiffFile(t, repository, "modified.txt", "before\nstaged\n")
-	runGit(t, "-C", repository, "add", "modified.txt")
-	writeDiffFile(t, repository, "modified.txt", "before\nstaged\nunstaged\n")
+	testutil.WriteFile(t, repository, "modified.txt", "before\nstaged\n")
+	testutil.RunGit(t, "-C", repository, "add", "modified.txt")
+	testutil.WriteFile(t, repository, "modified.txt", "before\nstaged\nunstaged\n")
 
-	files, err := readGitChangedFiles(repository)
+	files, err := ChangedFiles(repository)
 	if err != nil {
-		t.Fatalf("readGitChangedFiles() error = %v", err)
+		t.Fatalf("ChangedFiles() error = %v", err)
 	}
 	file := changedFileAt(t, files, "modified.txt")
-	diff, err := readGitFileDiff(repository, file)
+	diff, err := FileDiff(repository, file)
 	if err != nil {
-		t.Fatalf("readGitFileDiff() error = %v", err)
+		t.Fatalf("FileDiff() error = %v", err)
 	}
 	for _, fragment := range []string{"Staged changes", "+staged", "Unstaged changes", "+unstaged"} {
 		if !strings.Contains(diff, fragment) {
@@ -75,15 +77,15 @@ func TestReadGitFileDiffCombinesStagedAndUnstagedChanges(t *testing.T) {
 
 func TestReadGitFileDiffShowsUntrackedFile(t *testing.T) {
 	repository := initializeDiffRepository(t)
-	writeDiffFile(t, repository, "nested/new file.txt", "first\nsecond\n")
+	testutil.WriteFile(t, repository, "nested/new file.txt", "first\nsecond\n")
 
-	files, err := readGitChangedFiles(repository)
+	files, err := ChangedFiles(repository)
 	if err != nil {
-		t.Fatalf("readGitChangedFiles() error = %v", err)
+		t.Fatalf("ChangedFiles() error = %v", err)
 	}
-	diff, err := readGitFileDiff(repository, changedFileAt(t, files, "nested/new file.txt"))
+	diff, err := FileDiff(repository, changedFileAt(t, files, "nested/new file.txt"))
 	if err != nil {
-		t.Fatalf("readGitFileDiff() error = %v", err)
+		t.Fatalf("FileDiff() error = %v", err)
 	}
 	if !strings.Contains(diff, "new file.txt") || !strings.Contains(diff, "+first") || !strings.Contains(diff, "+second") {
 		t.Fatalf("untracked diff =\n%s", diff)
@@ -92,11 +94,11 @@ func TestReadGitFileDiffShowsUntrackedFile(t *testing.T) {
 
 func TestReadGitFileDiffDoesNotRunTextconv(t *testing.T) {
 	repository := initializeDiffRepository(t)
-	writeDiffFile(t, repository, ".gitattributes", "*.txt diff=romty-test\n")
-	writeDiffFile(t, repository, "converter.sh", "printf invoked > converter-ran\ncat \"$1\"\n")
-	runGit(t, "-C", repository, "config", "diff.romty-test.textconv", "sh ./converter.sh")
-	writeDiffFile(t, repository, "modified.txt", "after\n")
-	diff, err := readGitFileDiff(repository, gitChangedFile{Path: "modified.txt", IndexStatus: ' ', WorkTreeStatus: 'M'})
+	testutil.WriteFile(t, repository, ".gitattributes", "*.txt diff=romty-test\n")
+	testutil.WriteFile(t, repository, "converter.sh", "printf invoked > converter-ran\ncat \"$1\"\n")
+	testutil.RunGit(t, "-C", repository, "config", "diff.romty-test.textconv", "sh ./converter.sh")
+	testutil.WriteFile(t, repository, "modified.txt", "after\n")
+	diff, err := FileDiff(repository, ChangedFile{Path: "modified.txt", IndexStatus: ' ', WorkTreeStatus: 'M'})
 	if err != nil || !strings.Contains(diff, "+after") {
 		t.Fatalf("read diff: %q, %v", diff, err)
 	}
@@ -108,13 +110,13 @@ func TestReadGitFileDiffDoesNotRunTextconv(t *testing.T) {
 func TestReadGitFileDiffTreatsFilenameLiterally(t *testing.T) {
 	repository := initializeDiffRepository(t)
 	for _, name := range []string{"[ab].txt", "a.txt"} {
-		writeDiffFile(t, repository, name, "before\n")
+		testutil.WriteFile(t, repository, name, "before\n")
 	}
-	runGit(t, "-C", repository, "add", ".")
-	runGit(t, "-C", repository, "commit", "-m", "filenames")
-	writeDiffFile(t, repository, "[ab].txt", "selected\n")
-	writeDiffFile(t, repository, "a.txt", "unselected\n")
-	diff, err := readGitFileDiff(repository, gitChangedFile{Path: "[ab].txt", IndexStatus: ' ', WorkTreeStatus: 'M'})
+	testutil.RunGit(t, "-C", repository, "add", ".")
+	testutil.RunGit(t, "-C", repository, "commit", "-m", "filenames")
+	testutil.WriteFile(t, repository, "[ab].txt", "selected\n")
+	testutil.WriteFile(t, repository, "a.txt", "unselected\n")
+	diff, err := FileDiff(repository, ChangedFile{Path: "[ab].txt", IndexStatus: ' ', WorkTreeStatus: 'M'})
 	if err != nil || !strings.Contains(diff, "+selected") || strings.Contains(diff, "+unselected") {
 		t.Fatalf("filename interpreted as a pattern: %q, %v", diff, err)
 	}
@@ -123,26 +125,15 @@ func TestReadGitFileDiffTreatsFilenameLiterally(t *testing.T) {
 func initializeDiffRepository(t *testing.T) string {
 	t.Helper()
 	repository := t.TempDir()
-	runGit(t, "init", "--initial-branch=main", repository)
-	writeDiffFile(t, repository, "modified.txt", "before\n")
-	writeDiffFile(t, repository, "staged.txt", "before\n")
-	runGit(t, "-C", repository, "add", ".")
-	runGit(t, "-C", repository, "commit", "-m", "initial")
+	testutil.RunGit(t, "init", "--initial-branch=main", repository)
+	testutil.WriteFile(t, repository, "modified.txt", "before\n")
+	testutil.WriteFile(t, repository, "staged.txt", "before\n")
+	testutil.RunGit(t, "-C", repository, "add", ".")
+	testutil.RunGit(t, "-C", repository, "commit", "-m", "initial")
 	return repository
 }
 
-func writeDiffFile(t *testing.T, repository, name, content string) {
-	t.Helper()
-	path := filepath.Join(repository, name)
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatalf("create Git fixture directory: %v", err)
-	}
-	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
-		t.Fatalf("write Git fixture: %v", err)
-	}
-}
-
-func changedFileAt(t *testing.T, files []gitChangedFile, path string) gitChangedFile {
+func changedFileAt(t *testing.T, files []ChangedFile, path string) ChangedFile {
 	t.Helper()
 	for _, file := range files {
 		if file.Path == path {
@@ -150,5 +141,5 @@ func changedFileAt(t *testing.T, files []gitChangedFile, path string) gitChanged
 		}
 	}
 	t.Fatalf("changed files %#v do not contain %q", files, path)
-	return gitChangedFile{}
+	return ChangedFile{}
 }

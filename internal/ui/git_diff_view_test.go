@@ -10,22 +10,23 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/opspresso/romty/internal/gitrepo"
 	"github.com/opspresso/romty/internal/model"
 	"github.com/opspresso/romty/internal/testutil"
 )
 
 func TestDashboardTogglesGitDiffViewForContextWorkspace(t *testing.T) {
 	snapshot, workspace := alphaWorkspaceSnapshot(nil)
-	testutil.Set(t, &loadGitChangedFiles, func(path string) ([]gitChangedFile, error) {
+	testutil.Set(t, &loadGitChangedFiles, func(path string) ([]gitrepo.ChangedFile, error) {
 		if path != workspace.Path {
 			t.Fatalf("changed files path = %q, want %q", path, workspace.Path)
 		}
-		return []gitChangedFile{
+		return []gitrepo.ChangedFile{
 			{Path: "README.md", WorkTreeStatus: 'M', IndexStatus: ' '},
 			{Path: "internal/ui/view.go", WorkTreeStatus: '?', IndexStatus: '?'},
 		}, nil
 	})
-	testutil.Set(t, &loadGitFileDiff, func(path string, file gitChangedFile) (string, error) {
+	testutil.Set(t, &loadGitFileDiff, func(path string, file gitrepo.ChangedFile) (string, error) {
 		if path != workspace.Path || file.Path != "README.md" {
 			t.Fatalf("diff target = (%q, %q), want (%q, README.md)", path, file.Path, workspace.Path)
 		}
@@ -33,7 +34,7 @@ func TestDashboardTogglesGitDiffViewForContextWorkspace(t *testing.T) {
 	})
 
 	value := newDashboard(&fakeBackend{}, snapshot)
-	value.gitStates = map[string]gitState{workspace.Path: {Branch: "main", Dirty: true}}
+	value.gitStates = map[string]gitrepo.State{workspace.Path: {Branch: "main", Dirty: true}}
 	value.setNavigation(1)
 
 	filesCommand := send(&value, gitDiffViewKey())
@@ -65,11 +66,11 @@ func TestDashboardTogglesGitDiffViewForContextWorkspace(t *testing.T) {
 
 func TestDashboardLoadsAndRendersEveryWorkspaceFile(t *testing.T) {
 	snapshot, workspace := alphaWorkspaceSnapshot(nil)
-	testutil.Set(t, &loadWorkspaceFiles, func(path string) ([]gitChangedFile, error) {
+	testutil.Set(t, &loadWorkspaceFiles, func(path string) ([]gitrepo.ChangedFile, error) {
 		if path != workspace.Path {
 			t.Fatalf("workspace files path = %q, want %q", path, workspace.Path)
 		}
-		return []gitChangedFile{{Path: "README.md"}, {Path: "internal/ui/view.go"}}, nil
+		return []gitrepo.ChangedFile{{Path: "README.md"}, {Path: "internal/ui/view.go"}}, nil
 	})
 	testutil.Set(t, &loadWorkspaceFile, func(path, filePath string) (string, error) {
 		if path != workspace.Path || filePath != "README.md" {
@@ -102,7 +103,7 @@ func TestDashboardLoadsAndRendersEveryWorkspaceFile(t *testing.T) {
 }
 
 func TestAllFilesTreeSortsDirectoriesBeforeFiles(t *testing.T) {
-	files := []gitChangedFile{
+	files := []gitrepo.ChangedFile{
 		{Path: "alpha.txt"},
 		{Path: "zeta/last.txt"},
 		{Path: "beta/first.txt"},
@@ -127,7 +128,7 @@ func TestAllFilesTreeSortsDirectoriesBeforeFiles(t *testing.T) {
 }
 
 func TestAllFilesTreePreservesExpandedDirectoriesOnRefresh(t *testing.T) {
-	files := []gitChangedFile{{Path: "internal/ui/view.go"}, {Path: "README.md"}}
+	files := []gitrepo.ChangedFile{{Path: "internal/ui/view.go"}, {Path: "README.md"}}
 	rows := fileViewTreeRows(files, allFilesView)
 	value := newDashboard(&fakeBackend{}, model.Snapshot{})
 	value.gitDiff = gitDiffView{
@@ -152,7 +153,7 @@ func TestAllFilesTreePreservesExpandedDirectoriesOnRefresh(t *testing.T) {
 }
 
 func TestDashboardCollapsesAndExpandsFileTreeDirectories(t *testing.T) {
-	files := []gitChangedFile{
+	files := []gitrepo.ChangedFile{
 		{Path: "internal/ui/first.go", IndexStatus: ' ', WorkTreeStatus: 'M'},
 		{Path: "internal/ui/second.go", IndexStatus: ' ', WorkTreeStatus: 'M'},
 		{Path: "README.md", IndexStatus: ' ', WorkTreeStatus: 'M'},
@@ -213,7 +214,7 @@ func TestDashboardExpandsTabsInLoadedGitDiff(t *testing.T) {
 	value.gitDiff = gitDiffView{
 		active:    true,
 		target:    model.Workspace{Name: "alpha", Path: "/projects/alpha"},
-		files:     []gitChangedFile{{Path: "file.go", WorkTreeStatus: 'M'}},
+		files:     []gitrepo.ChangedFile{{Path: "file.go", WorkTreeStatus: 'M'}},
 		fileIndex: 0,
 		request:   1,
 	}
@@ -250,7 +251,7 @@ func TestDashboardExpandsTabsInLoadedGitDiff(t *testing.T) {
 }
 
 func TestDashboardNavigatesAndScrollsGitDiffView(t *testing.T) {
-	testutil.Set(t, &loadGitFileDiff, func(_ string, file gitChangedFile) (string, error) {
+	testutil.Set(t, &loadGitFileDiff, func(_ string, file gitrepo.ChangedFile) (string, error) {
 		return file.Path + "\n" + strings.Join([]string{"one", "two", "three", "four", "five", "six", "seven"}, "\n"), nil
 	})
 	value := newDashboard(&fakeBackend{}, model.Snapshot{})
@@ -259,7 +260,7 @@ func TestDashboardNavigatesAndScrollsGitDiffView(t *testing.T) {
 	value.gitDiff = gitDiffView{
 		active: true,
 		target: model.Workspace{Name: "alpha", Path: "/projects/alpha"},
-		files: []gitChangedFile{
+		files: []gitrepo.ChangedFile{
 			{Path: "first.txt", WorkTreeStatus: 'M', IndexStatus: ' '},
 			{Path: "second.txt", WorkTreeStatus: 'M', IndexStatus: ' '},
 		},
@@ -308,7 +309,7 @@ func TestDashboardUsesMouseInFileTree(t *testing.T) {
 	testutil.Set(t, &loadWorkspaceFile, func(_ string, filePath string) (string, error) {
 		return filePath, nil
 	})
-	files := []gitChangedFile{
+	files := []gitrepo.ChangedFile{
 		{Path: "folder/inside.txt"},
 		{Path: "root.txt"},
 		{Path: "tail.txt"},
@@ -343,7 +344,7 @@ func TestDashboardColorsChangedFilesByStatus(t *testing.T) {
 	value.gitDiff = gitDiffView{
 		active:    true,
 		fileIndex: -1,
-		files: []gitChangedFile{
+		files: []gitrepo.ChangedFile{
 			{Path: "added.txt", IndexStatus: 'A', WorkTreeStatus: ' '},
 			{Path: "modified.txt", IndexStatus: ' ', WorkTreeStatus: 'M'},
 			{Path: "deleted.txt", IndexStatus: 'D', WorkTreeStatus: ' '},
@@ -434,7 +435,7 @@ func TestDashboardTogglesInlineAndSplitGitDiff(t *testing.T) {
 	value.gitDiff = gitDiffView{
 		active:    true,
 		target:    model.Workspace{Name: "alpha", Path: "/projects/alpha"},
-		files:     []gitChangedFile{{Path: "file.txt", IndexStatus: ' ', WorkTreeStatus: 'M'}},
+		files:     []gitrepo.ChangedFile{{Path: "file.txt", IndexStatus: ' ', WorkTreeStatus: 'M'}},
 		diffLines: []string{"@@ -1 +1 @@", "-old", "+new"},
 	}
 	value.gitDiff.splitRows = splitGitDiffRows(value.gitDiff.diffLines)
@@ -464,7 +465,7 @@ func TestSplitDiffReplacesAndClearsPreparedRows(t *testing.T) {
 	value.width, value.height = 100, 10
 	value.gitDiff = gitDiffView{
 		active: true, split: true, target: model.Workspace{Path: "/workspace"},
-		files: []gitChangedFile{{Path: "file.txt"}}, request: 1,
+		files: []gitrepo.ChangedFile{{Path: "file.txt"}}, request: 1,
 	}
 	for _, text := range []string{"first", "second"} {
 		send(&value, gitFileDiffMsg{
@@ -504,7 +505,7 @@ func TestDashboardPersistsAndRestoresGitDiffViewMode(t *testing.T) {
 	snapshot, workspace := alphaWorkspaceSnapshot(nil)
 	configPath := filepath.Join(t.TempDir(), "config.json")
 	value := newDashboardWithConfig(&fakeBackend{}, snapshot, configPath, Config{})
-	value.gitStates = map[string]gitState{workspace.Path: {Branch: "main", Dirty: true}}
+	value.gitStates = map[string]gitrepo.State{workspace.Path: {Branch: "main", Dirty: true}}
 	value.setNavigation(1)
 
 	send(&value, gitDiffViewKey())
@@ -577,7 +578,7 @@ func TestDashboardGitDiffViewHandlesCleanAndFailedReads(t *testing.T) {
 func TestDashboardRecognisesCtrlShiftFForGitDiffAcrossInputLayouts(t *testing.T) {
 	snapshot, workspace := alphaWorkspaceSnapshot(nil)
 	value := newDashboard(&fakeBackend{}, snapshot)
-	value.gitStates = map[string]gitState{workspace.Path: {Branch: "main"}}
+	value.gitStates = map[string]gitrepo.State{workspace.Path: {Branch: "main"}}
 	value.setNavigation(1)
 	physicalF := tea.KeyPressMsg(tea.Key{Code: 'ㄹ', BaseCode: 'f', Mod: tea.ModCtrl | tea.ModShift})
 

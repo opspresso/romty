@@ -10,12 +10,13 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/opspresso/romty/internal/display"
+	"github.com/opspresso/romty/internal/gitrepo"
 	"github.com/opspresso/romty/internal/model"
 )
 
 var (
-	loadGitChangedFiles = readGitChangedFiles
-	loadGitFileDiff     = readGitFileDiff
+	loadGitChangedFiles = gitrepo.ChangedFiles
+	loadGitFileDiff     = gitrepo.FileDiff
 	loadWorkspaceFiles  = readWorkspaceFiles
 	loadWorkspaceFile   = readWorkspaceFile
 )
@@ -31,7 +32,7 @@ type gitDiffView struct {
 	active            bool
 	mode              fileViewMode
 	target            model.Workspace
-	files             []gitChangedFile
+	files             []gitrepo.ChangedFile
 	treeRows          []gitDiffTreeRow
 	treeIndex         int
 	selectedDirectory string
@@ -65,7 +66,7 @@ func (v *gitDiffView) clearDiff() {
 type gitChangedFilesMsg struct {
 	path    string
 	request uint64
-	files   []gitChangedFile
+	files   []gitrepo.ChangedFile
 	rows    []gitDiffTreeRow
 	err     error
 }
@@ -133,7 +134,7 @@ func (m *dashboard) loadChangedFiles() tea.Cmd {
 	m.gitDiff.diffPending = false
 	m.gitDiff.err = ""
 	return func() tea.Msg {
-		var files []gitChangedFile
+		var files []gitrepo.ChangedFile
 		var err error
 		if mode == allFilesView {
 			files, err = loadWorkspaceFiles(path)
@@ -569,7 +570,7 @@ func (m dashboard) renderGitDiffTreeRow(row gitDiffTreeRow, width int) string {
 	return style.Render(prefix) + statusStyle.Render(status) + style.Render(name)
 }
 
-func (m dashboard) gitChangedFileStyle(file gitChangedFile) lipgloss.Style {
+func (m dashboard) gitChangedFileStyle(file gitrepo.ChangedFile) lipgloss.Style {
 	return m.gitStatusStyle(file.IndexStatus, file.WorkTreeStatus)
 }
 
@@ -836,11 +837,11 @@ type gitDiffTreeRow struct {
 	fileIndex int
 }
 
-func fileViewTreeRows(files []gitChangedFile, mode fileViewMode) []gitDiffTreeRow {
+func fileViewTreeRows(files []gitrepo.ChangedFile, mode fileViewMode) []gitDiffTreeRow {
 	return buildFileViewTreeRows(files, mode == allFilesView)
 }
 
-func buildFileViewTreeRows(files []gitChangedFile, directoriesFirst bool) []gitDiffTreeRow {
+func buildFileViewTreeRows(files []gitrepo.ChangedFile, directoriesFirst bool) []gitDiffTreeRow {
 	root := &gitDiffTreeNode{fileIndex: -1, children: make(map[string]*gitDiffTreeNode)}
 	for fileIndex, file := range files {
 		parts := strings.Split(file.Path, "/")
@@ -909,7 +910,7 @@ func visibleGitDiffTreeRows(rows []gitDiffTreeRow, collapsed map[string]bool) []
 	return visible
 }
 
-func gitChangedFileStatus(file gitChangedFile) string {
+func gitChangedFileStatus(file gitrepo.ChangedFile) string {
 	if file.IndexStatus == '?' && file.WorkTreeStatus == '?' {
 		return "? "
 	}

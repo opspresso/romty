@@ -1,4 +1,4 @@
-package ui
+package gitrepo
 
 import (
 	"context"
@@ -6,12 +6,14 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/opspresso/romty/internal/testutil"
 )
 
 func TestCappedGitOutputCancelsOnlyOnOverflow(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	output := cappedGitOutput{limit: 4, cancel: cancel}
+	output := cappedOutput{limit: 4, cancel: cancel}
 	if n, err := output.Write([]byte("abcd")); n != 4 || err != nil || ctx.Err() != nil {
 		t.Fatalf("exact limit: wrote %d, error %v, cancelled %v", n, err, ctx.Err())
 	}
@@ -27,8 +29,8 @@ func TestCappedGitOutputCancelsOnlyOnOverflow(t *testing.T) {
 
 func TestGitDiffRejectsOversizedOutput(t *testing.T) {
 	repository := initializeDiffRepository(t)
-	writeDiffFile(t, repository, "large.txt", strings.Repeat("line\n", maximumGitOutputBytes/5))
-	diff, err := readGitFileDiff(repository, gitChangedFile{Path: "large.txt", IndexStatus: '?', WorkTreeStatus: '?'})
+	testutil.WriteFile(t, repository, "large.txt", strings.Repeat("line\n", maxOutputBytes/5))
+	diff, err := FileDiff(repository, ChangedFile{Path: "large.txt", IndexStatus: '?', WorkTreeStatus: '?'})
 	if err == nil || !strings.Contains(err.Error(), "output exceeds") || len(diff) != 0 {
 		t.Fatalf("oversized diff: %d bytes, error %v", len(diff), err)
 	}
@@ -45,10 +47,10 @@ func TestGitStatusRejectsOversizedOutput(t *testing.T) {
 	if err := os.Mkdir(filepath.Join(workspace, ".git"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if files, err := readGitChangedFiles(workspace); err == nil || !strings.Contains(err.Error(), "output exceeds") || files != nil {
+	if files, err := ChangedFiles(workspace); err == nil || !strings.Contains(err.Error(), "output exceeds") || files != nil {
 		t.Fatalf("oversized changed-file status: %v, %v", files, err)
 	}
-	if _, ok := readGitState(workspace, false); ok {
+	if _, ok := readState(workspace, false); ok {
 		t.Fatal("oversized background Git status was accepted")
 	}
 }

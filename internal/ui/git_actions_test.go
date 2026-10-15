@@ -10,7 +10,9 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/opspresso/romty/internal/gitrepo"
 	"github.com/opspresso/romty/internal/model"
+	"github.com/opspresso/romty/internal/testutil"
 )
 
 func TestDashboardRunsGitActionForContextWorkspace(t *testing.T) {
@@ -46,7 +48,7 @@ func TestDashboardRunsGitActionForContextWorkspace(t *testing.T) {
 	} {
 		t.Run(probe.name, func(t *testing.T) {
 			value := newDashboard(&fakeBackend{}, snapshot)
-			value.gitStates = map[string]gitState{
+			value.gitStates = map[string]gitrepo.State{
 				alpha.Path: {Branch: "main"},
 				bravo.Path: {Branch: "feature"},
 			}
@@ -69,7 +71,7 @@ func TestDashboardRunsGitActionForContextWorkspace(t *testing.T) {
 func TestDashboardRunsSelectedGitActionAndShowsResult(t *testing.T) {
 	snapshot, workspace := alphaWorkspaceSnapshot(nil)
 	value := newDashboard(&fakeBackend{}, snapshot)
-	value.gitStates = map[string]gitState{workspace.Path: {Branch: "main"}}
+	value.gitStates = map[string]gitrepo.State{workspace.Path: {Branch: "main"}}
 	value.setNavigation(1)
 
 	send(&value, gitActionsKey())
@@ -254,7 +256,7 @@ func TestDashboardDoesNotOpenGitActionsOutsideRepository(t *testing.T) {
 func TestDashboardRecognisesCtrlShiftGAcrossInputLayouts(t *testing.T) {
 	snapshot, workspace := alphaWorkspaceSnapshot(nil)
 	value := newDashboard(&fakeBackend{}, snapshot)
-	value.gitStates = map[string]gitState{workspace.Path: {Branch: "main"}}
+	value.gitStates = map[string]gitrepo.State{workspace.Path: {Branch: "main"}}
 	value.setNavigation(1)
 	physicalG := tea.KeyPressMsg(tea.Key{
 		Code: 'ㅎ', BaseCode: 'g', Mod: tea.ModCtrl | tea.ModShift,
@@ -289,8 +291,8 @@ func TestGitActionArguments(t *testing.T) {
 
 func TestExecuteGitStatusAction(t *testing.T) {
 	repository := t.TempDir()
-	runGit(t, "init", "--initial-branch=main", repository)
-	writeDiffFile(t, repository, "untracked.txt", "new")
+	testutil.RunGit(t, "init", "--initial-branch=main", repository)
+	testutil.WriteFile(t, repository, "untracked.txt", "new")
 
 	output, err := executeGitAction(repository, gitStatusAction)
 	if err != nil || !strings.Contains(output, "## No commits yet on main") || !strings.Contains(output, "?? untracked.txt") {

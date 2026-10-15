@@ -13,16 +13,18 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"github.com/alecthomas/chroma/v2"
+
+	"github.com/opspresso/romty/internal/gitrepo"
 )
 
 const workspaceFileTimeout = 10 * time.Second
 
 const maximumWorkspaceFileBytes = 8 << 20
 
-func readWorkspaceFiles(path string) ([]gitChangedFile, error) {
+func readWorkspaceFiles(path string) ([]gitrepo.ChangedFile, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), workspaceFileTimeout)
 	defer cancel()
-	files := make([]gitChangedFile, 0)
+	files := make([]gitrepo.ChangedFile, 0)
 	err := filepath.WalkDir(path, func(filePath string, entry os.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -40,7 +42,7 @@ func readWorkspaceFiles(path string) ([]gitChangedFile, error) {
 		if err != nil {
 			return err
 		}
-		files = append(files, gitChangedFile{
+		files = append(files, gitrepo.ChangedFile{
 			Path: filepath.ToSlash(relative), IndexStatus: ' ', WorkTreeStatus: ' ',
 		})
 		return nil

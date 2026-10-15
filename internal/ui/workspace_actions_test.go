@@ -7,6 +7,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/opspresso/romty/internal/gitrepo"
 	"github.com/opspresso/romty/internal/model"
 )
 
@@ -44,12 +45,12 @@ func TestWorkspaceActionsStartWithThePrimaryTerminalAction(t *testing.T) {
 	for _, probe := range []struct {
 		name    string
 		tabs    []model.Tab
-		git     gitState
+		git     gitrepo.State
 		hasGit  bool
 		failure string
 		want    workspaceAction
 	}{
-		{name: "running terminal", tabs: running, git: gitState{Branch: "main", Dirty: true}, hasGit: true, want: workspaceOpenTerminalAction},
+		{name: "running terminal", tabs: running, git: gitrepo.State{Branch: "main", Dirty: true}, hasGit: true, want: workspaceOpenTerminalAction},
 		{name: "new terminal", want: workspaceNewTabAction},
 		{name: "open terminal", tabs: running, want: workspaceOpenTerminalAction},
 		{name: "unreadable root", failure: "not found", want: workspaceRemoveAction},
@@ -72,7 +73,7 @@ func TestWorkspaceActionsStartWithThePrimaryTerminalAction(t *testing.T) {
 func TestWorkspaceActionsExposeEveryGitOperationDirectly(t *testing.T) {
 	snapshot, workspace := alphaWorkspaceSnapshot(nil)
 	value := newDashboard(&fakeBackend{}, snapshot)
-	value.gitStates = map[string]gitState{workspace.Path: {Branch: "main", Dirty: true}}
+	value.gitStates = map[string]gitrepo.State{workspace.Path: {Branch: "main", Dirty: true}}
 	value.setNavigation(1)
 	command := send(&value, key(tea.KeyF8, ""))
 	if command != nil || value.modal != workspaceActionsModal || value.palette.target.workspace.Path != workspace.Path {
@@ -100,7 +101,7 @@ func TestWorkspaceActionsExposeEveryGitOperationDirectly(t *testing.T) {
 func TestWorkspaceActionsRunAGitOperationAndReturnToThePalette(t *testing.T) {
 	snapshot, workspace := alphaWorkspaceSnapshot(nil)
 	value := newDashboard(&fakeBackend{}, snapshot)
-	value.gitStates = map[string]gitState{workspace.Path: {Branch: "main"}}
+	value.gitStates = map[string]gitrepo.State{workspace.Path: {Branch: "main"}}
 	value.setNavigation(1)
 	value, command := runWorkspaceAction(t, value, workspaceGitPullAction)
 	if command == nil || value.modal != gitActionsModal || !value.gitRun.pending || value.gitRun.action != gitPullAction ||
@@ -168,7 +169,7 @@ func TestWorkspaceActionsRunTerminalAndFileCommands(t *testing.T) {
 	t.Run("file changes", func(t *testing.T) {
 		snapshot, workspace := alphaWorkspaceSnapshot(nil)
 		value := newDashboard(&fakeBackend{}, snapshot)
-		value.gitStates = map[string]gitState{workspace.Path: {Branch: "main", Dirty: true}}
+		value.gitStates = map[string]gitrepo.State{workspace.Path: {Branch: "main", Dirty: true}}
 		value.setNavigation(1)
 		value, command := runWorkspaceAction(t, value, workspaceFileChangesAction)
 		if command == nil || value.modal != noModal || !value.gitDiff.active || value.gitDiff.target.Path != workspace.Path {
@@ -232,7 +233,7 @@ func TestWorkspaceActionsWindowACompactScreen(t *testing.T) {
 	snapshot, workspace := alphaWorkspaceSnapshot(tabs)
 	value := newDashboard(&fakeBackend{}, snapshot)
 	value.width, value.height = 80, 10
-	value.gitStates = map[string]gitState{workspace.Path: {Branch: "main"}}
+	value.gitStates = map[string]gitrepo.State{workspace.Path: {Branch: "main"}}
 	value.setNavigation(1)
 	send(&value, key(tea.KeyF8, ""))
 

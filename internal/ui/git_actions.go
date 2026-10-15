@@ -11,6 +11,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/opspresso/romty/internal/display"
+	"github.com/opspresso/romty/internal/gitrepo"
 	"github.com/opspresso/romty/internal/model"
 )
 
@@ -108,7 +109,7 @@ func executeGitActionContext(parent context.Context, path string, action gitActi
 	}
 	ctx, cancel := context.WithTimeout(parent, gitActionTimeout)
 	defer cancel()
-	output, err := gitCombinedOutput(ctx, path, gitRemoteEnvironment, arguments...)
+	output, err := gitrepo.RunRemote(ctx, path, arguments...)
 	value := strings.TrimSpace(string(output))
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		return value, fmt.Errorf("%s timed out after %s", action.label(), gitActionTimeout)

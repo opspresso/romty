@@ -6,6 +6,7 @@ package ui
 import (
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/opspresso/romty/internal/gitrepo"
 	"github.com/opspresso/romty/internal/model"
 )
 
@@ -13,7 +14,7 @@ type navItem struct {
 	root      model.Root
 	workspace model.Workspace
 	tabs      []model.Tab
-	git       gitState
+	git       gitrepo.State
 	hasGit    bool
 	isRoot    bool
 	separator bool

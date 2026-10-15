@@ -17,6 +17,7 @@ import (
 
 	"github.com/opspresso/romty/internal/agenthooks"
 	"github.com/opspresso/romty/internal/display"
+	"github.com/opspresso/romty/internal/gitrepo"
 	"github.com/opspresso/romty/internal/model"
 	"github.com/opspresso/romty/internal/sound"
 )
@@ -252,7 +253,7 @@ type dashboard struct {
 	hover            hoverTarget
 	search           scrollbackSearch
 	agentSoundReady  bool
-	gitStates        map[string]gitState
+	gitStates        map[string]gitrepo.State
 	gitFetchedAt     time.Time
 	gitRun           gitActionRun
 	gitDiff          gitDiffView
@@ -277,7 +278,7 @@ type soundPlayedMsg struct {
 }
 
 type gitStatusMsg struct {
-	value      map[string]gitState
+	value      map[string]gitrepo.State
 	fetchedAt  time.Time
 	reschedule bool
 }

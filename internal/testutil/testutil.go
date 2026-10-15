@@ -5,6 +5,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 	"time"
@@ -66,4 +67,33 @@ func Set[T any](t testing.TB, target *T, value T) {
 	previous := *target
 	*target = value
 	t.Cleanup(func() { *target = previous })
+}
+
+// RunGit runs git with a fixed identity and no user or system configuration,
+// so fixtures can commit anywhere. It skips the test when git is missing.
+func RunGit(t *testing.T, arguments ...string) {
+	t.Helper()
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is not installed")
+	}
+	command := exec.Command("git", arguments...)
+	command.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1",
+		"GIT_AUTHOR_NAME=romty", "GIT_AUTHOR_EMAIL=romty@example.com",
+		"GIT_COMMITTER_NAME=romty", "GIT_COMMITTER_EMAIL=romty@example.com")
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v\n%s", arguments, err, output)
+	}
+}
+
+// WriteFile writes content to name under directory, creating parent
+// directories as needed.
+func WriteFile(t *testing.T, directory, name, content string) {
+	t.Helper()
+	path := filepath.Join(directory, name)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("create fixture directory: %v", err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
 }

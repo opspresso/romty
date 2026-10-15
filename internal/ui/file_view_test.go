@@ -6,6 +6,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/opspresso/romty/internal/testutil"
 )
 
 func TestReadWorkspaceFilesIncludesDotFilesAndExcludesDotDirectories(t *testing.T) {
@@ -19,7 +21,7 @@ func TestReadWorkspaceFilesIncludesDotFilesAndExcludesDotDirectories(t *testing.
 		"src/main.go":               "package main\n",
 		"node_modules/pkg/index.js": "module.exports = {}\n",
 	} {
-		writeDiffFile(t, workspace, name, content)
+		testutil.WriteFile(t, workspace, name, content)
 	}
 	if err := os.Symlink(filepath.Join(workspace, "README.md"), filepath.Join(workspace, "linked-file")); err != nil {
 		t.Logf("file symlink is unavailable: %v", err)
@@ -44,7 +46,7 @@ func TestReadWorkspaceFilesIncludesDotFilesAndExcludesDotDirectories(t *testing.
 
 func TestReadWorkspaceFileReturnsContents(t *testing.T) {
 	workspace := t.TempDir()
-	writeDiffFile(t, workspace, "nested/file.txt", "first\nsecond\n")
+	testutil.WriteFile(t, workspace, "nested/file.txt", "first\nsecond\n")
 
 	content, err := readWorkspaceFile(workspace, "nested/file.txt")
 	if err != nil || content != "first\nsecond\n" {
@@ -54,8 +56,8 @@ func TestReadWorkspaceFileReturnsContents(t *testing.T) {
 
 func TestReadWorkspaceFileRejectsReplacedParent(t *testing.T) {
 	workspace, outside := t.TempDir(), t.TempDir()
-	writeDiffFile(t, workspace, "nested/file.txt", "inside")
-	writeDiffFile(t, outside, "file.txt", "outside")
+	testutil.WriteFile(t, workspace, "nested/file.txt", "inside")
+	testutil.WriteFile(t, outside, "file.txt", "outside")
 	files, err := readWorkspaceFiles(workspace)
 	if err != nil || len(files) != 1 {
 		t.Fatalf("list files: %v, %v", files, err)
@@ -75,8 +77,8 @@ func TestReadWorkspaceFileRejectsReplacedWorkspace(t *testing.T) {
 	parent := t.TempDir()
 	workspace := filepath.Join(parent, "workspace")
 	outside := filepath.Join(parent, "outside")
-	writeDiffFile(t, workspace, "file.txt", "inside")
-	writeDiffFile(t, outside, "file.txt", "outside")
+	testutil.WriteFile(t, workspace, "file.txt", "inside")
+	testutil.WriteFile(t, outside, "file.txt", "outside")
 	files, err := readWorkspaceFiles(workspace)
 	if err != nil || len(files) != 1 {
 		t.Fatalf("list files: %v, %v", files, err)

@@ -21,6 +21,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/opspresso/romty/internal/agenthooks"
+	"github.com/opspresso/romty/internal/gitrepo"
 	"github.com/opspresso/romty/internal/model"
 	"github.com/opspresso/romty/internal/sound"
 	"github.com/opspresso/romty/internal/testutil"
@@ -2360,7 +2361,7 @@ func TestDashboardKeepsTheFileViewSplitOnANarrowScreen(t *testing.T) {
 	value.gitDiff = gitDiffView{
 		active:    true,
 		target:    model.Workspace{Name: "alpha", Path: "/projects/alpha"},
-		files:     []gitChangedFile{{Path: "file.go", WorkTreeStatus: 'M'}},
+		files:     []gitrepo.ChangedFile{{Path: "file.go", WorkTreeStatus: 'M'}},
 		fileIndex: 0,
 	}
 	if view := value.gitDiffLayout(); view.leftWidth == 0 || view.separator != separatorWidth {
@@ -4221,7 +4222,7 @@ func TestNavigationShowsGitStateOnSecondLine(t *testing.T) {
 		Tabs:      []model.Tab{{ID: "tab-1", Running: true}},
 	}})
 	value := newDashboard(&fakeBackend{}, snapshot)
-	value.gitStates = map[string]gitState{workspace.Path: {
+	value.gitStates = map[string]gitrepo.State{workspace.Path: {
 		Branch: "main",
 		Dirty:  true,
 		Ahead:  1,
@@ -4253,7 +4254,7 @@ func TestNavigationUsesOneRootLineAndTwoWorkspaceLines(t *testing.T) {
 	}))
 	value.focus = terminalPane
 	value.selectedPath = "/projects/first"
-	value.gitStates = map[string]gitState{"/projects/first": {Branch: "main"}}
+	value.gitStates = map[string]gitrepo.State{"/projects/first": {Branch: "main"}}
 	lines := value.renderNavigation(28, 20)
 	if len(lines) != 7 {
 		t.Fatalf("navigation lines = %d, want header, one root line, and two lines per workspace\n%s", len(lines), strings.Join(lines, "\n"))
@@ -4286,10 +4287,10 @@ func TestNavigationSeparatesRootsWithOneBlankLine(t *testing.T) {
 
 func TestGitStatusUpdatesStateAndSchedulesAnotherRefresh(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, model.Snapshot{})
-	value.gitStates = map[string]gitState{"/old": {Behind: 2}}
+	value.gitStates = map[string]gitrepo.State{"/old": {Behind: 2}}
 
-	command := send(&value, gitStatusMsg{value: map[string]gitState{"/new": {Behind: 1}}, reschedule: true})
-	if !reflect.DeepEqual(value.gitStates, map[string]gitState{"/new": {Behind: 1}}) {
+	command := send(&value, gitStatusMsg{value: map[string]gitrepo.State{"/new": {Behind: 1}}, reschedule: true})
+	if !reflect.DeepEqual(value.gitStates, map[string]gitrepo.State{"/new": {Behind: 1}}) {
 		t.Fatalf("Git status = %#v, want only the current result", value.gitStates)
 	}
 	if command == nil {
@@ -4532,7 +4533,7 @@ func TestDashboardKeepsWideWorkspaceNamesWithinViewport(t *testing.T) {
 	value.width = 40
 	value.height = 12
 	value.setNavigation(1)
-	value.gitStates = map[string]gitState{"/projects/long": {
+	value.gitStates = map[string]gitrepo.State{"/projects/long": {
 		Branch: "feat/a-very-long-workspace-branch-name",
 		Dirty:  true,
 		Ahead:  123,

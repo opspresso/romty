@@ -1,4 +1,4 @@
-package ui
+package gitrepo
 
 import (
 	"context"
@@ -10,27 +10,31 @@ import (
 	"time"
 )
 
-const gitDiffTimeout = 10 * time.Second
+const diffTimeout = 10 * time.Second
 
-type gitChangedFile struct {
+// ChangedFile is one path git status reports, with its index and work tree
+// status letters as git prints them.
+type ChangedFile struct {
 	Path           string
 	OldPath        string
 	IndexStatus    byte
 	WorkTreeStatus byte
 }
 
-func readGitChangedFiles(path string) ([]gitChangedFile, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), gitDiffTimeout)
+// ChangedFiles lists the changed and untracked files of the repository at
+// path, sorted by path.
+func ChangedFiles(path string) ([]ChangedFile, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), diffTimeout)
 	defer cancel()
-	output, err := gitStdout(ctx, path, gitReadEnvironment,
+	output, err := stdout(ctx, path, readEnvironment,
 		"status", "--porcelain=v1", "-z", "--untracked-files=all")
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-		return nil, fmt.Errorf("read changed files timed out after %s", gitDiffTimeout)
+		return nil, fmt.Errorf("read changed files timed out after %s", diffTimeout)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("read changed files: %w", err)
 	}
-	files, err := parseGitChangedFiles(string(output))
+	files, err := parseChangedFiles(string(output))
 	if err != nil {
 		return nil, err
 	}
@@ -38,9 +42,9 @@ func readGitChangedFiles(path string) ([]gitChangedFile, error) {
 	return files, nil
 }
 
-func parseGitChangedFiles(output string) ([]gitChangedFile, error) {
+func parseChangedFiles(output string) ([]ChangedFile, error) {
 	records := strings.Split(output, "\x00")
-	files := make([]gitChangedFile, 0, len(records))
+	files := make([]ChangedFile, 0, len(records))
 	for index := 0; index < len(records); index++ {
 		record := records[index]
 		if record == "" {
@@ -49,7 +53,7 @@ func parseGitChangedFiles(output string) ([]gitChangedFile, error) {
 		if len(record) < 4 || record[2] != ' ' {
 			return nil, fmt.Errorf("parse Git status: malformed record %q", record)
 		}
-		file := gitChangedFile{
+		file := ChangedFile{
 			Path:           record[3:],
 			IndexStatus:    record[0],
 			WorkTreeStatus: record[1],
@@ -67,14 +71,16 @@ func parseGitChangedFiles(output string) ([]gitChangedFile, error) {
 	return files, nil
 }
 
-func readGitFileDiff(path string, file gitChangedFile) (string, error) {
+// FileDiff is the staged and unstaged diff of one changed file, or the whole
+// content of an untracked one.
+func FileDiff(path string, file ChangedFile) (string, error) {
 	sections := make([]string, 0, 2)
 	paths := []string{file.Path}
 	if file.OldPath != "" {
 		paths = append([]string{file.OldPath}, paths...)
 	}
 	if file.IndexStatus == '?' && file.WorkTreeStatus == '?' {
-		output, err := runGitDiff(path, true, "--no-index", "--", "/dev/null", file.Path)
+		output, err := runDiff(path, true, "--no-index", "--", "/dev/null", file.Path)
 		if err != nil {
 			return "", fmt.Errorf("read untracked file diff: %w", err)
 		}
@@ -82,7 +88,7 @@ func readGitFileDiff(path string, file gitChangedFile) (string, error) {
 	}
 	if file.IndexStatus != ' ' {
 		arguments := append([]string{"--cached", "--"}, paths...)
-		output, err := runGitDiff(path, false, arguments...)
+		output, err := runDiff(path, false, arguments...)
 		if err != nil {
 			return "", fmt.Errorf("read staged diff: %w", err)
 		}
@@ -92,7 +98,7 @@ func readGitFileDiff(path string, file gitChangedFile) (string, error) {
 	}
 	if file.WorkTreeStatus != ' ' {
 		arguments := append([]string{"--"}, paths...)
-		output, err := runGitDiff(path, false, arguments...)
+		output, err := runDiff(path, false, arguments...)
 		if err != nil {
 			return "", fmt.Errorf("read unstaged diff: %w", err)
 		}
@@ -106,14 +112,14 @@ func readGitFileDiff(path string, file gitChangedFile) (string, error) {
 	return strings.Join(sections, "\n\n"), nil
 }
 
-func runGitDiff(path string, allowDifferenceExit bool, arguments ...string) (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), gitDiffTimeout)
+func runDiff(path string, allowDifferenceExit bool, arguments ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), diffTimeout)
 	defer cancel()
 	arguments = append([]string{"--literal-pathspecs", "diff", "--no-ext-diff", "--no-textconv", "--no-color"}, arguments...)
-	output, err := gitCombinedOutput(ctx, path, gitReadEnvironment, arguments...)
+	output, err := combinedOutput(ctx, path, readEnvironment, arguments...)
 	value := strings.TrimRight(string(output), "\n")
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-		return value, fmt.Errorf("git diff timed out after %s", gitDiffTimeout)
+		return value, fmt.Errorf("git diff timed out after %s", diffTimeout)
 	}
 	var exitError *exec.ExitError
 	if allowDifferenceExit && errors.As(err, &exitError) && exitError.ExitCode() == 1 {
