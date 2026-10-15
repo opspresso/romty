@@ -193,12 +193,8 @@ func (c *Client) RemoveRoot(rootID string) (model.Snapshot, error) {
 }
 
 func (c *Client) RemoveWorkspace(rootID, path string) (model.Snapshot, error) {
-	supported, err := c.supports(protocol.CapabilityRemoveWorkspace)
-	if err != nil {
+	if err := c.require(protocol.CapabilityRemoveWorkspace, "removing workspaces"); err != nil {
 		return model.Snapshot{}, err
-	}
-	if !supported {
-		return model.Snapshot{}, fmt.Errorf("running daemon does not support removing workspaces; %s", protocol.Remedy)
 	}
 	return callFor(c, protocol.Request{
 		Action: protocol.ActionRemoveWorkspace,
@@ -230,23 +226,15 @@ func (c *Client) CreateTab(workspaceID string, columns, rows uint16) (model.Tab,
 }
 
 func (c *Client) CloseTab(tabID string) (model.Snapshot, error) {
-	supported, err := c.supports(protocol.CapabilityCloseTab)
-	if err != nil {
+	if err := c.require(protocol.CapabilityCloseTab, "closing tabs"); err != nil {
 		return model.Snapshot{}, err
-	}
-	if !supported {
-		return model.Snapshot{}, fmt.Errorf("closing tabs requires a newer daemon; %s", protocol.Remedy)
 	}
 	return callFor(c, protocol.Request{Action: protocol.ActionCloseTab, TabID: tabID}, snapshotOf, "snapshot")
 }
 
 func (c *Client) RenameTab(tabID, name string) (model.Snapshot, error) {
-	supported, err := c.supports(protocol.CapabilityRenameTab)
-	if err != nil {
+	if err := c.require(protocol.CapabilityRenameTab, "renaming tabs"); err != nil {
 		return model.Snapshot{}, err
-	}
-	if !supported {
-		return model.Snapshot{}, fmt.Errorf("renaming tabs requires a newer daemon; %s", protocol.Remedy)
 	}
 	return callFor(c, protocol.Request{Action: protocol.ActionRenameTab, TabID: tabID, Name: name}, snapshotOf, "snapshot")
 }
@@ -544,6 +532,19 @@ func (c *Client) supports(capability string) (bool, error) {
 		return false, err
 	}
 	return protocol.HasCapability(negotiated.capabilities, capability), nil
+}
+
+// require refuses an action the running daemon has no capability for. what
+// names the action in the message, such as "closing tabs".
+func (c *Client) require(capability, what string) error {
+	supported, err := c.supports(capability)
+	if err != nil {
+		return err
+	}
+	if !supported {
+		return fmt.Errorf("%s requires a newer daemon; %s", what, protocol.Remedy)
+	}
+	return nil
 }
 
 func validateDaemonSocket(path string) error {
