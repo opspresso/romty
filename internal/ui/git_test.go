@@ -9,9 +9,6 @@ import (
 )
 
 func TestGitStateUsesFetchedUpstream(t *testing.T) {
-	if _, err := exec.LookPath("git"); err != nil {
-		t.Skip("git is not installed")
-	}
 	base := t.TempDir()
 	remote := filepath.Join(base, "remote.git")
 	source := filepath.Join(base, "source")
@@ -82,8 +79,12 @@ func TestGitStateIgnoresDirectoriesWithoutGitMetadata(t *testing.T) {
 	}
 }
 
+// runGit runs git for a fixture and skips the test where git is not installed.
 func runGit(t *testing.T, arguments ...string) {
 	t.Helper()
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is not installed")
+	}
 	command := exec.Command("git", arguments...)
 	// A fixed identity lets fixtures commit without any user Git configuration.
 	command.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1",

@@ -2,16 +2,12 @@ package ui
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 )
 
 func TestReadGitChangedFilesBuildsCompleteSortedList(t *testing.T) {
-	if _, err := exec.LookPath("git"); err != nil {
-		t.Skip("git is not installed")
-	}
 	repository := initializeDiffRepository(t)
 
 	writeDiffFile(t, repository, "modified.txt", "before\nafter\n")
@@ -39,9 +35,6 @@ func TestReadGitChangedFilesBuildsCompleteSortedList(t *testing.T) {
 }
 
 func TestReadGitChangedFilesPreservesRenameSource(t *testing.T) {
-	if _, err := exec.LookPath("git"); err != nil {
-		t.Skip("git is not installed")
-	}
 	repository := initializeDiffRepository(t)
 	runGit(t, "-C", repository, "mv", "staged.txt", "renamed.txt")
 
@@ -59,9 +52,6 @@ func TestReadGitChangedFilesPreservesRenameSource(t *testing.T) {
 }
 
 func TestReadGitFileDiffCombinesStagedAndUnstagedChanges(t *testing.T) {
-	if _, err := exec.LookPath("git"); err != nil {
-		t.Skip("git is not installed")
-	}
 	repository := initializeDiffRepository(t)
 	writeDiffFile(t, repository, "modified.txt", "before\nstaged\n")
 	runGit(t, "-C", repository, "add", "modified.txt")
@@ -84,9 +74,6 @@ func TestReadGitFileDiffCombinesStagedAndUnstagedChanges(t *testing.T) {
 }
 
 func TestReadGitFileDiffShowsUntrackedFile(t *testing.T) {
-	if _, err := exec.LookPath("git"); err != nil {
-		t.Skip("git is not installed")
-	}
 	repository := initializeDiffRepository(t)
 	writeDiffFile(t, repository, "nested/new file.txt", "first\nsecond\n")
 
