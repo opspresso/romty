@@ -170,6 +170,10 @@ func TestAgentEventValidate(t *testing.T) {
 			Agent: model.AgentClaude, HookEvent: "Stop", NotificationType: long}},
 		{name: "oversized permission mode", event: protocol.AgentEvent{
 			Agent: model.AgentClaude, HookEvent: "Stop", PermissionMode: long}},
+		{name: "a transcript path at the bound", event: protocol.AgentEvent{
+			Agent: model.AgentClaude, HookEvent: "Stop", TranscriptPath: strings.Repeat("p", protocol.MaxAgentEventPathBytes)}, valid: true},
+		{name: "oversized transcript path", event: protocol.AgentEvent{
+			Agent: model.AgentClaude, HookEvent: "Stop", TranscriptPath: strings.Repeat("p", protocol.MaxAgentEventPathBytes+1)}},
 		{name: "bounded ancestry", event: protocol.AgentEvent{
 			Agent: model.AgentOpenCode, HookEvent: "Stop", ProcessGroups: make([]int, protocol.MaxAgentEventProcessGroups)}, valid: true},
 		{name: "oversized ancestry", event: protocol.AgentEvent{
@@ -184,5 +188,24 @@ func TestAgentEventValidate(t *testing.T) {
 				t.Fatal("Validate() accepted an event the daemon cannot record")
 			}
 		})
+	}
+}
+
+func TestIntersectCapabilitiesKeepsTheFirstListsOrder(t *testing.T) {
+	got := protocol.IntersectCapabilities([]string{"c", "a", "b"}, []string{"b", "c", "x"})
+	if want := []string{"c", "b"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("IntersectCapabilities() = %v, want %v", got, want)
+	}
+	if got := protocol.IntersectCapabilities([]string{"a"}, nil); len(got) != 0 {
+		t.Fatalf("IntersectCapabilities() with nothing in common = %v, want none", got)
+	}
+}
+
+// A refusal reads as the daemon's in a log, and its reason alone is what a
+// caller shows beside the request that caused it.
+func TestRefusedErrorNamesTheDaemonAndKeepsItsReason(t *testing.T) {
+	err := &protocol.RefusedError{Message: "tab name is required"}
+	if err.Error() != "daemon: tab name is required" {
+		t.Fatalf("Error() = %q", err.Error())
 	}
 }
