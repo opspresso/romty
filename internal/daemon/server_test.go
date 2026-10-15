@@ -311,11 +311,10 @@ func waitForTabCount(t *testing.T, backend *client.Client, workspaceID string, c
 }
 
 // A daemon shares its process with whatever else runs in it: a TUI that starts
-// one in development, and the whole of this suite under test. Narrowing the
-// umask around the socket bind narrowed every file the process created in that
-// window, and a workspace directory that lost its execute bit could no longer
-// be a shell's working directory — which reached the user as an exec failure
-// on a directory that looked fine everywhere else.
+// one in development, and the whole of this suite under test. The umask is
+// process-wide, so binding the socket must not change it: a directory created
+// meanwhile would lose its execute bit and could not be a shell's working
+// directory.
 func TestServeLeavesTheModesOfConcurrentDirectoriesAlone(t *testing.T) {
 	previous := syscall.Umask(0o022)
 	t.Cleanup(func() { syscall.Umask(previous) })
@@ -454,8 +453,8 @@ func TestAttachDoesNotReplayTerminalQueries(t *testing.T) {
 }
 
 // A root can be unmounted, deleted, or made unreadable while romty is running.
-// One such root used to fail every snapshot, and with it every path that needs
-// one — including startup, which left romty unable to open at all.
+// One such root must not fail the snapshot, which every path including startup
+// needs.
 func TestSnapshotSurvivesAnUnreadableRoot(t *testing.T) {
 	base := testutil.ShortTempDir(t)
 	socket := filepath.Join(base, "daemon.sock")
@@ -511,7 +510,7 @@ func TestSnapshotSurvivesAnUnreadableRoot(t *testing.T) {
 		}
 	}
 
-	// And it can be forgotten, which was impossible without editing state.json.
+	// And it can be forgotten from the TUI.
 	snapshot, err = backend.RemoveRoot(doomedID)
 	if err != nil {
 		t.Fatalf("RemoveRoot() error = %v", err)
@@ -696,11 +695,8 @@ func TestCreateTabLeavesNoTabWhenTheShellExitsAtOnce(t *testing.T) {
 
 func countTabs(snapshot model.Snapshot) int {
 	total := 0
-	for _, root := range snapshot.Roots {
-		total += len(root.Tabs)
-		for _, directory := range root.Directories {
-			total += len(directory.Tabs)
-		}
+	for range snapshot.Tabs() {
+		total++
 	}
 	return total
 }
@@ -805,6 +801,7 @@ func TestServerRefusesAnActionTheSelectedProtocolPredates(t *testing.T) {
 		{action: "remove_workspace", version: 3, capability: protocol.CapabilityRemoveWorkspace},
 		{action: "agent_statuses", version: 4, capability: protocol.CapabilityAgentStatus},
 		{action: "close_tab", version: 5, capability: protocol.CapabilityCloseTab},
+		{action: "rename_tab", version: 6, capability: protocol.CapabilityRenameTab},
 	} {
 		response := speakRaw(t, socket, map[string]any{
 			"action":       testCase.action,
@@ -866,8 +863,9 @@ func TestServerAnswersPingAndShutdownRegardlessOfVersion(t *testing.T) {
 	}
 }
 
-// Attach built its request inline and sent it unversioned, so the daemon saw
-// every attach as coming from a client that predates the field.
+// Attach is sent with the negotiated version and capabilities, so the daemon
+// announces the replay boundary and size rather than treating it as a client
+// that predates them.
 func TestAttachSendsTheProtocolVersion(t *testing.T) {
 	socket := startDaemon(t).socket
 
@@ -1033,9 +1031,8 @@ func speakRaw(t *testing.T, socket string, request map[string]any) protocol.Resp
 // A workspace whose directory has already gone must still be removable. The
 // removal that deletes the directory rolls its state back when the state
 // cannot be written, which leaves romty holding a record for a path that is no
-// longer there — and every retry used to die inspecting the directory it had
-// itself deleted, so the workspace stayed in the tree naming nothing, with no
-// action able to remove it.
+// longer there. A retry has to forget that record rather than fail on the
+// missing directory.
 func TestRemoveWorkspaceForgetsADirectoryThatIsAlreadyGone(t *testing.T) {
 	base := testutil.ShortTempDir(t)
 	root := filepath.Join(base, "projects")

@@ -737,8 +737,7 @@ func TestAttachCopiesTheRecordingItReplays(t *testing.T) {
 }
 
 // The daemon outlives every client and fails where nobody is watching, so
-// diagnosis depends entirely on what reaches daemon.log. It used to write
-// nothing at all: the file existed and was always empty.
+// diagnosis depends entirely on what reaches daemon.log.
 func TestDaemonRecordsItsLifecycleAndFailures(t *testing.T) {
 	base := testutil.ShortTempDir(t)
 	socket := filepath.Join(base, "daemon.sock")
@@ -874,8 +873,7 @@ func TestStartSessionUsesTheEnvironmentItIsGiven(t *testing.T) {
 // The bind, not the probe that precedes it, is what decides who owns the
 // socket. Two daemons starting at once can both find nothing to dial and race
 // to create one, and the one that loses the bind has lost a race rather than
-// failed: reporting it as a bind error sent the ordinary outcome of that race
-// to daemon.log as a failure and exited non-zero.
+// failed, so it reports ErrAlreadyRunning rather than a bind error.
 func TestListenPrivatelyReportsAlreadyRunningWhenTheBindIsLost(t *testing.T) {
 	base := testutil.ShortTempDir(t)
 	socket := filepath.Join(base, "daemon.sock")
