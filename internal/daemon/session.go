@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/creack/pty"
+	"golang.org/x/sys/unix"
 
 	"github.com/opspresso/romty/internal/codexstate"
 )
@@ -27,6 +28,10 @@ const resetScreen = "\x1b[2J\x1b[H"
 // without reading. It is a variable so tests need not wait it out, the way the
 // daemon's request timeout is one.
 var replayTimeout = 2 * time.Second
+
+// A guest that stops reading must not hold input ownership and resize requests
+// forever. The PTY is pollable so this deadline can interrupt a full input queue.
+var terminalInputTimeout = 2 * time.Second
 
 // maxLiveClientQueueBytes is a variable so tests can overflow one client
 // without making another client consume a megabyte of output.
@@ -107,6 +112,12 @@ func startSession(id, directory, shell string, environment []string, columns, ro
 	if err != nil {
 		return nil, fmt.Errorf("start shell PTY: %w", err)
 	}
+	terminal, err = pollableTerminal(terminal)
+	if err != nil {
+		_ = command.Process.Kill()
+		_ = command.Wait()
+		return nil, fmt.Errorf("prepare shell PTY: %w", err)
+	}
 
 	value := &session{
 		id:        id,
@@ -124,6 +135,37 @@ func startSession(id, directory, shell string, environment []string, columns, ro
 	go value.read()
 	go value.wait()
 	return value, nil
+}
+
+// pty.StartWithSize returns a blocking master on macOS. Setting O_NONBLOCK
+// after os.NewFile is too late to register it with Go's poller. Duplicate it,
+// set the flag first, and give the new File sole ownership before I/O starts.
+func pollableTerminal(terminal *os.File) (*os.File, error) {
+	defer terminal.Close()
+	conn, err := terminal.SyscallConn()
+	if err != nil {
+		return nil, err
+	}
+	var fd int
+	var dupErr error
+	if err := conn.Control(func(original uintptr) {
+		fd, dupErr = unix.FcntlInt(original, unix.F_DUPFD_CLOEXEC, 0)
+	}); err != nil {
+		return nil, err
+	}
+	if dupErr != nil {
+		return nil, dupErr
+	}
+	if err := unix.SetNonblock(fd, true); err != nil {
+		unix.Close(fd)
+		return nil, err
+	}
+	file := os.NewFile(uintptr(fd), terminal.Name())
+	if err := file.SetWriteDeadline(time.Time{}); err != nil {
+		file.Close()
+		return nil, err
+	}
+	return file, nil
 }
 
 func sessionCodexHome(environment []string, directory string) string {
@@ -381,7 +423,8 @@ func writeReplay(connection net.Conn, data []byte) error {
 }
 
 func (s *session) detach(connection net.Conn) {
-	s.writeMu.Lock()
+	// broadcast calls detach while draining output. Waiting for writeMu here
+	// can deadlock with a guest that must finish writing before reading input.
 	s.mu.Lock()
 	attached, ok := s.clients[connection]
 	if ok {
@@ -397,7 +440,6 @@ func (s *session) detach(connection net.Conn) {
 		}
 	}
 	s.mu.Unlock()
-	s.writeMu.Unlock()
 	connection.Close()
 }
 
@@ -450,6 +492,14 @@ func (s *session) restore(recording []byte, command string) {
 func (s *session) write(data []byte) error {
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
+	return s.writeInput(data)
+}
+
+// writeInput is called with writeMu held, so each write owns its deadline.
+func (s *session) writeInput(data []byte) error {
+	if err := s.pty.SetWriteDeadline(time.Now().Add(terminalInputTimeout)); err != nil {
+		return fmt.Errorf("set terminal input deadline: %w", err)
+	}
 	if _, err := s.pty.Write(data); err != nil {
 		return fmt.Errorf("write terminal input: %w", err)
 	}
@@ -479,10 +529,7 @@ func (s *session) writeFrom(connection net.Conn, data []byte) error {
 		}
 	}
 	s.mu.Unlock()
-	if _, err := s.pty.Write(data); err != nil {
-		return fmt.Errorf("write terminal input: %w", err)
-	}
-	return nil
+	return s.writeInput(data)
 }
 
 func (s *session) resizeFor(clientID string, columns, rows uint16) error {
@@ -517,8 +564,18 @@ func (s *session) applySize(columns, rows uint16) error {
 	if s.columns == columns && s.rows == rows {
 		return nil
 	}
-	if err := pty.Setsize(s.pty, &pty.Winsize{Cols: columns, Rows: rows}); err != nil {
+	conn, err := s.pty.SyscallConn()
+	if err != nil {
 		return fmt.Errorf("resize terminal: %w", err)
+	}
+	var ioctlErr error
+	if err := conn.Control(func(fd uintptr) {
+		ioctlErr = unix.IoctlSetWinsize(int(fd), unix.TIOCSWINSZ, &unix.Winsize{Col: columns, Row: rows})
+	}); err != nil {
+		return fmt.Errorf("resize terminal: %w", err)
+	}
+	if ioctlErr != nil {
+		return fmt.Errorf("resize terminal: %w", ioctlErr)
 	}
 	s.columns, s.rows = columns, rows
 	return nil

@@ -9,7 +9,105 @@ import (
 	"os/exec"
 	"testing"
 	"time"
+
+	"github.com/opspresso/romty/internal/testutil"
 )
+
+func TestBroadcastDetachesSlowClientWhileInputIsBlocked(t *testing.T) {
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reader.Close()
+	defer writer.Close()
+	connection, peer := net.Pipe()
+	defer peer.Close()
+	value := newSessionForTest(writer)
+	value.clients[connection] = &attachment{live: true, output: make(chan []byte), done: make(chan struct{})}
+	written := make(chan error, 1)
+	go func() { written <- value.write(bytes.Repeat([]byte("x"), 1<<20)) }()
+	t.Cleanup(func() { reader.Close(); writer.Close(); <-written })
+	deadline := time.Now().Add(time.Second)
+	for value.writeMu.TryLock() {
+		value.writeMu.Unlock()
+		if time.Now().After(deadline) {
+			t.Fatal("input writer never started")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	finished := make(chan struct{})
+	go func() { value.broadcast([]byte("output")); close(finished) }()
+	select {
+	case <-finished:
+	case <-time.After(200 * time.Millisecond):
+		reader.Close()
+		<-finished
+		t.Fatal("output drain waited for blocked terminal input")
+	}
+	if _, err := peer.Read(make([]byte, 1)); !errors.Is(err, io.EOF) {
+		t.Fatalf("slow client was not detached: %v", err)
+	}
+}
+
+func TestSessionBoundsInputToAnUnresponsivePTY(t *testing.T) {
+	value, err := startSession("blocked-input", t.TempDir(), "/bin/sh", os.Environ(), 80, 24, func() {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(value.close)
+	// A PTY must support interruption before any potentially blocking input
+	// is sent. Check again after resizing and foreground detection.
+	if err := value.pty.SetWriteDeadline(time.Time{}); err != nil {
+		t.Fatalf("PTY does not support write interruption: %v", err)
+	}
+	if err := value.resizeFor("", 90, 30); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := value.foregroundProcessGroup(); err != nil {
+		t.Fatal(err)
+	}
+	if err := value.write([]byte("stty raw -echo; printf 'no-%s' input; exec sleep 30\n")); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		output, _, _ := value.recentOutput(4096)
+		if bytes.Contains(output, []byte("no-input")) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("shell did not stop reading input")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	testutil.Set(t, &terminalInputTimeout, 100*time.Millisecond)
+	if err := value.write(bytes.Repeat([]byte("x"), 1<<20)); !errors.Is(err, os.ErrDeadlineExceeded) {
+		t.Fatalf("write to unresponsive PTY = %v, want timeout", err)
+	}
+	// Closing the PTY must interrupt a pending write directly, without waiting
+	// for its deadline. Otherwise shutdown can still wait forever for reaping.
+	terminalInputTimeout = time.Minute
+	written := make(chan error, 1)
+	go func() { written <- value.write(bytes.Repeat([]byte("x"), 1<<20)) }()
+	deadline = time.Now().Add(time.Second)
+	for value.writeMu.TryLock() {
+		value.writeMu.Unlock()
+		if time.Now().After(deadline) {
+			t.Fatal("input writer never started")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	closed := make(chan struct{})
+	go func() { value.close(); close(closed) }()
+	select {
+	case <-closed:
+	case <-time.After(3 * time.Second):
+		t.Fatal("session close waited for blocked input")
+	}
+	if err := <-written; !errors.Is(err, os.ErrClosed) {
+		t.Fatalf("interrupted input = %v, want closed PTY", err)
+	}
+}
 
 func TestSessionTracksOnlyLiveOutputAsAgentActivity(t *testing.T) {
 	value := newSessionForTest(nil)
