@@ -267,9 +267,8 @@ func (m dashboard) renderGitActionsModal(maximum, height int) []string {
 		)
 	}
 	if !m.gitRun.complete {
-		// The same highlighted bar the root picker draws. A bold row behind a
-		// chevron was the whole of the selection here, which is the least
-		// visible cursor romty has for the list whose rows push and delete.
+		// The same highlighted bar the root picker draws, so the cursor on a
+		// list that can push stands out as clearly as any other.
 		labels := make([]string, len(gitActionChoices))
 		contentWidth := lipgloss.Width(target)
 		for index, action := range gitActionChoices {
@@ -311,10 +310,9 @@ func (m dashboard) renderGitActionsModal(maximum, height int) []string {
 // gitActionLabelWidth is the column the action descriptions line up in.
 const gitActionLabelWidth = 8
 
-// renderGitOutputLine colours what git printed. A status line carries its two
-// letters in the first columns and a diffstat a run of + and -, and those are
-// what the eye is looking for; as one flat block of text they had to be read
-// rather than glanced at.
+// renderGitOutputLine colours what git printed: a status line's two letters,
+// the branch header, and a diffstat's run of + and -, so the result can be
+// scanned rather than read.
 //
 // Hovering tints the row without taking its colours away, the way the file
 // view marks the file it has open.
