@@ -57,9 +57,7 @@ func (s *Server) recordAgentEvent(tabID string, event *protocol.AgentEvent) prot
 			if session == nil {
 				continue
 			}
-			title, _ := session.agentIdentity()
-			prefix := codexstate.SessionPrefix(title)
-			if prefix != "" && strings.HasPrefix(event.SessionID, prefix) {
+			if ownsCodexSession(session.codexPrefix(), event.SessionID) {
 				if matched != "" {
 					return protocol.Response{}
 				}

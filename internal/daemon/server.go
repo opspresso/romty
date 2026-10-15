@@ -262,11 +262,10 @@ func (s *Server) resumeSnapshotsLocked() []resumeSave {
 		}
 		runtime := s.agentStatuses[tab.ID]
 		if runtime.Agent == model.AgentCodex {
-			title, _ := value.agentIdentity()
-			prefix := codexstate.SessionPrefix(title)
+			prefix := value.codexPrefix()
 			if prefix == "" {
 				runtime = agentRuntime{}
-			} else if !strings.HasPrefix(runtime.SessionID, prefix) {
+			} else if !ownsCodexSession(prefix, runtime.SessionID) {
 				runtime.SessionID = ""
 			}
 		}
@@ -464,12 +463,8 @@ func (s *Server) agentStatusesSnapshot() map[string]model.AgentStatus {
 		if runtime.Agent != model.AgentCodex {
 			continue
 		}
-		if session := s.sessions[tabID]; session != nil {
-			title, _ := session.agentIdentity()
-			prefix := codexstate.SessionPrefix(title)
-			if prefix == "" || !strings.HasPrefix(runtime.SessionID, prefix) {
-				delete(s.agentStatuses, tabID)
-			}
+		if session := s.sessions[tabID]; session != nil && !ownsCodexSession(session.codexPrefix(), runtime.SessionID) {
+			delete(s.agentStatuses, tabID)
 		}
 	}
 	for tabID, agent := range agents {
@@ -478,17 +473,13 @@ func (s *Server) agentStatusesSnapshot() map[string]model.AgentStatus {
 		}
 		status := model.AgentStatus{Agent: agent, Phase: model.AgentPhaseUnknown}
 		if agent == model.AgentCodex {
-			title, _ := sessions[tabID].agentIdentity()
-			prefix := codexstate.SessionPrefix(title)
-			if report, ok := native[tabID]; ok && report.prefix == prefix {
+			// The loop above already dropped a status whose session the
+			// title no longer shows, so what is left belongs to this tab.
+			if report, ok := native[tabID]; ok && report.prefix == sessions[tabID].codexPrefix() {
 				s.agentStatuses[tabID] = agentRuntime{AgentStatus: report.status}
-			} else if current, ok := s.agentStatuses[tabID]; ok && current.Agent == model.AgentCodex {
-				if prefix == "" || !strings.HasPrefix(current.SessionID, prefix) {
-					delete(s.agentStatuses, tabID)
-				} else if current.Source == "runtime" {
-					current.Phase, current.Active = model.AgentPhaseUnknown, false
-					s.agentStatuses[tabID] = current
-				}
+			} else if current, ok := s.agentStatuses[tabID]; ok && current.Agent == model.AgentCodex && current.Source == "runtime" {
+				current.Phase, current.Active = model.AgentPhaseUnknown, false
+				s.agentStatuses[tabID] = current
 			}
 		}
 		switch runtime, ok := s.agentStatuses[tabID]; {

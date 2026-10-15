@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/creack/pty"
+
+	"github.com/opspresso/romty/internal/codexstate"
 )
 
 // maxHistoryBytes is a variable so tests can reach the trimming path without
@@ -148,6 +150,13 @@ func (s *session) agentIdentity() (string, string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.guest.title, s.codexHome
+}
+
+// codexPrefix is the Codex session prefix the terminal title shows, or empty
+// when the title names no single session.
+func (s *session) codexPrefix() string {
+	title, _ := s.agentIdentity()
+	return codexstate.SessionPrefix(title)
 }
 
 // read drains the PTY master until it is exhausted, and owns closing it. The

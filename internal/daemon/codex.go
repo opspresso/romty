@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/opspresso/romty/internal/codexstate"
@@ -11,6 +12,12 @@ import (
 type codexStatusReader interface {
 	Read(context.Context, string, []string) (map[string]model.AgentStatus, error)
 	Close()
+}
+
+// ownsCodexSession reports whether a Codex session belongs to the terminal
+// whose title shows prefix. A title that names no single session owns none.
+func ownsCodexSession(prefix, sessionID string) bool {
+	return prefix != "" && strings.HasPrefix(sessionID, prefix)
 }
 
 type codexReport struct {
