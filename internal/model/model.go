@@ -107,7 +107,6 @@ type Tab struct {
 	AgentCostUSD       float64 `json:"agent_cost_usd,omitempty"`
 }
 
-// SetAgentStatus copies an agent status onto the tab it describes.
 // AgentStatus is the agent status the tab carries, the inverse of
 // SetAgentStatus.
 func (t Tab) AgentStatus() AgentStatus {
@@ -117,6 +116,7 @@ func (t Tab) AgentStatus() AgentStatus {
 	}
 }
 
+// SetAgentStatus copies an agent status onto the tab it describes.
 func (t *Tab) SetAgentStatus(status AgentStatus) {
 	t.Agent = status.Agent
 	t.AgentPhase = status.Phase
