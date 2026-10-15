@@ -957,12 +957,7 @@ func (m dashboard) saveConfig() tea.Cmd {
 // addRoot adds the directory the picker names and leaves the daemon to
 // canonicalise and judge it.
 func (m *dashboard) addRoot(path string) tea.Cmd {
-	order := m.nextSnapshotOrder()
-	backend := m.backend
-	return func() tea.Msg {
-		value, err := backend.AddRoot(path)
-		return snapshotMsg{value: value, order: order, err: err}
-	}
+	return m.snapshotCommand(func(backend Backend) (model.Snapshot, error) { return backend.AddRoot(path) })
 }
 
 func (m dashboard) handleWorkspace(message workspaceMsg) (tea.Model, tea.Cmd) {
@@ -1166,28 +1161,17 @@ func (m *dashboard) removeSelection() tea.Cmd {
 	if rootID == "" {
 		return nil
 	}
-	order := m.nextSnapshotOrder()
-	backend := m.backend
 	target := m.removeTarget
-	return func() tea.Msg {
-		var value model.Snapshot
-		var err error
+	return m.snapshotCommand(func(backend Backend) (model.Snapshot, error) {
 		if target.isRoot {
-			value, err = backend.RemoveRoot(rootID)
-		} else {
-			value, err = backend.RemoveWorkspace(rootID, target.workspace.Path)
+			return backend.RemoveRoot(rootID)
 		}
-		return snapshotMsg{value: value, order: order, err: err}
-	}
+		return backend.RemoveWorkspace(rootID, target.workspace.Path)
+	})
 }
 
 func (m *dashboard) refresh() tea.Cmd {
-	order := m.nextSnapshotOrder()
-	backend := m.backend
-	return func() tea.Msg {
-		value, err := backend.Snapshot()
-		return snapshotMsg{value: value, order: order, err: err}
-	}
+	return m.snapshotCommand(Backend.Snapshot)
 }
 
 func (m dashboard) refreshAll() (tea.Model, tea.Cmd) {
@@ -1260,6 +1244,22 @@ func (m *dashboard) createTab() tea.Cmd {
 func (m *dashboard) nextSnapshotOrder() uint64 {
 	m.snapshotOrder++
 	return m.snapshotOrder
+}
+
+// snapshotRequest prepares a daemon call that answers with a snapshot. The
+// order is taken when the request is made, so answers apply in request order
+// whatever order they arrive in.
+func (m *dashboard) snapshotRequest(call func(Backend) (model.Snapshot, error)) func() snapshotMsg {
+	order, backend := m.nextSnapshotOrder(), m.backend
+	return func() snapshotMsg {
+		value, err := call(backend)
+		return snapshotMsg{value: value, order: order, err: err}
+	}
+}
+
+func (m *dashboard) snapshotCommand(call func(Backend) (model.Snapshot, error)) tea.Cmd {
+	request := m.snapshotRequest(call)
+	return func() tea.Msg { return request() }
 }
 
 func (m *dashboard) applySnapshot(order uint64, snapshot model.Snapshot) bool {

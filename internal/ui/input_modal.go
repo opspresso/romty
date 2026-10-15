@@ -92,18 +92,14 @@ type inputResultMsg struct {
 }
 
 func (m *dashboard) submitInput(value string) tea.Cmd {
-	order := m.nextSnapshotOrder()
-	backend, kind, tabID := m.backend, m.input.kind, m.input.tabID
-	return func() tea.Msg {
-		var snapshot model.Snapshot
-		var err error
+	kind, tabID := m.input.kind, m.input.tabID
+	request := m.snapshotRequest(func(backend Backend) (model.Snapshot, error) {
 		if kind == tabNameInput {
-			snapshot, err = backend.RenameTab(tabID, value)
-		} else {
-			snapshot, err = backend.AddRoot(value)
+			return backend.RenameTab(tabID, value)
 		}
-		return inputResultMsg{snapshotMsg{value: snapshot, order: order, err: err}}
-	}
+		return backend.AddRoot(value)
+	})
+	return func() tea.Msg { return inputResultMsg{request()} }
 }
 
 // handleInputResult closes the modal only when the daemon accepted the value.
