@@ -23,6 +23,7 @@ import (
 	"github.com/opspresso/romty/internal/agenthooks"
 	"github.com/opspresso/romty/internal/model"
 	"github.com/opspresso/romty/internal/sound"
+	"github.com/opspresso/romty/internal/testutil"
 	"github.com/opspresso/romty/internal/version"
 )
 
@@ -260,13 +261,7 @@ func (f *fakeBackend) Shutdown() error {
 }
 
 func TestDashboardSelectsWorkspaceAndCreatesTerminal(t *testing.T) {
-	workspace := model.Workspace{ID: "workspace-1", RootID: "root-1", Name: "alpha", Path: "/projects/alpha"}
-	snapshot := model.Snapshot{Roots: []model.RootView{{
-		Root: model.Root{ID: "root-1", Name: "projects", Path: "/projects"},
-		Directories: []model.WorkspaceView{{
-			Workspace: workspace,
-		}},
-	}}}
+	snapshot, workspace := alphaWorkspaceSnapshot(nil)
 	backend := &fakeBackend{
 		snapshot:   snapshot,
 		workspace:  workspace,
@@ -276,28 +271,23 @@ func TestDashboardSelectsWorkspaceAndCreatesTerminal(t *testing.T) {
 	value.width = 120
 	value.height = 40
 
-	updated, _ := value.Update(key(tea.KeyDown, ""))
-	value = updated.(dashboard)
-	updated, command := value.Update(key(tea.KeyEnter, ""))
-	value = updated.(dashboard)
+	send(&value, key(tea.KeyDown, ""))
+	command := send(&value, key(tea.KeyEnter, ""))
 	if command == nil {
 		t.Fatal("select workspace command = nil")
 	}
-	updated, command = value.Update(commandMessage[workspaceMsg](t, command))
-	value = updated.(dashboard)
+	command = send(&value, commandMessage[workspaceMsg](t, command))
 	if value.selectedWorkspaceID != workspace.ID || value.focus != leftPane {
 		t.Fatalf("selected workspace = %q, focus = %v", value.selectedWorkspaceID, value.focus)
 	}
 	if command == nil {
 		t.Fatal("workspace without tabs did not create a terminal")
 	}
-	updated, openCommand := value.Update(commandMessage[tabMsg](t, command))
-	value = updated.(dashboard)
+	openCommand := send(&value, commandMessage[tabMsg](t, command))
 	if openCommand == nil {
 		t.Fatal("created tab did not open an embedded terminal")
 	}
-	updated, readCommand := value.Update(commandMessage[terminalOpenedMsg](t, openCommand))
-	value = updated.(dashboard)
+	readCommand := send(&value, commandMessage[terminalOpenedMsg](t, openCommand))
 	defer value.closeTerminal()
 	if value.terminal == nil || value.focus != terminalPane || readCommand == nil {
 		t.Fatalf("terminal = %v, focus = %v, read command = %v", value.terminal, value.focus, readCommand)
@@ -316,23 +306,21 @@ func TestDashboardSelectsWorkspaceAndCreatesTerminal(t *testing.T) {
 	}
 	for _, command := range commands {
 		if message := command(); message != nil {
-			updated, _ = value.Update(message)
-			value = updated.(dashboard)
+			send(&value, message)
 		}
 	}
 	rendered := value.render()
 	if !strings.Contains(rendered, "projects") || !strings.Contains(rendered, "embedded terminal") {
 		t.Fatalf("rendered dashboard does not contain both panes:\n%s", rendered)
 	}
-	updated, _ = value.Update(controlSlashKey())
-	value = updated.(dashboard)
+	send(&value, controlSlashKey())
 	if value.focus != leftPane || value.terminal == nil {
 		t.Fatalf("Ctrl+/ focus = %v, terminal = %v", value.focus, value.terminal)
 	}
 }
 
 func TestDashboardSelectsRootAndCreatesTerminal(t *testing.T) {
-	root := model.Root{ID: "root-1", Name: "projects", Path: "/projects"}
+	root := projectsRoot
 	rootWorkspace := model.Workspace{ID: "root-workspace", RootID: root.ID, Name: root.Name, Path: root.Path}
 	tab := model.Tab{ID: "root-tab", WorkspaceID: rootWorkspace.ID, Name: "1", Running: true}
 	snapshot := model.Snapshot{Roots: []model.RootView{{
@@ -350,23 +338,19 @@ func TestDashboardSelectsRootAndCreatesTerminal(t *testing.T) {
 	if rendered := ansi.Strip(value.render()); !strings.Contains(rendered, "▌▾ projects") || !strings.Contains(rendered, "  - cloned") {
 		t.Fatalf("root and indented workspace are not distinguishable:\n%s", rendered)
 	}
-	updated, selectCommand := value.Update(key(tea.KeyEnter, ""))
-	value = updated.(dashboard)
+	selectCommand := send(&value, key(tea.KeyEnter, ""))
 	if selectCommand == nil {
 		t.Fatal("root selection command = nil")
 	}
-	updated, createCommand := value.Update(commandMessage[workspaceMsg](t, selectCommand))
-	value = updated.(dashboard)
+	createCommand := send(&value, commandMessage[workspaceMsg](t, selectCommand))
 	if createCommand == nil || backend.ensuredRootID != root.ID || backend.ensuredPath != root.Path {
 		t.Fatalf("root selection = (command %v, root %q, path %q)", createCommand, backend.ensuredRootID, backend.ensuredPath)
 	}
-	updated, openCommand := value.Update(commandMessage[tabMsg](t, createCommand))
-	value = updated.(dashboard)
+	openCommand := send(&value, commandMessage[tabMsg](t, createCommand))
 	if openCommand == nil || backend.createCount != 1 {
 		t.Fatalf("root tab creation = (command %v, count %d)", openCommand, backend.createCount)
 	}
-	updated, readCommand := value.Update(commandMessage[terminalOpenedMsg](t, openCommand))
-	value = updated.(dashboard)
+	readCommand := send(&value, commandMessage[terminalOpenedMsg](t, openCommand))
 	defer value.closeTerminal()
 	if value.terminal == nil || value.terminal.id != tab.ID || readCommand == nil {
 		t.Fatalf("root terminal = %v, read command = %v", value.terminal, readCommand)
@@ -377,7 +361,7 @@ func TestDashboardSelectsRootAndCreatesTerminal(t *testing.T) {
 }
 
 func TestDashboardReloadsWorkspacesWhenReturningFromTerminal(t *testing.T) {
-	root := model.Root{ID: "root-1", Name: "projects", Path: "/projects"}
+	root := projectsRoot
 	rootWorkspace := model.Workspace{ID: "root-workspace", RootID: root.ID, Name: root.Name, Path: root.Path}
 	tab := model.Tab{ID: "root-tab", WorkspaceID: rootWorkspace.ID, Name: "1", Running: true}
 	initial := model.Snapshot{Roots: []model.RootView{{Root: root, Tabs: []model.Tab{tab}}}}
@@ -397,32 +381,25 @@ func TestDashboardReloadsWorkspacesWhenReturningFromTerminal(t *testing.T) {
 	value.selectedPath = root.Path
 	value.terminal = terminal
 
-	updated, refreshCommand := value.Update(controlSlashKey())
-	value = updated.(dashboard)
+	refreshCommand := send(&value, controlSlashKey())
 	if value.focus != leftPane || refreshCommand == nil {
 		t.Fatalf("Ctrl+/ result = (focus %v, command %v)", value.focus, refreshCommand)
 	}
-	updated, _ = value.Update(refreshCommand())
-	value = updated.(dashboard)
+	send(&value, refreshCommand())
 	if backend.snapshotCount != 1 || !strings.Contains(ansi.Strip(value.render()), "  - cloned") {
 		t.Fatalf("reloaded workspace list = (snapshots %d):\n%s", backend.snapshotCount, value.render())
 	}
 }
 
 func TestDashboardOpensExistingWorkspaceTabWithoutCreatingOne(t *testing.T) {
-	workspace := model.Workspace{ID: "workspace-1", RootID: "root-1", Name: "alpha", Path: "/projects/alpha"}
-	tab := model.Tab{ID: "tab-1", WorkspaceID: workspace.ID, Name: "1", Running: true}
-	snapshot := model.Snapshot{Roots: []model.RootView{{
-		Root:        model.Root{ID: "root-1", Name: "projects", Path: "/projects"},
-		Directories: []model.WorkspaceView{{Workspace: workspace, Tabs: []model.Tab{tab}}},
-	}}}
+	tab := model.Tab{ID: "tab-1", WorkspaceID: "workspace-1", Name: "1", Running: true}
+	snapshot, workspace := alphaWorkspaceSnapshot([]model.Tab{tab})
 	backend := &fakeBackend{snapshot: snapshot, workspace: workspace}
 	value := newDashboard(backend, snapshot)
 	value.setNavigation(1)
 
 	command := value.selectWorkspace()
-	updated, openCommand := value.Update(command())
-	value = updated.(dashboard)
+	openCommand := send(&value, command())
 	if openCommand == nil {
 		t.Fatal("existing terminal was not opened")
 	}
@@ -439,12 +416,9 @@ func TestDashboardRejectsSnapshotsThatFinishOutOfOrder(t *testing.T) {
 	}
 
 	value := newDashboard(&fakeBackend{}, tree(1, "initial"))
-	updated, _ := value.Update(snapshotMsg{value: tree(2, "newest"), order: 2})
-	value = updated.(dashboard)
-	updated, _ = value.Update(snapshotMsg{value: tree(1, "older revision"), order: 3})
-	value = updated.(dashboard)
-	updated, _ = value.Update(snapshotMsg{value: tree(2, "older request"), order: 1})
-	value = updated.(dashboard)
+	send(&value, snapshotMsg{value: tree(2, "newest"), order: 2})
+	send(&value, snapshotMsg{value: tree(1, "older revision"), order: 3})
+	send(&value, snapshotMsg{value: tree(2, "older request"), order: 1})
 
 	if got := value.state.Roots[0].Root.Name; got != "newest" {
 		t.Fatalf("root after out-of-order snapshots = %q, want newest", got)
@@ -465,23 +439,21 @@ func TestDashboardIgnoresAnOlderWorkspaceSelection(t *testing.T) {
 			})
 		}
 		return model.Snapshot{Revision: revision, Roots: []model.RootView{{
-			Root:        model.Root{ID: "root-1", Name: "projects", Path: "/projects"},
+			Root:        projectsRoot,
 			Directories: directories,
 		}}}
 	}
 
 	value := newDashboard(&fakeBackend{}, tree(1, "alpha", "beta"))
 	value.selectionRequest = 2
-	updated, _ := value.Update(workspaceMsg{
+	send(&value, workspaceMsg{
 		value: workspace("beta"), snapshot: tree(3, "alpha", "beta"),
 		order: 2, selection: 2, tabID: "beta-tab",
 	})
-	value = updated.(dashboard)
-	updated, command := value.Update(workspaceMsg{
+	command := send(&value, workspaceMsg{
 		value: workspace("alpha"), snapshot: tree(2, "alpha", "beta"),
 		order: 1, selection: 1, tabID: "alpha-tab",
 	})
-	value = updated.(dashboard)
 
 	if command != nil || value.selectedWorkspaceID != "beta" || value.selectedPath != "/projects/beta" {
 		t.Fatalf("stale selection result = (command %v, workspace %q, path %q)", command, value.selectedWorkspaceID, value.selectedPath)
@@ -505,13 +477,7 @@ func TestCreateTabErrorKeepsItsSelection(t *testing.T) {
 }
 
 func TestDashboardCreatesOnlyOneTabWhileASelectionIsPending(t *testing.T) {
-	workspace := model.Workspace{ID: "workspace-1", RootID: "root-1", Name: "alpha", Path: "/projects/alpha"}
-	snapshot := model.Snapshot{Roots: []model.RootView{{
-		Root: model.Root{ID: "root-1", Name: "projects", Path: "/projects"},
-		Directories: []model.WorkspaceView{{
-			Workspace: workspace,
-		}},
-	}}}
+	snapshot, workspace := alphaWorkspaceSnapshot(nil)
 	backend := &fakeBackend{
 		snapshot:   snapshot,
 		workspace:  workspace,
@@ -524,10 +490,8 @@ func TestDashboardCreatesOnlyOneTabWhileASelectionIsPending(t *testing.T) {
 	second := value.selectWorkspace()
 	firstMessage := first()
 	secondMessage := second()
-	updated, create := value.Update(secondMessage)
-	value = updated.(dashboard)
-	updated, stale := value.Update(firstMessage)
-	value = updated.(dashboard)
+	create := send(&value, secondMessage)
+	stale := send(&value, firstMessage)
 	if stale != nil {
 		t.Fatal("older selection created a second tab command")
 	}
@@ -537,21 +501,16 @@ func TestDashboardCreatesOnlyOneTabWhileASelectionIsPending(t *testing.T) {
 	if create == nil {
 		t.Fatal("newest selection did not create a tab command")
 	}
-	updated, _ = value.Update(commandMessage[tabMsg](t, create))
-	value = updated.(dashboard)
+	send(&value, commandMessage[tabMsg](t, create))
 	if backend.createCount != 1 || value.tabPending {
 		t.Fatalf("tab creation = (calls %d, pending %t), want (1, false)", backend.createCount, value.tabPending)
 	}
 }
 
 func TestDashboardCreatesTabWithCtrlShiftT(t *testing.T) {
-	workspace := model.Workspace{ID: "workspace-1", RootID: "root-1", Name: "alpha", Path: "/projects/alpha"}
-	existing := model.Tab{ID: "tab-1", WorkspaceID: workspace.ID, Name: "1", Running: true}
-	created := model.Tab{ID: "tab-2", WorkspaceID: workspace.ID, Name: "2", Running: true}
-	snapshot := model.Snapshot{Roots: []model.RootView{{
-		Root:        model.Root{ID: "root-1", Name: "projects", Path: "/projects"},
-		Directories: []model.WorkspaceView{{Workspace: workspace, Tabs: []model.Tab{existing}}},
-	}}}
+	existing := model.Tab{ID: "tab-1", WorkspaceID: "workspace-1", Name: "1", Running: true}
+	created := model.Tab{ID: "tab-2", WorkspaceID: "workspace-1", Name: "2", Running: true}
+	snapshot, workspace := alphaWorkspaceSnapshot([]model.Tab{existing})
 	backend := &fakeBackend{snapshot: snapshot, workspace: workspace, createdTab: created}
 	value := newDashboard(backend, snapshot)
 	value.selectedWorkspaceID = workspace.ID
@@ -560,26 +519,23 @@ func TestDashboardCreatesTabWithCtrlShiftT(t *testing.T) {
 	value.focus = terminalPane
 	t.Cleanup(value.closeTerminal)
 
-	updated, createCommand := value.Update(newTabKey())
-	value = updated.(dashboard)
+	createCommand := send(&value, newTabKey())
 	if createCommand == nil || !value.tabPending {
 		t.Fatalf("Ctrl+Shift+T = (command %v, pending %t), want tab creation", createCommand, value.tabPending)
 	}
-	updated, openCommand := value.Update(commandMessage[tabMsg](t, createCommand))
-	value = updated.(dashboard)
+	openCommand := send(&value, commandMessage[tabMsg](t, createCommand))
 	if openCommand == nil || backend.createCount != 1 || value.tabPending {
 		t.Fatalf("created tab = (command %v, calls %d, pending %t), want one tab ready to open",
 			openCommand, backend.createCount, value.tabPending)
 	}
-	updated, readCommand := value.Update(commandMessage[terminalOpenedMsg](t, openCommand))
-	value = updated.(dashboard)
+	readCommand := send(&value, commandMessage[terminalOpenedMsg](t, openCommand))
 	if readCommand == nil || value.terminal == nil || value.terminal.id != created.ID {
 		t.Fatalf("opened terminal = (command %v, terminal %v), want %q", readCommand, value.terminal, created.ID)
 	}
 }
 
 func TestDashboardCreatesTabForWorkspaceCursorWithCtrlShiftT(t *testing.T) {
-	root := model.Root{ID: "root-1", Name: "projects", Path: "/projects"}
+	root := projectsRoot
 	alpha := model.Workspace{ID: "workspace-1", RootID: root.ID, Name: "alpha", Path: "/projects/alpha"}
 	bravo := model.Workspace{ID: "workspace-2", RootID: root.ID, Name: "bravo", Path: "/projects/bravo"}
 	alphaTab := model.Tab{ID: "tab-1", WorkspaceID: alpha.ID, Name: "1", Running: true}
@@ -600,18 +556,15 @@ func TestDashboardCreatesTabForWorkspaceCursorWithCtrlShiftT(t *testing.T) {
 	value.setNavigation(2)
 	t.Cleanup(value.closeTerminal)
 
-	updated, selectCommand := value.Update(newTabKey())
-	value = updated.(dashboard)
+	selectCommand := send(&value, newTabKey())
 	if selectCommand == nil {
 		t.Fatal("Ctrl+Shift+T on the workspace cursor produced no selection command")
 	}
-	updated, createCommand := value.Update(commandMessage[workspaceMsg](t, selectCommand))
-	value = updated.(dashboard)
+	createCommand := send(&value, commandMessage[workspaceMsg](t, selectCommand))
 	if createCommand == nil || backend.ensuredPath != bravo.Path {
 		t.Fatalf("selected workspace = (command %v, path %q), want %q", createCommand, backend.ensuredPath, bravo.Path)
 	}
-	updated, openCommand := value.Update(commandMessage[tabMsg](t, createCommand))
-	value = updated.(dashboard)
+	openCommand := send(&value, commandMessage[tabMsg](t, createCommand))
 	if openCommand == nil || backend.createCount != 1 || value.selectedWorkspaceID != bravo.ID {
 		t.Fatalf("created tab = (command %v, calls %d, workspace %q), want one in %q",
 			openCommand, backend.createCount, value.selectedWorkspaceID, bravo.ID)
@@ -619,11 +572,7 @@ func TestDashboardCreatesTabForWorkspaceCursorWithCtrlShiftT(t *testing.T) {
 }
 
 func TestDashboardIgnoresCtrlShiftTWhileTabCreationCannotStart(t *testing.T) {
-	workspace := model.Workspace{ID: "workspace-1", RootID: "root-1", Name: "alpha", Path: "/projects/alpha"}
-	snapshot := model.Snapshot{Roots: []model.RootView{{
-		Root:        model.Root{ID: "root-1", Name: "projects", Path: "/projects"},
-		Directories: []model.WorkspaceView{{Workspace: workspace}},
-	}}}
+	snapshot, _ := alphaWorkspaceSnapshot(nil)
 
 	for _, probe := range []struct {
 		name    string
@@ -637,8 +586,7 @@ func TestDashboardIgnoresCtrlShiftTWhileTabCreationCannotStart(t *testing.T) {
 			value.setNavigation(1)
 			probe.prepare(&value)
 
-			updated, command := value.Update(newTabKey())
-			value = updated.(dashboard)
+			command := send(&value, newTabKey())
 			for _, message := range commandMessages(command) {
 				switch message.(type) {
 				case workspaceMsg, tabMsg:
@@ -650,11 +598,7 @@ func TestDashboardIgnoresCtrlShiftTWhileTabCreationCannotStart(t *testing.T) {
 }
 
 func TestDashboardRecognisesCtrlShiftTAcrossInputLayouts(t *testing.T) {
-	workspace := model.Workspace{ID: "workspace-1", RootID: "root-1", Name: "alpha", Path: "/projects/alpha"}
-	snapshot := model.Snapshot{Roots: []model.RootView{{
-		Root:        model.Root{ID: "root-1", Name: "projects", Path: "/projects"},
-		Directories: []model.WorkspaceView{{Workspace: workspace}},
-	}}}
+	snapshot, _ := alphaWorkspaceSnapshot(nil)
 	value := newDashboard(&fakeBackend{}, snapshot)
 	value.setNavigation(1)
 	physicalT := tea.KeyPressMsg(tea.Key{
@@ -671,19 +615,14 @@ func TestDashboardAddsRootFromPrompt(t *testing.T) {
 	backend := &fakeBackend{}
 	value := newDashboard(backend, model.Snapshot{})
 
-	updated, _ := value.Update(key(tea.KeyF2, ""))
-	value = updated.(dashboard)
-	updated, _ = value.Update(key('/', "/"))
-	value = updated.(dashboard)
-	updated, _ = value.Update(key(tea.KeyExtended, "/projects"))
-	value = updated.(dashboard)
-	updated, command := value.Update(key(tea.KeyEnter, ""))
-	value = updated.(dashboard)
+	send(&value, key(tea.KeyF2, ""))
+	send(&value, key('/', "/"))
+	send(&value, key(tea.KeyExtended, "/projects"))
+	command := send(&value, key(tea.KeyEnter, ""))
 	if command == nil {
 		t.Fatal("add root command = nil")
 	}
-	updated, _ = value.Update(command())
-	value = updated.(dashboard)
+	send(&value, command())
 	if backend.addedPath != "/projects" || value.errorMessage != "" {
 		t.Fatalf("added path = %q, error = %q", backend.addedPath, value.errorMessage)
 	}
@@ -693,14 +632,10 @@ func TestDashboardAcceptsPastedRootPath(t *testing.T) {
 	backend := &fakeBackend{}
 	value := newDashboard(backend, model.Snapshot{})
 
-	updated, _ := value.Update(key(tea.KeyF2, ""))
-	value = updated.(dashboard)
-	updated, _ = value.Update(key('/', "/"))
-	value = updated.(dashboard)
-	updated, _ = value.Update(tea.PasteMsg{Content: "/projects/with spaces"})
-	value = updated.(dashboard)
-	updated, command := value.Update(key(tea.KeyEnter, ""))
-	value = updated.(dashboard)
+	send(&value, key(tea.KeyF2, ""))
+	send(&value, key('/', "/"))
+	send(&value, tea.PasteMsg{Content: "/projects/with spaces"})
+	command := send(&value, key(tea.KeyEnter, ""))
 	if command == nil {
 		t.Fatal("add pasted root command = nil")
 	}
@@ -714,15 +649,13 @@ func TestDashboardSupportsRemainingWorkspaceShortcuts(t *testing.T) {
 	backend := &fakeBackend{}
 
 	value := newDashboard(backend, model.Snapshot{})
-	updated, command := value.Update(key('i', "i"))
-	value = updated.(dashboard)
+	command := send(&value, key('i', "i"))
 	if value.modal != aboutModal || command != nil {
 		t.Fatalf("i result = (modal %v, command %v), want about modal", value.modal, command)
 	}
 
 	value = newDashboard(backend, model.Snapshot{})
-	updated, command = value.Update(key(',', ","))
-	value = updated.(dashboard)
+	command = send(&value, key(',', ","))
 	if value.modal != configModal || command != nil {
 		t.Fatalf(", result = (modal %v, command %v), want config modal", value.modal, command)
 	}
@@ -732,18 +665,14 @@ func TestDashboardSupportsRemainingWorkspaceShortcuts(t *testing.T) {
 // keys — three per notch, through the terminal's alternate scroll — so a tree
 // that wrapped sent one notch at the bottom back to the top.
 func TestDashboardNavigationStopsAtBothEnds(t *testing.T) {
-	snapshot := model.Snapshot{Roots: []model.RootView{{
-		Root: model.Root{ID: "root-1", Name: "projects", Path: "/projects"},
-		Directories: []model.WorkspaceView{
-			{Workspace: model.Workspace{RootID: "root-1", Name: "api", Path: "/projects/api"}},
-			{Workspace: model.Workspace{RootID: "root-1", Name: "web", Path: "/projects/web"}},
-		},
-	}}}
+	snapshot := projectsSnapshot([]model.WorkspaceView{
+		{Workspace: model.Workspace{RootID: "root-1", Name: "api", Path: "/projects/api"}},
+		{Workspace: model.Workspace{RootID: "root-1", Name: "web", Path: "/projects/web"}},
+	})
 	value := newDashboard(&fakeBackend{}, snapshot)
 
 	for range 3 {
-		updated, _ := value.Update(key(tea.KeyUp, ""))
-		value = updated.(dashboard)
+		send(&value, key(tea.KeyUp, ""))
 	}
 	if value.navIndex != 0 {
 		t.Fatalf("cursor after ↑ past the top = %d, want 0", value.navIndex)
@@ -751,8 +680,7 @@ func TestDashboardNavigationStopsAtBothEnds(t *testing.T) {
 
 	last := len(value.navigationItems()) - 1
 	for range 5 {
-		updated, _ := value.Update(key(tea.KeyDown, ""))
-		value = updated.(dashboard)
+		send(&value, key(tea.KeyDown, ""))
 	}
 	if value.navIndex != last {
 		t.Fatalf("cursor after ↓ past the end = %d, want %d", value.navIndex, last)
@@ -762,8 +690,7 @@ func TestDashboardNavigationStopsAtBothEnds(t *testing.T) {
 func TestDashboardIgnoresRemovedPlusShortcut(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, model.Snapshot{})
 
-	updated, command := value.Update(key('+', "+"))
-	value = updated.(dashboard)
+	command := send(&value, key('+', "+"))
 	if value.inputMode || command != nil {
 		t.Fatalf("+ result = (input mode %v, command %v), want no action", value.inputMode, command)
 	}
@@ -773,29 +700,25 @@ func TestDashboardSupportsIMEIndependentShortcuts(t *testing.T) {
 	backend := &fakeBackend{}
 
 	value := newDashboard(backend, model.Snapshot{})
-	updated, command := value.Update(key(tea.KeyF1, ""))
-	value = updated.(dashboard)
+	command := send(&value, key(tea.KeyF1, ""))
 	if value.modal != helpModal || command != nil {
 		t.Fatalf("F1 result = (modal %v, command %v), want help modal", value.modal, command)
 	}
 
 	value = newDashboard(backend, model.Snapshot{})
-	updated, command = value.Update(key(tea.KeyF2, ""))
-	value = updated.(dashboard)
+	command = send(&value, key(tea.KeyF2, ""))
 	if value.modal != browseModal || command == nil {
 		t.Fatalf("F2 result = (modal %v, command %v), want the root picker reading", value.modal, command)
 	}
 
 	value = newDashboard(backend, model.Snapshot{})
-	updated, command = value.Update(key(tea.KeyF3, ""))
-	value = updated.(dashboard)
+	command = send(&value, key(tea.KeyF3, ""))
 	if value.modal != configModal || command != nil {
 		t.Fatalf("F3 result = (modal %v, command %v), want config modal", value.modal, command)
 	}
 
 	value = newDashboard(backend, model.Snapshot{})
-	updated, command = value.Update(key(tea.KeyF5, ""))
-	value = updated.(dashboard)
+	command = send(&value, key(tea.KeyF5, ""))
 	if command == nil {
 		t.Fatal("F5 refresh command = nil")
 	}
@@ -818,8 +741,7 @@ func TestDashboardSupportsIMEIndependentShortcuts(t *testing.T) {
 	}
 
 	value = newDashboard(backend, model.Snapshot{})
-	updated, command = value.Update(tea.KeyPressMsg(tea.Key{Code: 'c', Mod: tea.ModCtrl}))
-	value = updated.(dashboard)
+	command = send(&value, tea.KeyPressMsg(tea.Key{Code: 'c', Mod: tea.ModCtrl}))
 	if !value.result.Quit || command == nil {
 		t.Fatalf("Ctrl+C result = (quit %v, command %v), want quit", value.result.Quit, command)
 	}
@@ -836,13 +758,11 @@ func TestDashboardSupportsIMEIndependentShortcuts(t *testing.T) {
 		// check passes with the contextual rail deleted outright.
 		t.Fatalf("terminal status bar does not contain navigation shortcut:\n%s", rendered)
 	}
-	updated, command = value.Update(key(tea.KeyF3, ""))
-	value = updated.(dashboard)
+	command = send(&value, key(tea.KeyF3, ""))
 	if value.modal != configModal || command != nil {
 		t.Fatalf("terminal F3 result = (modal %v, command %v), want config modal", value.modal, command)
 	}
-	updated, command = value.Update(key(tea.KeyF4, ""))
-	value = updated.(dashboard)
+	command = send(&value, key(tea.KeyF4, ""))
 	if !value.result.Quit || command == nil || value.terminal != nil {
 		t.Fatalf("F4 result = (quit %v, command %v, terminal %v), want global quit", value.result.Quit, command, value.terminal)
 	}
@@ -876,21 +796,13 @@ func TestDashboardSupportsIMEIndependentShortcuts(t *testing.T) {
 }
 
 func TestDashboardMouseSelectsWorkspaceAndTab(t *testing.T) {
-	workspace := model.Workspace{ID: "workspace-1", RootID: "root-1", Name: "alpha", Path: "/projects/alpha"}
-	tabs := []model.Tab{
-		{ID: "tab-1", WorkspaceID: workspace.ID, Name: "1", Running: true},
-		{ID: "tab-2", WorkspaceID: workspace.ID, Name: "2", Running: true},
-	}
-	snapshot := model.Snapshot{Roots: []model.RootView{{
-		Root:        model.Root{ID: "root-1", Name: "projects", Path: "/projects"},
-		Directories: []model.WorkspaceView{{Workspace: workspace, Tabs: tabs}},
-	}}}
+	tabs := openTabs(2)
+	snapshot, workspace := alphaWorkspaceSnapshot(tabs)
 	backend := &fakeBackend{snapshot: snapshot, workspace: workspace}
 	value := newDashboard(backend, snapshot)
 	value.width, value.height = 120, 30
 
-	updated, command := value.Update(tea.MouseClickMsg{X: 2, Y: 3, Button: tea.MouseLeft})
-	value = updated.(dashboard)
+	command := send(&value, tea.MouseClickMsg{X: 2, Y: 3, Button: tea.MouseLeft})
 	if value.navIndex != 1 || value.cursorPath != workspace.Path || command == nil {
 		t.Fatalf("workspace click = (index %d, path %q, command %v)", value.navIndex, value.cursorPath, command)
 	}
@@ -899,8 +811,7 @@ func TestDashboardMouseSelectsWorkspaceAndTab(t *testing.T) {
 	value.selectedPath = workspace.Path
 	value.focus = terminalPane
 	rightX := value.dimensions().leftWidth + value.dimensions().separator
-	updated, command = value.Update(tea.MouseClickMsg{X: rightX + 11, Y: 0, Button: tea.MouseLeft})
-	value = updated.(dashboard)
+	command = send(&value, tea.MouseClickMsg{X: rightX + 11, Y: 0, Button: tea.MouseLeft})
 	if value.tabIndex != 1 || command == nil {
 		t.Fatalf("tab click = (index %d, command %v), want second tab opened", value.tabIndex, command)
 	}
@@ -915,14 +826,13 @@ func TestDashboardMouseWheelScrollsTheWorkspaceWithoutMovingItsCursor(t *testing
 		}})
 	}
 	value := newDashboard(&fakeBackend{}, model.Snapshot{Roots: []model.RootView{{
-		Root: model.Root{ID: "root-1", Name: "projects", Path: "/projects"}, Directories: directories,
+		Root: projectsRoot, Directories: directories,
 	}}})
 	value.width, value.height = 120, 10
 	value.focus = terminalPane
 	before := ansi.Strip(strings.Join(value.renderNavigation(value.dimensions().leftWidth, value.dimensions().bodyHeight), "\n"))
 
-	updated, command := value.Update(tea.MouseWheelMsg{X: 2, Y: 3, Button: tea.MouseWheelDown})
-	value = updated.(dashboard)
+	command := send(&value, tea.MouseWheelMsg{X: 2, Y: 3, Button: tea.MouseWheelDown})
 	if value.navIndex != 0 || value.cursorPath != "/projects" || value.focus != terminalPane || command != nil {
 		t.Fatalf("workspace wheel = (index %d, path %q, focus %v, command %v)",
 			value.navIndex, value.cursorPath, value.focus, command)
@@ -950,20 +860,17 @@ func TestDashboardDragsAndPersistsTheWorkspaceDivider(t *testing.T) {
 	value.width, value.height = 120, 30
 	seam := value.dimensions().leftWidth + 1
 
-	updated, command := value.Update(tea.MouseClickMsg{X: seam, Y: 5, Button: tea.MouseLeft})
-	value = updated.(dashboard)
+	command := send(&value, tea.MouseClickMsg{X: seam, Y: 5, Button: tea.MouseLeft})
 	if !value.navigationResize || command != nil {
 		t.Fatalf("divider press = (dragging %v, command %v)", value.navigationResize, command)
 	}
 
-	updated, _ = value.Update(tea.MouseMotionMsg{X: 35, Y: 5, Button: tea.MouseLeft})
-	value = updated.(dashboard)
+	send(&value, tea.MouseMotionMsg{X: 35, Y: 5, Button: tea.MouseLeft})
 	if value.paneWidth() != 34 {
 		t.Fatalf("divider drag width = %d, want 34", value.paneWidth())
 	}
 
-	updated, command = value.Update(tea.MouseReleaseMsg{X: 35, Y: 5, Button: tea.MouseLeft})
-	value = updated.(dashboard)
+	command = send(&value, tea.MouseReleaseMsg{X: 35, Y: 5, Button: tea.MouseLeft})
 	if value.navigationResize || command == nil {
 		t.Fatalf("divider release = (dragging %v, command %v)", value.navigationResize, command)
 	}
@@ -988,36 +895,29 @@ func TestDashboardClaimsTheMouseWithoutAnOpenTerminal(t *testing.T) {
 }
 
 func TestDashboardHighlightsMouseTargetsOnHover(t *testing.T) {
-	workspace := model.Workspace{ID: "workspace-1", RootID: "root-1", Name: "alpha", Path: "/projects/alpha"}
-	tab := model.Tab{ID: "tab-1", WorkspaceID: workspace.ID, Name: "1", Running: true}
-	snapshot := model.Snapshot{Roots: []model.RootView{{
-		Root:        model.Root{ID: "root-1", Name: "projects", Path: "/projects"},
-		Directories: []model.WorkspaceView{{Workspace: workspace, Tabs: []model.Tab{tab}}},
-	}}}
+	tab := model.Tab{ID: "tab-1", WorkspaceID: "workspace-1", Name: "1", Running: true}
+	snapshot, _ := alphaWorkspaceSnapshot([]model.Tab{tab})
 	value := newDashboard(&fakeBackend{}, snapshot)
 	value.width, value.height = 120, 30
 	value.setNavigation(1)
 	_, defaultDivider := value.paneSeparators()
 
 	before := value.render()
-	updated, _ := value.Update(tea.MouseMotionMsg{X: 2, Y: 2})
-	value = updated.(dashboard)
+	send(&value, tea.MouseMotionMsg{X: 2, Y: 2})
 	if value.hover.kind != hoverNavigation || value.hover.index != 0 || value.render() == before {
 		t.Fatalf("navigation hover = %#v", value.hover)
 	}
 
 	seam := value.dimensions().leftWidth + 1
 	before = value.render()
-	updated, _ = value.Update(tea.MouseMotionMsg{X: seam, Y: 5})
-	value = updated.(dashboard)
+	send(&value, tea.MouseMotionMsg{X: seam, Y: 5})
 	if value.hover.kind != hoverDivider || value.render() == before {
 		t.Fatalf("divider hover = %#v", value.hover)
 	}
 	if _, hoveredDivider := value.paneSeparators(); hoveredDivider == defaultDivider {
 		t.Fatal("divider hover kept its default color")
 	}
-	updated, _ = value.Update(tea.MouseMotionMsg{X: seam + 10, Y: 5})
-	value = updated.(dashboard)
+	send(&value, tea.MouseMotionMsg{X: seam + 10, Y: 5})
 	if value.hover.kind != hoverNone {
 		t.Fatalf("mouse out hover = %#v, want none", value.hover)
 	}
@@ -1027,15 +927,13 @@ func TestDashboardHighlightsMouseTargetsOnHover(t *testing.T) {
 
 	origin := value.dimensions().leftWidth + value.dimensions().separator
 	before = value.render()
-	updated, _ = value.Update(tea.MouseMotionMsg{X: origin + tabCloseLocalX([]model.Tab{tab}, 0), Y: 0})
-	value = updated.(dashboard)
+	send(&value, tea.MouseMotionMsg{X: origin + tabCloseLocalX([]model.Tab{tab}, 0), Y: 0})
 	if value.hover.kind != hoverTabClose || value.hover.index != 0 || value.render() == before {
 		t.Fatalf("tab close hover = %#v", value.hover)
 	}
 
 	before = value.render()
-	updated, _ = value.Update(tea.MouseMotionMsg{X: origin + 11, Y: 0})
-	value = updated.(dashboard)
+	send(&value, tea.MouseMotionMsg{X: origin + 11, Y: 0})
 	if value.hover.kind != hoverTab || value.hover.index != 1 || value.render() == before {
 		t.Fatalf("tab hover = %#v", value.hover)
 	}
@@ -1044,12 +942,10 @@ func TestDashboardHighlightsMouseTargetsOnHover(t *testing.T) {
 func TestDashboardHighlightsDialogMouseTargets(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, model.Snapshot{})
 	value.width, value.height = 100, 24
-	updated, _ := value.Update(key(tea.KeyF9, ""))
-	value = updated.(dashboard)
+	send(&value, key(tea.KeyF9, ""))
 	hit := value.modalActionHits(value.modalGeometry(value.width, value.dimensions().bodyHeight))[0]
 	before := value.render()
-	updated, _ = value.Update(tea.MouseMotionMsg{X: hit.left, Y: hit.row})
-	value = updated.(dashboard)
+	send(&value, tea.MouseMotionMsg{X: hit.left, Y: hit.row})
 	if value.hover.kind != hoverModalAction || value.hover.index != 0 || value.render() == before {
 		t.Fatalf("modal action hover = %#v", value.hover)
 	}
@@ -1057,8 +953,7 @@ func TestDashboardHighlightsDialogMouseTargets(t *testing.T) {
 	value.modal = configModal
 	left, top := value.modalGeometry(value.width, value.dimensions().bodyHeight).contentOrigin()
 	before = value.render()
-	updated, _ = value.Update(tea.MouseMotionMsg{X: left + 2, Y: top + 2})
-	value = updated.(dashboard)
+	send(&value, tea.MouseMotionMsg{X: left + 2, Y: top + 2})
 	if value.hover.kind != hoverConfigRow || value.hover.index != 1 || value.render() == before {
 		t.Fatalf("config hover = %#v", value.hover)
 	}
@@ -1072,8 +967,7 @@ func TestDashboardConfirmsDaemonShutdown(t *testing.T) {
 	value.width = 100
 	value.height = 24
 
-	updated, command := value.Update(key(tea.KeyF9, ""))
-	value = updated.(dashboard)
+	command := send(&value, key(tea.KeyF9, ""))
 	if value.modal != shutdownModal || command != nil || backend.shutdownCount != 0 {
 		t.Fatalf("F9 result = (modal %v, command %v, shutdowns %d), want confirmation", value.modal, command, backend.shutdownCount)
 	}
@@ -1081,24 +975,20 @@ func TestDashboardConfirmsDaemonShutdown(t *testing.T) {
 		t.Fatalf("shutdown warning is missing:\n%s", rendered)
 	}
 
-	updated, command = value.Update(key(tea.KeyEscape, ""))
-	value = updated.(dashboard)
+	command = send(&value, key(tea.KeyEscape, ""))
 	if value.modal != noModal || command != nil || backend.shutdownCount != 0 {
 		t.Fatalf("Esc result = (modal %v, command %v, shutdowns %d), want cancellation", value.modal, command, backend.shutdownCount)
 	}
 
-	updated, _ = value.Update(key(tea.KeyF9, ""))
-	value = updated.(dashboard)
-	updated, command = value.Update(key(tea.KeyEnter, ""))
-	value = updated.(dashboard)
+	send(&value, key(tea.KeyF9, ""))
+	command = send(&value, key(tea.KeyEnter, ""))
 	if command == nil || !value.shutdownPending || backend.shutdownCount != 0 {
 		t.Fatalf("Enter result = (command %v, pending %v, shutdowns %d), want deferred shutdown", command, value.shutdownPending, backend.shutdownCount)
 	}
 
 	// Esc cannot take back a dispatched shutdown, and Enter must not repeat it.
 	for _, message := range []tea.KeyPressMsg{key(tea.KeyEscape, ""), key(tea.KeyEnter, ""), key(tea.KeyF9, "")} {
-		updated, extra := value.Update(message)
-		value = updated.(dashboard)
+		extra := send(&value, message)
 		if extra != nil || value.modal != shutdownModal {
 			t.Fatalf("%q during shutdown = (command %v, modal %v), want the modal held", message.String(), extra, value.modal)
 		}
@@ -1107,8 +997,7 @@ func TestDashboardConfirmsDaemonShutdown(t *testing.T) {
 		t.Fatalf("status bar does not report the pending shutdown:\n%s", rendered)
 	}
 
-	updated, quitCommand := value.Update(commandMessage[daemonStoppedMsg](t, command))
-	value = updated.(dashboard)
+	quitCommand := send(&value, commandMessage[daemonStoppedMsg](t, command))
 	if backend.shutdownCount != 1 || !value.result.Quit || quitCommand == nil || value.terminal != nil {
 		t.Fatalf("shutdown result = (count %d, quit %v, command %v, terminal %v)", backend.shutdownCount, value.result.Quit, quitCommand, value.terminal)
 	}
@@ -1117,8 +1006,7 @@ func TestDashboardConfirmsDaemonShutdown(t *testing.T) {
 func TestDashboardConfirmationActionsAreClickable(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, model.Snapshot{})
 	value.width, value.height = 100, 24
-	updated, _ := value.Update(key(tea.KeyF9, ""))
-	value = updated.(dashboard)
+	send(&value, key(tea.KeyF9, ""))
 
 	plain := ansi.Strip(value.render())
 	for _, label := range []string{"stop daemon", "cancel"} {
@@ -1131,24 +1019,21 @@ func TestDashboardConfirmationActionsAreClickable(t *testing.T) {
 		t.Fatalf("modal action hits = %#v, want confirm and cancel", hits)
 	}
 	confirm := hits[0]
-	updated, command := value.Update(tea.MouseClickMsg{
+	command := send(&value, tea.MouseClickMsg{
 		X: (confirm.left + confirm.right) / 2, Y: confirm.row, Button: tea.MouseLeft,
 	})
-	value = updated.(dashboard)
 	if !value.shutdownPending || command == nil {
 		t.Fatalf("confirm click = (pending %v, command %v)", value.shutdownPending, command)
 	}
 
 	value = newDashboard(&fakeBackend{}, model.Snapshot{})
 	value.width, value.height = 100, 24
-	updated, _ = value.Update(key(tea.KeyF9, ""))
-	value = updated.(dashboard)
+	send(&value, key(tea.KeyF9, ""))
 	hits = value.modalActionHits(value.modalGeometry(value.width, value.dimensions().bodyHeight))
 	cancel := hits[1]
-	updated, command = value.Update(tea.MouseClickMsg{
+	command = send(&value, tea.MouseClickMsg{
 		X: (cancel.left + cancel.right) / 2, Y: cancel.row, Button: tea.MouseLeft,
 	})
-	value = updated.(dashboard)
 	if value.modal != noModal || command != nil {
 		t.Fatalf("cancel click = (modal %v, command %v)", value.modal, command)
 	}
@@ -1158,8 +1043,7 @@ func TestDashboardAnimatesVisiblePendingWork(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, model.Snapshot{})
 	value.tabPending = true
 
-	updated, command := value.Update(struct{}{})
-	value = updated.(dashboard)
+	command := send(&value, struct{}{})
 	if !value.agentAnimationPending || command == nil {
 		t.Fatalf("pending tab animation = (scheduled %v, command %v)", value.agentAnimationPending, command)
 	}
@@ -1168,8 +1052,7 @@ func TestDashboardAnimatesVisiblePendingWork(t *testing.T) {
 		t.Fatalf("pending tab status = %q", status)
 	}
 
-	updated, _ = value.Update(agentAnimationMsg{})
-	value = updated.(dashboard)
+	send(&value, agentAnimationMsg{})
 	if value.agentAnimationFrame != 1 || !value.agentAnimationPending {
 		t.Fatalf("pending animation = (frame %d, scheduled %v)", value.agentAnimationFrame, value.agentAnimationPending)
 	}
@@ -1179,8 +1062,7 @@ func TestDashboardAnimatesDirectoryReads(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, model.Snapshot{})
 	value.modal = browseModal
 	value.browse = browser{path: "/projects", loading: true}
-	updated, command := value.Update(struct{}{})
-	value = updated.(dashboard)
+	command := send(&value, struct{}{})
 	if command == nil || !value.agentAnimationPending {
 		t.Fatal("directory read did not schedule its activity indicator")
 	}
@@ -1207,19 +1089,16 @@ func TestDashboardConfirmsAgentHookInstallation(t *testing.T) {
 		}
 	}
 
-	previousInstall := installHookProviders
 	var installed []agenthooks.Provider
-	installHookProviders = func(providers []agenthooks.Provider) ([]agenthooks.Result, error) {
+	testutil.Set(t, &installHookProviders, func(providers []agenthooks.Provider) ([]agenthooks.Result, error) {
 		installed = append(installed, providers...)
 		return []agenthooks.Result{
 			{Provider: agenthooks.ProviderClaude, Action: agenthooks.ActionInstalled},
 			{Provider: agenthooks.ProviderCodex, Action: agenthooks.ActionUpdated},
 		}, nil
-	}
-	t.Cleanup(func() { installHookProviders = previousInstall })
+	})
 
-	updated, command := value.Update(key(tea.KeyEnter, ""))
-	value = updated.(dashboard)
+	command := send(&value, key(tea.KeyEnter, ""))
 	if command == nil || !value.hookInstallPending || len(installed) != 0 {
 		t.Fatalf("Enter = (command %v, pending %v, installed %v), want deferred install", command, value.hookInstallPending, installed)
 	}
@@ -1227,8 +1106,7 @@ func TestDashboardConfirmsAgentHookInstallation(t *testing.T) {
 		t.Fatalf("pending status = %q", status)
 	}
 
-	updated, extra := value.Update(commandMessage[hooksInstalledMsg](t, command))
-	value = updated.(dashboard)
+	extra := send(&value, commandMessage[hooksInstalledMsg](t, command))
 	if extra != nil || value.modal != noModal || value.hookInstallPending {
 		t.Fatalf("install result = (extra %v, modal %v, pending %v)", extra, value.modal, value.hookInstallPending)
 	}
@@ -1247,8 +1125,7 @@ func TestDashboardCanSkipAgentHookInstallation(t *testing.T) {
 		State:    agenthooks.StateMissing,
 	}})
 
-	updated, command := value.Update(key(tea.KeyEscape, ""))
-	value = updated.(dashboard)
+	command := send(&value, key(tea.KeyEscape, ""))
 	if command != nil || value.modal != noModal || value.hookStatuses != nil {
 		t.Fatalf("Esc = (command %v, modal %v, statuses %v), want no changes", command, value.modal, value.hookStatuses)
 	}
@@ -1262,8 +1139,7 @@ func TestStatusRailExplainsSkippedAgentHooks(t *testing.T) {
 		{Provider: agenthooks.ProviderClaude, State: agenthooks.StateMissing},
 		{Provider: agenthooks.ProviderCodex, State: agenthooks.StateCurrent},
 	})
-	updated, _ := value.Update(key(tea.KeyEscape, ""))
-	value = updated.(dashboard)
+	send(&value, key(tea.KeyEscape, ""))
 	tab, ok := value.openTab()
 	if !ok {
 		t.Fatal("no open tab")
@@ -1292,8 +1168,7 @@ func TestDashboardCanQuitDuringAgentHookInstallation(t *testing.T) {
 		}})
 		value.hookInstallPending = pending
 
-		updated, command := value.Update(key(tea.KeyF4, ""))
-		value = updated.(dashboard)
+		command := send(&value, key(tea.KeyF4, ""))
 		if !value.result.Quit || command == nil {
 			t.Fatalf("F4 with pending %v = (quit %v, command %v), want quit", pending, value.result.Quit, command)
 		}
@@ -1325,13 +1200,10 @@ func TestDashboardReportsInvalidAgentHookSettings(t *testing.T) {
 
 func TestDashboardReportsFailedShutdown(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, model.Snapshot{})
-	updated, _ := value.Update(key(tea.KeyF9, ""))
-	value = updated.(dashboard)
-	updated, _ = value.Update(key(tea.KeyEnter, ""))
-	value = updated.(dashboard)
+	send(&value, key(tea.KeyF9, ""))
+	send(&value, key(tea.KeyEnter, ""))
 
-	updated, command := value.Update(daemonStoppedMsg{err: errors.New("dial unix: no such file")})
-	value = updated.(dashboard)
+	command := send(&value, daemonStoppedMsg{err: errors.New("dial unix: no such file")})
 	if command != nil || value.shutdownPending || value.modal != noModal || value.result.Quit {
 		t.Fatalf("failed shutdown = (command %v, pending %v, modal %v, quit %v), want the dashboard restored",
 			command, value.shutdownPending, value.modal, value.result.Quit)
@@ -1341,15 +1213,12 @@ func TestDashboardReportsFailedShutdown(t *testing.T) {
 	}
 
 	// Retrying is possible because the pending flag was cleared.
-	updated, _ = value.Update(key(tea.KeyF9, ""))
-	value = updated.(dashboard)
+	send(&value, key(tea.KeyF9, ""))
 	if value.modal != shutdownModal || value.errorMessage != "" {
 		t.Fatalf("retry = (modal %v, error %q), want a fresh confirmation", value.modal, value.errorMessage)
 	}
 }
 
-// plainRows drops styling and trailing padding so viewport rows can be compared
-// whether they are rendered from the live screen or from the scrollback.
 // waitForGuest blocks until the guest's stream holds want, so tests do not
 // race the goroutine that drains the emulator's input pipe. A fixed sleep is
 // long enough on an idle machine and too short under -race.
@@ -1363,6 +1232,11 @@ func waitForGuest(t *testing.T, stream *memoryStream, want string) {
 		time.Sleep(time.Millisecond)
 	}
 	t.Fatalf("guest received %q, want it to contain %q", stream.String(), want)
+}
+
+// guest is the stream the dashboard's open terminal writes guest input to.
+func guest(value dashboard) *memoryStream {
+	return value.terminal.stream.(*memoryStream)
 }
 
 // waitForGuestSilence puts a marker behind the event under test. Seeing that
@@ -1382,6 +1256,8 @@ func waitForGuestSilence(t *testing.T, terminal *embeddedTerminal, was string) s
 	return want
 }
 
+// plainRows drops styling and trailing padding so viewport rows can be compared
+// whether they are rendered from the live screen or from the scrollback.
 func plainRows(lines []string) []string {
 	rows := make([]string, 0, len(lines))
 	for _, line := range lines {
@@ -1390,26 +1266,31 @@ func plainRows(lines []string) []string {
 	return rows
 }
 
+// terminalDashboard returns a 120x30 dashboard focused on an empty terminal
+// that fills the right pane.
+func terminalDashboard(t *testing.T) dashboard {
+	t.Helper()
+	value := newDashboard(&fakeBackend{}, model.Snapshot{})
+	value.width, value.height = 120, 30
+	view := value.dimensions()
+	value.terminal = newEmbeddedTerminal("tab-1", newMemoryStream(""), view.rightWidth, view.terminalHeight)
+	t.Cleanup(value.closeTerminal)
+	value.focus = terminalPane
+	return value
+}
+
 // scrolledDashboard returns a dashboard whose terminal holds `lines` rows of
 // numbered output, all but the last screen of which sits in the scrollback.
 func scrolledDashboard(t *testing.T, lines int) dashboard {
 	t.Helper()
-	value := newDashboard(&fakeBackend{}, model.Snapshot{})
-	value.width = 120
-	value.height = 30
-	view := value.dimensions()
-	rightWidth, terminalHeight := view.rightWidth, view.terminalHeight
-	value.terminal = newEmbeddedTerminal("tab-1", newMemoryStream(""), rightWidth, terminalHeight)
-	t.Cleanup(value.closeTerminal)
-	value.focus = terminalPane
-
+	value := terminalDashboard(t)
 	var output strings.Builder
 	for index := range lines {
 		fmt.Fprintf(&output, "line-%03d\r\n", index)
 	}
 	value.terminal.writeOutput([]byte(output.String()))
 	if value.terminal.scrollbackLen() == 0 {
-		t.Fatalf("terminal produced no scrollback for %d lines at height %d", lines, terminalHeight)
+		t.Fatalf("terminal produced no scrollback for %d lines at height %d", lines, value.dimensions().terminalHeight)
 	}
 	return value
 }
@@ -1425,8 +1306,7 @@ func TestDashboardScrollsTerminalHistory(t *testing.T) {
 	}
 	live := plainRows(value.terminal.renderViewport(0))
 
-	updated, command := value.Update(key(tea.KeyF6, ""))
-	value = updated.(dashboard)
+	command := send(&value, key(tea.KeyF6, ""))
 	if !value.scrollback || value.scrollOffset != 0 {
 		t.Fatalf("F6 = (scrollback %v, offset %d), want the live view in scrollback mode",
 			value.scrollback, value.scrollOffset)
@@ -1441,24 +1321,21 @@ func TestDashboardScrollsTerminalHistory(t *testing.T) {
 
 	// The wheel arrives as arrow keys through the alternate scroll copy mode
 	// just asked for, which is what keeps the host's drag selection alive.
-	updated, _ = value.Update(key(tea.KeyUp, ""))
-	value = updated.(dashboard)
+	send(&value, key(tea.KeyUp, ""))
 	if value.scrollOffset != 1 {
 		t.Fatalf("wheel up offset = %d, want 1", value.scrollOffset)
 	}
 	if slices.Equal(plainRows(value.terminal.renderViewport(value.scrollOffset)), live) {
 		t.Fatal("scrolling up did not change the rendered viewport")
 	}
-	updated, _ = value.Update(key(tea.KeyDown, ""))
-	value = updated.(dashboard)
+	send(&value, key(tea.KeyDown, ""))
 	if value.scrollOffset != 0 {
 		t.Fatalf("wheel down offset = %d, want back at the live screen", value.scrollOffset)
 	}
 
 	// Repeated Shift+PgUp reaches the oldest retained line and clamps there.
 	for range history/value.scrollbackPage() + 1 {
-		updated, _ = value.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyPgUp, Mod: tea.ModShift}))
-		value = updated.(dashboard)
+		send(&value, tea.KeyPressMsg(tea.Key{Code: tea.KeyPgUp, Mod: tea.ModShift}))
 	}
 	if value.scrollOffset != history {
 		t.Fatalf("Shift+PgUp offset = %d, want the full history %d", value.scrollOffset, history)
@@ -1474,15 +1351,13 @@ func TestDashboardScrollsTerminalHistory(t *testing.T) {
 		t.Fatalf("status bar does not report the scrollback position:\n%s", rendered)
 	}
 	for range history/value.scrollbackPage() + 1 {
-		updated, _ = value.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyPgDown, Mod: tea.ModShift}))
-		value = updated.(dashboard)
+		send(&value, tea.KeyPressMsg(tea.Key{Code: tea.KeyPgDown, Mod: tea.ModShift}))
 	}
 	if value.scrollOffset != 0 {
 		t.Fatalf("Shift+PgDown offset = %d, want the live screen", value.scrollOffset)
 	}
 
-	updated, command = value.Update(key(tea.KeyEscape, ""))
-	value = updated.(dashboard)
+	command = send(&value, key(tea.KeyEscape, ""))
 	if value.scrollback || value.scrollOffset != 0 || value.View().MouseMode != tea.MouseModeCellMotion {
 		t.Fatalf("Esc = (scrollback %v, offset %d, mouse %v), want live wheel capture restored",
 			value.scrollback, value.scrollOffset, value.View().MouseMode)
@@ -1496,22 +1371,20 @@ func TestDashboardEntersScrollbackFromLiveMouseWheel(t *testing.T) {
 	value := scrolledDashboard(t, 200)
 	leftWidth := value.dimensions().leftWidth
 
-	updated, _ := value.Update(tea.MouseWheelMsg{
+	send(&value, tea.MouseWheelMsg{
 		X: leftWidth + 3, Y: terminalTop + 2, Button: tea.MouseWheelUp,
 	})
-	value = updated.(dashboard)
 	if !value.scrollback || value.scrollOffset != 3 {
 		t.Fatalf("wheel up = (scrollback %v, offset %d), want three lines of history",
 			value.scrollback, value.scrollOffset)
 	}
 
-	updated, _ = value.Update(key('x', "x"))
-	value = updated.(dashboard)
+	send(&value, key('x', "x"))
 	if value.scrollback || value.scrollOffset != 0 {
 		t.Fatalf("typing = (scrollback %v, offset %d), want the live screen",
 			value.scrollback, value.scrollOffset)
 	}
-	waitForGuest(t, value.terminal.stream.(*memoryStream), "x")
+	waitForGuest(t, guest(value), "x")
 }
 
 // Outside scrollback the host's alternate scroll turns a wheel notch into three
@@ -1527,27 +1400,23 @@ func TestDashboardHoldsAlternateScrollForScrollback(t *testing.T) {
 
 	// A key that changes nothing about scrollback repeats no sequence: the mode
 	// moves on the transitions, not on every message.
-	updated, command := value.Update(key(tea.KeyDown, ""))
-	value = updated.(dashboard)
+	command := send(&value, key(tea.KeyDown, ""))
 	if sequences := rawSequences(command); len(sequences) != 0 {
 		t.Fatalf("sequences without a transition = %q, want none", sequences)
 	}
 
-	updated, command = value.Update(key(tea.KeyF6, ""))
-	value = updated.(dashboard)
+	command = send(&value, key(tea.KeyF6, ""))
 	if sequences := rawSequences(command); !slices.Contains(sequences, ansi.SetMode(altScrollMode)) {
 		t.Fatalf("entering scrollback = %q, want alternate scroll asked for", sequences)
 	}
-	updated, command = value.Update(key(tea.KeyUp, ""))
-	value = updated.(dashboard)
+	command = send(&value, key(tea.KeyUp, ""))
 	if sequences := rawSequences(command); len(sequences) != 0 {
 		t.Fatalf("scrolling inside scrollback = %q, want the mode left alone", sequences)
 	}
 
 	// F7 leaves scrollback for the workspace pane, which is one of the seven
 	// paths out: the mode follows the state rather than a particular key.
-	updated, command = value.Update(key(tea.KeyF7, ""))
-	value = updated.(dashboard)
+	command = send(&value, key(tea.KeyF7, ""))
 	if value.scrollback {
 		t.Fatal("F7 left scrollback open")
 	}
@@ -1656,8 +1525,7 @@ func TestDashboardEntersScrollbackFromEveryBinding(t *testing.T) {
 			value := scrolledDashboard(t, 200)
 			value.focus = step.focus
 			for _, message := range step.enter {
-				updated, _ := value.Update(message)
-				value = updated.(dashboard)
+				send(&value, message)
 			}
 			if !value.scrollback || value.scrollOffset != step.offset {
 				t.Fatalf("%s = (scrollback %v, offset %d), want scrollback at offset %d",
@@ -1669,13 +1537,11 @@ func TestDashboardEntersScrollbackFromEveryBinding(t *testing.T) {
 
 func TestDashboardHoldsScrollbackViewportOnNewOutput(t *testing.T) {
 	value := scrolledDashboard(t, 200)
-	updated, _ := value.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyPgUp, Mod: tea.ModShift}))
-	value = updated.(dashboard)
+	send(&value, tea.KeyPressMsg(tea.Key{Code: tea.KeyPgUp, Mod: tea.ModShift}))
 	anchored := plainRows(value.terminal.renderViewport(value.scrollOffset))
 	before := value.scrollOffset
 
-	updated, _ = value.Update(terminalOutputMsg{terminal: value.terminal, data: []byte("fresh-a\r\nfresh-b\r\n")})
-	value = updated.(dashboard)
+	send(&value, terminalOutputMsg{terminal: value.terminal, data: []byte("fresh-a\r\nfresh-b\r\n")})
 	if value.scrollOffset == before {
 		t.Fatalf("offset stayed at %d while new output pushed lines into the scrollback", before)
 	}
@@ -1685,8 +1551,7 @@ func TestDashboardHoldsScrollbackViewportOnNewOutput(t *testing.T) {
 	}
 
 	// Leaving scrollback returns to the live screen, which has the new output.
-	updated, _ = value.Update(key(tea.KeyF6, ""))
-	value = updated.(dashboard)
+	send(&value, key(tea.KeyF6, ""))
 	if value.scrollback || value.scrollOffset != 0 {
 		t.Fatalf("F6 = (scrollback %v, offset %d), want the live screen", value.scrollback, value.scrollOffset)
 	}
@@ -1700,18 +1565,16 @@ func TestDashboardHoldsScrollbackViewportOnNewOutput(t *testing.T) {
 // main screen's older output as if it belonged to them.
 func TestDashboardRefusesScrollbackOnTheAlternateScreen(t *testing.T) {
 	value := scrolledDashboard(t, 200)
-	updated, _ := value.Update(key(tea.KeyF6, ""))
-	value = updated.(dashboard)
+	send(&value, key(tea.KeyF6, ""))
 	if !value.scrollback {
 		t.Fatal("scrollback did not open on the main screen")
 	}
 
 	// The application takes over the screen while scrollback is open.
-	updated, _ = value.Update(terminalOutputMsg{
+	send(&value, terminalOutputMsg{
 		terminal: value.terminal,
 		data:     []byte("\x1b[?1049h\x1b[2J\x1b[Happlication frame\r\n"),
 	})
-	value = updated.(dashboard)
 	if value.scrollback || value.scrollOffset != 0 {
 		t.Fatalf("scrollback stayed open on the alternate screen = (scrollback %v, offset %d)",
 			value.scrollback, value.scrollOffset)
@@ -1725,8 +1588,7 @@ func TestDashboardRefusesScrollbackOnTheAlternateScreen(t *testing.T) {
 		key(tea.KeyF6, ""),
 		tea.KeyPressMsg(tea.Key{Code: tea.KeyPgUp, Mod: tea.ModShift}),
 	} {
-		updated, _ = value.Update(message)
-		value = updated.(dashboard)
+		send(&value, message)
 		if value.scrollback {
 			t.Fatalf("%q entered scrollback while the alternate screen was active", message.String())
 		}
@@ -1740,10 +1602,8 @@ func TestDashboardRefusesScrollbackOnTheAlternateScreen(t *testing.T) {
 	}
 
 	// Leaving the alternate screen restores the history that was there before.
-	updated, _ = value.Update(terminalOutputMsg{terminal: value.terminal, data: []byte("\x1b[?1049l")})
-	value = updated.(dashboard)
-	updated, _ = value.Update(key(tea.KeyF6, ""))
-	value = updated.(dashboard)
+	send(&value, terminalOutputMsg{terminal: value.terminal, data: []byte("\x1b[?1049l")})
+	send(&value, key(tea.KeyF6, ""))
 	if !value.scrollback {
 		t.Fatalf("scrollback did not reopen after the application exited: %q", value.errorMessage)
 	}
@@ -1753,16 +1613,9 @@ func TestDashboardRefusesScrollbackOnTheAlternateScreen(t *testing.T) {
 // suffered, so the status bar must not raise the red ERROR that a refused
 // daemon call or a dead terminal earns.
 func TestDashboardReportsEmptyScrollbackAsANotice(t *testing.T) {
-	value := newDashboard(&fakeBackend{}, model.Snapshot{})
-	value.width = 120
-	value.height = 30
-	view := value.dimensions()
-	value.terminal = newEmbeddedTerminal("tab-1", newMemoryStream(""), view.rightWidth, view.terminalHeight)
-	t.Cleanup(value.closeTerminal)
-	value.focus = terminalPane
+	value := terminalDashboard(t)
 
-	updated, _ := value.Update(key(tea.KeyF6, ""))
-	value = updated.(dashboard)
+	send(&value, key(tea.KeyF6, ""))
 	if value.scrollback || !strings.Contains(value.errorMessage, "scrolled off") {
 		t.Fatalf("F6 with an empty scrollback = (scrollback %v, message %q)",
 			value.scrollback, value.errorMessage)
@@ -1792,8 +1645,7 @@ func TestDashboardRendersCopyModeFullWidth(t *testing.T) {
 		t.Fatal("the split layout does not show the workspace tree")
 	}
 
-	updated, _ := value.Update(key(tea.KeyF6, ""))
-	value = updated.(dashboard)
+	send(&value, key(tea.KeyF6, ""))
 	bodyHeight := value.dimensions().bodyHeight
 	body := strings.Split(ansi.Strip(value.render()), "\n")[:bodyHeight]
 	joined := strings.Join(body, "\n")
@@ -1804,8 +1656,7 @@ func TestDashboardRendersCopyModeFullWidth(t *testing.T) {
 		t.Fatalf("copy mode does not render terminal output:\n%s", joined)
 	}
 
-	updated, _ = value.Update(key(tea.KeyEscape, ""))
-	value = updated.(dashboard)
+	send(&value, key(tea.KeyEscape, ""))
 	if !strings.Contains(ansi.Strip(value.render()), "SnowClash") {
 		t.Fatal("leaving copy mode did not restore the workspace pane")
 	}
@@ -1822,14 +1673,13 @@ func TestDashboardGivesTheWheelToAGuestThatOwnsTheScreen(t *testing.T) {
 		// htop start.
 		value.terminal.writeOutput([]byte("\x1b[?1049h\x1b[?1003h\x1b[?1006h"))
 
-		updated, _ := value.Update(tea.MouseWheelMsg{
+		send(&value, tea.MouseWheelMsg{
 			X: leftWidth + separatorWidth + 4, Y: terminalTop + 2, Button: tea.MouseWheelUp,
 		})
-		value = updated.(dashboard)
 		if value.scrollback {
 			t.Fatal("the wheel opened scrollback on the alternate screen")
 		}
-		waitForGuest(t, value.terminal.stream.(*memoryStream), "\x1b[<64;5;3")
+		waitForGuest(t, guest(value), "\x1b[<64;5;3")
 	})
 
 	t.Run("a guest that did not", func(t *testing.T) {
@@ -1839,36 +1689,29 @@ func TestDashboardGivesTheWheelToAGuestThatOwnsTheScreen(t *testing.T) {
 		// terminal gives them the cursor keys of alternate scroll instead.
 		value.terminal.writeOutput([]byte("\x1b[?1049h"))
 
-		updated, _ := value.Update(tea.MouseWheelMsg{
+		send(&value, tea.MouseWheelMsg{
 			X: leftWidth + separatorWidth + 4, Y: terminalTop + 2, Button: tea.MouseWheelUp,
 		})
-		value = updated.(dashboard)
 		if value.scrollback {
 			t.Fatal("the wheel opened scrollback on the alternate screen")
 		}
-		waitForGuest(t, value.terminal.stream.(*memoryStream), "\x1b[A\x1b[A\x1b[A")
+		waitForGuest(t, guest(value), "\x1b[A\x1b[A\x1b[A")
 
 		value.Update(tea.MouseWheelMsg{
 			X: leftWidth + separatorWidth + 4, Y: terminalTop + 2, Button: tea.MouseWheelDown,
 		})
-		waitForGuest(t, value.terminal.stream.(*memoryStream), "\x1b[B\x1b[B\x1b[B")
+		waitForGuest(t, guest(value), "\x1b[B\x1b[B\x1b[B")
 	})
 }
 
 // Silence is what a wheel that the host never reports looks like, so the one
 // state where romty has nothing to scroll has to say so instead.
 func TestDashboardSaysWhyTheWheelHasNothingToScroll(t *testing.T) {
-	value := newDashboard(&fakeBackend{}, model.Snapshot{})
-	value.width, value.height = 120, 30
-	view := value.dimensions()
-	value.terminal = newEmbeddedTerminal("tab-1", newMemoryStream(""), view.rightWidth, view.terminalHeight)
-	t.Cleanup(value.closeTerminal)
-	value.focus = terminalPane
+	value := terminalDashboard(t)
 
-	updated, _ := value.Update(tea.MouseWheelMsg{
-		X: view.leftWidth + separatorWidth + 4, Y: terminalTop + 2, Button: tea.MouseWheelUp,
+	send(&value, tea.MouseWheelMsg{
+		X: value.dimensions().leftWidth + separatorWidth + 4, Y: terminalTop + 2, Button: tea.MouseWheelUp,
 	})
-	value = updated.(dashboard)
 	if value.scrollback {
 		t.Fatal("scrollback opened with no history to show")
 	}
@@ -1885,8 +1728,7 @@ func TestDashboardKeepsTheMouseInScrollbackWhenAsked(t *testing.T) {
 	value := scrolledDashboard(t, 200)
 	value.scrollbackMouse = true
 
-	updated, command := value.Update(key(tea.KeyF6, ""))
-	value = updated.(dashboard)
+	command := send(&value, key(tea.KeyF6, ""))
 	if !value.scrollback {
 		t.Fatal("F6 did not open scrollback")
 	}
@@ -1897,8 +1739,7 @@ func TestDashboardKeepsTheMouseInScrollbackWhenAsked(t *testing.T) {
 		t.Fatalf("sequences = %q, want no alternate scroll while romty holds the mouse", sequences)
 	}
 
-	updated, _ = value.Update(tea.MouseWheelMsg{X: 40, Y: terminalTop + 2, Button: tea.MouseWheelUp})
-	value = updated.(dashboard)
+	send(&value, tea.MouseWheelMsg{X: 40, Y: terminalTop + 2, Button: tea.MouseWheelUp})
 	if value.scrollOffset != wheelLines {
 		t.Fatalf("scroll offset = %d, want one notch of history", value.scrollOffset)
 	}
@@ -1919,15 +1760,13 @@ func TestDashboardScrollsHistoryNotTheGuestWithBothMouseOptions(t *testing.T) {
 	value.mousePassthrough = true
 	value.terminal.writeOutput([]byte("\x1b[?1003h\x1b[?1006h"))
 
-	updated, _ := value.Update(key(tea.KeyF6, ""))
-	value = updated.(dashboard)
+	send(&value, key(tea.KeyF6, ""))
 	if !value.scrollback {
 		t.Fatal("F6 did not open scrollback")
 	}
-	sent := value.terminal.stream.(*memoryStream).String()
+	sent := guest(value).String()
 
-	updated, _ = value.Update(tea.MouseWheelMsg{X: 40, Y: terminalTop + 2, Button: tea.MouseWheelUp})
-	value = updated.(dashboard)
+	send(&value, tea.MouseWheelMsg{X: 40, Y: terminalTop + 2, Button: tea.MouseWheelUp})
 	if value.scrollOffset != wheelLines {
 		t.Fatalf("scroll offset = %d, want the wheel to move the history", value.scrollOffset)
 	}
@@ -2060,14 +1899,12 @@ func TestDashboardKeepsConfigControlsCompact(t *testing.T) {
 
 func TestDashboardTogglesScrollbackMouseFromConfig(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, model.Snapshot{})
-	updated, _ := value.Update(key(tea.KeyF3, ""))
-	value = updated.(dashboard)
+	send(&value, key(tea.KeyF3, ""))
 	if value.modal != configModal {
 		t.Fatalf("F3 modal = %v, want config", value.modal)
 	}
 
-	updated, command := value.Update(key('m', "m"))
-	value = updated.(dashboard)
+	command := send(&value, key('m', "m"))
 	if !value.scrollbackMouse || command == nil {
 		t.Fatalf("m = (scrollback mouse %v, command %v), want the setting on and saved",
 			value.scrollbackMouse, command)
@@ -2076,8 +1913,7 @@ func TestDashboardTogglesScrollbackMouseFromConfig(t *testing.T) {
 		t.Fatalf("config modal does not report the setting:\n%s", ansi.Strip(value.render()))
 	}
 
-	updated, _ = value.Update(key('m', "m"))
-	value = updated.(dashboard)
+	send(&value, key('m', "m"))
 	if value.scrollbackMouse {
 		t.Fatal("m did not turn the setting back off")
 	}
@@ -2085,20 +1921,16 @@ func TestDashboardTogglesScrollbackMouseFromConfig(t *testing.T) {
 
 func TestDashboardConfiguresAndTestsSoundAlerts(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, model.Snapshot{})
-	updated, _ := value.Update(key(tea.KeyF3, ""))
-	value = updated.(dashboard)
+	send(&value, key(tea.KeyF3, ""))
 
-	updated, saveDone := value.Update(key('d', "d"))
-	value = updated.(dashboard)
-	updated, saveWaiting := value.Update(key('b', "b"))
-	value = updated.(dashboard)
+	saveDone := send(&value, key('d', "d"))
+	saveWaiting := send(&value, key('b', "b"))
 	if !value.soundOnDone || !value.soundOnWaiting || saveDone == nil || saveWaiting == nil {
 		t.Fatalf("sound toggles = (done %v, waiting %v, saves %v/%v)",
 			value.soundOnDone, value.soundOnWaiting, saveDone, saveWaiting)
 	}
 
-	updated, soundCommand := value.Update(key('s', "s"))
-	value = updated.(dashboard)
+	soundCommand := send(&value, key('s', "s"))
 	if played := commandMessage[soundPlayedMsg](t, soundCommand); played.kind != sound.Done {
 		t.Fatalf("test sound = %q, want done", played.kind)
 	}
@@ -2107,18 +1939,15 @@ func TestDashboardConfiguresAndTestsSoundAlerts(t *testing.T) {
 func TestDashboardClicksConfigControls(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, model.Snapshot{})
 	value.width, value.height = 100, 24
-	updated, _ := value.Update(key(tea.KeyF3, ""))
-	value = updated.(dashboard)
+	send(&value, key(tea.KeyF3, ""))
 	left, top := value.modalGeometry(value.width, value.dimensions().bodyHeight).contentOrigin()
 
-	updated, save := value.Update(tea.MouseClickMsg{X: left + 2, Y: top + 2, Button: tea.MouseLeft})
-	value = updated.(dashboard)
+	save := send(&value, tea.MouseClickMsg{X: left + 2, Y: top + 2, Button: tea.MouseLeft})
 	if !value.scrollbackMouse || save == nil || value.configIndex != 1 {
 		t.Fatalf("scrollback mouse click = (enabled %v, save %v, cursor %d)",
 			value.scrollbackMouse, save, value.configIndex)
 	}
-	updated, soundCommand := value.Update(tea.MouseClickMsg{X: left + 2, Y: top + 5, Button: tea.MouseLeft})
-	value = updated.(dashboard)
+	soundCommand := send(&value, tea.MouseClickMsg{X: left + 2, Y: top + 5, Button: tea.MouseLeft})
 	if played := commandMessage[soundPlayedMsg](t, soundCommand); played.kind != sound.Done {
 		t.Fatalf("test sound click = %q, want done", played.kind)
 	}
@@ -2137,20 +1966,17 @@ func TestDashboardSoundsOnceForAgentTransitions(t *testing.T) {
 	value.agentSoundReady = true
 
 	idle := map[string]model.AgentStatus{"tab-1": {Agent: model.AgentCodex, Phase: model.AgentPhaseCompleted}}
-	updated, command := value.Update(agentSnapshotMsg{value: idle})
-	value = updated.(dashboard)
+	command := send(&value, agentSnapshotMsg{value: idle})
 	if kind, ok := playedSound(command); !ok || kind != sound.Done {
 		t.Fatalf("done transition sound = (%q, %v)", kind, ok)
 	}
-	updated, command = value.Update(agentSnapshotMsg{value: idle})
-	value = updated.(dashboard)
+	command = send(&value, agentSnapshotMsg{value: idle})
 	if kind, ok := playedSound(command); ok {
 		t.Fatalf("stable idle transition played %q again", kind)
 	}
 
 	waiting := map[string]model.AgentStatus{"tab-1": {Agent: model.AgentCodex, Phase: model.AgentPhaseWaitingApproval}}
-	updated, command = value.Update(agentSnapshotMsg{value: waiting})
-	value = updated.(dashboard)
+	command = send(&value, agentSnapshotMsg{value: waiting})
 	if kind, ok := playedSound(command); !ok || kind != sound.Waiting {
 		t.Fatalf("waiting transition sound = (%q, %v)", kind, ok)
 	}
@@ -2159,8 +1985,7 @@ func TestDashboardSoundsOnceForAgentTransitions(t *testing.T) {
 func TestDashboardDoesNotSoundOnTheFirstAgentSnapshot(t *testing.T) {
 	value := newDashboardWithConfig(&fakeBackend{}, model.Snapshot{}, "", Config{SoundOnWaiting: true})
 	waiting := map[string]model.AgentStatus{"tab-1": {Agent: model.AgentCodex, Phase: model.AgentPhaseWaitingInput}}
-	updated, command := value.Update(agentSnapshotMsg{value: waiting})
-	value = updated.(dashboard)
+	command := send(&value, agentSnapshotMsg{value: waiting})
 	if !value.agentSoundReady {
 		t.Fatal("first successful agent snapshot did not arm later sounds")
 	}
@@ -2176,8 +2001,7 @@ func TestDashboardSeparatesProvisionalStopInterruptionAndCompletion(t *testing.T
 				Root: model.Root{ID: "root"}, Tabs: []model.Tab{{ID: "tab", Running: true, Agent: model.AgentCodex, AgentPhase: model.AgentPhaseWorking}},
 			}}}, "", Config{SoundOnDone: true})
 			value.agentSoundReady = true
-			updated, command := value.Update(agentSnapshotMsg{value: map[string]model.AgentStatus{"tab": {Agent: model.AgentCodex, Phase: phase}}})
-			value = updated.(dashboard)
+			command := send(&value, agentSnapshotMsg{value: map[string]model.AgentStatus{"tab": {Agent: model.AgentCodex, Phase: phase}}})
 			if value.hasAnimatedAgent() {
 				t.Fatal("terminal/non-authoritative state still animates")
 			}
@@ -2221,8 +2045,7 @@ func TestDashboardDoesNotSoundForEstimatedIdle(t *testing.T) {
 	if err := json.Unmarshal([]byte(`{"tab-1":{"agent":"codex","phase":"idle","estimated":true}}`), &statuses); err != nil {
 		t.Fatalf("Unmarshal() error = %v", err)
 	}
-	updated, command := value.Update(agentSnapshotMsg{value: statuses})
-	value = updated.(dashboard)
+	command := send(&value, agentSnapshotMsg{value: statuses})
 	if kind, ok := playedSound(command); ok {
 		t.Fatalf("estimated idle played %q, want no completion sound", kind)
 	}
@@ -2231,11 +2054,9 @@ func TestDashboardDoesNotSoundForEstimatedIdle(t *testing.T) {
 	}
 
 	statuses["tab-1"] = model.AgentStatus{Agent: model.AgentCodex, Phase: model.AgentPhaseWorking, Estimated: true}
-	updated, _ = value.Update(agentSnapshotMsg{value: statuses})
-	value = updated.(dashboard)
+	send(&value, agentSnapshotMsg{value: statuses})
 	statuses["tab-1"] = model.AgentStatus{Agent: model.AgentCodex, Phase: model.AgentPhaseCompleted}
-	updated, command = value.Update(agentSnapshotMsg{value: statuses})
-	value = updated.(dashboard)
+	command = send(&value, agentSnapshotMsg{value: statuses})
 	if kind, ok := playedSound(command); !ok || kind != sound.Done {
 		t.Fatalf("hooked completion sound = (%q, %v), want done", kind, ok)
 	}
@@ -2268,14 +2089,14 @@ func TestDashboardWithholdsUnrequestedMotionFromTheGuest(t *testing.T) {
 	// The buttons the guest did ask for still reach it.
 	value.Update(tea.MouseClickMsg{X: x, Y: y, Button: tea.MouseLeft})
 	sent += "\x1b[<0;5;3M"
-	waitForGuest(t, value.terminal.stream.(*memoryStream), sent)
+	waitForGuest(t, guest(value), sent)
 
 	// ?1002h is button-event tracking: motion, but only while a button is held.
 	value.terminal.writeOutput([]byte("\x1b[?1002h"))
 	value.Update(tea.MouseMotionMsg{X: x, Y: y})
 	sent = waitForGuestSilence(t, value.terminal, sent)
 	value.Update(tea.MouseMotionMsg{X: x, Y: y, Button: tea.MouseLeft})
-	waitForGuest(t, value.terminal.stream.(*memoryStream), sent+"\x1b[<32;5;3M")
+	waitForGuest(t, guest(value), sent+"\x1b[<32;5;3M")
 }
 
 func TestDashboardKeepsMouseWithTheHostUnlessPassthroughIsOn(t *testing.T) {
@@ -2289,14 +2110,12 @@ func TestDashboardKeepsMouseWithTheHostUnlessPassthroughIsOn(t *testing.T) {
 	if value.View().MouseMode != tea.MouseModeCellMotion {
 		t.Fatalf("mouse mode = %v, want romty to capture the live wheel", value.View().MouseMode)
 	}
-	updated, _ := value.Update(tea.MouseWheelMsg{X: 40, Y: 6, Button: tea.MouseWheelUp})
-	value = updated.(dashboard)
+	send(&value, tea.MouseWheelMsg{X: 40, Y: 6, Button: tea.MouseWheelUp})
 	if !value.scrollback {
 		t.Fatal("wheel did not open scrollback while passthrough was disabled")
 	}
 	waitForGuestSilence(t, value.terminal, "")
-	updated, _ = value.Update(key(tea.KeyEscape, ""))
-	value = updated.(dashboard)
+	send(&value, key(tea.KeyEscape, ""))
 
 	value.mousePassthrough = true
 	if value.View().MouseMode != tea.MouseModeAllMotion {
@@ -2304,16 +2123,15 @@ func TestDashboardKeepsMouseWithTheHostUnlessPassthroughIsOn(t *testing.T) {
 	}
 	leftWidth := value.dimensions().leftWidth
 	value.Update(tea.MouseWheelMsg{X: leftWidth + 3 + 4, Y: terminalTop + 2, Button: tea.MouseWheelUp})
-	waitForGuest(t, value.terminal.stream.(*memoryStream), "\x1b[<64;5;3")
-	sent := value.terminal.stream.(*memoryStream).String()
+	waitForGuest(t, guest(value), "\x1b[<64;5;3")
+	sent := guest(value).String()
 
 	// Events over the workspace pane are not the guest's business.
 	value.Update(tea.MouseWheelMsg{X: 1, Y: terminalTop + 2, Button: tea.MouseWheelUp})
 	waitForGuestSilence(t, value.terminal, sent)
 
 	// Copy mode takes the mouse back so the host can select the scrolled page.
-	updated, _ = value.Update(key(tea.KeyF6, ""))
-	value = updated.(dashboard)
+	send(&value, key(tea.KeyF6, ""))
 	if !value.scrollback || value.View().MouseMode != tea.MouseModeNone {
 		t.Fatalf("copy mode = (scrollback %v, mouse %v), want the mouse returned to the host",
 			value.scrollback, value.View().MouseMode)
@@ -2335,12 +2153,11 @@ func TestDashboardForwardsPagingToTheGuestThatOwnsTheScreen(t *testing.T) {
 
 	value.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyPgUp, Mod: tea.ModShift}))
 	// Sent unmodified: plain PgUp is the key such applications bind.
-	waitForGuest(t, value.terminal.stream.(*memoryStream), "\x1b[5~")
+	waitForGuest(t, guest(value), "\x1b[5~")
 
 	// On the main screen it still belongs to romty's own scrollback.
 	value.terminal.writeOutput([]byte("\x1b[?1049l"))
-	updated, _ := value.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyPgUp, Mod: tea.ModShift}))
-	value = updated.(dashboard)
+	send(&value, tea.KeyPressMsg(tea.Key{Code: tea.KeyPgUp, Mod: tea.ModShift}))
 	if !value.scrollback || value.scrollOffset == 0 {
 		t.Fatalf("Shift+PgUp on the main screen = (scrollback %v, offset %d), want a page of history",
 			value.scrollback, value.scrollOffset)
@@ -2351,14 +2168,12 @@ func TestDashboardFocusesTerminalWhenLeavingScrollback(t *testing.T) {
 	for _, leave := range []tea.KeyPressMsg{scrollbackToggleKey(), key(tea.KeyEscape, ""), key(tea.KeyF6, "")} {
 		value := scrolledDashboard(t, 200)
 		value.focus = leftPane
-		updated, _ := value.Update(scrollbackToggleKey())
-		value = updated.(dashboard)
+		send(&value, scrollbackToggleKey())
 		if !value.scrollback || value.focus != leftPane {
 			t.Fatalf("Ctrl+Shift+\\ = (scrollback %v, focus %v), want scrollback without moving focus",
 				value.scrollback, value.focus)
 		}
-		updated, _ = value.Update(leave)
-		value = updated.(dashboard)
+		send(&value, leave)
 		if value.scrollback || value.focus != terminalPane {
 			t.Fatalf("%q = (scrollback %v, focus %v), want the terminal focused",
 				leave.String(), value.scrollback, value.focus)
@@ -2391,14 +2206,12 @@ func TestDashboardSwitchesPanesWithOneKey(t *testing.T) {
 	} {
 		t.Run(binding.name, func(t *testing.T) {
 			value := scrolledDashboard(t, 200)
-			updated, command := value.Update(binding.key)
-			value = updated.(dashboard)
+			command := send(&value, binding.key)
 			if value.focus != leftPane || command == nil {
 				t.Fatalf("terminal -> workspace = (focus %v, command %v), want a refreshed workspace", value.focus, command)
 			}
 
-			updated, _ = value.Update(binding.key)
-			value = updated.(dashboard)
+			send(&value, binding.key)
 			if value.focus != terminalPane {
 				t.Fatalf("workspace -> terminal = focus %v, want the terminal", value.focus)
 			}
@@ -2408,13 +2221,11 @@ func TestDashboardSwitchesPanesWithOneKey(t *testing.T) {
 	// Scrollback covers the terminal, so switching away from the terminal has
 	// to leave it rather than land the keyboard behind the full-width view.
 	value := scrolledDashboard(t, 200)
-	updated, _ := value.Update(key(tea.KeyF6, ""))
-	value = updated.(dashboard)
+	send(&value, key(tea.KeyF6, ""))
 	if !value.scrollback {
 		t.Fatal("F6 did not open scrollback")
 	}
-	updated, _ = value.Update(key(tea.KeyF7, ""))
-	value = updated.(dashboard)
+	send(&value, key(tea.KeyF7, ""))
 	if value.scrollback || value.focus != leftPane {
 		t.Fatalf("F7 in scrollback = (scrollback %v, focus %v), want the workspace pane",
 			value.scrollback, value.focus)
@@ -2436,11 +2247,7 @@ func TestDashboardSwitchesPanesWithOneKey(t *testing.T) {
 // a terminal open on it, so a render can be searched for the tree by name.
 func narrowDashboard(t *testing.T, width int) dashboard {
 	t.Helper()
-	workspace := model.Workspace{ID: "workspace-1", RootID: "root-1", Name: "alpha", Path: "/projects/alpha"}
-	snapshot := model.Snapshot{Roots: []model.RootView{{
-		Root:        model.Root{ID: "root-1", Name: "projects", Path: "/projects"},
-		Directories: []model.WorkspaceView{{Workspace: workspace}},
-	}}}
+	snapshot, workspace := alphaWorkspaceSnapshot(nil)
 	value := newDashboard(&fakeBackend{snapshot: snapshot, workspace: workspace}, snapshot)
 	value.width, value.height = width, 24
 	value.selectedWorkspaceID = workspace.ID
@@ -2471,8 +2278,7 @@ func TestDashboardHidesWorkspacePaneOnANarrowScreen(t *testing.T) {
 		t.Fatalf("workspace tree is still drawn:\n%s", rendered)
 	}
 
-	updated, _ := value.Update(controlSlashKey())
-	value = updated.(dashboard)
+	send(&value, controlSlashKey())
 	if value.focus != leftPane {
 		t.Fatalf("Ctrl+/ focus = %v, want the workspace pane", value.focus)
 	}
@@ -2488,10 +2294,8 @@ func TestDashboardKeepsWorkspacePaneOnAWideScreen(t *testing.T) {
 	if value.navigationHidden() {
 		t.Fatal("a 120 column screen hid the workspace pane")
 	}
-	updated, _ := value.Update(key(tea.KeyF7, ""))
-	value = updated.(dashboard)
-	updated, _ = value.Update(key(tea.KeyF7, ""))
-	value = updated.(dashboard)
+	send(&value, key(tea.KeyF7, ""))
+	send(&value, key(tea.KeyF7, ""))
 	if view := value.dimensions(); view.leftWidth == 0 || view.separator != separatorWidth {
 		t.Fatalf("wide layout after two toggles = (left %d, separator %d), want the split",
 			view.leftWidth, view.separator)
@@ -2507,8 +2311,7 @@ func TestDashboardResizesThePTYWhenTheWorkspacePaneHides(t *testing.T) {
 	value := narrowDashboard(t, 60)
 	backend := value.backend.(*fakeBackend)
 
-	updated, command := value.Update(controlSlashKey())
-	value = updated.(dashboard)
+	command := send(&value, controlSlashKey())
 	if command == nil {
 		t.Fatal("hiding the workspace pane did not ask the daemon to resize the PTY")
 	}
@@ -2519,8 +2322,7 @@ func TestDashboardResizesThePTYWhenTheWorkspacePaneHides(t *testing.T) {
 			backend.createdColumns, backend.createdRows, wantColumns, wantRows)
 	}
 
-	updated, command = value.Update(controlSlashKey())
-	value = updated.(dashboard)
+	command = send(&value, controlSlashKey())
 	if command == nil {
 		t.Fatal("showing the workspace pane did not ask the daemon to resize the PTY")
 	}
@@ -2564,8 +2366,7 @@ func TestDashboardKeepsWorkspaceFocusWhenSwitchingToADeadTerminal(t *testing.T) 
 	value.focus = leftPane
 	value.closeTerminal()
 
-	updated, _ := value.Update(key(tea.KeyF7, ""))
-	value = updated.(dashboard)
+	send(&value, key(tea.KeyF7, ""))
 	if value.focus != leftPane {
 		t.Fatalf("F7 onto a dead terminal = focus %v, want the workspace pane", value.focus)
 	}
@@ -2574,12 +2375,10 @@ func TestDashboardKeepsWorkspaceFocusWhenSwitchingToADeadTerminal(t *testing.T) 
 func TestDashboardKeepsWorkspaceFocusWhenTheTerminalIsGone(t *testing.T) {
 	value := scrolledDashboard(t, 200)
 	value.focus = leftPane
-	updated, _ := value.Update(key(tea.KeyF6, ""))
-	value = updated.(dashboard)
+	send(&value, key(tea.KeyF6, ""))
 	value.closeTerminal()
 
-	updated, _ = value.Update(key(tea.KeyEscape, ""))
-	value = updated.(dashboard)
+	send(&value, key(tea.KeyEscape, ""))
 	if value.scrollback || value.focus == terminalPane {
 		t.Fatalf("leaving scrollback = (scrollback %v, focus %v), want the workspace pane for a dead terminal",
 			value.scrollback, value.focus)
@@ -2591,11 +2390,7 @@ func TestDashboardKeepsWorkspaceFocusWhenTheTerminalIsGone(t *testing.T) {
 // the refresh command it asked for.
 func exitedDashboard(t *testing.T, tabs []model.Tab, open int) (dashboard, *fakeBackend, tea.Cmd) {
 	t.Helper()
-	workspace := model.Workspace{ID: "workspace-1", RootID: "root-1", Name: "alpha", Path: "/projects/alpha"}
-	snapshot := model.Snapshot{Roots: []model.RootView{{
-		Root:        model.Root{ID: "root-1", Name: "projects", Path: "/projects"},
-		Directories: []model.WorkspaceView{{Workspace: workspace, Tabs: tabs}},
-	}}}
+	snapshot, workspace := alphaWorkspaceSnapshot(tabs)
 	backend := &fakeBackend{snapshot: snapshot, workspace: workspace}
 	value := newDashboard(backend, snapshot)
 	value.width = 120
@@ -2608,8 +2403,7 @@ func exitedDashboard(t *testing.T, tabs []model.Tab, open int) (dashboard, *fake
 	value.terminal = newEmbeddedTerminal(tabs[open].ID, newMemoryStream(""), 89, 36)
 	t.Cleanup(value.closeTerminal)
 
-	updated, refresh := value.Update(terminalOutputMsg{terminal: value.terminal, err: io.EOF})
-	value = updated.(dashboard)
+	refresh := send(&value, terminalOutputMsg{terminal: value.terminal, err: io.EOF})
 	if value.terminal != nil {
 		t.Fatal("the exited terminal is still attached")
 	}
@@ -2620,25 +2414,19 @@ func exitedDashboard(t *testing.T, tabs []model.Tab, open int) (dashboard, *fake
 }
 
 func TestDashboardMovesToASiblingTabWhenTheShellExits(t *testing.T) {
-	tabs := []model.Tab{
-		{ID: "tab-1", WorkspaceID: "workspace-1", Name: "1", Running: true},
-		{ID: "tab-2", WorkspaceID: "workspace-1", Name: "2", Running: true},
-		{ID: "tab-3", WorkspaceID: "workspace-1", Name: "3", Running: true},
-	}
+	tabs := openTabs(3)
 	value, backend, refresh := exitedDashboard(t, tabs, 1)
 
 	// The daemon drops the tab whose shell exited.
 	backend.snapshot.Roots[0].Directories[0].Tabs = []model.Tab{tabs[0], tabs[2]}
-	updated, open := value.Update(refresh())
-	value = updated.(dashboard)
+	open := send(&value, refresh())
 	if open == nil {
 		t.Fatal("no sibling tab was opened after the shell exited")
 	}
 	if value.tabIndex != 1 {
 		t.Fatalf("tab index = %d, want the tab that took the exited one's place", value.tabIndex)
 	}
-	updated, _ = value.Update(open())
-	value = updated.(dashboard)
+	send(&value, open())
 	defer value.closeTerminal()
 	if backend.openedTab != "tab-3" || value.focus != terminalPane {
 		t.Fatalf("opened %q with focus %v, want tab-3 in the terminal pane", backend.openedTab, value.focus)
@@ -2646,20 +2434,15 @@ func TestDashboardMovesToASiblingTabWhenTheShellExits(t *testing.T) {
 }
 
 func TestDashboardMovesToTheLastTabWhenTheLastShellExits(t *testing.T) {
-	tabs := []model.Tab{
-		{ID: "tab-1", WorkspaceID: "workspace-1", Name: "1", Running: true},
-		{ID: "tab-2", WorkspaceID: "workspace-1", Name: "2", Running: true},
-	}
+	tabs := openTabs(2)
 	value, backend, refresh := exitedDashboard(t, tabs, 1)
 
 	backend.snapshot.Roots[0].Directories[0].Tabs = tabs[:1]
-	updated, open := value.Update(refresh())
-	value = updated.(dashboard)
+	open := send(&value, refresh())
 	if open == nil || value.tabIndex != 0 {
 		t.Fatalf("trailing exit = (command %v, tab index %d), want the previous tab", open, value.tabIndex)
 	}
-	updated, _ = value.Update(open())
-	value = updated.(dashboard)
+	send(&value, open())
 	defer value.closeTerminal()
 	if backend.openedTab != "tab-1" {
 		t.Fatalf("opened %q, want tab-1", backend.openedTab)
@@ -2667,12 +2450,11 @@ func TestDashboardMovesToTheLastTabWhenTheLastShellExits(t *testing.T) {
 }
 
 func TestDashboardReturnsToTheWorkspaceWhenTheLastTabExits(t *testing.T) {
-	tabs := []model.Tab{{ID: "tab-1", WorkspaceID: "workspace-1", Name: "1", Running: true}}
+	tabs := openTabs(1)
 	value, backend, refresh := exitedDashboard(t, tabs, 0)
 
 	backend.snapshot.Roots[0].Directories[0].Tabs = nil
-	updated, open := value.Update(refresh())
-	value = updated.(dashboard)
+	open := send(&value, refresh())
 	if open != nil {
 		t.Fatalf("a terminal was opened with no tabs left: %v", open)
 	}
@@ -2689,16 +2471,14 @@ func TestDashboardReturnsToTheWorkspaceWhenTheLastTabExits(t *testing.T) {
 // A stream that drops while the tab keeps running is a lost connection, not an
 // exit, and the same walk reattaches to it.
 func TestDashboardReattachesWhenTheConnectionDrops(t *testing.T) {
-	tabs := []model.Tab{{ID: "tab-1", WorkspaceID: "workspace-1", Name: "1", Running: true}}
+	tabs := openTabs(1)
 	value, backend, refresh := exitedDashboard(t, tabs, 0)
 
-	updated, open := value.Update(refresh())
-	value = updated.(dashboard)
+	open := send(&value, refresh())
 	if open == nil {
 		t.Fatal("a still running tab was not reattached")
 	}
-	updated, _ = value.Update(open())
-	value = updated.(dashboard)
+	send(&value, open())
 	defer value.closeTerminal()
 	if backend.openedTab != "tab-1" || value.terminal == nil {
 		t.Fatalf("reattached to %q with terminal %v, want tab-1 open", backend.openedTab, value.terminal)
@@ -2707,17 +2487,13 @@ func TestDashboardReattachesWhenTheConnectionDrops(t *testing.T) {
 
 // A shell exiting in the background must not pull the user out of the tree.
 func TestDashboardKeepsWorkspaceFocusWhenABackgroundShellExits(t *testing.T) {
-	tabs := []model.Tab{
-		{ID: "tab-1", WorkspaceID: "workspace-1", Name: "1", Running: true},
-		{ID: "tab-2", WorkspaceID: "workspace-1", Name: "2", Running: true},
-	}
+	tabs := openTabs(2)
 	value, backend, _ := exitedDashboard(t, tabs, 0)
 	value.focus = leftPane
 	value.terminalExited = true
 
 	backend.snapshot.Roots[0].Directories[0].Tabs = tabs[1:]
-	updated, open := value.Update(snapshotMsg{value: backend.snapshot})
-	value = updated.(dashboard)
+	open := send(&value, snapshotMsg{value: backend.snapshot})
 	if open != nil || value.focus != leftPane {
 		t.Fatalf("background exit = (command %v, focus %v), want the workspace pane untouched", open, value.focus)
 	}
@@ -2727,14 +2503,10 @@ func TestDashboardKeepsWorkspaceFocusWhenABackgroundShellExits(t *testing.T) {
 // go. If that snapshot never arrives the move must be settled, not left armed
 // to fire on whatever refresh comes next.
 func TestDashboardSettlesAnExitWhenTheSnapshotFails(t *testing.T) {
-	tabs := []model.Tab{
-		{ID: "tab-1", WorkspaceID: "workspace-1", Name: "1", Running: true},
-		{ID: "tab-2", WorkspaceID: "workspace-1", Name: "2", Running: true},
-	}
+	tabs := openTabs(2)
 	value, backend, _ := exitedDashboard(t, tabs, 0)
 
-	updated, _ := value.Update(snapshotMsg{err: errors.New("connect to daemon: no such file")})
-	value = updated.(dashboard)
+	send(&value, snapshotMsg{err: errors.New("connect to daemon: no such file")})
 	if value.terminalExited || value.focus != leftPane {
 		t.Fatalf("failed refresh = (pending %v, focus %v), want the exit settled on the workspace pane",
 			value.terminalExited, value.focus)
@@ -2748,8 +2520,7 @@ func TestDashboardSettlesAnExitWhenTheSnapshotFails(t *testing.T) {
 	t.Cleanup(value.closeTerminal)
 	value.focus = terminalPane
 	value.tabIndex = 1
-	updated, command := value.Update(snapshotMsg{value: backend.snapshot})
-	value = updated.(dashboard)
+	command := send(&value, snapshotMsg{value: backend.snapshot})
 	if command != nil || value.terminal == nil {
 		t.Fatalf("later refresh = (command %v, terminal %v), want the open terminal left alone",
 			command, value.terminal != nil)
@@ -2760,11 +2531,7 @@ func TestDashboardSettlesAnExitWhenTheSnapshotFails(t *testing.T) {
 // bar and leave the dashboard usable. None of these branches had a test,
 // because the fake could not fail.
 func TestDashboardReportsBackendFailures(t *testing.T) {
-	workspace := model.Workspace{ID: "workspace-1", RootID: "root-1", Name: "alpha", Path: "/projects/alpha"}
-	snapshot := model.Snapshot{Roots: []model.RootView{{
-		Root:        model.Root{ID: "root-1", Name: "projects", Path: "/projects"},
-		Directories: []model.WorkspaceView{{Workspace: workspace}},
-	}}}
+	snapshot, workspace := alphaWorkspaceSnapshot(nil)
 
 	for _, probe := range []struct {
 		name   string
@@ -2785,10 +2552,10 @@ func TestDashboardReportsBackendFailures(t *testing.T) {
 			name:   "adding a root",
 			method: "AddRoot",
 			act: func(m dashboard) (tea.Model, tea.Cmd) {
-				updated, _ := m.Update(key(tea.KeyF2, ""))
-				updated, _ = updated.(dashboard).Update(key('/', "/"))
-				updated, _ = updated.(dashboard).Update(key(tea.KeyExtended, "/projects"))
-				return updated.(dashboard).Update(key(tea.KeyEnter, ""))
+				send(&m, key(tea.KeyF2, ""))
+				send(&m, key('/', "/"))
+				send(&m, key(tea.KeyExtended, "/projects"))
+				return m.Update(key(tea.KeyEnter, ""))
 			},
 		},
 	} {
@@ -2806,8 +2573,7 @@ func TestDashboardReportsBackendFailures(t *testing.T) {
 				t.Fatalf("%s produced no command to fail", probe.name)
 			}
 			for _, message := range commandMessages(command) {
-				updated, _ = value.Update(message)
-				value = updated.(dashboard)
+				send(&value, message)
 			}
 			if !strings.Contains(value.errorMessage, probe.method+" refused") {
 				t.Fatalf("error message = %q, want the %s failure", value.errorMessage, probe.method)
@@ -2826,21 +2592,14 @@ func TestDashboardReportsBackendFailures(t *testing.T) {
 // A tab whose creation failed must not leave the dashboard pointing at a
 // terminal that was never opened.
 func TestDashboardReportsAFailedTabCreation(t *testing.T) {
-	workspace := model.Workspace{ID: "workspace-1", RootID: "root-1", Name: "alpha", Path: "/projects/alpha"}
-	backend := &fakeBackend{
-		snapshot: model.Snapshot{Roots: []model.RootView{{
-			Root:        model.Root{ID: "root-1", Name: "projects", Path: "/projects"},
-			Directories: []model.WorkspaceView{{Workspace: workspace}},
-		}}},
-		workspace: workspace,
-	}
+	snapshot, workspace := alphaWorkspaceSnapshot(nil)
+	backend := &fakeBackend{snapshot: snapshot, workspace: workspace}
 	backend.fail("CreateTab", errors.New("daemon: start shell PTY: permission denied"))
 	value := newDashboard(backend, backend.snapshot)
 	value.selectedWorkspaceID = workspace.ID
 	value.selectedPath = workspace.Path
 
-	updated, _ := value.Update(tabMsg{err: backend.failure("CreateTab")})
-	value = updated.(dashboard)
+	send(&value, tabMsg{err: backend.failure("CreateTab")})
 	if value.terminal != nil || !strings.Contains(value.errorMessage, "permission denied") {
 		t.Fatalf("failed creation = (terminal %v, error %q)", value.terminal != nil, value.errorMessage)
 	}
@@ -2852,8 +2611,7 @@ func TestDashboardReturnsToTheTreeWhenOpeningFails(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, model.Snapshot{})
 	value.focus = terminalPane
 
-	updated, _ := value.Update(terminalOpenedMsg{err: errors.New("daemon: running terminal session not found")})
-	value = updated.(dashboard)
+	send(&value, terminalOpenedMsg{err: errors.New("daemon: running terminal session not found")})
 	if value.focus != leftPane || value.terminal != nil {
 		t.Fatalf("failed open = (focus %v, terminal %v), want the workspace pane", value.focus, value.terminal != nil)
 	}
@@ -2866,15 +2624,7 @@ func TestDashboardReturnsToTheTreeWhenOpeningFails(t *testing.T) {
 // of the dashboard. The event loop therefore renders only the final restored
 // screen, while keeping the history available to scrollback.
 func TestDashboardAdoptsACompletedTerminalReplay(t *testing.T) {
-	workspace := model.Workspace{ID: "workspace-1", RootID: "root-1", Name: "alpha", Path: "/projects/alpha"}
-	tab := model.Tab{ID: "tab-1", WorkspaceID: workspace.ID, Name: "1", Running: true}
-	snapshot := model.Snapshot{Roots: []model.RootView{{
-		Root: model.Root{ID: "root-1", Name: "projects", Path: "/projects"},
-		Directories: []model.WorkspaceView{{
-			Workspace: workspace,
-			Tabs:      []model.Tab{tab},
-		}},
-	}}}
+	snapshot, workspace := alphaWorkspaceSnapshot(openTabs(1))
 	value := newDashboard(&fakeBackend{}, snapshot)
 	value.width = 80
 	value.height = 12
@@ -2886,12 +2636,11 @@ func TestDashboardAdoptsACompletedTerminalReplay(t *testing.T) {
 	}
 	stream := newMemoryStream("")
 
-	updated, command := value.Update(terminalOpenedMsg{
+	command := send(&value, terminalOpenedMsg{
 		tabID:  "tab-1",
 		stream: stream,
 		replay: []byte(replay.String()),
 	})
-	value = updated.(dashboard)
 	t.Cleanup(value.closeTerminal)
 
 	if value.terminal == nil {
@@ -2923,8 +2672,7 @@ func TestDashboardReconnectsWhenTerminalInputFails(t *testing.T) {
 		t.Fatal("terminal input copy did not report the write failure")
 	}
 	message := value.terminal.read()()
-	updated, command := value.Update(message)
-	value = updated.(dashboard)
+	command := send(&value, message)
 
 	if value.terminal != nil || !value.terminalExited {
 		t.Fatalf("failed input = (terminal %v, exited %v), want reconnect", value.terminal != nil, value.terminalExited)
@@ -2966,13 +2714,11 @@ func TestDashboardShowsAndRemovesAnUnreadableRoot(t *testing.T) {
 	}
 
 	value.setNavigation(0)
-	updated, command := value.Update(key(tea.KeyF8, ""))
-	value = updated.(dashboard)
+	command := send(&value, key(tea.KeyF8, ""))
 	if value.modal != workspaceActionsModal || command != nil {
 		t.Fatalf("F8 = (modal %v, command %v), want workspace actions", value.modal, command)
 	}
-	updated, command = value.Update(key(tea.KeyEnter, ""))
-	value = updated.(dashboard)
+	command = send(&value, key(tea.KeyEnter, ""))
 	if value.modal != removeSelectionModal || command != nil {
 		t.Fatalf("Forget root = (modal %v, command %v), want a confirmation", value.modal, command)
 	}
@@ -2981,13 +2727,11 @@ func TestDashboardShowsAndRemovesAnUnreadableRoot(t *testing.T) {
 		!strings.Contains(body, "running shells will be terminated") {
 		t.Fatalf("the confirmation does not describe the root removal:\n%s", body)
 	}
-	updated, command = value.Update(key(tea.KeyEnter, ""))
-	value = updated.(dashboard)
+	command = send(&value, key(tea.KeyEnter, ""))
 	if command == nil || value.modal != noModal {
 		t.Fatalf("Enter = (command %v, modal %v), want the removal", command, value.modal)
 	}
-	updated, _ = value.Update(command())
-	value = updated.(dashboard)
+	send(&value, command())
 	if backend.removedRootID != "root-1" {
 		t.Fatalf("removed %q, want root-1", backend.removedRootID)
 	}
@@ -3010,15 +2754,13 @@ func TestDashboardDoesNotUseRemovedLetterShortcuts(t *testing.T) {
 			value := scrolledDashboard(t, 200)
 			value.focus = leftPane
 
-			updated, command := value.Update(key(letter, string(letter)))
-			value = updated.(dashboard)
+			command := send(&value, key(letter, string(letter)))
 			if command != nil || value.scrollback || value.modal != noModal {
 				t.Fatalf("%q = (command %v, scrollback %v, modal %v), want no shortcut action",
 					letter, command, value.scrollback, value.modal)
 			}
 		})
 	}
-
 }
 
 func TestDashboardLeavesScrollbackForTerminalInput(t *testing.T) {
@@ -3034,32 +2776,28 @@ func TestDashboardLeavesScrollbackForTerminalInput(t *testing.T) {
 	} {
 		t.Run(test.message.String(), func(t *testing.T) {
 			value := scrolledDashboard(t, 200)
-			updated, _ := value.Update(key(tea.KeyF6, ""))
-			value = updated.(dashboard)
+			send(&value, key(tea.KeyF6, ""))
 
-			updated, _ = value.Update(test.message)
-			value = updated.(dashboard)
+			send(&value, test.message)
 			if value.scrollback || value.scrollOffset != 0 || value.focus != terminalPane {
 				t.Fatalf("%q = (scrollback %v, offset %d, focus %v), want terminal input mode",
 					test.message.String(), value.scrollback, value.scrollOffset, value.focus)
 			}
-			waitForGuest(t, value.terminal.stream.(*memoryStream), test.want)
+			waitForGuest(t, guest(value), test.want)
 		})
 	}
 }
 
 func TestDashboardLeavesScrollbackForPaste(t *testing.T) {
 	value := scrolledDashboard(t, 200)
-	updated, _ := value.Update(key(tea.KeyF6, ""))
-	value = updated.(dashboard)
+	send(&value, key(tea.KeyF6, ""))
 
-	updated, _ = value.Update(tea.PasteMsg{Content: "pasted"})
-	value = updated.(dashboard)
+	send(&value, tea.PasteMsg{Content: "pasted"})
 	if value.scrollback || value.scrollOffset != 0 || value.focus != terminalPane {
 		t.Fatalf("paste = (scrollback %v, offset %d, focus %v), want terminal input mode",
 			value.scrollback, value.scrollOffset, value.focus)
 	}
-	waitForGuest(t, value.terminal.stream.(*memoryStream), "pasted")
+	waitForGuest(t, guest(value), "pasted")
 }
 
 // Unbound letters always belong to the shell in the terminal pane.
@@ -3067,8 +2805,7 @@ func TestDashboardSendsUnboundLettersToTheShell(t *testing.T) {
 	value := scrolledDashboard(t, 200)
 
 	for _, letter := range []rune{'a', 'q', 'r', 's', 'd', 't'} {
-		updated, _ := value.Update(key(letter, string(letter)))
-		value = updated.(dashboard)
+		send(&value, key(letter, string(letter)))
 		if value.scrollback || value.modal != noModal {
 			t.Fatalf("%q in the terminal = (scrollback %v, modal %v), want it forwarded to the shell",
 				letter, value.scrollback, value.modal)
@@ -3090,8 +2827,7 @@ func TestDashboardLeavesTheHighFunctionKeysToTheShell(t *testing.T) {
 	value.focus = terminalPane
 
 	for _, code := range []rune{tea.KeyF8, tea.KeyF9} {
-		updated, command := value.Update(key(code, ""))
-		value = updated.(dashboard)
+		command := send(&value, key(code, ""))
 		if value.modal != noModal || command != nil {
 			t.Fatalf("%v in the terminal = (modal %v, command %v), want it forwarded to the shell",
 				code, value.modal, command)
@@ -3100,15 +2836,12 @@ func TestDashboardLeavesTheHighFunctionKeysToTheShell(t *testing.T) {
 
 	// The workspace pane still answers them, next to their letters.
 	value.focus = leftPane
-	updated, _ := value.Update(key(tea.KeyF8, ""))
-	value = updated.(dashboard)
+	send(&value, key(tea.KeyF8, ""))
 	if value.modal != workspaceActionsModal {
 		t.Fatalf("F8 in the workspace = modal %v, want workspace actions", value.modal)
 	}
-	updated, _ = value.Update(key(tea.KeyEscape, ""))
-	value = updated.(dashboard)
-	updated, _ = value.Update(key(tea.KeyF9, ""))
-	value = updated.(dashboard)
+	send(&value, key(tea.KeyEscape, ""))
+	send(&value, key(tea.KeyF9, ""))
 	if value.modal != shutdownModal {
 		t.Fatalf("F9 in the workspace = modal %v, want the shutdown confirmation", value.modal)
 	}
@@ -3137,8 +2870,7 @@ func TestDashboardCancelsRemovingARoot(t *testing.T) {
 	if value.modal != removeSelectionModal {
 		t.Fatalf("remove modal = %v, want the confirmation", value.modal)
 	}
-	updated, command := value.Update(key(tea.KeyEscape, ""))
-	value = updated.(dashboard)
+	command := send(&value, key(tea.KeyEscape, ""))
 	if value.modal != noModal || command != nil {
 		t.Fatalf("Esc = (modal %v, command %v), want the confirmation closed", value.modal, command)
 	}
@@ -3156,8 +2888,7 @@ func TestDashboardRemovesTheSelectedRoot(t *testing.T) {
 
 	updated, _ := value.confirmRemoveSelection(cursorItem(t, value))
 	value = updated.(dashboard)
-	updated, command := value.Update(key(tea.KeyEnter, ""))
-	value = updated.(dashboard)
+	command := send(&value, key(tea.KeyEnter, ""))
 	if command == nil {
 		t.Fatal("confirmation then Enter produced no removal command")
 	}
@@ -3168,11 +2899,7 @@ func TestDashboardRemovesTheSelectedRoot(t *testing.T) {
 }
 
 func TestDashboardDeletesTheSelectedWorkspace(t *testing.T) {
-	workspace := model.Workspace{ID: "workspace-1", RootID: "root-1", Name: "alpha", Path: "/projects/alpha"}
-	snapshot := model.Snapshot{Roots: []model.RootView{{
-		Root:        model.Root{ID: "root-1", Name: "projects", Path: "/projects"},
-		Directories: []model.WorkspaceView{{Workspace: workspace}},
-	}}}
+	snapshot, workspace := alphaWorkspaceSnapshot(nil)
 	backend := &fakeBackend{snapshot: snapshot}
 	value := newDashboard(backend, snapshot)
 	value.width, value.height = 120, 40
@@ -3189,13 +2916,11 @@ func TestDashboardDeletesTheSelectedWorkspace(t *testing.T) {
 		t.Fatalf("workspace confirmation does not describe the deletion:\n%s", body)
 	}
 
-	updated, command = value.Update(key(tea.KeyEnter, ""))
-	value = updated.(dashboard)
+	command = send(&value, key(tea.KeyEnter, ""))
 	if command == nil || value.modal != noModal {
 		t.Fatalf("Enter = (command %v, modal %v), want the deletion", command, value.modal)
 	}
-	updated, _ = value.Update(command())
-	value = updated.(dashboard)
+	send(&value, command())
 	if backend.removedWorkspaceRootID != "root-1" || backend.removedWorkspacePath != workspace.Path {
 		t.Fatalf("removed workspace = (%q, %q), want (%q, %q)",
 			backend.removedWorkspaceRootID, backend.removedWorkspacePath, "root-1", workspace.Path)
@@ -3238,14 +2963,12 @@ func TestDashboardDeletesTheWorkspaceTheConfirmationNamed(t *testing.T) {
 		{Root: snapshot.Roots[0].Root, Directories: []model.WorkspaceView{}},
 		snapshot.Roots[1],
 	}}
-	updated, _ = value.Update(snapshotMsg{value: pruned})
-	value = updated.(dashboard)
+	send(&value, snapshotMsg{value: pruned})
 	if item, _ := value.navigationItem(); item.root.ID != "root-2" {
 		t.Fatalf("the cursor drifted to root %q; the test needs it on root-2 to prove anything", item.root.ID)
 	}
 
-	updated, command := value.Update(key(tea.KeyEnter, ""))
-	value = updated.(dashboard)
+	command := send(&value, key(tea.KeyEnter, ""))
 	if command == nil {
 		t.Fatal("Enter produced no removal command")
 	}
@@ -3263,14 +2986,12 @@ func TestDashboardForgetsTheRootTheConfirmationNamed(t *testing.T) {
 
 	updated, _ := value.confirmRemoveSelection(cursorItem(t, value))
 	value = updated.(dashboard)
-	updated, _ = value.Update(snapshotMsg{value: model.Snapshot{Roots: snapshot.Roots[1:]}})
-	value = updated.(dashboard)
+	send(&value, snapshotMsg{value: model.Snapshot{Roots: snapshot.Roots[1:]}})
 	if item, _ := value.navigationItem(); item.root.ID != "root-2" {
 		t.Fatalf("the cursor drifted to root %q; want root-2", item.root.ID)
 	}
 
-	updated, command := value.Update(key(tea.KeyEnter, ""))
-	value = updated.(dashboard)
+	command := send(&value, key(tea.KeyEnter, ""))
 	if command == nil {
 		t.Fatal("Enter produced no removal command")
 	}
@@ -3284,25 +3005,23 @@ func TestDashboardForgetsTheRootTheConfirmationNamed(t *testing.T) {
 // whole recording, the client fell behind, the daemon cut it off, and round it
 // went. Retries are spaced and bounded, and the last word is the user's.
 func TestDashboardBacksOffRepeatedReattaches(t *testing.T) {
-	tabs := []model.Tab{{ID: "tab-1", WorkspaceID: "workspace-1", Name: "1", Running: true}}
+	tabs := openTabs(1)
 	value, backend, refresh := exitedDashboard(t, tabs, 0)
 
 	// drop reopens the terminal the way a completed attach does, then ends its
 	// stream, which is what a connection the daemon cut off looks like.
 	drop := func(t *testing.T, value dashboard, open tea.Cmd) dashboard {
 		t.Helper()
-		updated, _ := value.Update(open())
-		value = updated.(dashboard)
+		send(&value, open())
 		if value.terminal == nil {
 			t.Fatal("the reattach did not open a terminal")
 		}
-		updated, _ = value.Update(terminalOutputMsg{terminal: value.terminal, err: io.EOF})
-		return updated.(dashboard)
+		send(&value, terminalOutputMsg{terminal: value.terminal, err: io.EOF})
+		return value
 	}
 
 	// The first drop reconnects at once: a one-off should recover unnoticed.
-	updated, open := value.Update(refresh())
-	value = updated.(dashboard)
+	open := send(&value, refresh())
 	if open == nil || value.reattachAttempts != 0 {
 		t.Fatalf("first reattach = (command %v, retries %d), want an immediate reconnect",
 			open, value.reattachAttempts)
@@ -3311,8 +3030,7 @@ func TestDashboardBacksOffRepeatedReattaches(t *testing.T) {
 
 	// Each further drop is a retry: spaced, and counted.
 	for attempt := 1; attempt <= maximumReattachAttempts; attempt++ {
-		updated, delayed := value.Update(refresh())
-		value = updated.(dashboard)
+		delayed := send(&value, refresh())
 		if delayed == nil {
 			t.Fatalf("retry %d produced no command", attempt)
 		}
@@ -3329,8 +3047,7 @@ func TestDashboardBacksOffRepeatedReattaches(t *testing.T) {
 		if elapsed := time.Since(waited); elapsed < initialReattachBackoff {
 			t.Fatalf("retry %d waited %v, want at least %v", attempt, elapsed, initialReattachBackoff)
 		}
-		updated, open = value.Update(message)
-		value = updated.(dashboard)
+		open = send(&value, message)
 		if open == nil {
 			t.Fatal("the backoff timer did not lead to a reattach")
 		}
@@ -3338,8 +3055,7 @@ func TestDashboardBacksOffRepeatedReattaches(t *testing.T) {
 	}
 
 	// Past the ceiling romty stops on its own and says so.
-	updated, command := value.Update(refresh())
-	value = updated.(dashboard)
+	command := send(&value, refresh())
 	if command != nil {
 		t.Fatalf("romty kept retrying past %d attempts", maximumReattachAttempts)
 	}
@@ -3349,34 +3065,28 @@ func TestDashboardBacksOffRepeatedReattaches(t *testing.T) {
 	if backend.openedTab != "tab-1" {
 		t.Fatalf("opened %q, want the dropping tab", backend.openedTab)
 	}
-
 }
 
 // Opening a workspace is the user asking again, so pending retries start over
 // and the next attach is immediate rather than delayed.
 func TestDashboardForgetsRetriesWhenTheUserSelectsAgain(t *testing.T) {
-	tabs := []model.Tab{{ID: "tab-1", WorkspaceID: "workspace-1", Name: "1", Running: true}}
+	tabs := openTabs(1)
 	value, backend, refresh := exitedDashboard(t, tabs, 0)
 
 	// One immediate reconnect, one drop, one counted retry.
-	updated, open := value.Update(refresh())
-	value = updated.(dashboard)
-	updated, _ = value.Update(open())
-	value = updated.(dashboard)
-	updated, _ = value.Update(terminalOutputMsg{terminal: value.terminal, err: io.EOF})
-	value = updated.(dashboard)
-	updated, _ = value.Update(refresh())
-	value = updated.(dashboard)
+	open := send(&value, refresh())
+	send(&value, open())
+	send(&value, terminalOutputMsg{terminal: value.terminal, err: io.EOF})
+	send(&value, refresh())
 	if value.reattachAttempts == 0 || value.reattachTab == "" {
 		t.Fatalf("no retry is pending: %d on %q", value.reattachAttempts, value.reattachTab)
 	}
 
-	updated, _ = value.Update(workspaceMsg{
+	send(&value, workspaceMsg{
 		value:    model.Workspace{ID: "workspace-1", Name: "alpha", Path: "/projects/alpha"},
 		snapshot: backend.snapshot,
 		tabID:    "tab-1",
 	})
-	value = updated.(dashboard)
 	if value.reattachTab != "" || value.reattachAttempts != 0 {
 		t.Fatalf("a user selection left %d retries pending on %q",
 			value.reattachAttempts, value.reattachTab)
@@ -3439,10 +3149,7 @@ func TestLayoutMatchesWhatIsRendered(t *testing.T) {
 // it. So the F5 a user presses right after a failure erased the reason for it,
 // and an in-flight refresh could erase one at random.
 func TestDashboardKeepsErrorsARefreshDoesNotAnswer(t *testing.T) {
-	snapshot := model.Snapshot{Roots: []model.RootView{{
-		Root:        model.Root{ID: "root-1", Name: "projects", Path: "/projects"},
-		Directories: []model.WorkspaceView{{Workspace: model.Workspace{ID: "w", Name: "alpha", Path: "/projects/alpha"}}},
-	}}}
+	snapshot := projectsSnapshot([]model.WorkspaceView{{Workspace: model.Workspace{ID: "w", Name: "alpha", Path: "/projects/alpha"}}})
 
 	for _, probe := range []struct {
 		name     string
@@ -3456,35 +3163,35 @@ func TestDashboardKeepsErrorsARefreshDoesNotAnswer(t *testing.T) {
 				// has to be the one on screen.
 				m.terminal = newEmbeddedTerminal("tab-1", newMemoryStream(""), 40, 10)
 				t.Cleanup(m.closeTerminal)
-				updated, _ := m.Update(resizeFailedMsg{
+				send(&m, resizeFailedMsg{
 					tabID: "tab-1",
 					err:   errors.New("terminal session not found"),
 				})
-				return updated.(dashboard)
+				return m
 			},
 			survives: true,
 		},
 		{
 			name: "a daemon that would not stop",
 			raise: func(m dashboard) dashboard {
-				updated, _ := m.Update(daemonStoppedMsg{err: errors.New("connection reset")})
-				return updated.(dashboard)
+				send(&m, daemonStoppedMsg{err: errors.New("connection reset")})
+				return m
 			},
 			survives: true,
 		},
 		{
 			name: "config that could not be written",
 			raise: func(m dashboard) dashboard {
-				updated, _ := m.Update(configSavedMsg{err: errors.New("read-only file system")})
-				return updated.(dashboard)
+				send(&m, configSavedMsg{err: errors.New("read-only file system")})
+				return m
 			},
 			survives: true,
 		},
 		{
 			name: "a snapshot that failed",
 			raise: func(m dashboard) dashboard {
-				updated, _ := m.Update(snapshotMsg{err: errors.New("daemon: read root")})
-				return updated.(dashboard)
+				send(&m, snapshotMsg{err: errors.New("daemon: read root")})
+				return m
 			},
 			survives: false,
 		},
@@ -3499,8 +3206,7 @@ func TestDashboardKeepsErrorsARefreshDoesNotAnswer(t *testing.T) {
 				t.Fatal("nothing was raised")
 			}
 
-			updated, _ := value.Update(snapshotMsg{value: snapshot})
-			value = updated.(dashboard)
+			send(&value, snapshotMsg{value: snapshot})
 			if probe.survives && value.errorMessage != raised {
 				t.Fatalf("a refresh erased %q, which it does not answer", raised)
 			}
@@ -3520,8 +3226,7 @@ func TestDashboardReportsAFailedResizeAsItsOwnFailure(t *testing.T) {
 	value.terminal = newEmbeddedTerminal("tab-1", newMemoryStream(""), 40, 10)
 	t.Cleanup(value.closeTerminal)
 
-	updated, command := value.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
-	value = updated.(dashboard)
+	command := send(&value, tea.WindowSizeMsg{Width: 100, Height: 30})
 	if command == nil {
 		t.Fatal("a resize produced no command")
 	}
@@ -3529,8 +3234,7 @@ func TestDashboardReportsAFailedResizeAsItsOwnFailure(t *testing.T) {
 	if _, ok := message.(resizeFailedMsg); !ok {
 		t.Fatalf("a failed resize produced %T, want resizeFailedMsg", message)
 	}
-	updated, _ = value.Update(message)
-	value = updated.(dashboard)
+	send(&value, message)
 	if !strings.Contains(value.errorMessage, "resize terminal") {
 		t.Fatalf("error message = %q, want the resize failure", value.errorMessage)
 	}
@@ -3551,11 +3255,10 @@ func TestDashboardReportsAConfigFailureTheWidthMovedPast(t *testing.T) {
 	value.width, value.height = 120, 40
 	value.leftWidth = 24
 
-	updated, command := value.Update(configSavedMsg{
+	command := send(&value, configSavedMsg{
 		leftWidth: 22,
 		err:       errors.New("read-only file system"),
 	})
-	value = updated.(dashboard)
 	if !strings.Contains(value.errorMessage, "read-only file system") {
 		t.Fatalf("error message = %q, want the save failure", value.errorMessage)
 	}
@@ -3574,8 +3277,7 @@ func TestDashboardIgnoresAResizeFailureForATerminalItLeft(t *testing.T) {
 	value := newDashboard(backend, model.Snapshot{})
 	value.terminal = newEmbeddedTerminal("tab-1", newMemoryStream(""), 40, 10)
 
-	updated, command := value.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
-	value = updated.(dashboard)
+	command := send(&value, tea.WindowSizeMsg{Width: 100, Height: 30})
 	if command == nil {
 		t.Fatal("a resize produced no command")
 	}
@@ -3593,8 +3295,7 @@ func TestDashboardIgnoresAResizeFailureForATerminalItLeft(t *testing.T) {
 	value.terminal = newEmbeddedTerminal("tab-2", newMemoryStream(""), 40, 10)
 	t.Cleanup(value.closeTerminal)
 
-	updated, _ = value.Update(failure)
-	value = updated.(dashboard)
+	send(&value, failure)
 	if value.errorMessage != "" {
 		t.Fatalf("error message = %q, want nothing about a terminal the user left", value.errorMessage)
 	}
@@ -3613,7 +3314,7 @@ func TestDashboardKeepsTheCursorOnTheSameWorkspace(t *testing.T) {
 			})
 		}
 		return model.Snapshot{Roots: []model.RootView{{
-			Root:        model.Root{ID: "root-1", Name: "projects", Path: "/projects"},
+			Root:        projectsRoot,
 			Directories: directories,
 		}}}
 	}
@@ -3630,8 +3331,7 @@ func TestDashboardKeepsTheCursorOnTheSameWorkspace(t *testing.T) {
 	}
 
 	// A clone finishes and sorts above the cursor.
-	updated, _ := value.Update(snapshotMsg{value: tree("alpha", "beta", "gamma")})
-	value = updated.(dashboard)
+	send(&value, snapshotMsg{value: tree("alpha", "beta", "gamma")})
 	item, ok := value.navigationItem()
 	if !ok || item.workspace.Name != "gamma" {
 		t.Fatalf("after the refresh the cursor is on %q, want gamma", item.workspace.Name)
@@ -3642,8 +3342,7 @@ func TestDashboardKeepsTheCursorOnTheSameWorkspace(t *testing.T) {
 
 	// The workspace the cursor was on disappears: fall back rather than
 	// pointing at nothing.
-	updated, _ = value.Update(snapshotMsg{value: tree("alpha", "beta")})
-	value = updated.(dashboard)
+	send(&value, snapshotMsg{value: tree("alpha", "beta")})
 	if _, ok := value.navigationItem(); !ok {
 		t.Fatal("the cursor points outside the tree after its workspace was removed")
 	}
@@ -3657,8 +3356,7 @@ func TestDashboardRefusesScrollbackWithoutTerminal(t *testing.T) {
 		tea.KeyPressMsg(tea.Key{Code: tea.KeyPgUp, Mod: tea.ModShift}),
 		scrollbackToggleKey(),
 	} {
-		updated, _ := value.Update(message)
-		value = updated.(dashboard)
+		send(&value, message)
 		if value.scrollback {
 			t.Fatalf("%q entered scrollback with no terminal open", message.String())
 		}
@@ -3681,8 +3379,7 @@ func TestDashboardKeepsGlobalKeysAtOnePrecedence(t *testing.T) {
 		{message: key(tea.KeyF3, ""), want: configModal},
 		{message: key(tea.KeyF1, ""), want: helpModal},
 	} {
-		updated, command := value.Update(step.message)
-		value = updated.(dashboard)
+		command := send(&value, step.message)
 		if value.modal != step.want || command != nil || value.errorMessage != "" {
 			t.Fatalf("%q with a modal open = (modal %v, command %v, error %q), want modal %v",
 				step.message.String(), value.modal, command, value.errorMessage, step.want)
@@ -3692,27 +3389,23 @@ func TestDashboardKeepsGlobalKeysAtOnePrecedence(t *testing.T) {
 		t.Fatalf("status bar keeps the stale error instead of the modal hint:\n%s", rendered)
 	}
 
-	updated, _ := value.Update(key(tea.KeyF2, ""))
-	value = updated.(dashboard)
+	send(&value, key(tea.KeyF2, ""))
 	if value.modal != browseModal {
 		t.Fatalf("F2 with a modal open = modal %v, want the root picker", value.modal)
 	}
-	updated, _ = value.Update(key('/', "/"))
-	value = updated.(dashboard)
+	send(&value, key('/', "/"))
 	if !value.inputMode || value.modal != noModal {
 		t.Fatalf("/ in the picker = (input %v, modal %v), want root input", value.inputMode, value.modal)
 	}
 
 	// Root input owns every key except its own cancel, so F4 cannot discard it.
 	value.input = "/projects"
-	updated, command := value.Update(key(tea.KeyF4, ""))
-	value = updated.(dashboard)
+	command := send(&value, key(tea.KeyF4, ""))
 	if value.result.Quit || command != nil || value.input != "/projects" {
 		t.Fatalf("F4 while typing = (quit %v, command %v, input %q), want the input kept",
 			value.result.Quit, command, value.input)
 	}
-	updated, _ = value.Update(key(tea.KeyEscape, ""))
-	value = updated.(dashboard)
+	send(&value, key(tea.KeyEscape, ""))
 	if value.inputMode || value.input != "" {
 		t.Fatalf("Esc while typing = (input mode %v, input %q), want the prompt cancelled", value.inputMode, value.input)
 	}
@@ -3750,8 +3443,7 @@ func TestDashboardCapturesLiveMouseWheelAndUsesKeyboardFocus(t *testing.T) {
 		t.Fatalf("mouse focus mode is still advertised:\n%s", rendered)
 	}
 
-	updated, _ := value.Update(controlSlashKey())
-	value = updated.(dashboard)
+	send(&value, controlSlashKey())
 	if value.focus != leftPane {
 		t.Fatalf("Ctrl+/ focus = %v, want workspace pane", value.focus)
 	}
@@ -3770,13 +3462,10 @@ func TestDashboardMovesWorkspaceAndTabCursorBeforeConfirming(t *testing.T) {
 	firstTab := model.Tab{ID: "tab-1", WorkspaceID: firstWorkspace.ID, Name: "one", Running: true}
 	secondTab := model.Tab{ID: "tab-2", WorkspaceID: secondWorkspace.ID, Name: "two", Running: true}
 	thirdTab := model.Tab{ID: "tab-3", WorkspaceID: secondWorkspace.ID, Name: "three", Running: true}
-	snapshot := model.Snapshot{Roots: []model.RootView{{
-		Root: model.Root{ID: "root-1", Name: "projects", Path: "/projects"},
-		Directories: []model.WorkspaceView{
-			{Workspace: firstWorkspace, Tabs: []model.Tab{firstTab}},
-			{Workspace: secondWorkspace, Tabs: []model.Tab{secondTab, thirdTab}},
-		},
-	}}}
+	snapshot := projectsSnapshot([]model.WorkspaceView{
+		{Workspace: firstWorkspace, Tabs: []model.Tab{firstTab}},
+		{Workspace: secondWorkspace, Tabs: []model.Tab{secondTab, thirdTab}},
+	})
 	backend := &fakeBackend{snapshot: snapshot, workspace: secondWorkspace}
 	terminal := newEmbeddedTerminal(firstTab.ID, newMemoryStream(""), 40, 10)
 	defer terminal.close()
@@ -3785,13 +3474,11 @@ func TestDashboardMovesWorkspaceAndTabCursorBeforeConfirming(t *testing.T) {
 	value.selectedPath = firstWorkspace.Path
 	value.terminal = terminal
 
-	updated, command := value.Update(key(tea.KeyDown, ""))
-	value = updated.(dashboard)
+	command := send(&value, key(tea.KeyDown, ""))
 	if command != nil || value.navIndex != 1 {
 		t.Fatalf("first workspace cursor move = (command %v, index %d)", command, value.navIndex)
 	}
-	updated, command = value.Update(key(tea.KeyDown, ""))
-	value = updated.(dashboard)
+	command = send(&value, key(tea.KeyDown, ""))
 	if command != nil || value.navIndex != 2 || value.terminal.id != firstTab.ID {
 		t.Fatalf("workspace cursor move = (command %v, index %d, terminal %q)", command, value.navIndex, value.terminal.id)
 	}
@@ -3799,19 +3486,16 @@ func TestDashboardMovesWorkspaceAndTabCursorBeforeConfirming(t *testing.T) {
 		t.Fatalf("candidate workspace tabs are not visible:\n%s", rendered)
 	}
 
-	updated, command = value.Update(key(tea.KeyRight, ""))
-	value = updated.(dashboard)
+	command = send(&value, key(tea.KeyRight, ""))
 	if command != nil || value.tabIndex != 1 || backend.openedTab != "" || value.terminal.id != firstTab.ID {
 		t.Fatalf("tab cursor move opened a terminal: command=%v index=%d opened=%q terminal=%q", command, value.tabIndex, backend.openedTab, value.terminal.id)
 	}
 
-	updated, selectCommand := value.Update(key(tea.KeyEnter, ""))
-	value = updated.(dashboard)
+	selectCommand := send(&value, key(tea.KeyEnter, ""))
 	if selectCommand == nil {
 		t.Fatal("Enter did not select the workspace and tab")
 	}
-	updated, openCommand := value.Update(selectCommand())
-	value = updated.(dashboard)
+	openCommand := send(&value, selectCommand())
 	if openCommand == nil {
 		t.Fatal("confirmed tab did not produce an open command")
 	}
@@ -3825,16 +3509,8 @@ func TestDashboardMovesWorkspaceAndTabCursorBeforeConfirming(t *testing.T) {
 // it has to switch on its own: moving the cursor and waiting for Enter is what
 // the plain arrows already do.
 func TestDashboardSwitchesTabsWithCtrlShiftArrows(t *testing.T) {
-	workspace := model.Workspace{ID: "workspace-1", RootID: "root-1", Name: "alpha", Path: "/projects/alpha"}
-	tabs := []model.Tab{
-		{ID: "tab-1", WorkspaceID: workspace.ID, Name: "1", Running: true},
-		{ID: "tab-2", WorkspaceID: workspace.ID, Name: "2", Running: true},
-		{ID: "tab-3", WorkspaceID: workspace.ID, Name: "3", Running: true},
-	}
-	snapshot := model.Snapshot{Roots: []model.RootView{{
-		Root:        model.Root{ID: "root-1", Name: "projects", Path: "/projects"},
-		Directories: []model.WorkspaceView{{Workspace: workspace, Tabs: tabs}},
-	}}}
+	tabs := openTabs(3)
+	snapshot, workspace := alphaWorkspaceSnapshot(tabs)
 	backend := &fakeBackend{snapshot: snapshot, workspace: workspace}
 	value := newDashboard(backend, snapshot)
 	value.setNavigation(1)
@@ -3872,8 +3548,7 @@ func TestDashboardSwitchesTabsWithCtrlShiftArrows(t *testing.T) {
 	// live terminal down and attach a new one in its place.
 	backend.openedTab = ""
 	value.tabIndex = 1
-	updated, command := value.Update(switchTabKey(tea.KeyLeft))
-	value = updated.(dashboard)
+	command := send(&value, switchTabKey(tea.KeyLeft))
 	if command != nil || backend.openedTab != "" || value.tabIndex != 1 {
 		t.Fatalf("switching to the open tab = (command %v, opened %q, index %d), want nothing done",
 			command, backend.openedTab, value.tabIndex)
@@ -3898,8 +3573,7 @@ func TestDashboardSwitchesTabsWithCtrlShiftArrows(t *testing.T) {
 	// change the terminal the answer applies to.
 	value.modal = shutdownModal
 	backend.openedTab = ""
-	updated, command = value.Update(switchTabKey(tea.KeyRight))
-	value = updated.(dashboard)
+	command = send(&value, switchTabKey(tea.KeyRight))
 	if command != nil || backend.openedTab != "" {
 		t.Fatalf("switching with a modal open = (command %v, opened %q), want nothing done",
 			command, backend.openedTab)
@@ -3911,7 +3585,7 @@ func TestDashboardSwitchesTabsWithCtrlShiftArrows(t *testing.T) {
 // tree and pressing Enter. Only workspaces with a terminal running are stops,
 // because a root lists every child directory whether it has been used or not.
 func TestDashboardSwitchesWorkspacesWithCtrlShiftArrows(t *testing.T) {
-	root := model.Root{ID: "root-1", Name: "projects", Path: "/projects"}
+	root := projectsRoot
 	// alpha and charlie have terminals; bravo is an empty directory between
 	// them, and delta an empty one after.
 	alpha := model.Workspace{ID: "workspace-1", RootID: root.ID, Name: "alpha", Path: "/projects/alpha"}
@@ -3972,7 +3646,7 @@ func TestDashboardSwitchesWorkspacesWithCtrlShiftArrows(t *testing.T) {
 // cursor anchor makes the key do nothing whenever it points at the workspace
 // before the open one, which from the workspace pane is where it often sits.
 func TestDashboardSwitchesWorkspacesFromTheOpenOneNotTheCursor(t *testing.T) {
-	root := model.Root{ID: "root-1", Name: "projects", Path: "/projects"}
+	root := projectsRoot
 	alpha := model.Workspace{ID: "workspace-1", RootID: root.ID, Name: "alpha", Path: "/projects/alpha"}
 	bravo := model.Workspace{ID: "workspace-2", RootID: root.ID, Name: "bravo", Path: "/projects/bravo"}
 	alphaTab := model.Tab{ID: "tab-1", WorkspaceID: alpha.ID, Name: "1", Running: true}
@@ -4007,7 +3681,7 @@ func TestDashboardSwitchesWorkspacesFromTheOpenOneNotTheCursor(t *testing.T) {
 // nowhere to go, and reopening the one that is open would tear a live terminal
 // down and attach a new one in its place.
 func TestDashboardKeepsTheWorkspaceWhenThereIsNowhereToSwitch(t *testing.T) {
-	root := model.Root{ID: "root-1", Name: "projects", Path: "/projects"}
+	root := projectsRoot
 	only := model.Workspace{ID: "workspace-1", RootID: root.ID, Name: "alpha", Path: "/projects/alpha"}
 	empty := model.Workspace{RootID: root.ID, Name: "bravo", Path: "/projects/bravo"}
 
@@ -4032,8 +3706,7 @@ func TestDashboardKeepsTheWorkspaceWhenThereIsNowhereToSwitch(t *testing.T) {
 			value.selectedPath = only.Path
 
 			for _, code := range []rune{tea.KeyDown, tea.KeyUp} {
-				updated, command := value.Update(switchTabKey(code))
-				value = updated.(dashboard)
+				command := send(&value, switchTabKey(code))
 				if command != nil || backend.openedTab != "" {
 					t.Fatalf("Ctrl+Shift+%s = (command %v, opened %q), want nothing done",
 						switchTabKey(code).String(), command, backend.openedTab)
@@ -4046,7 +3719,7 @@ func TestDashboardKeepsTheWorkspaceWhenThereIsNowhereToSwitch(t *testing.T) {
 // A sound and a tab marker say an agent stopped to ask something; without a way
 // to reach it the user still has to walk the tree to find which one.
 func TestDashboardJumpsToTheNextWaitingAgent(t *testing.T) {
-	root := model.Root{ID: "root-1", Name: "projects", Path: "/projects"}
+	root := projectsRoot
 	alpha := model.Workspace{ID: "workspace-1", RootID: root.ID, Name: "alpha", Path: "/projects/alpha"}
 	bravo := model.Workspace{ID: "workspace-2", RootID: root.ID, Name: "bravo", Path: "/projects/bravo"}
 	charlie := model.Workspace{ID: "workspace-3", RootID: root.ID, Name: "charlie", Path: "/projects/charlie"}
@@ -4103,7 +3776,7 @@ func TestDashboardJumpsToTheNextWaitingAgent(t *testing.T) {
 // Reopening the terminal that is already attached would tear it down to attach
 // a new one in its place, so the only waiting agent gets the keyboard instead.
 func TestDashboardJumpToTheOnlyWaitingAgentMovesTheFocus(t *testing.T) {
-	root := model.Root{ID: "root-1", Name: "projects", Path: "/projects"}
+	root := projectsRoot
 	alpha := model.Workspace{ID: "workspace-1", RootID: root.ID, Name: "alpha", Path: "/projects/alpha"}
 	alphaTab := model.Tab{ID: "tab-1", WorkspaceID: alpha.ID, Name: "1", Running: true,
 		Agent: model.AgentClaude, AgentPhase: model.AgentPhaseWaitingInput}
@@ -4120,8 +3793,7 @@ func TestDashboardJumpToTheOnlyWaitingAgentMovesTheFocus(t *testing.T) {
 	value.focus = leftPane
 	t.Cleanup(func() { value.closeTerminal() })
 
-	updated, command := value.Update(jumpToWaitingAgentKey())
-	value = updated.(dashboard)
+	command := send(&value, jumpToWaitingAgentKey())
 	if command != nil || backend.openedTab != "" {
 		t.Fatalf("jump to the open terminal = (command %v, opened %q), want no reattach",
 			command, backend.openedTab)
@@ -4132,7 +3804,7 @@ func TestDashboardJumpToTheOnlyWaitingAgentMovesTheFocus(t *testing.T) {
 }
 
 func TestDashboardJumpSaysWhenNoAgentIsWaiting(t *testing.T) {
-	root := model.Root{ID: "root-1", Name: "projects", Path: "/projects"}
+	root := projectsRoot
 	alpha := model.Workspace{ID: "workspace-1", RootID: root.ID, Name: "alpha", Path: "/projects/alpha"}
 	alphaTab := model.Tab{ID: "tab-1", WorkspaceID: alpha.ID, Name: "1", Running: true,
 		Agent: model.AgentClaude, AgentPhase: model.AgentPhaseWorking}
@@ -4142,8 +3814,7 @@ func TestDashboardJumpSaysWhenNoAgentIsWaiting(t *testing.T) {
 	}}}
 
 	value := newDashboard(&fakeBackend{snapshot: snapshot}, snapshot)
-	updated, command := value.Update(jumpToWaitingAgentKey())
-	value = updated.(dashboard)
+	command := send(&value, jumpToWaitingAgentKey())
 	if command != nil {
 		t.Fatalf("jump with nothing waiting produced %v, want no command", command)
 	}
@@ -4161,19 +3832,11 @@ func jumpToWaitingAgentKey() tea.KeyPressMsg {
 // jump produces, the way pressSwitchTab settles a switch.
 func pressJumpToWaitingAgent(t *testing.T, value dashboard) dashboard {
 	t.Helper()
-	updated, command := value.Update(jumpToWaitingAgentKey())
-	value = updated.(dashboard)
+	command := send(&value, jumpToWaitingAgentKey())
 	if command == nil {
 		t.Fatal("Ctrl+Shift+A produced no command")
 	}
-	for step := 0; command != nil && step < 4; step++ {
-		message := command()
-		if _, reading := message.(terminalOutputMsg); reading {
-			break
-		}
-		updated, command = value.Update(message)
-		value = updated.(dashboard)
-	}
+	settleSwitch(&value, command)
 	return value
 }
 
@@ -4185,26 +3848,29 @@ func newTabKey() tea.KeyPressMsg {
 	return tea.KeyPressMsg(tea.Key{Code: 't', ShiftedCode: 'T', Mod: tea.ModCtrl | tea.ModShift})
 }
 
-// pressSwitchTab presses Ctrl+Shift+code and runs the commands the switch
-// produces until it has settled: the workspace pane selects a workspace before
-// opening a tab, the terminal pane opens one straight away, and either way the
-// terminal that comes back has to be attached. The read command that ends the
-// chain is left alone; reading is what the terminal does from then on.
-func pressSwitchTab(t *testing.T, value dashboard, code rune) dashboard {
-	t.Helper()
-	updated, command := value.Update(switchTabKey(code))
-	value = updated.(dashboard)
-	if command == nil {
-		t.Fatalf("Ctrl+Shift+%s produced no command", switchTabKey(code).String())
-	}
+// settleSwitch runs the commands a switch produces until it has settled: the
+// workspace pane selects a workspace before opening a tab, the terminal pane
+// opens one straight away, and either way the terminal that comes back has to
+// be attached. The read command that ends the chain is left alone; reading is
+// what the terminal does from then on.
+func settleSwitch(value *dashboard, command tea.Cmd) {
 	for step := 0; command != nil && step < 4; step++ {
 		message := command()
 		if _, reading := message.(terminalOutputMsg); reading {
-			break
+			return
 		}
-		updated, command = value.Update(message)
-		value = updated.(dashboard)
+		command = send(value, message)
 	}
+}
+
+// pressSwitchTab presses Ctrl+Shift+code and settles the switch.
+func pressSwitchTab(t *testing.T, value dashboard, code rune) dashboard {
+	t.Helper()
+	command := send(&value, switchTabKey(code))
+	if command == nil {
+		t.Fatalf("Ctrl+Shift+%s produced no command", switchTabKey(code).String())
+	}
+	settleSwitch(&value, command)
 	return value
 }
 
@@ -4219,13 +3885,10 @@ func TestDashboardSwitchesTabsOfTheOpenTerminalNotTheCursor(t *testing.T) {
 		{ID: "tab-2", WorkspaceID: open.ID, Name: "2", Running: true},
 	}
 	otherTab := model.Tab{ID: "tab-3", WorkspaceID: other.ID, Name: "1", Running: true}
-	snapshot := model.Snapshot{Roots: []model.RootView{{
-		Root: model.Root{ID: "root-1", Name: "projects", Path: "/projects"},
-		Directories: []model.WorkspaceView{
-			{Workspace: open, Tabs: openTabs},
-			{Workspace: other, Tabs: []model.Tab{otherTab}},
-		},
-	}}}
+	snapshot := projectsSnapshot([]model.WorkspaceView{
+		{Workspace: open, Tabs: openTabs},
+		{Workspace: other, Tabs: []model.Tab{otherTab}},
+	})
 	backend := &fakeBackend{snapshot: snapshot, workspace: other}
 	value := newDashboard(backend, snapshot)
 	value.selectedWorkspaceID = open.ID
@@ -4245,15 +3908,8 @@ func TestDashboardSwitchesTabsOfTheOpenTerminalNotTheCursor(t *testing.T) {
 }
 
 func TestDashboardSelectsPlusAndCreatesTabOnEnter(t *testing.T) {
-	workspace := model.Workspace{ID: "workspace-1", RootID: "root-1", Name: "alpha", Path: "/projects/alpha"}
-	tabs := []model.Tab{
-		{ID: "tab-1", WorkspaceID: workspace.ID, Name: "1", Running: true},
-		{ID: "tab-2", WorkspaceID: workspace.ID, Name: "2", Running: true},
-	}
-	snapshot := model.Snapshot{Roots: []model.RootView{{
-		Root:        model.Root{ID: "root-1", Name: "projects", Path: "/projects"},
-		Directories: []model.WorkspaceView{{Workspace: workspace, Tabs: tabs}},
-	}}}
+	tabs := openTabs(2)
+	snapshot, workspace := alphaWorkspaceSnapshot(tabs)
 	backend := &fakeBackend{
 		snapshot:   snapshot,
 		workspace:  workspace,
@@ -4264,8 +3920,7 @@ func TestDashboardSelectsPlusAndCreatesTabOnEnter(t *testing.T) {
 	value.selectedWorkspaceID = workspace.ID
 	value.selectedPath = workspace.Path
 
-	updated, command := value.Update(key(tea.KeyLeft, ""))
-	value = updated.(dashboard)
+	command := send(&value, key(tea.KeyLeft, ""))
 	if command != nil || value.tabIndex != len(tabs) {
 		t.Fatalf("left from first tab = (command %v, index %d), want + index %d", command, value.tabIndex, len(tabs))
 	}
@@ -4273,13 +3928,11 @@ func TestDashboardSelectsPlusAndCreatesTabOnEnter(t *testing.T) {
 		t.Fatalf("+ cursor is not visible:\n%s", rendered)
 	}
 
-	updated, selectCommand := value.Update(key(tea.KeyEnter, ""))
-	value = updated.(dashboard)
+	selectCommand := send(&value, key(tea.KeyEnter, ""))
 	if selectCommand == nil {
 		t.Fatal("Enter on + did not select the workspace")
 	}
-	updated, createCommand := value.Update(commandMessage[workspaceMsg](t, selectCommand))
-	value = updated.(dashboard)
+	createCommand := send(&value, commandMessage[workspaceMsg](t, selectCommand))
 	if createCommand == nil {
 		t.Fatal("Enter on + did not produce a create command")
 	}
@@ -4287,8 +3940,7 @@ func TestDashboardSelectsPlusAndCreatesTabOnEnter(t *testing.T) {
 	if backend.createCount != 1 || backend.openedTab != "" {
 		t.Fatalf("Enter on + created %d tabs and opened %q", backend.createCount, backend.openedTab)
 	}
-	updated, openCommand := value.Update(createdMessage)
-	value = updated.(dashboard)
+	openCommand := send(&value, createdMessage)
 	if openCommand == nil {
 		t.Fatal("created tab did not produce an open command")
 	}
@@ -4354,8 +4006,7 @@ func TestDashboardHighlightsNavigationAndShowsOpenTabs(t *testing.T) {
 	}
 
 	value.tabIndex = 3
-	updated, _ := value.Update(snapshotMsg{value: snapshot})
-	value = updated.(dashboard)
+	send(&value, snapshotMsg{value: snapshot})
 	if value.tabIndex != 2 {
 		t.Fatalf("tab index after exited tab removal = %d, want + index 2", value.tabIndex)
 	}
@@ -4536,8 +4187,7 @@ func TestAgentAnimationRunsOnlyWhileWorkIsActive(t *testing.T) {
 		t.Fatal("working agent did not schedule the initial animation tick")
 	}
 
-	updated, command := value.Update(agentAnimationMsg{})
-	value = updated.(dashboard)
+	command := send(&value, agentAnimationMsg{})
 	if value.agentAnimationFrame != 1 || !value.agentAnimationPending || command == nil {
 		t.Fatalf("animation tick = (frame %d, pending %v, command %v), want next frame and tick", value.agentAnimationFrame, value.agentAnimationPending, command)
 	}
@@ -4545,16 +4195,14 @@ func TestAgentAnimationRunsOnlyWhileWorkIsActive(t *testing.T) {
 	value.updateAgents(map[string]model.AgentStatus{
 		"tab-1": {Agent: model.AgentClaude, Phase: model.AgentPhaseIdle},
 	})
-	updated, command = value.Update(agentAnimationMsg{})
-	value = updated.(dashboard)
+	command = send(&value, agentAnimationMsg{})
 	if value.agentAnimationFrame != 1 || value.agentAnimationActive || value.agentAnimationPending || command != nil {
 		t.Fatalf("idle animation = (frame %d, pending %v, command %v), want stopped frame", value.agentAnimationFrame, value.agentAnimationPending, command)
 	}
 
-	updated, command = value.Update(agentSnapshotMsg{value: map[string]model.AgentStatus{
+	command = send(&value, agentSnapshotMsg{value: map[string]model.AgentStatus{
 		"tab-1": {Agent: model.AgentClaude, Phase: model.AgentPhaseThinking},
 	}})
-	value = updated.(dashboard)
 	if !value.agentAnimationActive || !value.agentAnimationPending || command == nil {
 		t.Fatal("new working phase did not restart the animation")
 	}
@@ -4562,13 +4210,10 @@ func TestAgentAnimationRunsOnlyWhileWorkIsActive(t *testing.T) {
 
 func TestNavigationShowsGitStateOnSecondLine(t *testing.T) {
 	workspace := model.Workspace{ID: "workspace-1", RootID: "root-1", Name: "SnowClash", Path: "/projects/SnowClash"}
-	snapshot := model.Snapshot{Roots: []model.RootView{{
-		Root: model.Root{ID: "root-1", Name: "projects", Path: "/projects"},
-		Directories: []model.WorkspaceView{{
-			Workspace: workspace,
-			Tabs:      []model.Tab{{ID: "tab-1", Running: true}},
-		}},
-	}}}
+	snapshot := projectsSnapshot([]model.WorkspaceView{{
+		Workspace: workspace,
+		Tabs:      []model.Tab{{ID: "tab-1", Running: true}},
+	}})
 	value := newDashboard(&fakeBackend{}, snapshot)
 	value.gitStates = map[string]gitState{workspace.Path: {
 		Branch: "main",
@@ -4596,13 +4241,10 @@ func TestNavigationShowsGitStateOnSecondLine(t *testing.T) {
 }
 
 func TestNavigationUsesOneRootLineAndTwoWorkspaceLines(t *testing.T) {
-	value := newDashboard(&fakeBackend{}, model.Snapshot{Roots: []model.RootView{{
-		Root: model.Root{ID: "root-1", Name: "projects", Path: "/projects"},
-		Directories: []model.WorkspaceView{
-			{Workspace: model.Workspace{ID: "workspace-1", RootID: "root-1", Name: "first", Path: "/projects/first"}},
-			{Workspace: model.Workspace{ID: "workspace-2", RootID: "root-1", Name: "last", Path: "/projects/last"}},
-		},
-	}}})
+	value := newDashboard(&fakeBackend{}, projectsSnapshot([]model.WorkspaceView{
+		{Workspace: model.Workspace{ID: "workspace-1", RootID: "root-1", Name: "first", Path: "/projects/first"}},
+		{Workspace: model.Workspace{ID: "workspace-2", RootID: "root-1", Name: "last", Path: "/projects/last"}},
+	}))
 	value.focus = terminalPane
 	value.selectedPath = "/projects/first"
 	value.gitStates = map[string]gitState{"/projects/first": {Branch: "main"}}
@@ -4624,7 +4266,7 @@ func TestNavigationUsesOneRootLineAndTwoWorkspaceLines(t *testing.T) {
 
 func TestNavigationSeparatesRootsWithOneBlankLine(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, model.Snapshot{Roots: []model.RootView{
-		{Root: model.Root{ID: "root-1", Name: "projects", Path: "/projects"}},
+		{Root: projectsRoot},
 		{Root: model.Root{ID: "root-2", Name: "archive", Path: "/archive"}},
 	}})
 	lines := value.renderNavigation(28, 20)
@@ -4640,8 +4282,7 @@ func TestGitStatusUpdatesStateAndSchedulesAnotherRefresh(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, model.Snapshot{})
 	value.gitStates = map[string]gitState{"/old": {Behind: 2}}
 
-	updated, command := value.Update(gitStatusMsg{value: map[string]gitState{"/new": {Behind: 1}}, reschedule: true})
-	value = updated.(dashboard)
+	command := send(&value, gitStatusMsg{value: map[string]gitState{"/new": {Behind: 1}}, reschedule: true})
 	if !reflect.DeepEqual(value.gitStates, map[string]gitState{"/new": {Behind: 1}}) {
 		t.Fatalf("Git status = %#v, want only the current result", value.gitStates)
 	}
@@ -4651,10 +4292,8 @@ func TestGitStatusUpdatesStateAndSchedulesAnotherRefresh(t *testing.T) {
 }
 
 func TestGitStatusFetchesAtStartupAndAfterInterval(t *testing.T) {
-	previousNow := now
 	current := time.Date(2026, time.August, 25, 12, 0, 0, 0, time.UTC)
-	now = func() time.Time { return current }
-	t.Cleanup(func() { now = previousNow })
+	testutil.Set(t, &now, func() time.Time { return current })
 
 	value := newDashboard(&fakeBackend{}, model.Snapshot{})
 	beforeInterval := value.readGitStatus(false, true)().(gitStatusMsg)
@@ -4699,15 +4338,14 @@ func TestInitialGitStatusSeparatesLocalReadFromFetch(t *testing.T) {
 
 func TestAgentSnapshotUpdatesStateAndSchedulesAnotherRefresh(t *testing.T) {
 	snapshot := model.Snapshot{Roots: []model.RootView{{
-		Root: model.Root{ID: "root-1", Name: "projects", Path: "/projects"},
+		Root: projectsRoot,
 		Tabs: []model.Tab{{ID: "tab-1", Running: true}},
 	}}}
 	value := newDashboard(&fakeBackend{}, snapshot)
 
-	updated, command := value.Update(agentSnapshotMsg{value: map[string]model.AgentStatus{
+	command := send(&value, agentSnapshotMsg{value: map[string]model.AgentStatus{
 		"tab-1": {Agent: model.AgentClaude, Phase: model.AgentPhaseWaitingApproval},
 	}})
-	value = updated.(dashboard)
 	if got := value.state.Roots[0].Tabs[0].Agent; got != model.AgentClaude {
 		t.Fatalf("agent = %q, want %q", got, model.AgentClaude)
 	}
@@ -4746,13 +4384,10 @@ func TestDashboardRestoresTheLastWorkspaceAndTab(t *testing.T) {
 		{ID: "tab-2", WorkspaceID: bravo.ID, Name: "1", Running: true},
 		{ID: "tab-3", WorkspaceID: bravo.ID, Name: "2", Running: true},
 	}
-	snapshot := model.Snapshot{Roots: []model.RootView{{
-		Root: model.Root{ID: "root-1", Name: "projects", Path: "/projects"},
-		Directories: []model.WorkspaceView{
-			{Workspace: alpha, Tabs: []model.Tab{{ID: "tab-1", WorkspaceID: alpha.ID, Name: "1", Running: true}}},
-			{Workspace: bravo, Tabs: tabs},
-		},
-	}}}
+	snapshot := projectsSnapshot([]model.WorkspaceView{
+		{Workspace: alpha, Tabs: []model.Tab{{ID: "tab-1", WorkspaceID: alpha.ID, Name: "1", Running: true}}},
+		{Workspace: bravo, Tabs: tabs},
+	})
 	backend := &fakeBackend{snapshot: snapshot}
 	value := newDashboardWithConfig(backend, snapshot, "", Config{
 		LastWorkspacePath: bravo.Path,
@@ -4774,8 +4409,7 @@ func TestDashboardRestoresTheLastWorkspaceAndTab(t *testing.T) {
 	if opened.tabID != tabs[1].ID || backend.openedTab != tabs[1].ID {
 		t.Fatalf("startup opened tab = (%q, %q), want %q", opened.tabID, backend.openedTab, tabs[1].ID)
 	}
-	updated, _ := value.Update(opened)
-	value = updated.(dashboard)
+	send(&value, opened)
 	t.Cleanup(value.closeTerminal)
 	if value.terminal == nil || value.terminal.id != tabs[1].ID || value.focus != terminalPane {
 		t.Fatalf("restored terminal = (%v, focus %v), want %q", value.terminal, value.focus, tabs[1].ID)
@@ -4784,16 +4418,13 @@ func TestDashboardRestoresTheLastWorkspaceAndTab(t *testing.T) {
 
 func TestDashboardDoesNotRestoreAMissingWorkspaceOrTab(t *testing.T) {
 	workspace := model.Workspace{ID: "workspace-1", RootID: "root-1", Name: "alpha", Path: "/projects/alpha"}
-	snapshot := model.Snapshot{Roots: []model.RootView{{
-		Root: model.Root{ID: "root-1", Name: "projects", Path: "/projects"},
-		Directories: []model.WorkspaceView{{
-			Workspace: workspace,
-			Tabs: []model.Tab{
-				{ID: "running", WorkspaceID: workspace.ID, Running: true},
-				{ID: "stopped", WorkspaceID: workspace.ID},
-			},
-		}},
-	}}}
+	snapshot := projectsSnapshot([]model.WorkspaceView{{
+		Workspace: workspace,
+		Tabs: []model.Tab{
+			{ID: "running", WorkspaceID: workspace.ID, Running: true},
+			{ID: "stopped", WorkspaceID: workspace.ID},
+		},
+	}})
 
 	for _, probe := range []Config{
 		{LastWorkspacePath: "/projects/missing", LastTabID: "running"},
@@ -4809,31 +4440,22 @@ func TestDashboardDoesNotRestoreAMissingWorkspaceOrTab(t *testing.T) {
 }
 
 func TestDashboardPersistsTheLastOpenedWorkspaceAndTab(t *testing.T) {
-	workspace := model.Workspace{ID: "workspace-1", RootID: "root-1", Name: "alpha", Path: "/projects/alpha"}
-	tabs := []model.Tab{
-		{ID: "tab-1", WorkspaceID: workspace.ID, Name: "1", Running: true},
-		{ID: "tab-2", WorkspaceID: workspace.ID, Name: "2", Running: true},
-	}
-	snapshot := model.Snapshot{Roots: []model.RootView{{
-		Root:        model.Root{ID: "root-1", Name: "projects", Path: "/projects"},
-		Directories: []model.WorkspaceView{{Workspace: workspace, Tabs: tabs}},
-	}}}
+	tabs := openTabs(2)
+	snapshot, workspace := alphaWorkspaceSnapshot(tabs)
 	configPath := filepath.Join(t.TempDir(), "config.json")
 	value := newDashboardWithConfig(&fakeBackend{}, snapshot, configPath, Config{})
 	value.selectedWorkspaceID = workspace.ID
 	value.selectedPath = workspace.Path
 	value.tabIndex = 1
 
-	updated, command := value.Update(terminalOpenedMsg{tabID: tabs[1].ID, stream: newMemoryStream("")})
-	value = updated.(dashboard)
+	command := send(&value, terminalOpenedMsg{tabID: tabs[1].ID, stream: newMemoryStream("")})
 	t.Cleanup(value.closeTerminal)
 	if command == nil {
 		t.Fatal("opening a different tab did not save its selection")
 	}
 	for _, message := range commandMessages(command) {
 		if saved, ok := message.(configSavedMsg); ok {
-			updated, _ = value.Update(saved)
-			value = updated.(dashboard)
+			send(&value, saved)
 		}
 	}
 	loaded, err := loadConfig(configPath)
@@ -4847,25 +4469,20 @@ func TestDashboardPersistsTheLastOpenedWorkspaceAndTab(t *testing.T) {
 }
 
 func TestDashboardRewritesAStaleSelectionSave(t *testing.T) {
-	workspace := model.Workspace{ID: "workspace-1", RootID: "root-1", Name: "alpha", Path: "/projects/alpha"}
 	tabs := []model.Tab{
-		{ID: "tab-1", WorkspaceID: workspace.ID, Running: true},
-		{ID: "tab-2", WorkspaceID: workspace.ID, Running: true},
+		{ID: "tab-1", WorkspaceID: "workspace-1", Running: true},
+		{ID: "tab-2", WorkspaceID: "workspace-1", Running: true},
 	}
-	snapshot := model.Snapshot{Roots: []model.RootView{{
-		Root:        model.Root{ID: "root-1", Name: "projects", Path: "/projects"},
-		Directories: []model.WorkspaceView{{Workspace: workspace, Tabs: tabs}},
-	}}}
+	snapshot, workspace := alphaWorkspaceSnapshot(tabs)
 	configPath := filepath.Join(t.TempDir(), "config.json")
 	value := newDashboardWithConfig(&fakeBackend{}, snapshot, configPath, Config{})
 	value.rememberedWorkspacePath = workspace.Path
 	value.rememberedTabID = tabs[1].ID
 
-	updated, rewrite := value.Update(configSavedMsg{
+	rewrite := send(&value, configSavedMsg{
 		lastWorkspacePath: workspace.Path,
 		lastTabID:         tabs[0].ID,
 	})
-	value = updated.(dashboard)
 	if rewrite == nil {
 		t.Fatal("an older selection save was accepted as current")
 	}
@@ -4887,8 +4504,7 @@ func TestDashboardAdaptsChromeToTerminalBackground(t *testing.T) {
 	}
 	darkAccent := value.styles.paneTitleActive.GetForeground()
 
-	updated, command := value.Update(tea.BackgroundColorMsg{Color: color.White})
-	value = updated.(dashboard)
+	command := send(&value, tea.BackgroundColorMsg{Color: color.White})
 	if command != nil {
 		t.Fatalf("background color update command = %v, want nil", command)
 	}
@@ -4982,8 +4598,7 @@ func TestDashboardCentersModalOverTheDashboardItLeavesShowing(t *testing.T) {
 	value.width = 100
 	value.height = 30
 
-	updated, _ := value.Update(key('i', "i"))
-	value = updated.(dashboard)
+	send(&value, key('i', "i"))
 	if value.modal != aboutModal {
 		t.Fatalf("modal = %v, want about", value.modal)
 	}
@@ -5041,8 +4656,7 @@ func TestDashboardCentersModalOverTheDashboardItLeavesShowing(t *testing.T) {
 		t.Fatalf("about modal does not show version %q:\n%s", version.String(), ansi.Strip(rendered))
 	}
 
-	updated, _ = value.Update(key(tea.KeyEscape, ""))
-	value = updated.(dashboard)
+	send(&value, key(tea.KeyEscape, ""))
 	if value.modal != noModal || strings.Contains(value.render(), tagline) {
 		t.Fatalf("about modal did not close:\n%s", value.render())
 	}
@@ -5079,30 +4693,20 @@ func TestDashboardOpensHelpFromTheTerminalPane(t *testing.T) {
 	value.focus = terminalPane
 	value.terminal = newEmbeddedTerminal("tab-1", newMemoryStream(""), 40, 10)
 
-	updated, command := value.Update(key('?', "?"))
-	value = updated.(dashboard)
+	command := send(&value, key('?', "?"))
 	if value.modal != noModal || command != nil {
 		t.Fatalf("? in the terminal = (modal %v, command %v), want it forwarded to the shell", value.modal, command)
 	}
 
-	updated, command = value.Update(key(tea.KeyF1, ""))
-	value = updated.(dashboard)
+	command = send(&value, key(tea.KeyF1, ""))
 	if value.modal != helpModal || command != nil {
 		t.Fatalf("F1 in the terminal = (modal %v, command %v), want the help modal", value.modal, command)
 	}
 }
 
-// The help modal is the only place a user can look a shortcut up, so every key
-// romty takes in both panes has to appear there. Comparing the reference with
-// the table that routes those keys says that; counting rendered lines did not,
-// and the hand-copied list of every shortcut that stood beside it was a second
-// copy of the reference that quietly fell behind it.
-// The counters are the agent's own; romty reports them and estimates nothing,
-// so a tab with none shows none.
 func TestDashboardFindsAndWalksScrollbackMatches(t *testing.T) {
 	value := scrolledDashboard(t, 200)
-	updated, _ := value.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyPgUp, Mod: tea.ModShift}))
-	value = updated.(dashboard)
+	send(&value, tea.KeyPressMsg(tea.Key{Code: tea.KeyPgUp, Mod: tea.ModShift}))
 	if !value.scrollback {
 		t.Fatal("Shift+PgUp did not enter scrollback")
 	}
@@ -5127,13 +4731,11 @@ func TestDashboardFindsAndWalksScrollbackMatches(t *testing.T) {
 	if !scrollbackShows(value, "line-019") {
 		t.Fatal("search did not start at the newest match")
 	}
-	updated, _ = value.Update(key('n', "n"))
-	value = updated.(dashboard)
+	send(&value, key('n', "n"))
 	if !scrollbackShows(value, "line-018") {
 		t.Fatal("n did not step towards older output")
 	}
-	updated, _ = value.Update(tea.KeyPressMsg(tea.Key{Code: 'n', ShiftedCode: 'N', Text: "N", Mod: tea.ModShift}))
-	value = updated.(dashboard)
+	send(&value, tea.KeyPressMsg(tea.Key{Code: 'n', ShiftedCode: 'N', Text: "N", Mod: tea.ModShift}))
 	if !scrollbackShows(value, "line-019") {
 		t.Fatal("N did not step back towards newer output")
 	}
@@ -5141,8 +4743,7 @@ func TestDashboardFindsAndWalksScrollbackMatches(t *testing.T) {
 
 func TestDashboardSaysWhenScrollbackHasNoMatch(t *testing.T) {
 	value := scrolledDashboard(t, 200)
-	updated, _ := value.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyPgUp, Mod: tea.ModShift}))
-	value = updated.(dashboard)
+	send(&value, tea.KeyPressMsg(tea.Key{Code: tea.KeyPgUp, Mod: tea.ModShift}))
 
 	value = typeSearch(t, value, "nothing-here")
 	if len(value.searchMatches) != 0 {
@@ -5154,8 +4755,8 @@ func TestDashboardSaysWhenScrollbackHasNoMatch(t *testing.T) {
 	}
 	// Without matches n is not a search key, so it goes back to being what any
 	// other key is in scrollback: leave, and send it to the shell.
-	updated, _ = value.Update(key('n', "n"))
-	if updated.(dashboard).scrollback {
+	send(&value, key('n', "n"))
+	if value.scrollback {
 		t.Fatal("n with no matches did not leave scrollback")
 	}
 }
@@ -5164,11 +4765,10 @@ func TestDashboardSaysWhenScrollbackHasNoMatch(t *testing.T) {
 // stale match from output that has since scrolled away.
 func TestDashboardForgetsTheSearchOnLeavingScrollback(t *testing.T) {
 	value := scrolledDashboard(t, 200)
-	updated, _ := value.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyPgUp, Mod: tea.ModShift}))
-	value = typeSearch(t, updated.(dashboard), "line-004")
+	send(&value, tea.KeyPressMsg(tea.Key{Code: tea.KeyPgUp, Mod: tea.ModShift}))
+	value = typeSearch(t, value, "line-004")
 
-	updated, _ = value.Update(key(tea.KeyEscape, ""))
-	value = updated.(dashboard)
+	send(&value, key(tea.KeyEscape, ""))
 	if value.scrollback || value.searchMode || value.searchQuery != "" || len(value.searchMatches) != 0 {
 		t.Fatalf("after leaving = (scrollback %v, mode %v, query %q, matches %v), want the search forgotten",
 			value.scrollback, value.searchMode, value.searchQuery, value.searchMatches)
@@ -5179,20 +4779,17 @@ func TestDashboardForgetsTheSearchOnLeavingScrollback(t *testing.T) {
 // confirms it.
 func typeSearch(t *testing.T, value dashboard, query string) dashboard {
 	t.Helper()
-	updated, _ := value.Update(key('/', "/"))
-	value = updated.(dashboard)
+	send(&value, key('/', "/"))
 	if !value.searchMode {
 		t.Fatal("/ did not open the find prompt")
 	}
 	for _, letter := range query {
-		updated, _ = value.Update(key(letter, string(letter)))
-		value = updated.(dashboard)
+		send(&value, key(letter, string(letter)))
 	}
 	if value.searchQuery != query {
 		t.Fatalf("typed query = %q, want %q", value.searchQuery, query)
 	}
-	updated, _ = value.Update(key(tea.KeyEnter, ""))
-	value = updated.(dashboard)
+	send(&value, key(tea.KeyEnter, ""))
 	if value.searchMode {
 		t.Fatal("Enter did not close the find prompt")
 	}
@@ -5212,16 +4809,13 @@ func plainStatus(value dashboard) string {
 	return ansi.Strip(strings.Join(value.renderStatus(value.width, value.dimensions().bodyHeight), "\n"))
 }
 
+// The counters are the agent's own; romty reports them and estimates nothing,
+// so a tab with none shows none.
 func TestDashboardShowsTheOpenAgentLedgerInTheRail(t *testing.T) {
-	root := model.Root{ID: "root-1", Name: "projects", Path: "/projects"}
-	alpha := model.Workspace{ID: "workspace-1", RootID: root.ID, Name: "alpha", Path: "/projects/alpha"}
-	tab := model.Tab{ID: "tab-1", WorkspaceID: alpha.ID, Name: "1", Running: true,
+	tab := model.Tab{ID: "tab-1", WorkspaceID: "workspace-1", Name: "1", Running: true,
 		Agent: model.AgentClaude, AgentPhase: model.AgentPhaseWorking,
 		AgentContextTokens: 344103, AgentCostUSD: 1.25}
-	snapshot := model.Snapshot{Roots: []model.RootView{{
-		Root:        root,
-		Directories: []model.WorkspaceView{{Workspace: alpha, Tabs: []model.Tab{tab}}},
-	}}}
+	snapshot, alpha := alphaWorkspaceSnapshot([]model.Tab{tab})
 
 	value := newDashboard(&fakeBackend{snapshot: snapshot}, snapshot)
 	value.width = 120
@@ -5274,6 +4868,11 @@ func TestFormatTokensKeepsItsWidthAsItGrows(t *testing.T) {
 	}
 }
 
+// The help modal is the only place a user can look a shortcut up, so every key
+// romty takes in both panes has to appear there. Comparing the reference with
+// the table that routes those keys says that; counting rendered lines did not,
+// and the hand-copied list of every shortcut that stood beside it was a second
+// copy of the reference that quietly fell behind it.
 func TestHelpReferenceDocumentsEveryGlobalKey(t *testing.T) {
 	documented := make(map[string]bool)
 	for _, entry := range helpReference() {
@@ -5340,8 +4939,7 @@ func TestDashboardShowsCompleteShortcutReferenceInHelpModal(t *testing.T) {
 		t.Fatalf("help entries = %d, want %d", len(entries), len(helpReference())+1)
 	}
 
-	updated, command := value.Update(key('?', "?"))
-	value = updated.(dashboard)
+	command := send(&value, key('?', "?"))
 	if value.modal != helpModal || command != nil {
 		t.Fatalf("? result = (modal %v, command %v), want help modal", value.modal, command)
 	}
@@ -5402,8 +5000,7 @@ func TestDashboardScrollsHelpModalOnShortTerminals(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, model.Snapshot{})
 	value.width = 100
 	value.height = 20
-	updated, _ := value.Update(key('?', "?"))
-	value = updated.(dashboard)
+	send(&value, key('?', "?"))
 
 	bodyHeight := value.dimensions().bodyHeight
 	lines := strings.Split(value.render(), "\n")
@@ -5421,8 +5018,7 @@ func TestDashboardScrollsHelpModalOnShortTerminals(t *testing.T) {
 
 	// The last entry is off screen at this height and must be reachable.
 	for range value.helpEntries() {
-		updated, _ = value.Update(key(tea.KeyDown, ""))
-		value = updated.(dashboard)
+		send(&value, key(tea.KeyDown, ""))
 	}
 	plain := ansi.Strip(strings.Join(value.renderModal(value.width, bodyHeight), "\n"))
 	if !strings.Contains(plain, "Adjust pane width") {
@@ -5437,8 +5033,7 @@ func TestDashboardScrollsHelpModalWithMouseWheel(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, model.Snapshot{})
 	value.width = 100
 	value.height = 20
-	updated, _ := value.Update(key('?', "?"))
-	value = updated.(dashboard)
+	send(&value, key('?', "?"))
 
 	if value.View().MouseMode != tea.MouseModeAllMotion {
 		t.Fatalf("help mouse mode = %v, want all motion", value.View().MouseMode)
@@ -5446,19 +5041,16 @@ func TestDashboardScrollsHelpModalWithMouseWheel(t *testing.T) {
 	if rendered := ansi.Strip(value.render()); !strings.Contains(rendered, "↑/↓/Wheel") {
 		t.Fatalf("help status does not advertise wheel scrolling:\n%s", rendered)
 	}
-	updated, _ = value.Update(tea.MouseWheelMsg{X: 50, Y: 10, Button: tea.MouseWheelDown})
-	value = updated.(dashboard)
+	send(&value, tea.MouseWheelMsg{X: 50, Y: 10, Button: tea.MouseWheelDown})
 	if value.helpOffset != 3 {
 		t.Fatalf("wheel down help offset = %d, want 3", value.helpOffset)
 	}
-	updated, _ = value.Update(tea.MouseWheelMsg{X: 50, Y: 10, Button: tea.MouseWheelUp})
-	value = updated.(dashboard)
+	send(&value, tea.MouseWheelMsg{X: 50, Y: 10, Button: tea.MouseWheelUp})
 	if value.helpOffset != 0 {
 		t.Fatalf("wheel up help offset = %d, want 0", value.helpOffset)
 	}
 
-	updated, _ = value.Update(key(tea.KeyEscape, ""))
-	value = updated.(dashboard)
+	send(&value, key(tea.KeyEscape, ""))
 	if value.View().MouseMode != tea.MouseModeAllMotion {
 		t.Fatalf("mouse mode after closing help = %v, want dashboard clicks enabled", value.View().MouseMode)
 	}
@@ -5490,8 +5082,7 @@ func TestDashboardDoesNotCaptureWorkspaceShortcutsInTerminal(t *testing.T) {
 	for _, message := range []tea.KeyPressMsg{
 		key('i', "i"), key('a', "a"), key(',', ","), key('q', "q"), key('r', "r"), key('+', "+"), key('?', "?"),
 	} {
-		updated, command := value.Update(message)
-		value = updated.(dashboard)
+		command := send(&value, message)
 		if command != nil || value.inputMode || value.modal != noModal {
 			t.Fatalf("terminal key %q was captured: command=%v input=%v modal=%v", message.String(), command, value.inputMode, value.modal)
 		}
@@ -5505,19 +5096,16 @@ func TestDashboardAdjustsAndPersistsLeftPaneWidth(t *testing.T) {
 	value.height = 40
 	value.configPath = configPath
 
-	updated, _ := value.Update(key(',', ","))
-	value = updated.(dashboard)
+	send(&value, key(',', ","))
 	if value.modal != configModal {
 		t.Fatalf("modal = %v, want config", value.modal)
 	}
-	updated, saveCommand := value.Update(key(tea.KeyRight, ""))
-	value = updated.(dashboard)
+	saveCommand := send(&value, key(tea.KeyRight, ""))
 	leftWidth := value.dimensions().leftWidth
 	if saveCommand == nil || leftWidth != 29 {
 		t.Fatalf("right adjustment = (command %v, width %d), want saved width 29", saveCommand, leftWidth)
 	}
-	updated, _ = value.Update(saveCommand())
-	value = updated.(dashboard)
+	send(&value, saveCommand())
 	loaded, err := loadConfig(configPath)
 	if err != nil {
 		t.Fatalf("loadConfig() error = %v", err)
@@ -5526,8 +5114,7 @@ func TestDashboardAdjustsAndPersistsLeftPaneWidth(t *testing.T) {
 		t.Fatalf("persisted config = %#v\n%s", loaded, ansi.Strip(value.render()))
 	}
 
-	updated, _ = value.Update(key(tea.KeyEscape, ""))
-	value = updated.(dashboard)
+	send(&value, key(tea.KeyEscape, ""))
 	if value.modal != noModal {
 		t.Fatalf("modal after Esc = %v, want none", value.modal)
 	}
@@ -5561,35 +5148,27 @@ func scrollbackToggleKey() tea.KeyPressMsg {
 // then worked for an afternoon still counted its old drops towards the ceiling
 // and was eventually left saying it keeps disconnecting.
 func TestDashboardForgetsRetriesAfterAHealthyAttach(t *testing.T) {
-	tabs := []model.Tab{{ID: "tab-1", WorkspaceID: "workspace-1", Name: "1", Running: true}}
+	tabs := openTabs(1)
 	value, _, refresh := exitedDashboard(t, tabs, 0)
 
 	// One immediate reconnect, one drop, one counted retry — the same walk the
 	// backoff test makes, so the two disagree only about what time it is.
-	updated, open := value.Update(refresh())
-	value = updated.(dashboard)
-	updated, _ = value.Update(open())
-	value = updated.(dashboard)
-	updated, _ = value.Update(terminalOutputMsg{terminal: value.terminal, err: io.EOF})
-	value = updated.(dashboard)
-	updated, _ = value.Update(refresh())
-	value = updated.(dashboard)
+	open := send(&value, refresh())
+	send(&value, open())
+	send(&value, terminalOutputMsg{terminal: value.terminal, err: io.EOF})
+	send(&value, refresh())
 	if value.reattachAttempts != 1 {
 		t.Fatalf("retries after one drop = %d, want 1", value.reattachAttempts)
 	}
 
 	// Reopen, then let the terminal run past the healthy interval before it
 	// drops. That drop starts over: an immediate reconnect, not a delayed one.
-	updated, open = value.Update(reopenTerminalMsg{tabID: "tab-1"})
-	value = updated.(dashboard)
-	updated, _ = value.Update(open())
-	value = updated.(dashboard)
+	open = send(&value, reopenTerminalMsg{tabID: "tab-1"})
+	send(&value, open())
 	value.terminalOpenedAt = value.terminalOpenedAt.Add(-2 * healthyAttachInterval)
 
-	updated, _ = value.Update(terminalOutputMsg{terminal: value.terminal, err: io.EOF})
-	value = updated.(dashboard)
-	updated, command := value.Update(refresh())
-	value = updated.(dashboard)
+	send(&value, terminalOutputMsg{terminal: value.terminal, err: io.EOF})
+	command := send(&value, refresh())
 	if value.reattachAttempts != 0 {
 		t.Fatalf("retries after a healthy attach = %d, want them forgotten", value.reattachAttempts)
 	}
@@ -5604,20 +5183,16 @@ func TestDashboardForgetsRetriesAfterAHealthyAttach(t *testing.T) {
 // A drop that follows a fresh attach is another turn of the same loop, so the
 // healthy-attach reset must not hand it an immediate retry.
 func TestDashboardStillBacksOffWhenDropsAreImmediate(t *testing.T) {
-	tabs := []model.Tab{{ID: "tab-1", WorkspaceID: "workspace-1", Name: "1", Running: true}}
+	tabs := openTabs(1)
 	value, _, refresh := exitedDashboard(t, tabs, 0)
 
-	updated, open := value.Update(refresh())
-	value = updated.(dashboard)
-	updated, _ = value.Update(open())
-	value = updated.(dashboard)
+	open := send(&value, refresh())
+	send(&value, open())
 	if value.terminalOpenedAt.IsZero() {
 		t.Fatal("an opened terminal recorded no attach time")
 	}
-	updated, _ = value.Update(terminalOutputMsg{terminal: value.terminal, err: io.EOF})
-	value = updated.(dashboard)
-	updated, command := value.Update(refresh())
-	value = updated.(dashboard)
+	send(&value, terminalOutputMsg{terminal: value.terminal, err: io.EOF})
+	command := send(&value, refresh())
 	if value.reattachAttempts != 1 || command == nil {
 		t.Fatalf("an immediate drop = (retries %d, command %v), want one counted retry",
 			value.reattachAttempts, command)
@@ -5628,31 +5203,22 @@ func TestDashboardStillBacksOffWhenDropsAreImmediate(t *testing.T) {
 }
 
 func TestDashboardIgnoresAReattachForTheTabItLeft(t *testing.T) {
-	tabs := []model.Tab{
-		{ID: "tab-1", WorkspaceID: "workspace-1", Name: "1", Running: true},
-		{ID: "tab-2", WorkspaceID: "workspace-1", Name: "2", Running: true},
-	}
+	tabs := openTabs(2)
 	value, _, refresh := exitedDashboard(t, tabs, 0)
 
-	updated, open := value.Update(refresh())
-	value = updated.(dashboard)
-	updated, _ = value.Update(open())
-	value = updated.(dashboard)
-	updated, refresh = value.Update(terminalOutputMsg{terminal: value.terminal, err: io.EOF})
-	value = updated.(dashboard)
-	updated, delayed := value.Update(refresh())
-	value = updated.(dashboard)
+	open := send(&value, refresh())
+	send(&value, open())
+	refresh = send(&value, terminalOutputMsg{terminal: value.terminal, err: io.EOF})
+	delayed := send(&value, refresh())
 	if delayed == nil {
 		t.Fatal("the repeated drop produced no delayed reattach")
 	}
 
-	updated, _ = value.Update(switchTabKey(tea.KeyRight))
-	value = updated.(dashboard)
+	send(&value, switchTabKey(tea.KeyRight))
 	if value.selectedTabID() != "tab-2" {
 		t.Fatalf("selected tab = %q, want tab-2", value.selectedTabID())
 	}
-	updated, stale := value.Update(delayed())
-	value = updated.(dashboard)
+	stale := send(&value, delayed())
 	if stale != nil {
 		t.Fatal("a delayed reattach for tab-1 reopened tab-2")
 	}
@@ -5663,16 +5229,8 @@ func TestDashboardIgnoresAReattachForTheTabItLeft(t *testing.T) {
 // tab the user left must not be adopted: it would show that terminal under the
 // next tab's name and take the keyboard with it.
 func TestDashboardIgnoresATerminalOpenedForTheTabItLeft(t *testing.T) {
-	workspace := model.Workspace{ID: "workspace-1", RootID: "root-1", Name: "alpha", Path: "/projects/alpha"}
-	tabs := []model.Tab{
-		{ID: "tab-1", WorkspaceID: workspace.ID, Name: "1", Running: true},
-		{ID: "tab-2", WorkspaceID: workspace.ID, Name: "2", Running: true},
-		{ID: "tab-3", WorkspaceID: workspace.ID, Name: "3", Running: true},
-	}
-	snapshot := model.Snapshot{Roots: []model.RootView{{
-		Root:        model.Root{ID: "root-1", Name: "projects", Path: "/projects"},
-		Directories: []model.WorkspaceView{{Workspace: workspace, Tabs: tabs}},
-	}}}
+	tabs := openTabs(3)
+	snapshot, workspace := alphaWorkspaceSnapshot(tabs)
 	backend := &fakeBackend{snapshot: snapshot, workspace: workspace}
 	value := newDashboard(backend, snapshot)
 	value.setNavigation(1)
@@ -5683,20 +5241,16 @@ func TestDashboardIgnoresATerminalOpenedForTheTabItLeft(t *testing.T) {
 	t.Cleanup(value.closeTerminal)
 
 	// Two presses before either answer lands.
-	updated, toSecond := value.Update(switchTabKey(tea.KeyRight))
-	value = updated.(dashboard)
-	updated, toThird := value.Update(switchTabKey(tea.KeyRight))
-	value = updated.(dashboard)
+	toSecond := send(&value, switchTabKey(tea.KeyRight))
+	toThird := send(&value, switchTabKey(tea.KeyRight))
 	if toSecond == nil || toThird == nil {
 		t.Fatal("two switches did not both ask the daemon for a terminal")
 	}
 	second, third := toSecond().(terminalOpenedMsg), toThird().(terminalOpenedMsg)
 
 	// The later answer arrives first, which is what the daemon is free to do.
-	updated, _ = value.Update(third)
-	value = updated.(dashboard)
-	updated, _ = value.Update(second)
-	value = updated.(dashboard)
+	send(&value, third)
+	send(&value, second)
 
 	if value.terminal == nil || value.terminal.id != tabs[2].ID {
 		t.Fatalf("terminal = %v, want the tab the cursor is on", value.terminal)
@@ -5711,12 +5265,7 @@ func TestDashboardIgnoresATerminalOpenedForTheTabItLeft(t *testing.T) {
 }
 
 func TestDashboardSizesTerminalWhenAttachCompletes(t *testing.T) {
-	workspace := model.Workspace{ID: "workspace-1", RootID: "root-1", Name: "alpha", Path: "/projects/alpha"}
-	tab := model.Tab{ID: "tab-1", WorkspaceID: workspace.ID, Name: "1", Running: true}
-	snapshot := model.Snapshot{Roots: []model.RootView{{
-		Root:        model.Root{ID: "root-1", Name: "projects", Path: "/projects"},
-		Directories: []model.WorkspaceView{{Workspace: workspace, Tabs: []model.Tab{tab}}},
-	}}}
+	snapshot, workspace := alphaWorkspaceSnapshot(openTabs(1))
 	backend := &fakeBackend{snapshot: snapshot, workspace: workspace}
 	value := newDashboard(backend, snapshot)
 	value.width = 80
@@ -5729,14 +5278,12 @@ func TestDashboardSizesTerminalWhenAttachCompletes(t *testing.T) {
 	if open == nil {
 		t.Fatal("running tab did not produce an attach command")
 	}
-	updated, resize := value.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
-	value = updated.(dashboard)
+	resize := send(&value, tea.WindowSizeMsg{Width: 120, Height: 40})
 	if resize != nil {
 		t.Fatal("window resize without an attached terminal contacted the daemon")
 	}
 
-	updated, followup := value.Update(open())
-	value = updated.(dashboard)
+	followup := send(&value, open())
 	defer value.closeTerminal()
 	if value.terminal == nil || followup == nil {
 		t.Fatalf("attach result = (terminal %v, followup %v), want an open terminal", value.terminal, followup)
@@ -5766,10 +5313,8 @@ func TestDashboardResizesToTheSizeOnScreenWhateverTheOrder(t *testing.T) {
 	value.terminal = newEmbeddedTerminal("tab-1", newMemoryStream(""), 40, 10)
 	t.Cleanup(value.closeTerminal)
 
-	updated, wide := value.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
-	value = updated.(dashboard)
-	updated, narrow := value.Update(tea.WindowSizeMsg{Width: 60, Height: 20})
-	value = updated.(dashboard)
+	wide := send(&value, tea.WindowSizeMsg{Width: 120, Height: 40})
+	narrow := send(&value, tea.WindowSizeMsg{Width: 60, Height: 20})
 	if wide == nil || narrow == nil {
 		t.Fatal("a window resize did not ask the daemon to resize the PTY")
 	}
@@ -5837,13 +5382,11 @@ func TestDashboardOrdersInFlightResizes(t *testing.T) {
 	value.backend = backend
 	value.leftWidth = 37
 	// Start a wide request before the viewport shrinks, and delay its response.
-	updated, wide := value.Update(tea.WindowSizeMsg{Width: 160, Height: 24})
-	value = updated.(dashboard)
+	wide := send(&value, tea.WindowSizeMsg{Width: 160, Height: 24})
 	wideDone := make(chan struct{})
 	go func() { commandMessages(wide); close(wideDone) }()
 	<-backend.started
-	updated, narrow := value.Update(tea.WindowSizeMsg{Width: 32, Height: 24})
-	value = updated.(dashboard)
+	narrow := send(&value, tea.WindowSizeMsg{Width: 32, Height: 24})
 	narrowDone := make(chan struct{})
 	go func() { commandMessages(narrow); close(narrowDone) }()
 	select {
@@ -5864,12 +5407,8 @@ func TestDashboardPreservesReplayRightEdgeWhenOpeningOnPhone(t *testing.T) {
 	for _, width := range []int{32, 60, 79, 120} {
 		for _, alternate := range []bool{false, true} {
 			t.Run(fmt.Sprintf("width=%d/alternate=%t", width, alternate), func(t *testing.T) {
-				workspace := model.Workspace{ID: "workspace-1", RootID: "root-1", Name: "alpha", Path: "/projects/alpha"}
-				tab := model.Tab{ID: "tab-1", WorkspaceID: workspace.ID, Name: "1", Running: true}
-				snapshot := model.Snapshot{Roots: []model.RootView{{
-					Root:        model.Root{ID: "root-1", Name: "projects", Path: "/projects"},
-					Directories: []model.WorkspaceView{{Workspace: workspace, Tabs: []model.Tab{tab}}},
-				}}}
+				tabs := openTabs(1)
+				snapshot, workspace := alphaWorkspaceSnapshot(tabs)
 				value := newDashboard(&fakeBackend{snapshot: snapshot}, snapshot)
 				value.width, value.height = width, 24
 				value.selectedWorkspaceID, value.selectedPath = workspace.ID, workspace.Path
@@ -5885,8 +5424,7 @@ func TestDashboardPreservesReplayRightEdgeWhenOpeningOnPhone(t *testing.T) {
 				// Check both initial selection and reopening an attached workspace.
 				for range 2 {
 					stream := replaySizedMemoryStream{memoryStream: newMemoryStream(""), columns: columns, rows: rows}
-					updated, _ := value.Update(terminalOpenedMsg{tabID: tab.ID, stream: stream, replay: []byte(replay)})
-					value = updated.(dashboard)
+					send(&value, terminalOpenedMsg{tabID: tabs[0].ID, stream: stream, replay: []byte(replay)})
 					t.Cleanup(value.closeTerminal)
 					if got := value.terminal.render()[0]; !strings.Contains(got, "RIGHT") {
 						t.Fatalf("restored first row lost its right edge: %q", got)

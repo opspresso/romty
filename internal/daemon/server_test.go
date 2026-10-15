@@ -3,11 +3,13 @@ package daemon_test
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -29,11 +31,7 @@ func TestServeRemovesPersistedTerminalTabs(t *testing.T) {
 		t.Fatalf("Save() error = %v", err)
 	}
 
-	server, err := daemon.New(socket, statePath, "/bin/sh")
-	if err != nil {
-		t.Fatalf("New() error = %v", err)
-	}
-	server.SetLogger(testutil.QuietLogger())
+	server := newQuietDaemon(t, socket, statePath, "/bin/sh")
 	persisted, err := store.Load()
 	if err != nil {
 		t.Fatalf("Load() before Serve error = %v", err)
@@ -42,14 +40,7 @@ func TestServeRemovesPersistedTerminalTabs(t *testing.T) {
 		t.Fatalf("persisted tabs before Serve = %#v, want tabs unchanged", persisted.Tabs)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan error, 1)
-	go func() { done <- server.Serve(ctx) }()
-	defer func() {
-		cancel()
-		<-done
-	}()
-	testutil.WaitForDaemon(t, client.New(socket))
+	serveDaemon(t, server, socket).connect(t)
 	persisted, err = store.Load()
 	if err != nil {
 		t.Fatalf("Load() after Serve error = %v", err)
@@ -82,30 +73,7 @@ func TestServerDiscoversWorkspacesAndReattachesSession(t *testing.T) {
 
 	socket := filepath.Join(base, "daemon.sock")
 	statePath := filepath.Join(base, "state.json")
-	server, err := daemon.New(socket, statePath, "/bin/sh")
-	if err != nil {
-		t.Fatalf("New() error = %v", err)
-	}
-	server.SetLogger(testutil.QuietLogger())
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan error, 1)
-	go func() {
-		done <- server.Serve(ctx)
-	}()
-	t.Cleanup(func() {
-		cancel()
-		select {
-		case err := <-done:
-			if err != nil {
-				t.Errorf("Serve() error = %v", err)
-			}
-		case <-time.After(3 * time.Second):
-			t.Error("Serve() did not stop")
-		}
-	})
-
-	backend := client.New(socket)
-	testutil.WaitForDaemon(t, backend)
+	backend := startDaemonAt(t, socket, statePath, "/bin/sh").connect(t)
 	snapshot, err := backend.AddRoot(root)
 	if err != nil {
 		t.Fatalf("AddRoot() error = %v", err)
@@ -134,10 +102,7 @@ func TestServerDiscoversWorkspacesAndReattachesSession(t *testing.T) {
 		t.Fatalf("CreateTab() error = %v", err)
 	}
 
-	firstConnection, firstReader, err := backend.OpenAttach(tab.ID)
-	if err != nil {
-		t.Fatalf("OpenAttach() first error = %v", err)
-	}
+	firstConnection, firstReader := attach(t, backend, tab)
 	writeCommand(t, firstConnection, "pwd")
 	readUntil(t, firstConnection, firstReader, workspace.Path)
 	if err := backend.Resize(tab.ID, 120, 35); err != nil {
@@ -229,44 +194,15 @@ func TestServerOpensRootTerminalAndReloadsDirectories(t *testing.T) {
 
 	socket := filepath.Join(base, "daemon.sock")
 	statePath := filepath.Join(base, "state.json")
-	server, err := daemon.New(socket, statePath, "/bin/sh")
-	if err != nil {
-		t.Fatalf("New() error = %v", err)
-	}
-	server.SetLogger(testutil.QuietLogger())
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan error, 1)
-	go func() { done <- server.Serve(ctx) }()
-	defer func() {
-		cancel()
-		<-done
-	}()
-
-	backend := client.New(socket)
-	testutil.WaitForDaemon(t, backend)
-	snapshot, err := backend.AddRoot(root)
-	if err != nil {
-		t.Fatalf("AddRoot() error = %v", err)
-	}
-	rootID := snapshot.Roots[0].Root.ID
-	workspace, err := backend.EnsureWorkspace(rootID, root)
-	if err != nil {
-		t.Fatalf("EnsureWorkspace() root error = %v", err)
-	}
-	tab, err := backend.CreateTab(workspace.ID, 80, 24)
-	if err != nil {
-		t.Fatalf("CreateTab() root error = %v", err)
-	}
-	connection, reader, err := backend.OpenAttach(tab.ID)
-	if err != nil {
-		t.Fatalf("OpenAttach() root error = %v", err)
-	}
-	defer connection.Close()
+	backend := startDaemonAt(t, socket, statePath, "/bin/sh").connect(t)
+	_, workspace := openWorkspace(t, backend, root, root)
+	tab := createTab(t, backend, workspace)
+	connection, reader := attach(t, backend, tab)
 
 	writeCommand(t, connection, "pwd")
 	readUntil(t, connection, reader, root)
 	writeCommand(t, connection, "mkdir cloned")
-	snapshot = waitForRootDirectoryCount(t, backend, 1)
+	snapshot := waitForRootDirectoryCount(t, backend, 1)
 	if len(snapshot.Roots[0].Tabs) != 1 || len(snapshot.Roots[0].Directories) != 1 || snapshot.Roots[0].Directories[0].Workspace.Name != "cloned" {
 		t.Fatalf("root snapshot after create = %#v", snapshot.Roots[0])
 	}
@@ -287,39 +223,14 @@ func TestSnapshotKeepsRunningWorkspaceWhenItsDirectoryDisappears(t *testing.T) {
 	}
 
 	socket := filepath.Join(base, "daemon.sock")
-	server, err := daemon.New(socket, filepath.Join(base, "state.json"), "/bin/sh")
-	if err != nil {
-		t.Fatalf("New() error = %v", err)
-	}
-	server.SetLogger(testutil.QuietLogger())
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan error, 1)
-	go func() { done <- server.Serve(ctx) }()
-	defer func() {
-		cancel()
-		<-done
-	}()
-
-	backend := client.New(socket)
-	testutil.WaitForDaemon(t, backend)
-	snapshot, err := backend.AddRoot(root)
-	if err != nil {
-		t.Fatalf("AddRoot() error = %v", err)
-	}
-	rootID := snapshot.Roots[0].Root.ID
-	workspace, err := backend.EnsureWorkspace(rootID, workspacePath)
-	if err != nil {
-		t.Fatalf("EnsureWorkspace() error = %v", err)
-	}
-	tab, err := backend.CreateTab(workspace.ID, 80, 24)
-	if err != nil {
-		t.Fatalf("CreateTab() error = %v", err)
-	}
+	backend := startDaemonAt(t, socket, filepath.Join(base, "state.json"), "/bin/sh").connect(t)
+	rootID, workspace := openWorkspace(t, backend, root, workspacePath)
+	tab := createTab(t, backend, workspace)
 
 	if err := os.RemoveAll(root); err != nil {
 		t.Fatalf("RemoveAll() error = %v", err)
 	}
-	snapshot, err = backend.Snapshot()
+	snapshot, err := backend.Snapshot()
 	if err != nil {
 		t.Fatalf("Snapshot() error = %v", err)
 	}
@@ -333,11 +244,7 @@ func TestSnapshotKeepsRunningWorkspaceWhenItsDirectoryDisappears(t *testing.T) {
 	if _, err := backend.EnsureWorkspace(rootID, workspace.Path); err != nil {
 		t.Fatalf("EnsureWorkspace() for running missing workspace error = %v", err)
 	}
-	connection, reader, err := backend.OpenAttach(tab.ID)
-	if err != nil {
-		t.Fatalf("OpenAttach() after directory removal error = %v", err)
-	}
-	defer connection.Close()
+	connection, reader := attach(t, backend, tab)
 	writeCommand(t, connection, "printf workspace-survived")
 	readUntil(t, connection, reader, "workspace-survived")
 }
@@ -350,21 +257,7 @@ func TestEnsureWorkspaceRejectsNestedDirectory(t *testing.T) {
 		t.Fatalf("MkdirAll() error = %v", err)
 	}
 
-	server, err := daemon.New(filepath.Join(base, "daemon.sock"), filepath.Join(base, "state.json"), "/bin/sh")
-	if err != nil {
-		t.Fatalf("New() error = %v", err)
-	}
-	server.SetLogger(testutil.QuietLogger())
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan error, 1)
-	go func() { done <- server.Serve(ctx) }()
-	defer func() {
-		cancel()
-		<-done
-	}()
-
-	backend := client.New(filepath.Join(base, "daemon.sock"))
-	testutil.WaitForDaemon(t, backend)
+	backend := startDaemonAt(t, filepath.Join(base, "daemon.sock"), filepath.Join(base, "state.json"), "/bin/sh").connect(t)
 	snapshot, err := backend.AddRoot(root)
 	if err != nil {
 		t.Fatalf("AddRoot() error = %v", err)
@@ -381,63 +274,21 @@ func TestServerStopsAfterAcknowledgingShutdown(t *testing.T) {
 	if err := os.Mkdir(root, 0o755); err != nil {
 		t.Fatalf("Mkdir() error = %v", err)
 	}
-	socket := filepath.Join(base, "daemon.sock")
-	server, err := daemon.New(socket, filepath.Join(base, "state.json"), "/bin/sh")
-	if err != nil {
-		t.Fatalf("New() error = %v", err)
-	}
-	server.SetLogger(testutil.QuietLogger())
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	done := make(chan error, 1)
-	go func() { done <- server.Serve(ctx) }()
-
-	backend := client.New(socket)
-	testutil.WaitForDaemon(t, backend)
-	snapshot, err := backend.AddRoot(root)
-	if err != nil {
-		t.Fatalf("AddRoot() error = %v", err)
-	}
-	workspace, err := backend.EnsureWorkspace(snapshot.Roots[0].Root.ID, root)
-	if err != nil {
-		t.Fatalf("EnsureWorkspace() error = %v", err)
-	}
-	tab, err := backend.CreateTab(workspace.ID, 80, 24)
-	if err != nil {
-		t.Fatalf("CreateTab() error = %v", err)
-	}
-	connection, reader, err := backend.OpenAttach(tab.ID)
-	if err != nil {
-		t.Fatalf("OpenAttach() error = %v", err)
-	}
-	defer connection.Close()
+	served := startDaemonAt(t, filepath.Join(base, "daemon.sock"), filepath.Join(base, "state.json"), "/bin/sh")
+	backend := served.connect(t)
+	_, workspace := openWorkspace(t, backend, root, root)
+	connection, reader := attach(t, backend, createTab(t, backend, workspace))
 
 	if err := backend.Shutdown(); err != nil {
 		t.Fatalf("Shutdown() error = %v", err)
 	}
-	select {
-	case err := <-done:
-		if err != nil {
-			t.Fatalf("Serve() error = %v", err)
-		}
-	case <-time.After(3 * time.Second):
-		t.Fatal("Serve() did not stop after Shutdown()")
+	if err := served.wait(t); err != nil {
+		t.Fatalf("Serve() after Shutdown() error = %v", err)
 	}
 	if err := backend.Ping(); err == nil {
 		t.Fatal("Ping() after Shutdown() error = nil")
 	}
-	if err := connection.SetReadDeadline(time.Now().Add(3 * time.Second)); err != nil {
-		t.Fatalf("SetReadDeadline() error = %v", err)
-	}
-	buffer := make([]byte, 4096)
-	for {
-		if _, err := reader.Read(buffer); err != nil {
-			if timeout, ok := err.(net.Error); ok && timeout.Timeout() {
-				t.Fatal("terminal connection remained open after Shutdown()")
-			}
-			break
-		}
-	}
+	expectTerminalClosed(t, connection, reader)
 }
 
 func waitForTabCount(t *testing.T, backend *client.Client, workspaceID string, count int) {
@@ -469,16 +320,7 @@ func TestServeLeavesTheModesOfConcurrentDirectoriesAlone(t *testing.T) {
 	previous := syscall.Umask(0o022)
 	t.Cleanup(func() { syscall.Umask(previous) })
 	base := testutil.ShortTempDir(t)
-	socket := filepath.Join(base, "daemon.sock")
-	server, err := daemon.New(socket, filepath.Join(base, "state.json"), "/bin/sh")
-	if err != nil {
-		t.Fatalf("New() error = %v", err)
-	}
-	server.SetLogger(testutil.QuietLogger())
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	done := make(chan error, 1)
-	go func() { done <- server.Serve(ctx) }()
+	served := startDaemonAt(t, filepath.Join(base, "daemon.sock"), filepath.Join(base, "state.json"), "/bin/sh")
 
 	for index := 0; index < 200; index++ {
 		directory := filepath.Join(base, fmt.Sprintf("workspace-%d", index))
@@ -493,21 +335,14 @@ func TestServeLeavesTheModesOfConcurrentDirectoriesAlone(t *testing.T) {
 			t.Fatalf("directory %d mode = %04o, want 0755", index, mode)
 		}
 	}
-	testutil.WaitForDaemon(t, client.New(socket))
-	cancel()
-	if err := <-done; err != nil {
+	served.connect(t)
+	if err := served.stop(t); err != nil {
 		t.Fatalf("Serve() error = %v", err)
 	}
 }
 
 func TestCloseTabTerminatesOnlyTheSelectedSession(t *testing.T) {
-	socket, cancel, done := serveForTest(t)
-	t.Cleanup(func() {
-		cancel()
-		if err := <-done; err != nil {
-			t.Errorf("Serve() error = %v", err)
-		}
-	})
+	socket := startDaemon(t).socket
 	root := t.TempDir()
 	workspacePath := filepath.Join(root, "alpha")
 	if err := os.Mkdir(workspacePath, 0o755); err != nil {
@@ -515,24 +350,11 @@ func TestCloseTabTerminatesOnlyTheSelectedSession(t *testing.T) {
 	}
 	backend := client.New(socket)
 	testutil.WaitForDaemon(t, backend)
-	snapshot, err := backend.AddRoot(root)
-	if err != nil {
-		t.Fatalf("AddRoot() error = %v", err)
-	}
-	workspace, err := backend.EnsureWorkspace(snapshot.Roots[0].Root.ID, workspacePath)
-	if err != nil {
-		t.Fatalf("EnsureWorkspace() error = %v", err)
-	}
-	first, err := backend.CreateTab(workspace.ID, 80, 24)
-	if err != nil {
-		t.Fatalf("CreateTab() first error = %v", err)
-	}
-	second, err := backend.CreateTab(workspace.ID, 80, 24)
-	if err != nil {
-		t.Fatalf("CreateTab() second error = %v", err)
-	}
+	_, workspace := openWorkspace(t, backend, root, workspacePath)
+	first := createTab(t, backend, workspace)
+	second := createTab(t, backend, workspace)
 
-	snapshot, err = backend.CloseTab(first.ID)
+	snapshot, err := backend.CloseTab(first.ID)
 	if err != nil {
 		t.Fatalf("CloseTab() error = %v", err)
 	}
@@ -596,51 +418,19 @@ func readUntil(t *testing.T, connection net.Conn, reader *bufio.Reader, marker s
 func TestAttachDoesNotReplayTerminalQueries(t *testing.T) {
 	base := testutil.ShortTempDir(t)
 	socket := filepath.Join(base, "daemon.sock")
-	server, err := daemon.New(socket, filepath.Join(base, "state.json"), "/bin/sh")
-	if err != nil {
-		t.Fatalf("New() error = %v", err)
-	}
-	server.SetLogger(testutil.QuietLogger())
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan error, 1)
-	go func() { done <- server.Serve(ctx) }()
-	defer func() {
-		cancel()
-		if err := <-done; err != nil {
-			t.Errorf("Serve() error = %v", err)
-		}
-	}()
-	backend := client.New(socket)
-	testutil.WaitForDaemon(t, backend)
+	backend := startDaemonAt(t, socket, filepath.Join(base, "state.json"), "/bin/sh").connect(t)
 
-	snapshot, err := backend.AddRoot(base)
-	if err != nil {
-		t.Fatalf("AddRoot() error = %v", err)
-	}
-	workspace, err := backend.EnsureWorkspace(snapshot.Roots[0].Root.ID, base)
-	if err != nil {
-		t.Fatalf("EnsureWorkspace() error = %v", err)
-	}
-	tab, err := backend.CreateTab(workspace.ID, 80, 24)
-	if err != nil {
-		t.Fatalf("CreateTab() error = %v", err)
-	}
+	_, workspace := openWorkspace(t, backend, base, base)
+	tab := createTab(t, backend, workspace)
 
-	first, reader, err := backend.OpenAttach(tab.ID)
-	if err != nil {
-		t.Fatalf("OpenAttach() error = %v", err)
-	}
+	first, reader := attach(t, backend, tab)
 	// The shell echoes the command line, so the marker is split in the source
 	// and only whole in the output: waiting on the echo would race the history.
 	writeCommand(t, first, `printf 'MARK\033[6n\033[c\033]11;?\033\\END'; echo SETT''LED`)
 	readUntil(t, first, reader, "SETTLED")
 	first.Close()
 
-	second, secondReader, err := backend.OpenAttach(tab.ID)
-	if err != nil {
-		t.Fatalf("second OpenAttach() error = %v", err)
-	}
-	defer second.Close()
+	second, secondReader := attach(t, backend, tab)
 	if err := second.SetReadDeadline(time.Now().Add(2 * time.Second)); err != nil {
 		t.Fatalf("SetReadDeadline() error = %v", err)
 	}
@@ -669,17 +459,7 @@ func TestAttachDoesNotReplayTerminalQueries(t *testing.T) {
 func TestSnapshotSurvivesAnUnreadableRoot(t *testing.T) {
 	base := testutil.ShortTempDir(t)
 	socket := filepath.Join(base, "daemon.sock")
-	server, err := daemon.New(socket, filepath.Join(base, "state.json"), "/bin/sh")
-	if err != nil {
-		t.Fatalf("New() error = %v", err)
-	}
-	server.SetLogger(testutil.QuietLogger())
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan error, 1)
-	go func() { done <- server.Serve(ctx) }()
-	defer func() { cancel(); <-done }()
-	backend := client.New(socket)
-	testutil.WaitForDaemon(t, backend)
+	backend := startDaemonAt(t, socket, filepath.Join(base, "state.json"), "/bin/sh").connect(t)
 
 	healthy := filepath.Join(base, "healthy")
 	doomed := filepath.Join(base, "doomed")
@@ -752,45 +532,12 @@ func TestRemoveRootTerminatesItsTerminalSessions(t *testing.T) {
 	}
 
 	socket := filepath.Join(base, "daemon.sock")
-	server, err := daemon.New(socket, filepath.Join(base, "state.json"), "/bin/sh")
-	if err != nil {
-		t.Fatalf("New() error = %v", err)
-	}
-	server.SetLogger(testutil.QuietLogger())
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan error, 1)
-	go func() { done <- server.Serve(ctx) }()
-	defer func() { cancel(); <-done }()
-
-	backend := client.New(socket)
-	testutil.WaitForDaemon(t, backend)
-	snapshot, err := backend.AddRoot(root)
-	if err != nil {
-		t.Fatalf("AddRoot() error = %v", err)
-	}
-	rootID := snapshot.Roots[0].Root.ID
-	workspace, err := backend.EnsureWorkspace(rootID, root)
-	if err != nil {
-		t.Fatalf("EnsureWorkspace() error = %v", err)
-	}
-	tab, err := backend.CreateTab(workspace.ID, 80, 24)
-	if err != nil {
-		t.Fatalf("CreateTab() error = %v", err)
-	}
-	connection, reader, err := backend.OpenAttach(tab.ID)
-	if err != nil {
-		t.Fatalf("OpenAttach() error = %v", err)
-	}
-	defer connection.Close()
-	secondTab, err := backend.CreateTab(workspace.ID, 80, 24)
-	if err != nil {
-		t.Fatalf("CreateTab() second error = %v", err)
-	}
-	secondConnection, secondReader, err := backend.OpenAttach(secondTab.ID)
-	if err != nil {
-		t.Fatalf("OpenAttach() second error = %v", err)
-	}
-	defer secondConnection.Close()
+	backend := startDaemonAt(t, socket, filepath.Join(base, "state.json"), "/bin/sh").connect(t)
+	rootID, workspace := openWorkspace(t, backend, root, root)
+	tab := createTab(t, backend, workspace)
+	connection, reader := attach(t, backend, tab)
+	secondTab := createTab(t, backend, workspace)
+	secondConnection, secondReader := attach(t, backend, secondTab)
 
 	if _, err := backend.RemoveRoot(rootID); err != nil {
 		t.Fatalf("RemoveRoot() error = %v", err)
@@ -814,51 +561,19 @@ func TestRemoveWorkspaceDeletesOnlyTheDirectChildAndTerminatesItsSessions(t *tes
 
 	socket := filepath.Join(base, "daemon.sock")
 	statePath := filepath.Join(base, "state.json")
-	server, err := daemon.New(socket, statePath, "/bin/sh")
-	if err != nil {
-		t.Fatalf("New() error = %v", err)
-	}
-	server.SetLogger(testutil.QuietLogger())
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan error, 1)
-	go func() { done <- server.Serve(ctx) }()
-	defer func() { cancel(); <-done }()
-
-	backend := client.New(socket)
-	testutil.WaitForDaemon(t, backend)
-	snapshot, err := backend.AddRoot(root)
-	if err != nil {
-		t.Fatalf("AddRoot() error = %v", err)
-	}
-	rootID := snapshot.Roots[0].Root.ID
-	workspace, err := backend.EnsureWorkspace(rootID, workspacePath)
-	if err != nil {
-		t.Fatalf("EnsureWorkspace() error = %v", err)
-	}
-	tab, err := backend.CreateTab(workspace.ID, 80, 24)
-	if err != nil {
-		t.Fatalf("CreateTab() error = %v", err)
-	}
-	connection, reader, err := backend.OpenAttach(tab.ID)
-	if err != nil {
-		t.Fatalf("OpenAttach() error = %v", err)
-	}
-	defer connection.Close()
+	backend := startDaemonAt(t, socket, statePath, "/bin/sh").connect(t)
+	rootID, workspace := openWorkspace(t, backend, root, workspacePath)
+	tab := createTab(t, backend, workspace)
+	connection, reader := attach(t, backend, tab)
 	siblingWorkspace, err := backend.EnsureWorkspace(rootID, siblingPath)
 	if err != nil {
 		t.Fatalf("EnsureWorkspace() sibling error = %v", err)
 	}
-	siblingTab, err := backend.CreateTab(siblingWorkspace.ID, 80, 24)
-	if err != nil {
-		t.Fatalf("CreateTab() sibling error = %v", err)
-	}
-	siblingConnection, siblingReader, err := backend.OpenAttach(siblingTab.ID)
-	if err != nil {
-		t.Fatalf("OpenAttach() sibling error = %v", err)
-	}
-	defer siblingConnection.Close()
+	siblingTab := createTab(t, backend, siblingWorkspace)
+	siblingConnection, siblingReader := attach(t, backend, siblingTab)
 
-	canonicalRoot := snapshot.Roots[0].Root.Path
+	// The daemon records canonical paths, and a workspace is a direct child.
+	canonicalRoot := filepath.Dir(workspace.Path)
 	canonicalNested := filepath.Join(workspace.Path, "nested")
 	for _, protected := range []string{canonicalRoot, canonicalNested, filepath.Join(base, "outside")} {
 		if _, err := backend.RemoveWorkspace(rootID, protected); err == nil {
@@ -872,7 +587,7 @@ func TestRemoveWorkspaceDeletesOnlyTheDirectChildAndTerminatesItsSessions(t *tes
 		t.Fatalf("protected nested directory changed: %v", err)
 	}
 
-	snapshot, err = backend.RemoveWorkspace(rootID, workspace.Path)
+	snapshot, err := backend.RemoveWorkspace(rootID, workspace.Path)
 	if err != nil {
 		t.Fatalf("RemoveWorkspace() error = %v", err)
 	}
@@ -928,16 +643,7 @@ func TestServeCreatesAPrivateSocketAndDirectory(t *testing.T) {
 		t.Fatalf("MkdirAll() error = %v", err)
 	}
 	socket := filepath.Join(home, "daemon.sock")
-	server, err := daemon.New(socket, filepath.Join(home, "state.json"), "/bin/sh")
-	if err != nil {
-		t.Fatalf("New() error = %v", err)
-	}
-	server.SetLogger(testutil.QuietLogger())
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan error, 1)
-	go func() { done <- server.Serve(ctx) }()
-	defer func() { cancel(); <-done }()
-	testutil.WaitForDaemon(t, client.New(socket))
+	startDaemonAt(t, socket, filepath.Join(home, "state.json"), "/bin/sh").connect(t)
 
 	info, err := os.Stat(socket)
 	if err != nil {
@@ -964,44 +670,28 @@ func TestCreateTabLeavesNoTabWhenTheShellExitsAtOnce(t *testing.T) {
 	// A "shell" that exits the moment it starts. The client sends its own
 	// SHELL with each tab, so that is where this has to be set.
 	t.Setenv("SHELL", "/usr/bin/true")
-	server, err := daemon.New(socket, filepath.Join(base, "state.json"), "/usr/bin/true")
-	if err != nil {
-		t.Fatalf("New() error = %v", err)
-	}
-	server.SetLogger(testutil.QuietLogger())
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan error, 1)
-	go func() { done <- server.Serve(ctx) }()
-	defer func() { cancel(); <-done }()
-	backend := client.New(socket)
-	testutil.WaitForDaemon(t, backend)
+	backend := startDaemonAt(t, socket, filepath.Join(base, "state.json"), "/usr/bin/true").connect(t)
 
-	snapshot, err := backend.AddRoot(base)
-	if err != nil {
-		t.Fatalf("AddRoot() error = %v", err)
-	}
-	workspace, err := backend.EnsureWorkspace(snapshot.Roots[0].Root.ID, base)
-	if err != nil {
-		t.Fatalf("EnsureWorkspace() error = %v", err)
-	}
+	_, workspace := openWorkspace(t, backend, base, base)
 	for range 5 {
 		if _, err := backend.CreateTab(workspace.ID, 80, 24); err != nil {
 			t.Fatalf("CreateTab() error = %v", err)
 		}
 	}
 
+	remaining := -1
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
-		snapshot, err = backend.Snapshot()
+		snapshot, err := backend.Snapshot()
 		if err != nil {
 			t.Fatalf("Snapshot() error = %v", err)
 		}
-		if countTabs(snapshot) == 0 {
+		if remaining = countTabs(snapshot); remaining == 0 {
 			return
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	t.Fatalf("%d tabs outlived their shells", countTabs(snapshot))
+	t.Fatalf("%d tabs outlived their shells", remaining)
 }
 
 func countTabs(snapshot model.Snapshot) int {
@@ -1021,46 +711,21 @@ func countTabs(snapshot model.Snapshot) int {
 func TestCreateTabUsesTheClientEnvironment(t *testing.T) {
 	base := testutil.ShortTempDir(t)
 	socket := filepath.Join(base, "daemon.sock")
-	server, err := daemon.New(socket, filepath.Join(base, "state.json"), "/bin/sh")
-	if err != nil {
-		t.Fatalf("New() error = %v", err)
-	}
-	server.SetLogger(testutil.QuietLogger())
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan error, 1)
-	go func() { done <- server.Serve(ctx) }()
-	defer func() { cancel(); <-done }()
-	backend := client.New(socket)
-	testutil.WaitForDaemon(t, backend)
+	backend := startDaemonAt(t, socket, filepath.Join(base, "state.json"), "/bin/sh").connect(t)
 
-	snapshot, err := backend.AddRoot(base)
-	if err != nil {
-		t.Fatalf("AddRoot() error = %v", err)
-	}
-	workspace, err := backend.EnsureWorkspace(snapshot.Roots[0].Root.ID, base)
-	if err != nil {
-		t.Fatalf("EnsureWorkspace() error = %v", err)
-	}
+	_, workspace := openWorkspace(t, backend, base, base)
 
 	// Set after the daemon started, the way a user's PATH changes under a
 	// daemon that has been running for days.
 	t.Setenv("ROMTY_AUDIT_MARKER", "from-the-client")
-	tab, err := backend.CreateTab(workspace.ID, 80, 24)
-	if err != nil {
-		t.Fatalf("CreateTab() error = %v", err)
-	}
-	connection, reader, err := backend.OpenAttach(tab.ID)
-	if err != nil {
-		t.Fatalf("OpenAttach() error = %v", err)
-	}
-	defer connection.Close()
+	tab := createTab(t, backend, workspace)
+	connection, reader := attach(t, backend, tab)
 	writeCommand(t, connection, `printf 'marker=%s\n' "$ROMTY_AUDIT_MARKER"`)
 	readUntil(t, connection, reader, "marker=from-the-client")
 }
 
 func TestServerAcceptsAnOlderSupportedProtocol(t *testing.T) {
-	socket, cancel, done := serveForTest(t)
-	defer func() { cancel(); <-done }()
+	socket := startDaemon(t).socket
 
 	response := speakRaw(t, socket, map[string]any{
 		"action":  "snapshot",
@@ -1078,8 +743,7 @@ func TestServerAcceptsAnOlderSupportedProtocol(t *testing.T) {
 // future client's mutation cannot happen under semantics this daemon does not
 // understand.
 func TestServerRefusesAClientOutsideItsProtocolRange(t *testing.T) {
-	socket, cancel, done := serveForTest(t)
-	defer func() { cancel(); <-done }()
+	socket := startDaemon(t).socket
 
 	response := speakRaw(t, socket, map[string]any{"action": "snapshot", "version": protocol.Version + 1})
 	if response.Error == "" {
@@ -1105,8 +769,7 @@ func TestServerRefusesAClientOutsideItsProtocolRange(t *testing.T) {
 // checked against the shape a released client actually sends: a stamped
 // version, no range and no capability list.
 func TestServerInfersCapabilitiesForAReleasedClient(t *testing.T) {
-	socket, cancel, done := serveForTest(t)
-	defer func() { cancel(); <-done }()
+	socket := startDaemon(t).socket
 
 	removal := speakRaw(t, socket, map[string]any{
 		"action":  "remove_workspace",
@@ -1131,8 +794,7 @@ func TestServerInfersCapabilitiesForAReleasedClient(t *testing.T) {
 // capability list, and the daemon refuses rather than answering with a field
 // that revision has no meaning for.
 func TestServerRefusesAnActionTheSelectedProtocolPredates(t *testing.T) {
-	socket, cancel, done := serveForTest(t)
-	defer func() { cancel(); <-done }()
+	socket := startDaemon(t).socket
 
 	for _, testCase := range []struct {
 		action     string
@@ -1162,8 +824,7 @@ func TestServerRefusesAnActionTheSelectedProtocolPredates(t *testing.T) {
 }
 
 func TestServerPingAdvertisesItsProtocolRangeAndCapabilities(t *testing.T) {
-	socket, cancel, done := serveForTest(t)
-	defer func() { cancel(); <-done }()
+	socket := startDaemon(t).socket
 
 	response := speakRaw(t, socket, map[string]any{"action": "ping"})
 	if response.Version != 0 || response.MinVersion != protocol.MinimumVersion || response.MaxVersion != protocol.Version {
@@ -1189,8 +850,8 @@ func TestServerPingAdvertisesItsProtocolRangeAndCapabilities(t *testing.T) {
 // client decides whether a daemon is running at all, and shutdown is the
 // remedy the mismatch message names.
 func TestServerAnswersPingAndShutdownRegardlessOfVersion(t *testing.T) {
-	socket, cancel, done := serveForTest(t)
-	defer cancel()
+	served := startDaemon(t)
+	socket := served.socket
 
 	if response := speakRaw(t, socket, map[string]any{"action": "ping"}); response.Error != "" {
 		t.Fatalf("unversioned ping error = %q, want it answered", response.Error)
@@ -1200,7 +861,7 @@ func TestServerAnswersPingAndShutdownRegardlessOfVersion(t *testing.T) {
 	}
 	// The shutdown was accepted, so the daemon stops on its own; waiting on
 	// Serve is what proves the request reached past the version check.
-	if err := <-done; err != nil {
+	if err := served.wait(t); err != nil {
 		t.Fatalf("Serve() after an unversioned shutdown error = %v", err)
 	}
 }
@@ -1208,8 +869,7 @@ func TestServerAnswersPingAndShutdownRegardlessOfVersion(t *testing.T) {
 // Attach built its request inline and sent it unversioned, so the daemon saw
 // every attach as coming from a client that predates the field.
 func TestAttachSendsTheProtocolVersion(t *testing.T) {
-	socket, cancel, done := serveForTest(t)
-	defer func() { cancel(); <-done }()
+	socket := startDaemon(t).socket
 
 	backend := client.New(socket)
 	testutil.WaitForDaemon(t, backend)
@@ -1225,10 +885,7 @@ func TestAttachSendsTheProtocolVersion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("EnsureWorkspace() error = %v", err)
 	}
-	tab, err := backend.CreateTab(workspace.ID, 80, 24)
-	if err != nil {
-		t.Fatalf("CreateTab() error = %v", err)
-	}
+	tab := createTab(t, backend, workspace)
 	stream, _, err := backend.OpenTerminal(tab.ID)
 	if err != nil {
 		t.Fatalf("OpenTerminal() error = %v", err)
@@ -1241,21 +898,116 @@ func TestAttachSendsTheProtocolVersion(t *testing.T) {
 	stream.Close()
 }
 
-// serveForTest starts a daemon on a private socket and returns the socket, the
-// cancel that stops it, and the channel carrying Serve's result.
-func serveForTest(t *testing.T) (string, context.CancelFunc, chan error) {
+// testDaemon is a daemon serving on its own goroutine for one test. The test
+// stops it at cleanup unless the test stopped it first.
+type testDaemon struct {
+	socket string
+	cancel context.CancelFunc
+	done   chan error
+	once   sync.Once
+	err    error
+}
+
+// newQuietDaemon builds a daemon on socket and statePath that logs nowhere.
+func newQuietDaemon(t *testing.T, socket, statePath, shell string) *daemon.Server {
 	t.Helper()
-	base := testutil.ShortTempDir(t)
-	socket := filepath.Join(base, "daemon.sock")
-	server, err := daemon.New(socket, filepath.Join(base, "state.json"), "/bin/sh")
+	server, err := daemon.New(socket, statePath, shell)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
 	server.SetLogger(testutil.QuietLogger())
+	return server
+}
+
+// serveDaemon serves server until the test stops it or ends.
+func serveDaemon(t *testing.T, server *daemon.Server, socket string) *testDaemon {
+	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan error, 1)
-	go func() { done <- server.Serve(ctx) }()
-	return socket, cancel, done
+	value := &testDaemon{socket: socket, cancel: cancel, done: make(chan error, 1)}
+	go func() { value.done <- server.Serve(ctx) }()
+	t.Cleanup(func() {
+		if err := value.stop(t); err != nil {
+			t.Errorf("Serve() error = %v", err)
+		}
+	})
+	return value
+}
+
+// startDaemonAt builds and serves a daemon on socket and statePath with shell.
+func startDaemonAt(t *testing.T, socket, statePath, shell string) *testDaemon {
+	t.Helper()
+	return serveDaemon(t, newQuietDaemon(t, socket, statePath, shell), socket)
+}
+
+// startDaemon serves a daemon in a new private romty home.
+func startDaemon(t *testing.T) *testDaemon {
+	t.Helper()
+	base := testutil.ShortTempDir(t)
+	return startDaemonAt(t, filepath.Join(base, "daemon.sock"), filepath.Join(base, "state.json"), "/bin/sh")
+}
+
+// connect returns a client once the daemon answers it.
+func (d *testDaemon) connect(t *testing.T) *client.Client {
+	t.Helper()
+	backend := client.New(d.socket)
+	testutil.WaitForDaemon(t, backend)
+	return backend
+}
+
+// wait returns what Serve returned, or an error when it does not return soon.
+func (d *testDaemon) wait(t *testing.T) error {
+	t.Helper()
+	d.once.Do(func() {
+		select {
+		case d.err = <-d.done:
+		case <-time.After(3 * time.Second):
+			d.err = errors.New("Serve() did not stop")
+		}
+	})
+	return d.err
+}
+
+// stop cancels Serve and returns what it returned.
+func (d *testDaemon) stop(t *testing.T) error {
+	t.Helper()
+	d.cancel()
+	return d.wait(t)
+}
+
+// openWorkspace adds root and registers path inside it as a workspace.
+func openWorkspace(t *testing.T, backend *client.Client, root, path string) (string, model.Workspace) {
+	t.Helper()
+	snapshot, err := backend.AddRoot(root)
+	if err != nil {
+		t.Fatalf("AddRoot() error = %v", err)
+	}
+	rootID := snapshot.Roots[len(snapshot.Roots)-1].Root.ID
+	workspace, err := backend.EnsureWorkspace(rootID, path)
+	if err != nil {
+		t.Fatalf("EnsureWorkspace() error = %v", err)
+	}
+	return rootID, workspace
+}
+
+// createTab starts an 80x24 terminal in workspace.
+func createTab(t *testing.T, backend *client.Client, workspace model.Workspace) model.Tab {
+	t.Helper()
+	tab, err := backend.CreateTab(workspace.ID, 80, 24)
+	if err != nil {
+		t.Fatalf("CreateTab() error = %v", err)
+	}
+	return tab
+}
+
+// attach opens tab's terminal stream until the test ends.
+func attach(t *testing.T, backend *client.Client, tab model.Tab) (net.Conn, *bufio.Reader) {
+	t.Helper()
+	connection, reader, err := backend.OpenAttach(tab.ID)
+	if err != nil {
+		t.Fatalf("OpenAttach(%s) error = %v", tab.ID, err)
+	}
+	t.Cleanup(func() { connection.Close() })
+	return connection, reader
 }
 
 // speakRaw sends one hand-built request, so a test can say a version the
@@ -1293,30 +1045,9 @@ func TestRemoveWorkspaceForgetsADirectoryThatIsAlreadyGone(t *testing.T) {
 	}
 
 	socket := filepath.Join(base, "daemon.sock")
-	server, err := daemon.New(socket, filepath.Join(base, "state.json"), "/bin/sh")
-	if err != nil {
-		t.Fatalf("New() error = %v", err)
-	}
-	server.SetLogger(testutil.QuietLogger())
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan error, 1)
-	go func() { done <- server.Serve(ctx) }()
-	defer func() { cancel(); <-done }()
-
-	backend := client.New(socket)
-	testutil.WaitForDaemon(t, backend)
-	snapshot, err := backend.AddRoot(root)
-	if err != nil {
-		t.Fatalf("AddRoot() error = %v", err)
-	}
-	rootID := snapshot.Roots[0].Root.ID
-	workspace, err := backend.EnsureWorkspace(rootID, workspacePath)
-	if err != nil {
-		t.Fatalf("EnsureWorkspace() error = %v", err)
-	}
-	if _, err := backend.CreateTab(workspace.ID, 80, 24); err != nil {
-		t.Fatalf("CreateTab() error = %v", err)
-	}
+	backend := startDaemonAt(t, socket, filepath.Join(base, "state.json"), "/bin/sh").connect(t)
+	rootID, workspace := openWorkspace(t, backend, root, workspacePath)
+	createTab(t, backend, workspace)
 
 	// The directory goes without romty being the one to remove it, which is
 	// the state a rolled-back removal leaves behind. The canonical path is
@@ -1326,7 +1057,7 @@ func TestRemoveWorkspaceForgetsADirectoryThatIsAlreadyGone(t *testing.T) {
 		t.Fatalf("RemoveAll() error = %v", err)
 	}
 
-	snapshot, err = backend.RemoveWorkspace(rootID, canonical)
+	snapshot, err := backend.RemoveWorkspace(rootID, canonical)
 	if err != nil {
 		t.Fatalf("RemoveWorkspace() on a missing directory error = %v", err)
 	}
@@ -1360,60 +1091,27 @@ func TestStopSavesSessionsAndTheNextDaemonRestoresThem(t *testing.T) {
 		t.Fatalf("MkdirAll() error = %v", err)
 	}
 
-	serve := func() (*client.Client, func()) {
-		server, err := daemon.New(socket, statePath, "/bin/sh")
-		if err != nil {
-			t.Fatalf("New() error = %v", err)
-		}
-		server.SetLogger(testutil.QuietLogger())
-		ctx, cancel := context.WithCancel(context.Background())
-		done := make(chan error, 1)
-		go func() { done <- server.Serve(ctx) }()
-		backend := client.New(socket)
-		testutil.WaitForDaemon(t, backend)
-		return backend, func() {
-			cancel()
-			if err := <-done; err != nil {
-				t.Errorf("Serve() error = %v", err)
-			}
-		}
-	}
-
-	backend, stop := serve()
-	snapshot, err := backend.AddRoot(base)
-	if err != nil {
-		t.Fatalf("AddRoot() error = %v", err)
-	}
-	workspace, err := backend.EnsureWorkspace(snapshot.Roots[0].Root.ID, workspacePath)
-	if err != nil {
-		t.Fatalf("EnsureWorkspace() error = %v", err)
-	}
-	tab, err := backend.CreateTab(workspace.ID, 80, 24)
-	if err != nil {
-		t.Fatalf("CreateTab() error = %v", err)
-	}
+	first := startDaemonAt(t, socket, statePath, "/bin/sh")
+	backend := first.connect(t)
+	_, workspace := openWorkspace(t, backend, base, workspacePath)
+	tab := createTab(t, backend, workspace)
 	const sessionID = "0123abcd-89ef-4567-0123-456789abcdef"
 	if err := backend.ReportAgentEvent(tab.ID, protocol.AgentEvent{
 		Agent: model.AgentClaude, HookEvent: "SessionStart", SessionID: sessionID,
 	}); err != nil {
 		t.Fatalf("ReportAgentEvent() error = %v", err)
 	}
-	connection, reader, err := backend.OpenAttach(tab.ID)
-	if err != nil {
-		t.Fatalf("OpenAttach() error = %v", err)
-	}
+	connection, reader := attach(t, backend, tab)
 	writeCommand(t, connection, `echo RESUME''PROOF`)
 	readUntil(t, connection, reader, "RESUMEPROOF")
 	connection.Close()
-	stop()
-
-	backend, stop = serve()
-	defer stop()
-	restored, err := backend.CreateTab(workspace.ID, 80, 24)
-	if err != nil {
-		t.Fatalf("CreateTab() after restart error = %v", err)
+	if err := first.stop(t); err != nil {
+		t.Fatalf("Serve() error = %v", err)
 	}
-	connection, reader, err = backend.OpenAttach(restored.ID)
+
+	backend = startDaemonAt(t, socket, statePath, "/bin/sh").connect(t)
+	restored := createTab(t, backend, workspace)
+	connection, reader, err := backend.OpenAttach(restored.ID)
 	if err != nil {
 		t.Fatalf("OpenAttach() after restart error = %v", err)
 	}
@@ -1441,15 +1139,8 @@ func TestStopSavesSessionsAndTheNextDaemonRestoresThem(t *testing.T) {
 		t.Fatalf("restored output out of order (proof %d, marker %d):\n%q", proof, marker, output)
 	}
 
-	third, err := backend.CreateTab(workspace.ID, 80, 24)
-	if err != nil {
-		t.Fatalf("third CreateTab() error = %v", err)
-	}
-	thirdConnection, thirdReader, err := backend.OpenAttach(third.ID)
-	if err != nil {
-		t.Fatalf("third OpenAttach() error = %v", err)
-	}
-	defer thirdConnection.Close()
+	third := createTab(t, backend, workspace)
+	thirdConnection, thirdReader := attach(t, backend, third)
 	writeCommand(t, thirdConnection, `echo FRESH''TAB`)
 	readUntil(t, thirdConnection, thirdReader, "FRESHTAB")
 	if _, err := os.Stat(filepath.Join(base, "resume", tab.ID+".json")); !os.IsNotExist(err) {

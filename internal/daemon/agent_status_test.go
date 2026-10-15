@@ -11,8 +11,37 @@ import (
 
 	"github.com/opspresso/romty/internal/model"
 	"github.com/opspresso/romty/internal/protocol"
+	"github.com/opspresso/romty/internal/testutil"
 	"github.com/opspresso/romty/internal/transcript"
 )
+
+// stubForeground reports groupOf as each terminal's foreground process group
+// and processes ("pid command" lines) as the process list.
+func stubForeground(t *testing.T, groupOf func(*os.File) int, processes string) {
+	t.Helper()
+	testutil.Set(t, &foregroundProcessGroup, func(terminal *os.File) (int, error) { return groupOf(terminal), nil })
+	testutil.Set(t, &runProcessList, func(context.Context) ([]byte, error) { return []byte(processes), nil })
+}
+
+// group puts every terminal in the same foreground process group.
+func group(id int) func(*os.File) int {
+	return func(*os.File) int { return id }
+}
+
+// writeClaudeTranscript writes a Claude Code transcript for a session run in
+// workspace, under a configuration directory the test owns.
+func writeClaudeTranscript(t *testing.T, workspace, sessionID, records string) {
+	t.Helper()
+	configDir := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", configDir)
+	directory := filepath.Join(configDir, "projects", strings.NewReplacer("/", "-", ".", "-").Replace(workspace))
+	if err := os.MkdirAll(directory, 0o700); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(directory, sessionID+".jsonl"), []byte(records), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+}
 
 func TestAgentHookEventsMapToPhases(t *testing.T) {
 	for _, testCase := range []struct {
@@ -117,11 +146,9 @@ func TestAgentStatusRequiresARunningTab(t *testing.T) {
 }
 
 func TestNodeStatusReportsPresenceWithoutAgentPhases(t *testing.T) {
-	previousGroup, previousList := foregroundProcessGroup, runProcessList
-	foregroundProcessGroup = func(*os.File) (int, error) { return 101, nil }
+	testutil.Set(t, &foregroundProcessGroup, func(*os.File) (int, error) { return 101, nil })
 	command := "node server.js"
-	runProcessList = func(context.Context) ([]byte, error) { return []byte("101 " + command + "\n"), nil }
-	t.Cleanup(func() { foregroundProcessGroup, runProcessList = previousGroup, previousList })
+	testutil.Set(t, &runProcessList, func(context.Context) ([]byte, error) { return []byte("101 " + command + "\n"), nil })
 
 	value := newSessionForTest(nil)
 	value.broadcast([]byte("Server ready. Press Enter to continue.\r\n"))
@@ -272,25 +299,16 @@ func TestTranscriptInterruptEndsOnlyANewerOpenTurn(t *testing.T) {
 func TestAgentStatusRequiresLifecycleReportsForCodexAndClaude(t *testing.T) {
 	hooked, unhooked := new(os.File), new(os.File)
 	titled := new(os.File)
-	previousGroup := foregroundProcessGroup
-	previousList := runProcessList
-	foregroundProcessGroup = func(terminal *os.File) (int, error) {
+	stubForeground(t, func(terminal *os.File) int {
 		switch terminal {
 		case hooked:
-			return 101, nil
+			return 101
 		case unhooked:
-			return 102, nil
+			return 102
 		default:
-			return 103, nil
+			return 103
 		}
-	}
-	runProcessList = func(context.Context) ([]byte, error) {
-		return []byte("101 claude\n102 claude\n103 codex\n"), nil
-	}
-	t.Cleanup(func() {
-		foregroundProcessGroup = previousGroup
-		runProcessList = previousList
-	})
+	}, "101 claude\n102 claude\n103 codex\n")
 
 	hookedSession := newSessionForTest(hooked)
 	// The same approval prompt is on both screens.
@@ -325,34 +343,18 @@ func TestAgentStatusRequiresLifecycleReportsForCodexAndClaude(t *testing.T) {
 // The counters need the session identifier, which only a hook reports. Without
 // one romty cannot tell which of a directory's transcripts belongs to which tab.
 func TestAgentStatusReportsTheLedgerOnlyForAHookedSession(t *testing.T) {
-	configDir := t.TempDir()
-	t.Setenv("CLAUDE_CONFIG_DIR", configDir)
 	workspace := "/projects/alpha"
-	directory := filepath.Join(configDir, "projects", strings.NewReplacer("/", "-", ".", "-").Replace(workspace))
-	if err := os.MkdirAll(directory, 0o700); err != nil {
-		t.Fatalf("MkdirAll() error = %v", err)
-	}
-	record := `{"type":"assistant","message":{"usage":{"input_tokens":2,` +
-		`"cache_creation_input_tokens":1288,"cache_read_input_tokens":342813}}}` + "\n" +
-		`{"type":"summary","totalCostUSD":1.25}` + "\n"
-	if err := os.WriteFile(filepath.Join(directory, "session-1.jsonl"), []byte(record), 0o600); err != nil {
-		t.Fatalf("WriteFile() error = %v", err)
-	}
+	writeClaudeTranscript(t, workspace, "session-1", `{"type":"assistant","message":{"usage":{"input_tokens":2,`+
+		`"cache_creation_input_tokens":1288,"cache_read_input_tokens":342813}}}`+"\n"+
+		`{"type":"summary","totalCostUSD":1.25}`+"\n")
 
 	hooked, unhooked := new(os.File), new(os.File)
-	previousGroup := foregroundProcessGroup
-	previousList := runProcessList
-	foregroundProcessGroup = func(terminal *os.File) (int, error) {
+	stubForeground(t, func(terminal *os.File) int {
 		if terminal == hooked {
-			return 101, nil
+			return 101
 		}
-		return 102, nil
-	}
-	runProcessList = func(context.Context) ([]byte, error) { return []byte("101 claude\n102 claude\n"), nil }
-	t.Cleanup(func() {
-		foregroundProcessGroup = previousGroup
-		runProcessList = previousList
-	})
+		return 102
+	}, "101 claude\n102 claude\n")
 
 	server := &Server{
 		sessions: map[string]*session{
@@ -400,17 +402,8 @@ func TestAgentStatusReportsTheLedgerOnlyForAHookedSession(t *testing.T) {
 // A tab whose agent has drawn nothing recognisable keeps the unknown phase
 // rather than being guessed into a state it is not in.
 func TestAgentStatusLeavesAnUnreadableScreenUnknown(t *testing.T) {
-	terminal := new(os.File)
-	previousGroup := foregroundProcessGroup
-	previousList := runProcessList
-	foregroundProcessGroup = func(*os.File) (int, error) { return 101, nil }
-	runProcessList = func(context.Context) ([]byte, error) { return []byte("101 claude\n"), nil }
-	t.Cleanup(func() {
-		foregroundProcessGroup = previousGroup
-		runProcessList = previousList
-	})
-
-	value := newSessionForTest(terminal)
+	stubForeground(t, group(101), "101 claude\n")
+	value := newSessionForTest(new(os.File))
 	value.history.append([]byte("go: downloading github.com/example/module v1.2.3\r\n"))
 	server := &Server{
 		sessions:      map[string]*session{"tab-1": value},
@@ -423,14 +416,7 @@ func TestAgentStatusLeavesAnUnreadableScreenUnknown(t *testing.T) {
 }
 
 func TestAgentStatusDoesNotGuessCodexLifecycleFromRedraws(t *testing.T) {
-	previousGroup := foregroundProcessGroup
-	previousList := runProcessList
-	foregroundProcessGroup = func(*os.File) (int, error) { return 101, nil }
-	runProcessList = func(context.Context) ([]byte, error) { return []byte("101 codex\n"), nil }
-	t.Cleanup(func() {
-		foregroundProcessGroup = previousGroup
-		runProcessList = previousList
-	})
+	stubForeground(t, group(101), "101 codex\n")
 
 	value := newSessionForTest(new(os.File))
 	server := &Server{
@@ -462,14 +448,7 @@ func TestAgentStatusDoesNotGuessCodexLifecycleFromRedraws(t *testing.T) {
 
 func TestAgentStatusUsesForegroundProcessAsPresenceAuthority(t *testing.T) {
 	claudePTY := new(os.File)
-	previousGroup := foregroundProcessGroup
-	previousList := runProcessList
-	foregroundProcessGroup = func(terminal *os.File) (int, error) { return 101, nil }
-	runProcessList = func(context.Context) ([]byte, error) { return []byte("101 claude\n"), nil }
-	t.Cleanup(func() {
-		foregroundProcessGroup = previousGroup
-		runProcessList = previousList
-	})
+	stubForeground(t, group(101), "101 claude\n")
 
 	server := &Server{
 		sessions: map[string]*session{
@@ -494,25 +473,13 @@ func TestAgentStatusUsesForegroundProcessAsPresenceAuthority(t *testing.T) {
 // An interrupt runs no Claude Code hook. The snapshot reads it from the
 // session's transcript and keeps the interrupted phase for later snapshots.
 func TestAgentStatusEndsATurnTheTranscriptRecordsAsInterrupted(t *testing.T) {
-	configDir := t.TempDir()
-	t.Setenv("CLAUDE_CONFIG_DIR", configDir)
 	workspace := "/projects/alpha"
-	directory := filepath.Join(configDir, "projects", strings.NewReplacer("/", "-", ".", "-").Replace(workspace))
-	if err := os.MkdirAll(directory, 0o700); err != nil {
-		t.Fatalf("MkdirAll() error = %v", err)
-	}
-	record := `{"type":"user","timestamp":"2026-10-15T09:00:05.000Z","message":{"content":[{"type":"text","text":"[Request interrupted by user]"}]}}` + "\n"
-	if err := os.WriteFile(filepath.Join(directory, "session-1.jsonl"), []byte(record), 0o600); err != nil {
-		t.Fatalf("WriteFile() error = %v", err)
-	}
-	terminal := new(os.File)
-	previousGroup, previousList := foregroundProcessGroup, runProcessList
-	foregroundProcessGroup = func(*os.File) (int, error) { return 101, nil }
-	runProcessList = func(context.Context) ([]byte, error) { return []byte("101 claude\n"), nil }
-	t.Cleanup(func() { foregroundProcessGroup, runProcessList = previousGroup, previousList })
+	writeClaudeTranscript(t, workspace, "session-1",
+		`{"type":"user","timestamp":"2026-10-15T09:00:05.000Z","message":{"content":[{"type":"text","text":"[Request interrupted by user]"}]}}`+"\n")
+	stubForeground(t, group(101), "101 claude\n")
 
 	server := &Server{
-		sessions: map[string]*session{"tab-1": newSessionForTest(terminal)},
+		sessions: map[string]*session{"tab-1": newSessionForTest(new(os.File))},
 		agentStatuses: map[string]agentRuntime{"tab-1": {
 			AgentStatus: model.AgentStatus{Agent: model.AgentClaude, Phase: model.AgentPhaseWorking},
 			SessionID:   "session-1",
@@ -536,9 +503,7 @@ func TestAgentStatusEndsATurnTheTranscriptRecordsAsInterrupted(t *testing.T) {
 // carry another tab's ID. Only a hook below the tab's foreground job counts.
 func TestOpenCodeEventsCountOnlyFromTheTabsForegroundJob(t *testing.T) {
 	terminal := new(os.File)
-	previous := foregroundProcessGroup
-	foregroundProcessGroup = func(*os.File) (int, error) { return 4242, nil }
-	t.Cleanup(func() { foregroundProcessGroup = previous })
+	testutil.Set(t, &foregroundProcessGroup, func(*os.File) (int, error) { return 4242, nil })
 	server := &Server{sessions: map[string]*session{"tab": newSessionForTest(terminal)}, agentStatuses: make(map[string]agentRuntime)}
 	report := func(groups ...int) {
 		t.Helper()

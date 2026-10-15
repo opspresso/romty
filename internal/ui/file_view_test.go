@@ -99,7 +99,7 @@ func TestReadWorkspaceFileRejectsOversizedFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer file.Close()
-	if err := file.Truncate((8 << 20) + 1); err != nil {
+	if err := file.Truncate(maximumWorkspaceFileBytes + 1); err != nil {
 		t.Fatal(err)
 	}
 	if content, err := readWorkspaceFile(workspace, "large.log"); err == nil || content != "" {

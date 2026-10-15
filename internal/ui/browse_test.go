@@ -21,18 +21,17 @@ func browsing(t *testing.T, backend Backend, home string) dashboard {
 	value.width = 120
 	value.height = 40
 	value.homePath = home
-	updated, command := value.Update(key(tea.KeyF2, ""))
-	result := updated.(dashboard)
-	if result.modal != browseModal {
-		t.Fatalf("F2 modal = %v, want the root picker", result.modal)
+	command := send(&value, key(tea.KeyF2, ""))
+	if value.modal != browseModal {
+		t.Fatalf("F2 modal = %v, want the root picker", value.modal)
 	}
-	return load(t, result, command)
+	return load(t, value, command)
 }
 
 func press(t *testing.T, value dashboard, message tea.KeyPressMsg) (dashboard, tea.Cmd) {
 	t.Helper()
-	updated, command := value.Update(message)
-	return updated.(dashboard), command
+	command := send(&value, message)
+	return value, command
 }
 
 // load runs a pending directory read and delivers it, the way the program
@@ -43,9 +42,8 @@ func load(t *testing.T, value dashboard, command tea.Cmd) dashboard {
 	if command == nil {
 		t.Fatal("directory read command = nil")
 	}
-	message := commandMessage[browserMsg](t, command)
-	updated, _ := value.Update(message)
-	return updated.(dashboard)
+	send(&value, commandMessage[browserMsg](t, command))
+	return value
 }
 
 // walk presses a key that opens another directory and delivers the read.
@@ -53,6 +51,22 @@ func walk(t *testing.T, value dashboard, message tea.KeyPressMsg) dashboard {
 	t.Helper()
 	value, command := press(t, value, message)
 	return load(t, value, command)
+}
+
+// assertAddsRoot presses Enter in the picker and expects it to close and add want.
+func assertAddsRoot(t *testing.T, value dashboard, backend *fakeBackend, want string) {
+	t.Helper()
+	value, command := press(t, value, key(tea.KeyEnter, ""))
+	if command == nil {
+		t.Fatal("add root command = nil")
+	}
+	if value.modal != noModal {
+		t.Fatalf("modal after Enter = %v, want the picker closed", value.modal)
+	}
+	command()
+	if backend.addedPath != want {
+		t.Fatalf("added path = %q, want %q", backend.addedPath, want)
+	}
 }
 
 func makeDirectories(t *testing.T, parent string, names ...string) {
@@ -90,8 +104,7 @@ func TestBrowsePickerOpensClickedDirectory(t *testing.T) {
 	value := browsing(t, &fakeBackend{}, home)
 	left, top := value.modalGeometry(value.width, value.dimensions().bodyHeight).contentOrigin()
 
-	updated, command := value.Update(tea.MouseClickMsg{X: left + 2, Y: top + 4, Button: tea.MouseLeft})
-	value = updated.(dashboard)
+	command := send(&value, tea.MouseClickMsg{X: left + 2, Y: top + 4, Button: tea.MouseLeft})
 	if command == nil || value.browse.path != filepath.Join(home, "beta") || !value.browse.loading {
 		t.Fatalf("clicked directory = (path %q, loading %v, command %v)",
 			value.browse.path, value.browse.loading, command)
@@ -105,8 +118,7 @@ func TestBrowsePickerHighlightsHoveredDirectory(t *testing.T) {
 	left, top := value.modalGeometry(value.width, value.dimensions().bodyHeight).contentOrigin()
 	before := value.render()
 
-	updated, _ := value.Update(tea.MouseMotionMsg{X: left + 2, Y: top + 4})
-	value = updated.(dashboard)
+	send(&value, tea.MouseMotionMsg{X: left + 2, Y: top + 4})
 	if value.hover.kind != hoverBrowseRow || value.hover.index != 2 || value.render() == before {
 		t.Fatalf("browse hover = %#v", value.hover)
 	}
@@ -164,17 +176,7 @@ func TestBrowsePickerAddsTheOpenDirectoryFromItsOwnRow(t *testing.T) {
 		t.Fatalf("→ on the open directory = %v, want no read", command)
 	}
 
-	value, command := press(t, value, key(tea.KeyEnter, ""))
-	if command == nil {
-		t.Fatal("add root command = nil")
-	}
-	if value.modal != noModal {
-		t.Fatalf("modal after Enter = %v, want the picker closed", value.modal)
-	}
-	command()
-	if backend.addedPath != home {
-		t.Fatalf("added path = %q, want the open directory", backend.addedPath)
-	}
+	assertAddsRoot(t, value, backend, home)
 }
 
 func TestBrowsePickerWalksInAndOut(t *testing.T) {
@@ -207,17 +209,7 @@ func TestBrowsePickerAddsHighlightedDirectory(t *testing.T) {
 	backend := &fakeBackend{}
 	value := browsing(t, backend, home)
 	value, _ = press(t, value, key(tea.KeyDown, ""))
-	value, command := press(t, value, key(tea.KeyEnter, ""))
-	if command == nil {
-		t.Fatal("add root command = nil")
-	}
-	if value.modal != noModal {
-		t.Fatalf("modal after Enter = %v, want the picker closed", value.modal)
-	}
-	command()
-	if backend.addedPath != filepath.Join(home, "beta") {
-		t.Fatalf("added path = %q, want beta", backend.addedPath)
-	}
+	assertAddsRoot(t, value, backend, filepath.Join(home, "beta"))
 }
 
 func TestBrowsePickerAddsAnEmptyDirectoryItWalkedInto(t *testing.T) {
@@ -234,14 +226,7 @@ func TestBrowsePickerAddsAnEmptyDirectoryItWalkedInto(t *testing.T) {
 		t.Fatalf("the picker does not say the directory is empty:\n%s", rendered)
 	}
 
-	_, command := press(t, value, key(tea.KeyEnter, ""))
-	if command == nil {
-		t.Fatal("add root command = nil")
-	}
-	command()
-	if backend.addedPath != filepath.Join(home, "alpha") {
-		t.Fatalf("added path = %q, want the open directory", backend.addedPath)
-	}
+	assertAddsRoot(t, value, backend, filepath.Join(home, "alpha"))
 }
 
 // The cursor stops at both ends. The wheel arrives as three arrow keys per
@@ -349,8 +334,7 @@ func TestBrowsePickerIgnoresAReadItHasLeftBehind(t *testing.T) {
 	stale := value.browse.path
 	value = walk(t, value, key(tea.KeyRight, ""))
 
-	updated, _ := value.Update(browserMsg{value: browser{path: stale, entries: []string{"alpha"}}})
-	value = updated.(dashboard)
+	send(&value, browserMsg{value: browser{path: stale, entries: []string{"alpha"}}})
 	if value.browse.path != filepath.Join(home, "alpha") ||
 		strings.Join(value.browse.entries, ",") != "inner" {
 		t.Fatalf("a stale read replaced the open directory: (path %q, entries %v)",
@@ -404,9 +388,7 @@ func TestShortenPathKeepsTheEnd(t *testing.T) {
 func TestBrowseClicksFollowTheScrolledWindow(t *testing.T) {
 	home := t.TempDir()
 	for index := range 40 {
-		if err := os.Mkdir(filepath.Join(home, fmt.Sprintf("child-%02d", index)), 0o755); err != nil {
-			t.Fatalf("Mkdir() error = %v", err)
-		}
+		makeDirectories(t, home, fmt.Sprintf("child-%02d", index))
 	}
 	value := browsing(t, &fakeBackend{}, home)
 	// Deep enough into the list that the window has scrolled off the first row.

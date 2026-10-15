@@ -108,10 +108,8 @@ func TestModalOwnsPaste(t *testing.T) {
 		value.terminal = newEmbeddedTerminal("tab", stream, 40, 10)
 		t.Cleanup(value.terminal.close)
 		value.focus, value.modal = terminalPane, kind
-		updated, _ := value.Update(tea.PasteMsg{Content: "hidden shell input"})
-		value = updated.(dashboard)
-		updated, _ = value.Update(key(tea.KeyEscape, ""))
-		value = updated.(dashboard)
+		send(&value, tea.PasteMsg{Content: "hidden shell input"})
+		send(&value, key(tea.KeyEscape, ""))
 		_, _ = value.Update(tea.PasteMsg{Content: "visible shell input"})
 		waitForGuest(t, stream, "visible shell input")
 		if got := stream.String(); got != "visible shell input" {
@@ -125,8 +123,7 @@ func TestWorkspaceMenuKeepsSelectionVisibleAfterResize(t *testing.T) {
 	value.width, value.height, value.modal = 100, 30, workspaceActionsModal
 	value.workspaceActionTarget.hasGit = true
 	value.workspaceActionIndex = len(value.workspaceActionChoices()) - 1
-	updated, _ := value.Update(tea.WindowSizeMsg{Width: 40, Height: 10})
-	value = updated.(dashboard)
+	send(&value, tea.WindowSizeMsg{Width: 40, Height: 10})
 	lines, _, _ := value.workspaceActionPopup(value.bodySize())
 	if !strings.Contains(ansi.Strip(strings.Join(lines, "\n")), "Delete workspace") {
 		t.Fatal("selected menu action disappeared after resize")
@@ -135,12 +132,9 @@ func TestWorkspaceMenuKeepsSelectionVisibleAfterResize(t *testing.T) {
 
 func TestScrollbackSearchOwnsPaste(t *testing.T) {
 	value := scrolledDashboard(t, 200)
-	updated, _ := value.Update(key(tea.KeyF6, ""))
-	value = updated.(dashboard)
-	updated, _ = value.Update(key('/', "/"))
-	value = updated.(dashboard)
-	updated, _ = value.Update(tea.PasteMsg{Content: "search text"})
-	value = updated.(dashboard)
+	send(&value, key(tea.KeyF6, ""))
+	send(&value, key('/', "/"))
+	send(&value, tea.PasteMsg{Content: "search text"})
 	if !value.scrollback || !value.searchMode || value.searchQuery != "search text" {
 		t.Fatal("paste left the search prompt instead of editing its query")
 	}

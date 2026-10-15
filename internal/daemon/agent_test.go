@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/opspresso/romty/internal/model"
+	"github.com/opspresso/romty/internal/testutil"
 )
 
 func TestProcessAgentsRecogniseClaudeCodeAndCodex(t *testing.T) {
@@ -99,16 +100,8 @@ func TestSessionAgentsMatchTabsByForegroundProcessGroup(t *testing.T) {
 	opencodePTY := new(os.File)
 	nodePTY := new(os.File)
 	groups := map[*os.File]int{claudePTY: 101, codexPTY: 202, opencodePTY: 303, nodePTY: 404}
-	previousGroup := foregroundProcessGroup
-	previousList := runProcessList
-	foregroundProcessGroup = func(terminal *os.File) (int, error) { return groups[terminal], nil }
-	runProcessList = func(context.Context) ([]byte, error) {
-		return []byte("101 claude\n202 codex\n303 opencode\n404 node server.js\n505 node background.js\n"), nil
-	}
-	t.Cleanup(func() {
-		foregroundProcessGroup = previousGroup
-		runProcessList = previousList
-	})
+	stubForeground(t, func(terminal *os.File) int { return groups[terminal] },
+		"101 claude\n202 codex\n303 opencode\n404 node server.js\n505 node background.js\n")
 
 	sessions := map[string]*session{
 		"tab-1": newSessionForTest(claudePTY),
@@ -128,16 +121,10 @@ func TestSessionAgentsMatchTabsByForegroundProcessGroup(t *testing.T) {
 }
 
 func TestListProcessesTimesOut(t *testing.T) {
-	previousTimeout := processListTimeout
-	previousList := runProcessList
-	processListTimeout = 20 * time.Millisecond
-	runProcessList = func(ctx context.Context) ([]byte, error) {
+	testutil.Set(t, &processListTimeout, 20*time.Millisecond)
+	testutil.Set(t, &runProcessList, func(ctx context.Context) ([]byte, error) {
 		<-ctx.Done()
 		return nil, ctx.Err()
-	}
-	t.Cleanup(func() {
-		processListTimeout = previousTimeout
-		runProcessList = previousList
 	})
 
 	result := make(chan error, 1)

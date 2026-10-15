@@ -36,6 +36,29 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
+// assertContains fails unless output holds every one of wants.
+func assertContains(t *testing.T, label, output string, wants ...string) {
+	t.Helper()
+	for _, want := range wants {
+		if !strings.Contains(output, want) {
+			t.Fatalf("%s does not contain %q:\n%s", label, want, output)
+		}
+	}
+}
+
+// fakeAgents puts an executable for each agent name in a new directory and
+// returns that directory for PATH.
+func fakeAgents(t *testing.T, names ...string) string {
+	t.Helper()
+	bin := t.TempDir()
+	for _, name := range names {
+		if err := os.WriteFile(filepath.Join(bin, name), []byte("#!/bin/sh\n"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return bin
+}
+
 func TestRunRejectsNestedRomty(t *testing.T) {
 	t.Setenv("ROMTY", "1")
 
@@ -48,9 +71,7 @@ func TestRunRejectsNestedRomty(t *testing.T) {
 func TestVersionAndHelpDoNotNeedARuntime(t *testing.T) {
 	t.Setenv("ROMTY", "1")
 	t.Setenv("ROMTY_HOME", strings.Repeat("too-deep/", paths.SocketPathLimit))
-	originalVersion := version.Value
-	version.Value = "9.8.7"
-	t.Cleanup(func() { version.Value = originalVersion })
+	testutil.Set(t, &version.Value, "9.8.7")
 
 	var output bytes.Buffer
 	if err := runCommand([]string{"version"}, &output); err != nil {
@@ -64,11 +85,7 @@ func TestVersionAndHelpDoNotNeedARuntime(t *testing.T) {
 	if err := runCommand([]string{"help"}, &output); err != nil {
 		t.Fatalf("help error = %v", err)
 	}
-	for _, command := range []string{"status", "version", "help", "doctor", "hooks", "list", "stop"} {
-		if !strings.Contains(output.String(), "  "+command) {
-			t.Fatalf("help does not contain %q:\n%s", command, output.String())
-		}
-	}
+	assertContains(t, "help", output.String(), "  status", "  version", "  help", "  doctor", "  hooks", "  list", "  stop")
 	if strings.Contains(output.String(), "  daemon") {
 		t.Fatalf("help exposes the internal daemon command:\n%s", output.String())
 	}
@@ -76,13 +93,7 @@ func TestVersionAndHelpDoNotNeedARuntime(t *testing.T) {
 
 func TestHooksCommandInstallsDetectedAgentHooksWithoutARuntime(t *testing.T) {
 	useReleaseBuild(t)
-	bin := t.TempDir()
-	for _, name := range []string{"claude", "codex"} {
-		path := filepath.Join(bin, name)
-		if err := os.WriteFile(path, []byte("#!/bin/sh\n"), 0o700); err != nil {
-			t.Fatal(err)
-		}
-	}
+	bin := fakeAgents(t, "claude", "codex")
 	claudeHome := filepath.Join(t.TempDir(), "claude")
 	codexHome := filepath.Join(t.TempDir(), "codex")
 	t.Setenv("PATH", bin)
@@ -94,11 +105,7 @@ func TestHooksCommandInstallsDetectedAgentHooksWithoutARuntime(t *testing.T) {
 	if err := runCommand([]string{"hooks"}, &output); err != nil {
 		t.Fatalf("hooks error = %v", err)
 	}
-	for _, want := range []string{"claude:     installed", "codex:      installed"} {
-		if !strings.Contains(output.String(), want) {
-			t.Fatalf("hooks output does not contain %q:\n%s", want, output.String())
-		}
-	}
+	assertContains(t, "hooks output", output.String(), "claude:     installed", "codex:      installed")
 	for _, path := range []string{filepath.Join(claudeHome, "settings.json"), filepath.Join(codexHome, "hooks.json")} {
 		data, err := os.ReadFile(path)
 		if err != nil {
@@ -112,11 +119,7 @@ func TestHooksCommandInstallsDetectedAgentHooksWithoutARuntime(t *testing.T) {
 
 func TestHooksCommandDoesNotOverwriteInvalidSettings(t *testing.T) {
 	useReleaseBuild(t)
-	bin := t.TempDir()
-	claude := filepath.Join(bin, "claude")
-	if err := os.WriteFile(claude, []byte("#!/bin/sh\n"), 0o700); err != nil {
-		t.Fatal(err)
-	}
+	bin := fakeAgents(t, "claude")
 	home := t.TempDir()
 	settings := filepath.Join(home, "settings.json")
 	broken := []byte(`{"hooks":[]}`)
@@ -145,15 +148,9 @@ func TestHooksCommandDoesNotOverwriteInvalidSettings(t *testing.T) {
 }
 
 func TestHooksCommandSkipsDevelopmentBuild(t *testing.T) {
-	bin := t.TempDir()
-	claude := filepath.Join(bin, "claude")
-	if err := os.WriteFile(claude, []byte("#!/bin/sh\n"), 0o700); err != nil {
-		t.Fatal(err)
-	}
+	bin := fakeAgents(t, "claude")
 	home := t.TempDir()
-	originalVersion := version.Value
-	version.Value = ""
-	t.Cleanup(func() { version.Value = originalVersion })
+	testutil.Set(t, &version.Value, "")
 	t.Setenv("PATH", bin)
 	t.Setenv("CLAUDE_CONFIG_DIR", home)
 	t.Setenv("CODEX_HOME", filepath.Join(t.TempDir(), "codex"))
@@ -172,9 +169,7 @@ func TestHooksCommandSkipsDevelopmentBuild(t *testing.T) {
 
 func useReleaseBuild(t *testing.T) {
 	t.Helper()
-	original := version.Value
-	version.Value = "0.15.0"
-	t.Cleanup(func() { version.Value = original })
+	testutil.Set(t, &version.Value, "0.15.0")
 }
 
 func TestStatusAndListDoNotStartAMissingDaemon(t *testing.T) {
@@ -195,16 +190,8 @@ func TestStatusAndListDoNotStartAMissingDaemon(t *testing.T) {
 	if err := runCommand([]string{"doctor"}, &doctorOutput); err != nil {
 		t.Fatalf("doctor error = %v", err)
 	}
-	for _, want := range []string{
-		"runtime:    not created",
-		"state:      not created",
-		"config:     not created",
-		"daemon:     stopped",
-	} {
-		if !strings.Contains(doctorOutput.String(), want) {
-			t.Fatalf("doctor does not contain %q:\n%s", want, doctorOutput.String())
-		}
-	}
+	assertContains(t, "doctor", doctorOutput.String(),
+		"runtime:    not created", "state:      not created", "config:     not created", "daemon:     stopped")
 	if _, err := os.Stat(home); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("read-only commands created runtime directory: %v", err)
 	}
@@ -235,31 +222,23 @@ func TestStatusAndListDescribeTheRunningDaemon(t *testing.T) {
 	if err := runCommand([]string{"status"}, &output); err != nil {
 		t.Fatalf("status error = %v", err)
 	}
-	for _, want := range []string{
+	assertContains(t, "status", output.String(),
 		"daemon:     running",
 		fmt.Sprintf("protocol:   %d", protocol.Version),
 		"roots:      1",
 		"workspaces: 1",
 		"sessions:   1 (claude: 0, codex: 0, opencode: 0, shell: 1)",
-	} {
-		if !strings.Contains(output.String(), want) {
-			t.Fatalf("status does not contain %q:\n%s", want, output.String())
-		}
-	}
+	)
 
 	output.Reset()
 	if err := runCommand([]string{"list"}, &output); err != nil {
 		t.Fatalf("list error = %v", err)
 	}
-	for _, want := range []string{
+	assertContains(t, "list", output.String(),
 		fmt.Sprintf("root:       %q  %q", rootName, snapshot.Roots[0].Root.Path),
 		fmt.Sprintf("  workspace: %q  %q", "alpha", workspace.Path),
 		"    tab:    \"1\"  shell",
-	} {
-		if !strings.Contains(output.String(), want) {
-			t.Fatalf("list does not contain %q:\n%s", want, output.String())
-		}
-	}
+	)
 	if strings.Contains(output.String(), "\x1b") || strings.Contains(output.String(), "\a") {
 		t.Fatalf("list emitted terminal control characters: %q", output.String())
 	}
@@ -280,16 +259,8 @@ func TestDoctorReportsInvalidStateWithoutChangingIt(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "doctor found 1 problem") {
 		t.Fatalf("doctor error = %v", err)
 	}
-	for _, want := range []string{
-		"runtime:    ok",
-		"state:      error",
-		"config:     not created",
-		"daemon:     stopped",
-	} {
-		if !strings.Contains(output.String(), want) {
-			t.Fatalf("doctor does not contain %q:\n%s", want, output.String())
-		}
-	}
+	assertContains(t, "doctor", output.String(),
+		"runtime:    ok", "state:      error", "config:     not created", "daemon:     stopped")
 	data, readErr := os.ReadFile(runtime.State)
 	if readErr != nil || !bytes.Equal(data, invalid) {
 		t.Fatalf("doctor changed invalid state: data %q, error %v", data, readErr)
@@ -469,22 +440,22 @@ func TestBinaryStartsDaemonAndEntersTheDashboard(t *testing.T) {
 // the command line for the duration of the test.
 func stopArgs(t *testing.T) paths.Paths {
 	t.Helper()
-	t.Setenv("ROMTY", "")
-	t.Setenv("ROMTY_HOME", testutil.ShortTempDir(t))
-	runtime, err := paths.Resolve()
-	if err != nil {
-		t.Fatalf("Resolve() error = %v", err)
-	}
-	originalArgs := os.Args
-	os.Args = []string{"romty", "stop"}
-	t.Cleanup(func() { os.Args = originalArgs })
+	runtime := runtimeAt(t, testutil.ShortTempDir(t))
+	testutil.Set(t, &os.Args, []string{"romty", "stop"})
 	return runtime
 }
 
+// commandRuntime points romty at a romty home that does not exist yet.
 func commandRuntime(t *testing.T) paths.Paths {
 	t.Helper()
+	return runtimeAt(t, filepath.Join(testutil.ShortTempDir(t), "romty-home"))
+}
+
+// runtimeAt runs romty outside a romty terminal with home as ROMTY_HOME.
+func runtimeAt(t *testing.T, home string) paths.Paths {
+	t.Helper()
 	t.Setenv("ROMTY", "")
-	t.Setenv("ROMTY_HOME", filepath.Join(testutil.ShortTempDir(t), "romty-home"))
+	t.Setenv("ROMTY_HOME", home)
 	runtime, err := paths.Resolve()
 	if err != nil {
 		t.Fatalf("Resolve() error = %v", err)

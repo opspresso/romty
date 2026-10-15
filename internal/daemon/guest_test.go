@@ -3,6 +3,8 @@ package daemon
 import (
 	"strings"
 	"testing"
+
+	"github.com/opspresso/romty/internal/testutil"
 )
 
 func TestGuestTrackerFollowsTheWindowTitle(t *testing.T) {
@@ -221,9 +223,7 @@ func TestModeTrackerFollowsWhatTheGuestSet(t *testing.T) {
 // The whole point is to outlive the recording, so the tracker must not depend
 // on the bytes still being in it.
 func TestModeTrackerOutlivesTheRecording(t *testing.T) {
-	previous := maxHistoryBytes
-	maxHistoryBytes = 1024
-	t.Cleanup(func() { maxHistoryBytes = previous })
+	testutil.Set(t, &maxHistoryBytes, 1024)
 
 	value := newSessionForTest(nil)
 	value.guest.observe([]byte("\x1b[?2004h\x1b="))

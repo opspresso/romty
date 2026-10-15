@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/opspresso/romty/internal/testutil"
 )
 
 // pluginHarness drives the generated plugin through OpenCode 2's setup() and
@@ -76,9 +78,7 @@ func runPluginHarness(t *testing.T, api string, want int) []map[string]string {
 	if err := os.WriteFile(romty, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	previous := findRomtyExecutable
-	findRomtyExecutable = func() (string, error) { return romty, nil }
-	t.Cleanup(func() { findRomtyExecutable = previous })
+	testutil.Set(t, &findRomtyExecutable, func() (string, error) { return romty, nil })
 	contents, err := pluginContents(definition{})
 	if err != nil {
 		t.Fatal(err)
@@ -88,7 +88,7 @@ func runPluginHarness(t *testing.T, api string, want int) []map[string]string {
 	if err := os.WriteFile(plugin, contents, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(harness, []byte(strings.Replace(pluginHarness, "%q", strconvQuote(plugin), 1)), 0o600); err != nil {
+	if err := os.WriteFile(harness, []byte(strings.Replace(pluginHarness, "%q", jsString(plugin), 1)), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	command := exec.Command(node, harness, api, reportsDirectory, strconv.Itoa(want))
@@ -112,7 +112,8 @@ func runPluginHarness(t *testing.T, api string, want int) []map[string]string {
 	return reports
 }
 
-func strconvQuote(value string) string {
+// jsString quotes value as a JavaScript string literal.
+func jsString(value string) string {
 	quoted, _ := json.Marshal(value)
 	return string(quoted)
 }
@@ -125,48 +126,41 @@ func hookEvents(reports []map[string]string) []string {
 	return events
 }
 
-// OpenCode 2 reports one execution outcome per turn and tool call IDs, and a
-// child session's events belong to its parent's subagent tool.
-func TestOpenCodePluginReportsOpenCode2Lifecycle(t *testing.T) {
-	want := []string{"SessionStart", "UserPromptSubmit", "PreToolUse", "PermissionRequest", "PostToolUseFailure", "Interrupt", "Stop"}
-	reports := runPluginHarness(t, "2", len(want))
-	got := hookEvents(reports)
-	// Detached reporters can finish out of order; the set and the tool IDs matter.
-	if !reflect.DeepEqual(sorted(got), sorted(want)) {
-		t.Fatalf("OpenCode 2 events = %v, want %v", got, want)
-	}
-	for _, report := range reports {
-		if report["session_id"] != "ses-1" {
-			t.Fatalf("child session reported: %v", report)
-		}
-		switch report["hook_event_name"] {
-		case "PreToolUse", "PermissionRequest", "PostToolUseFailure":
-			if report["tool_use_id"] != "call-1" {
-				t.Fatalf("%s tool_use_id = %q, want call-1", report["hook_event_name"], report["tool_use_id"])
+// OpenCode 2 reports one execution outcome per turn, OpenCode 1 reports each
+// hook, and both carry tool call IDs. A child session's events belong to its
+// parent's subagent tool, so it cannot rebind the tab or end the parent's turn.
+func TestOpenCodePluginReportsTheParentSessionLifecycle(t *testing.T) {
+	for _, probe := range []struct {
+		api, name   string
+		events      []string
+		toolUseOnly []string
+	}{
+		{
+			api: "2", name: "OpenCode 2",
+			events:      []string{"SessionStart", "UserPromptSubmit", "PreToolUse", "PermissionRequest", "PostToolUseFailure", "Interrupt", "Stop"},
+			toolUseOnly: []string{"PreToolUse", "PermissionRequest", "PostToolUseFailure"},
+		},
+		{
+			api: "1", name: "OpenCode 1",
+			events:      []string{"UserPromptSubmit", "PreToolUse", "PermissionRequest", "Stop"},
+			toolUseOnly: []string{"PreToolUse", "PermissionRequest"},
+		},
+	} {
+		t.Run(probe.name, func(t *testing.T) {
+			reports := runPluginHarness(t, probe.api, len(probe.events))
+			// Detached reporters can finish out of order; the set and the tool IDs matter.
+			if got := hookEvents(reports); !reflect.DeepEqual(sorted(got), sorted(probe.events)) {
+				t.Fatalf("events = %v, want %v", got, probe.events)
 			}
-		}
-	}
-}
-
-// OpenCode 1 reports tool call IDs, and a child session cannot rebind the tab
-// or end its parent's turn.
-func TestOpenCodePluginReportsOpenCode1Hooks(t *testing.T) {
-	want := []string{"UserPromptSubmit", "PreToolUse", "PermissionRequest", "Stop"}
-	reports := runPluginHarness(t, "1", len(want))
-	got := hookEvents(reports)
-	if !reflect.DeepEqual(sorted(got), sorted(want)) {
-		t.Fatalf("OpenCode 1 events = %v, want %v", got, want)
-	}
-	for _, report := range reports {
-		if report["session_id"] != "ses-1" {
-			t.Fatalf("child session reported: %v", report)
-		}
-		switch report["hook_event_name"] {
-		case "PreToolUse", "PermissionRequest":
-			if report["tool_use_id"] != "call-1" {
-				t.Fatalf("%s tool_use_id = %q, want call-1", report["hook_event_name"], report["tool_use_id"])
+			for _, report := range reports {
+				if report["session_id"] != "ses-1" {
+					t.Fatalf("child session reported: %v", report)
+				}
+				if slices.Contains(probe.toolUseOnly, report["hook_event_name"]) && report["tool_use_id"] != "call-1" {
+					t.Fatalf("%s tool_use_id = %q, want call-1", report["hook_event_name"], report["tool_use_id"])
+				}
 			}
-		}
+		})
 	}
 }
 

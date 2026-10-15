@@ -6,12 +6,36 @@ import (
 	"time"
 )
 
+type stripProbe struct {
+	name    string
+	history string
+	want    string
+}
+
+func checkStripQueries(t *testing.T, probes []stripProbe) {
+	t.Helper()
+	for _, probe := range probes {
+		t.Run(probe.name, func(t *testing.T) {
+			if got := string(stripQueries([]byte(probe.history))); got != probe.want {
+				t.Fatalf("stripQueries(%q)\n got %q\nwant %q", probe.history, got, probe.want)
+			}
+		})
+	}
+}
+
+// unterminatedHistory is maxHistoryBytes of output whose introducer never
+// meets its terminator, the shape of `cat`ing a binary file.
+func unterminatedHistory(introducer string) []byte {
+	var history []byte
+	for len(history) < maxHistoryBytes {
+		history = append(history, strings.Repeat("x", 4096)...)
+		history = append(history, introducer...)
+	}
+	return history[:maxHistoryBytes]
+}
+
 func TestStripQueriesRemovesQueriesAndKeepsOutput(t *testing.T) {
-	for _, probe := range []struct {
-		name    string
-		history string
-		want    string
-	}{
+	checkStripQueries(t, []stripProbe{
 		{
 			name:    "cursor position report request",
 			history: "before\x1b[6nafter",
@@ -182,13 +206,7 @@ func TestStripQueriesRemovesQueriesAndKeepsOutput(t *testing.T) {
 			history: "",
 			want:    "",
 		},
-	} {
-		t.Run(probe.name, func(t *testing.T) {
-			if got := string(stripQueries([]byte(probe.history))); got != probe.want {
-				t.Fatalf("stripQueries(%q)\n got %q\nwant %q", probe.history, got, probe.want)
-			}
-		})
-	}
+	})
 }
 
 // Untouched history must come back as the same backing array, so replaying a
@@ -252,15 +270,7 @@ func TestStripQueriesStaysLinearOnUnterminatedIntroducers(t *testing.T) {
 		{name: "8-bit DCS", introducer: "\x90"},
 	} {
 		t.Run(probe.name, func(t *testing.T) {
-			// maxHistoryBytes of output whose terminators never arrive, the
-			// shape of `cat`ing a binary file.
-			var history []byte
-			for len(history) < maxHistoryBytes {
-				history = append(history, strings.Repeat("x", 4096)...)
-				history = append(history, probe.introducer...)
-			}
-			history = history[:maxHistoryBytes]
-
+			history := unterminatedHistory(probe.introducer)
 			done := make(chan int, 1)
 			go func() { done <- len(stripQueries(history)) }()
 			select {
@@ -276,12 +286,7 @@ func TestStripQueriesStaysLinearOnUnterminatedIntroducers(t *testing.T) {
 }
 
 func BenchmarkStripQueries(b *testing.B) {
-	var history []byte
-	for len(history) < maxHistoryBytes {
-		history = append(history, strings.Repeat("x", 4096)...)
-		history = append(history, "\x1b]"...)
-	}
-	history = history[:maxHistoryBytes]
+	history := unterminatedHistory("\x1b]")
 	b.SetBytes(int64(len(history)))
 	b.ReportAllocs()
 	for b.Loop() {
@@ -295,11 +300,7 @@ func BenchmarkStripQueries(b *testing.B) {
 // query, and the clipboard read is the one that matters: what the terminal
 // sends back lands on the command line of a shell that asked nothing.
 func TestStripQueriesFindsAQueryBehindAnAbandonedString(t *testing.T) {
-	for _, probe := range []struct {
-		name    string
-		history string
-		want    string
-	}{
+	checkStripQueries(t, []stripProbe{
 		{
 			name:    "clipboard read behind an unterminated OSC",
 			history: "before\x1b]0;\x1b]52;c;?\x07after",
@@ -315,13 +316,7 @@ func TestStripQueriesFindsAQueryBehindAnAbandonedString(t *testing.T) {
 			history: "before\x1bPq\x1bP$qm\x1b\\after",
 			want:    "before\x1bPqafter",
 		},
-	} {
-		t.Run(probe.name, func(t *testing.T) {
-			if got := string(stripQueries([]byte(probe.history))); got != probe.want {
-				t.Fatalf("stripQueries(%q) = %q, want %q", probe.history, got, probe.want)
-			}
-		})
-	}
+	})
 }
 
 // Every C1 control byte also occurs as a continuation byte inside ordinary
@@ -329,11 +324,7 @@ func TestStripQueriesFindsAQueryBehindAnAbandonedString(t *testing.T) {
 // scan as a device status report to drop. UTF-8 text must pass unread while
 // the same bytes standing alone keep being stripped.
 func TestStripQueriesLeavesTextWhoseBytesLookLikeC1Controls(t *testing.T) {
-	for _, probe := range []struct {
-		name    string
-		history string
-		want    string
-	}{
+	checkStripQueries(t, []stripProbe{
 		{
 			name:    "a character ending in the CSI byte before digits",
 			history: "욛6n rest",
@@ -349,11 +340,5 @@ func TestStripQueriesLeavesTextWhoseBytesLookLikeC1Controls(t *testing.T) {
 			history: "before\x9b6nafter",
 			want:    "beforeafter",
 		},
-	} {
-		t.Run(probe.name, func(t *testing.T) {
-			if got := string(stripQueries([]byte(probe.history))); got != probe.want {
-				t.Fatalf("stripQueries(%q) = %q, want %q", probe.history, got, probe.want)
-			}
-		})
-	}
+	})
 }

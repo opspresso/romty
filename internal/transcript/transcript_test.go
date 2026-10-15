@@ -8,11 +8,16 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/opspresso/romty/internal/testutil"
 )
 
-func writeTranscript(t *testing.T, configDir, workspace, sessionID string, lines ...string) {
+// workspace is the project directory the fixtures' transcripts belong to.
+const workspace = "/Users/example/work/romty"
+
+func writeTranscript(t *testing.T, configDir, project, sessionID string, lines ...string) {
 	t.Helper()
-	directory := filepath.Join(configDir, "projects", transcriptDirectory(workspace))
+	directory := filepath.Join(configDir, "projects", transcriptDirectory(project))
 	if err := os.MkdirAll(directory, 0o700); err != nil {
 		t.Fatalf("MkdirAll() error = %v", err)
 	}
@@ -36,7 +41,6 @@ func assistantLine(input, cacheCreation, cacheRead int) string {
 
 func TestReadClaudeTakesTheNewestCounters(t *testing.T) {
 	configDir := t.TempDir()
-	workspace := "/Users/example/work/romty"
 	writeTranscript(t, configDir, workspace, "session-1",
 		`{"type":"user","message":{"content":"hello"}}`,
 		assistantLine(10, 20, 30),
@@ -61,7 +65,6 @@ func TestReadClaudeTakesTheNewestCounters(t *testing.T) {
 // record straddling that seek is a fragment and must not be parsed.
 func TestReadClaudeReadsOnlyTheEndOfALongTranscript(t *testing.T) {
 	configDir := t.TempDir()
-	workspace := "/Users/example/work/romty"
 	filler := make([]string, 0, 400)
 	for range 400 {
 		filler = append(filler, `{"type":"user","message":{"content":"`+strings.Repeat("x", 4096)+`"}}`)
@@ -80,7 +83,6 @@ func TestReadClaudeReadsOnlyTheEndOfALongTranscript(t *testing.T) {
 // token count is an allocation the daemon cannot refuse, so it is skipped.
 func TestReadClaudeSkipsAnOversizedRecord(t *testing.T) {
 	configDir := t.TempDir()
-	workspace := "/Users/example/work/romty"
 	writeTranscript(t, configDir, workspace, "session-1",
 		assistantLine(1, 2, 3),
 		`{"type":"user","message":{"content":"`+strings.Repeat("y", maxRecordBytes)+`"}}`,
@@ -95,7 +97,6 @@ func TestReadClaudeSkipsAnOversizedRecord(t *testing.T) {
 
 func TestReadClaudeReportsNothingWithoutCounters(t *testing.T) {
 	configDir := t.TempDir()
-	workspace := "/Users/example/work/romty"
 	writeTranscript(t, configDir, workspace, "session-1", `{"type":"user","message":{"content":"hello"}}`)
 
 	if value, ok := NewReader().ReadClaude(configDir, workspace, "session-1"); ok {
@@ -139,7 +140,6 @@ func TestReadClaudeRefusesAnUnsafeSessionID(t *testing.T) {
 // not changed would cost more than everything else that goes into one.
 func TestReaderRereadsOnlyAChangedTranscript(t *testing.T) {
 	configDir := t.TempDir()
-	workspace := "/Users/example/work/romty"
 	writeTranscript(t, configDir, workspace, "session-1", assistantLine(1, 2, 3))
 	reader := NewReader()
 
@@ -199,16 +199,13 @@ func TestTranscriptDirectoryMatchesClaudesNaming(t *testing.T) {
 // carried the newest counters, romty would report the previous request's.
 func TestReadClaudeKeepsARecordThatStartsAtTheTailBoundary(t *testing.T) {
 	configDir := t.TempDir()
-	workspace := "/Users/example/work/romty"
 	// The newest counters, then a record that carries none.
 	newest := assistantLine(1, 2, 3)
 	trailing := `{"type":"user","message":{"content":"thanks"}}`
 	older := assistantLine(100, 200, 300)
 
-	previous := maxTranscriptTail
 	// Exactly the two final records, so the boundary sits on newest's first byte.
-	maxTranscriptTail = int64(len(newest) + len(trailing) + 2)
-	t.Cleanup(func() { maxTranscriptTail = previous })
+	testutil.Set(t, &maxTranscriptTail, int64(len(newest)+len(trailing)+2))
 
 	writeTranscript(t, configDir, workspace, "session-1", older, newest, trailing)
 	value, ok := NewReader().ReadClaude(configDir, workspace, "session-1")

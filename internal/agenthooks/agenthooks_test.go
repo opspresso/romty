@@ -8,8 +8,21 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/opspresso/romty/internal/testutil"
 	"github.com/opspresso/romty/internal/version"
 )
+
+// assertFileHolds fails unless path still holds exactly want.
+func assertFileHolds(t *testing.T, path string, want []byte, message string) {
+	t.Helper()
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(got, want) {
+		t.Fatal(message)
+	}
+}
 
 func TestDetectReportsOnlyAvailableAgentsAsPending(t *testing.T) {
 	useReleaseBuild(t)
@@ -18,19 +31,13 @@ func TestDetectReportsOnlyAvailableAgentsAsPending(t *testing.T) {
 	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	t.Setenv("CODEX_HOME", "")
 	t.Setenv("OPENCODE_CONFIG_DIR", "")
-	previousFind := findExecutable
-	previousHome := userHomeDirectory
-	findExecutable = func(name string) (string, error) {
+	testutil.Set(t, &findExecutable, func(name string) (string, error) {
 		if name == "claude" {
 			return "/usr/local/bin/claude", nil
 		}
 		return "", errors.New("not found")
-	}
-	userHomeDirectory = func() (string, error) { return home, nil }
-	t.Cleanup(func() {
-		findExecutable = previousFind
-		userHomeDirectory = previousHome
 	})
+	testutil.Set(t, &userHomeDirectory, func() (string, error) { return home, nil })
 
 	statuses := Detect()
 	if len(statuses) != 3 || statuses[0].State != StateMissing ||
@@ -95,18 +102,11 @@ func TestInstallMergesAndUpdatesRomtyHooks(t *testing.T) {
 		}
 	}
 
-	before := append([]byte(nil), data...)
 	results, err = Install([]Provider{ProviderClaude})
 	if err != nil || len(results) != 1 || results[0].Action != ActionUnchanged {
 		t.Fatalf("second Install() = (%#v, %v), want unchanged", results, err)
 	}
-	after, err := os.ReadFile(settings)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !slices.Equal(before, after) {
-		t.Fatal("idempotent Install() rewrote current settings")
-	}
+	assertFileHolds(t, settings, data, "idempotent Install() rewrote current settings")
 }
 
 func TestInstallCreatesCodexHooksAndHonorsCodexHome(t *testing.T) {
@@ -134,19 +134,13 @@ func TestInstallCreatesOpenCodePluginAndHonorsConfigDirectory(t *testing.T) {
 	useReleaseBuild(t)
 	directory := filepath.Join(t.TempDir(), "custom-opencode")
 	t.Setenv("OPENCODE_CONFIG_DIR", directory)
-	previousFind := findRomtyExecutable
-	previousExecutables := findExecutable
-	findRomtyExecutable = func() (string, error) { return "/usr/local/bin/romty", nil }
+	testutil.Set(t, &findRomtyExecutable, func() (string, error) { return "/usr/local/bin/romty", nil })
 	// Detect consults PATH, which does not hold opencode on a clean machine.
-	findExecutable = func(name string) (string, error) {
+	testutil.Set(t, &findExecutable, func(name string) (string, error) {
 		if name == "opencode" {
 			return "/usr/local/bin/opencode", nil
 		}
 		return "", errors.New("not found")
-	}
-	t.Cleanup(func() {
-		findRomtyExecutable = previousFind
-		findExecutable = previousExecutables
 	})
 
 	path := filepath.Join(directory, "plugins", "romty.js")
@@ -167,18 +161,11 @@ func TestInstallCreatesOpenCodePluginAndHonorsConfigDirectory(t *testing.T) {
 	}
 
 	// A second install of the same build is idempotent.
-	before := append([]byte(nil), data...)
 	results, err = Install([]Provider{ProviderOpenCode})
 	if err != nil || len(results) != 1 || results[0].Action != ActionUnchanged {
 		t.Fatalf("second Install() = (%#v, %v), want unchanged", results, err)
 	}
-	after, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !slices.Equal(before, after) {
-		t.Fatal("idempotent Install() rewrote the current plugin")
-	}
+	assertFileHolds(t, path, data, "idempotent Install() rewrote the current plugin")
 
 	// Moving romty makes the plugin name a stale path, which is an update.
 	findRomtyExecutable = func() (string, error) { return "/opt/romty", nil }
@@ -204,21 +191,13 @@ func TestOpenCodePluginRefusesToOverwriteAForeignFile(t *testing.T) {
 	if _, err := Install([]Provider{ProviderOpenCode}); err == nil || !strings.Contains(err.Error(), "not a romty-managed file") {
 		t.Fatalf("Install() error = %v, want a refusal", err)
 	}
-	got, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !slices.Equal(got, foreign) {
-		t.Fatal("Install() overwrote a file it did not write")
-	}
+	assertFileHolds(t, path, foreign, "Install() overwrote a file it did not write")
 }
 
 func TestDesiredCommandQuotesTheRunningExecutable(t *testing.T) {
-	previousFind := findRomtyExecutable
-	findRomtyExecutable = func() (string, error) {
+	testutil.Set(t, &findRomtyExecutable, func() (string, error) {
 		return "/opt/Romty App/romty's", nil
-	}
-	t.Cleanup(func() { findRomtyExecutable = previousFind })
+	})
 
 	got, err := desiredCommand(ProviderCodex)
 	if err != nil {
@@ -231,45 +210,22 @@ func TestDesiredCommandQuotesTheRunningExecutable(t *testing.T) {
 
 func TestInstallRefusesMalformedSettingsWithoutChangingThem(t *testing.T) {
 	useReleaseBuild(t)
-	home := t.TempDir()
-	t.Setenv("CLAUDE_CONFIG_DIR", home)
-	path := filepath.Join(home, "settings.json")
-	broken := []byte(`{"hooks":[]}`)
-	if err := os.WriteFile(path, broken, 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	if _, err := Install([]Provider{ProviderClaude}); err == nil || !strings.Contains(err.Error(), "hooks must be an object") {
-		t.Fatalf("Install() error = %v, want invalid hooks", err)
-	}
-	got, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !slices.Equal(got, broken) {
-		t.Fatal("Install() changed malformed settings")
-	}
-}
-
-func TestInstallRefusesMalformedEventWithoutChangingSettings(t *testing.T) {
-	useReleaseBuild(t)
-	home := t.TempDir()
-	t.Setenv("CLAUDE_CONFIG_DIR", home)
-	path := filepath.Join(home, "settings.json")
-	broken := []byte(`{"hooks":{"Stop":[{"hooks":"not-an-array"}]}}`)
-	if err := os.WriteFile(path, broken, 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	if _, err := Install([]Provider{ProviderClaude}); err == nil || !strings.Contains(err.Error(), "entry hooks must be an array") {
-		t.Fatalf("Install() error = %v, want invalid event hooks", err)
-	}
-	got, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !slices.Equal(got, broken) {
-		t.Fatal("Install() changed settings with a malformed event")
+	for _, probe := range []struct{ name, settings, error string }{
+		{name: "hooks", settings: `{"hooks":[]}`, error: "hooks must be an object"},
+		{name: "event", settings: `{"hooks":{"Stop":[{"hooks":"not-an-array"}]}}`, error: "entry hooks must be an array"},
+	} {
+		t.Run(probe.name, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("CLAUDE_CONFIG_DIR", home)
+			path := filepath.Join(home, "settings.json")
+			if err := os.WriteFile(path, []byte(probe.settings), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := Install([]Provider{ProviderClaude}); err == nil || !strings.Contains(err.Error(), probe.error) {
+				t.Fatalf("Install() error = %v, want %q", err, probe.error)
+			}
+			assertFileHolds(t, path, []byte(probe.settings), "Install() changed malformed settings")
+		})
 	}
 }
 
@@ -305,19 +261,11 @@ func TestInstallPreservesASettingsSymlink(t *testing.T) {
 }
 
 func TestDevelopmentBuildDoesNotInspectOrInstallHooks(t *testing.T) {
-	originalVersion := version.Value
-	originalFind := findExecutable
-	originalRomty := findRomtyExecutable
-	version.Value = ""
-	findExecutable = func(string) (string, error) { return "/usr/local/bin/agent", nil }
-	findRomtyExecutable = func() (string, error) {
+	testutil.Set(t, &version.Value, "")
+	testutil.Set(t, &findExecutable, func(string) (string, error) { return "/usr/local/bin/agent", nil })
+	testutil.Set(t, &findRomtyExecutable, func() (string, error) {
 		t.Fatal("development hook detection resolved the temporary executable")
 		return "", nil
-	}
-	t.Cleanup(func() {
-		version.Value = originalVersion
-		findExecutable = originalFind
-		findRomtyExecutable = originalRomty
 	})
 
 	statuses := Detect()
@@ -335,9 +283,7 @@ func TestDevelopmentBuildDoesNotInspectOrInstallHooks(t *testing.T) {
 
 func useReleaseBuild(t *testing.T) {
 	t.Helper()
-	original := version.Value
-	version.Value = "0.15.0"
-	t.Cleanup(func() { version.Value = original })
+	testutil.Set(t, &version.Value, "0.15.0")
 }
 
 // The daemon reads a provider's transcripts out of the same directory the hook
@@ -353,9 +299,7 @@ func TestConfigDirectoryFollowsTheProviderOverride(t *testing.T) {
 	}
 
 	t.Setenv("CLAUDE_CONFIG_DIR", "")
-	previous := userHomeDirectory
-	userHomeDirectory = func() (string, error) { return "/home/example", nil }
-	t.Cleanup(func() { userHomeDirectory = previous })
+	testutil.Set(t, &userHomeDirectory, func() (string, error) { return "/home/example", nil })
 	directory, err = ConfigDirectory(ProviderClaude)
 	if err != nil {
 		t.Fatalf("ConfigDirectory() error = %v", err)
