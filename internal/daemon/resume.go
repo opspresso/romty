@@ -134,11 +134,12 @@ func (s *resumeStore) discardStale(now time.Time) {
 	}
 }
 
-// agentSessionID is the shape of the session identifiers Claude Code and
-// Codex report through their hooks. The resume command is typed into a shell,
-// so anything outside this shape is not an identifier to interpolate — it
-// falls back to the agent's own "most recent session" form instead.
-var agentSessionID = regexp.MustCompile(`^[A-Za-z0-9-]{8,64}$`)
+// agentSessionID is the shape of the session identifiers agents report
+// through their hooks: UUIDs from Claude Code and Codex, and `ses_` IDs from
+// OpenCode. The resume command is typed into a shell, so anything outside this
+// shape is not an identifier to interpolate — it falls back to the agent's own
+// "most recent session" form instead.
+var agentSessionID = regexp.MustCompile(`^[A-Za-z0-9_-]{8,64}$`)
 
 // resumeCommand is the command line typed — without a newline — into a
 // restored tab's fresh shell, so continuing the agent conversation is one
