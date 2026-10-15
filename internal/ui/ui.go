@@ -223,6 +223,9 @@ type dashboard struct {
 	// the place of the tab that leaves.
 	closeTabTarget model.Tab
 	closeTabIndex  int
+	// newerRelease is the tag of a published release newer than this build,
+	// or empty when there is none or the check has not answered.
+	newerRelease string
 	// renameTabID is the tab the name prompt renames, held so the answer
 	// applies to the tab the prompt opened for.
 	renameTabID string
@@ -470,6 +473,9 @@ func (m dashboard) Init() tea.Cmd {
 	if m.agentAnimationPending {
 		commands = append(commands, animateAgentMarker())
 	}
+	if releaseCheckEnabled() {
+		commands = append(commands, checkRelease())
+	}
 	return tea.Batch(commands...)
 }
 
@@ -647,6 +653,10 @@ func (m dashboard) update(message tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.refreshAgents()
 	case soundPlayedMsg:
 		return m, nil
+	case releaseCheckedMsg:
+		return m.handleReleaseCheck(message)
+	case releaseCheckDueMsg:
+		return m, checkRelease()
 	case agentAnimationMsg:
 		m.agentAnimationPending = false
 		if m.agentAnimationActive || m.hasPendingActivity() {
