@@ -62,9 +62,8 @@ func TestConfigMissingFileUsesResponsiveWidth(t *testing.T) {
 	}
 }
 
-// Saving used to rebuild the document from dashboard fields, so a setting
-// nobody remembered to copy across was erased the moment the user touched the
-// pane width — and an older romty would erase what a newer one had written.
+// Saving edits the document as loaded, so changing one setting keeps every
+// other one, including settings only a newer romty knows.
 func TestAdjustingOneSettingKeepsTheRest(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
 	if err := os.WriteFile(path, []byte(`{"left_width":24,"mouse_passthrough":true,"sound_on_done":true,"git_diff_view":"split","future":{"enabled":true}}`+"\n"), 0o600); err != nil {
@@ -229,9 +228,8 @@ func TestConfigRowsDrawAndAnswerTogether(t *testing.T) {
 	}
 }
 
-// Every other list romty draws is walked with the arrows and run with Enter.
-// Config alone asked the user to remember which letter belonged to which row,
-// and drew nothing to say which row was current.
+// Config is walked with the arrows and run with Enter like every other list
+// romty draws, and marks the row the cursor is on.
 func TestConfigWalksAndTogglesWithTheCursor(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, model.Snapshot{})
 	value.width, value.height = 120, 40
