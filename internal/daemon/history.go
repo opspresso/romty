@@ -62,8 +62,8 @@ func stripQueries(history []byte) []byte {
 // buffer. Scanning only moves forward, so once no terminator exists after one
 // position, none exists after any later one either. Without that memory a
 // buffer holding many unterminated introducers — what `cat`ing a binary file
-// leaves behind — costs one full scan each, which is quadratic: 8 MiB of such
-// output took three seconds, all of it holding the session lock.
+// leaves behind — would cost one full scan each, which is quadratic and runs
+// while the session lock is held.
 type historyScanner struct {
 	noStringTerminator bool
 	noBellOrTerminator bool
