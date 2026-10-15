@@ -40,7 +40,7 @@ func TestDashboardHighlightsCodeDiffsInBothLayouts(t *testing.T) {
 		diffSyntax:        syntax,
 		syntaxHighlighted: true,
 	}
-	inline := strings.Join(value.renderGitFileDiff(100, 20), "\n")
+	inline := strings.Join(value.renderFileViewContent(100, 20), "\n")
 	for _, line := range strings.Split(inline, "\n") {
 		plain := ansi.Strip(line)
 		if (strings.HasPrefix(plain, `-var message`) || strings.HasPrefix(plain, `+var message`)) && lipgloss.Width(line) != 100 {
@@ -49,7 +49,7 @@ func TestDashboardHighlightsCodeDiffsInBothLayouts(t *testing.T) {
 	}
 	for _, split := range []bool{false, true} {
 		value.fileView.split = split
-		rendered := strings.Join(value.renderGitFileDiff(100, 20), "\n")
+		rendered := strings.Join(value.renderFileViewContent(100, 20), "\n")
 		for _, fragment := range []string{
 			value.styles.syntaxKeyword.Render("package"),
 			value.styles.syntaxString.Background(value.styles.diffAddedLine.GetBackground()).Render(`"new"`),

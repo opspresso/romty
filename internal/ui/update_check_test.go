@@ -6,13 +6,12 @@ import (
 	"testing"
 
 	"github.com/opspresso/romty/internal/model"
+	"github.com/opspresso/romty/internal/testutil"
 )
 
 func releaseCheckDashboard(t *testing.T, current string) dashboard {
 	t.Helper()
-	original := currentVersion
-	currentVersion = func() string { return current }
-	t.Cleanup(func() { currentVersion = original })
+	testutil.Set(t, &currentVersion, func() string { return current })
 	value := newDashboard(&fakeBackend{}, model.Snapshot{})
 	value.width, value.height = 100, 30
 	return value

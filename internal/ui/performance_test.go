@@ -26,6 +26,6 @@ func BenchmarkSplitDiffViewport(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for b.Loop() {
-		value.renderGitFileDiff(88, 28)
+		value.renderFileViewContent(88, 28)
 	}
 }

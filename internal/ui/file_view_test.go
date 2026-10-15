@@ -168,7 +168,7 @@ func TestDashboardCollapsesAndExpandsFileTreeDirectories(t *testing.T) {
 	if command != nil || !value.fileView.collapsed["internal/ui"] || len(value.fileView.treeRows) != 3 {
 		t.Fatalf("collapse directory = (command %v, state %#v)", command, value.fileView)
 	}
-	rendered := ansi.Strip(strings.Join(value.renderGitChangedFiles(40, 10), "\n"))
+	rendered := ansi.Strip(strings.Join(value.renderFileViewList(40, 10), "\n"))
 	if !strings.Contains(rendered, "▸ ui/") || strings.Contains(rendered, "first.go") {
 		t.Fatalf("collapsed tree is incomplete:\n%s", rendered)
 	}
@@ -177,7 +177,7 @@ func TestDashboardCollapsesAndExpandsFileTreeDirectories(t *testing.T) {
 	if command != nil || value.fileView.collapsed["internal/ui"] || len(value.fileView.treeRows) != 5 {
 		t.Fatalf("expand directory = (command %v, state %#v)", command, value.fileView)
 	}
-	rendered = ansi.Strip(strings.Join(value.renderGitChangedFiles(40, 10), "\n"))
+	rendered = ansi.Strip(strings.Join(value.renderFileViewList(40, 10), "\n"))
 	if !strings.Contains(rendered, "▾ ui/") || !strings.Contains(rendered, "first.go") {
 		t.Fatalf("expanded tree is incomplete:\n%s", rendered)
 	}
@@ -238,7 +238,7 @@ func TestDashboardExpandsTabsInLoadedGitDiff(t *testing.T) {
 	}
 	for _, split := range []bool{false, true} {
 		value.fileView.split = split
-		rendered := ansi.Strip(strings.Join(value.renderGitFileDiff(80, 10), "\n"))
+		rendered := ansi.Strip(strings.Join(value.renderFileViewContent(80, 10), "\n"))
 		for _, fragment := range []string{"-    old value", "+    new value"} {
 			if !strings.Contains(rendered, fragment) {
 				t.Fatalf("split=%t diff does not contain %q:\n%s", split, fragment, rendered)
@@ -472,7 +472,7 @@ func TestSplitDiffReplacesAndClearsPreparedRows(t *testing.T) {
 			path: "/workspace", filePath: "file.txt", request: value.fileView.request,
 			lines: []string{"@@ -1 +1 @@", "-old", "+" + text},
 		})
-		rendered := ansi.Strip(strings.Join(value.renderGitFileDiff(80, 8), "\n"))
+		rendered := ansi.Strip(strings.Join(value.renderFileViewContent(80, 8), "\n"))
 		if !lineContainsInOrder(rendered, "-old", "│", "+"+text) || value.maximumFileViewOffset() != 0 {
 			t.Fatalf("prepared split rows did not follow new content:\n%s", rendered)
 		}

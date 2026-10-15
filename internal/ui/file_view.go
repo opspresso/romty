@@ -504,12 +504,12 @@ func (m dashboard) renderFileViewPanes(leftWidth, rightWidth, height int) []stri
 	separator := " " + m.styles.divider.Render("│") + " "
 	separator = truncate(separator, m.fileViewLayout().separator)
 	return mergePanes(
-		m.renderGitChangedFiles(leftWidth, height), m.renderGitFileDiff(rightWidth, height),
+		m.renderFileViewList(leftWidth, height), m.renderFileViewContent(rightWidth, height),
 		leftWidth, rightWidth, height,
 		func(int) string { return separator })
 }
 
-func (m dashboard) renderGitChangedFiles(width, height int) []string {
+func (m dashboard) renderFileViewList(width, height int) []string {
 	text := m.fileView.mode.text()
 	title := " " + text.list + " · " + display.Text(m.fileView.target.Name) + " "
 	lines := []string{m.paneHeader(m.styles.paneTitleActive, title, width), ""}
@@ -607,7 +607,7 @@ func (m dashboard) gitStatusStyle(index, workTree byte) lipgloss.Style {
 	}
 }
 
-func (m dashboard) renderGitFileDiff(width, height int) []string {
+func (m dashboard) renderFileViewContent(width, height int) []string {
 	path := ""
 	if m.fileView.fileIndex >= 0 && m.fileView.fileIndex < len(m.fileView.files) {
 		path = m.fileView.files[m.fileView.fileIndex].Path
