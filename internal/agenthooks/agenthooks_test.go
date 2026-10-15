@@ -25,7 +25,7 @@ func assertFileHolds(t *testing.T, path string, want []byte, message string) {
 }
 
 func TestDetectReportsOnlyAvailableAgentsAsPending(t *testing.T) {
-	useReleaseBuild(t)
+	testutil.UseReleaseBuild(t)
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("CLAUDE_CONFIG_DIR", "")
@@ -50,7 +50,7 @@ func TestDetectReportsOnlyAvailableAgentsAsPending(t *testing.T) {
 }
 
 func TestInstallMergesAndUpdatesRomtyHooks(t *testing.T) {
-	useReleaseBuild(t)
+	testutil.UseReleaseBuild(t)
 	home := t.TempDir()
 	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(home, "claude"))
 	settings := filepath.Join(home, "claude", "settings.json")
@@ -110,7 +110,7 @@ func TestInstallMergesAndUpdatesRomtyHooks(t *testing.T) {
 }
 
 func TestInstallCreatesCodexHooksAndHonorsCodexHome(t *testing.T) {
-	useReleaseBuild(t)
+	testutil.UseReleaseBuild(t)
 	home := filepath.Join(t.TempDir(), "custom-codex")
 	t.Setenv("CODEX_HOME", home)
 
@@ -131,7 +131,7 @@ func TestInstallCreatesCodexHooksAndHonorsCodexHome(t *testing.T) {
 }
 
 func TestInstallCreatesOpenCodePluginAndHonorsConfigDirectory(t *testing.T) {
-	useReleaseBuild(t)
+	testutil.UseReleaseBuild(t)
 	directory := filepath.Join(t.TempDir(), "custom-opencode")
 	t.Setenv("OPENCODE_CONFIG_DIR", directory)
 	testutil.Set(t, &findRomtyExecutable, func() (string, error) { return "/usr/local/bin/romty", nil })
@@ -176,7 +176,7 @@ func TestInstallCreatesOpenCodePluginAndHonorsConfigDirectory(t *testing.T) {
 }
 
 func TestOpenCodePluginRefusesToOverwriteAForeignFile(t *testing.T) {
-	useReleaseBuild(t)
+	testutil.UseReleaseBuild(t)
 	directory := filepath.Join(t.TempDir(), "opencode")
 	t.Setenv("OPENCODE_CONFIG_DIR", directory)
 	path := filepath.Join(directory, "plugins", "romty.js")
@@ -209,7 +209,7 @@ func TestDesiredCommandQuotesTheRunningExecutable(t *testing.T) {
 }
 
 func TestInstallRefusesMalformedSettingsWithoutChangingThem(t *testing.T) {
-	useReleaseBuild(t)
+	testutil.UseReleaseBuild(t)
 	for _, probe := range []struct{ name, settings, error string }{
 		{name: "hooks", settings: `{"hooks":[]}`, error: "hooks must be an object"},
 		{name: "event", settings: `{"hooks":{"Stop":[{"hooks":"not-an-array"}]}}`, error: "entry hooks must be an array"},
@@ -230,7 +230,7 @@ func TestInstallRefusesMalformedSettingsWithoutChangingThem(t *testing.T) {
 }
 
 func TestInstallPreservesASettingsSymlink(t *testing.T) {
-	useReleaseBuild(t)
+	testutil.UseReleaseBuild(t)
 	home := t.TempDir()
 	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(home, "claude"))
 	target := filepath.Join(home, "dotfiles", "claude.json")
@@ -279,11 +279,6 @@ func TestDevelopmentBuildDoesNotInspectOrInstallHooks(t *testing.T) {
 	if _, err := Install([]Provider{ProviderClaude}); !errors.Is(err, ErrDevelopmentBuild) {
 		t.Fatalf("Install() error = %v, want ErrDevelopmentBuild", err)
 	}
-}
-
-func useReleaseBuild(t *testing.T) {
-	t.Helper()
-	testutil.Set(t, &version.Value, "0.15.0")
 }
 
 // The daemon reads a provider's transcripts out of the same directory the hook

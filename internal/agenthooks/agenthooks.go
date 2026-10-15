@@ -673,7 +673,7 @@ func pluginPath(value definition) (string, error) {
 	return filepath.Join(directory, value.pluginFile), nil
 }
 
-func pluginContents(value definition) ([]byte, error) {
+func pluginContents() ([]byte, error) {
 	absolute, err := romtyPath()
 	if err != nil {
 		return nil, err
@@ -691,7 +691,7 @@ func planPlugin(value definition) (plan, error) {
 		return plan{}, err
 	}
 	result := plan{path: path}
-	desired, err := pluginContents(value)
+	desired, err := pluginContents()
 	if err != nil {
 		return result, err
 	}

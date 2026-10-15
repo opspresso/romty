@@ -79,7 +79,7 @@ func runPluginHarness(t *testing.T, api string, want int) []map[string]string {
 		t.Fatal(err)
 	}
 	testutil.Set(t, &findRomtyExecutable, func() (string, error) { return romty, nil })
-	contents, err := pluginContents(definition{})
+	contents, err := pluginContents()
 	if err != nil {
 		t.Fatal(err)
 	}
