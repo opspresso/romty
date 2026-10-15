@@ -11,20 +11,25 @@ import (
 	"github.com/opspresso/romty/internal/protocol"
 )
 
+// roundTrip writes value as one message and reads it back.
+func roundTrip[T any](t *testing.T, value T) T {
+	t.Helper()
+	var stream bytes.Buffer
+	if err := protocol.Write(&stream, value); err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+	var got T
+	if err := protocol.Read(bufio.NewReader(&stream), &got); err != nil {
+		t.Fatalf("Read() error = %v", err)
+	}
+	return got
+}
+
 func TestMessageRoundTrip(t *testing.T) {
 	want := protocol.Request{
 		Action: protocol.ActionResize, TabID: "tab-1", ClientID: "client-1", Columns: 120, Rows: 40,
 	}
-	var stream bytes.Buffer
-
-	if err := protocol.Write(&stream, want); err != nil {
-		t.Fatalf("Write() error = %v", err)
-	}
-	var got protocol.Request
-	if err := protocol.Read(bufio.NewReader(&stream), &got); err != nil {
-		t.Fatalf("Read() error = %v", err)
-	}
-	if !reflect.DeepEqual(got, want) {
+	if got := roundTrip(t, want); !reflect.DeepEqual(got, want) {
 		t.Fatalf("Read() = %#v, want %#v", got, want)
 	}
 }
@@ -39,16 +44,7 @@ func TestAttachResponseRoundTrip(t *testing.T) {
 		ReplayColumns: 120,
 		ReplayRows:    40,
 	}
-	var stream bytes.Buffer
-
-	if err := protocol.Write(&stream, want); err != nil {
-		t.Fatalf("Write() error = %v", err)
-	}
-	var got protocol.Response
-	if err := protocol.Read(bufio.NewReader(&stream), &got); err != nil {
-		t.Fatalf("Read() error = %v", err)
-	}
-	if !reflect.DeepEqual(got, want) {
+	if got := roundTrip(t, want); !reflect.DeepEqual(got, want) {
 		t.Fatalf("Read() = %#v, want %#v", got, want)
 	}
 }
@@ -73,16 +69,7 @@ func TestReadRefusesAnUnboundedMessage(t *testing.T) {
 
 func TestReadAcceptsAMessageLargerThanTheReadBuffer(t *testing.T) {
 	long := strings.Repeat("d", 128*1024)
-	var encoded bytes.Buffer
-	if err := protocol.Write(&encoded, protocol.Request{Action: protocol.ActionAddRoot, Path: long}); err != nil {
-		t.Fatalf("Write() error = %v", err)
-	}
-
-	var request protocol.Request
-	if err := protocol.Read(bufio.NewReader(&encoded), &request); err != nil {
-		t.Fatalf("Read() error = %v", err)
-	}
-	if request.Path != long {
+	if request := roundTrip(t, protocol.Request{Action: protocol.ActionAddRoot, Path: long}); request.Path != long {
 		t.Fatalf("Path length = %d, want %d", len(request.Path), len(long))
 	}
 }
@@ -90,15 +77,7 @@ func TestReadAcceptsAMessageLargerThanTheReadBuffer(t *testing.T) {
 // The daemon outlives the client binary, so a new client can meet an old
 // daemon. A reply with no version is one that predates the field.
 func TestVersionDistinguishesAnOlderDaemon(t *testing.T) {
-	var encoded bytes.Buffer
-	if err := protocol.Write(&encoded, protocol.Response{}); err != nil {
-		t.Fatalf("Write() error = %v", err)
-	}
-	var response protocol.Response
-	if err := protocol.Read(bufio.NewReader(&encoded), &response); err != nil {
-		t.Fatalf("Read() error = %v", err)
-	}
-	if response.Version != 0 {
+	if response := roundTrip(t, protocol.Response{}); response.Version != 0 {
 		t.Fatalf("an unstamped reply reports version %d, want 0", response.Version)
 	}
 	if protocol.Version == 0 {

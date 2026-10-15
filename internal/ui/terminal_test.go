@@ -3,7 +3,6 @@ package ui
 import (
 	"strings"
 	"testing"
-	"time"
 
 	tea "charm.land/bubbletea/v2"
 )
@@ -26,15 +25,7 @@ func TestEmbeddedTerminalForwardsKeysAndPaste(t *testing.T) {
 	terminal.sendKey(key('x', "x"))
 	terminal.sendKey(key(tea.KeyEnter, ""))
 	terminal.paste("pasted")
-
-	deadline := time.Now().Add(time.Second)
-	for time.Now().Before(deadline) {
-		if strings.Contains(stream.String(), "x\rpasted") {
-			return
-		}
-		time.Sleep(time.Millisecond)
-	}
-	t.Fatalf("terminal input = %q, want key and paste bytes", stream.String())
+	waitForGuest(t, stream, "x\rpasted")
 }
 
 func TestEmbeddedTerminalRendersANSIOutput(t *testing.T) {
@@ -100,15 +91,7 @@ func TestEmbeddedTerminalForwardsKeypad(t *testing.T) {
 				terminal.writeOutput([]byte("\x1b="))
 			}
 			terminal.sendKey(tea.KeyPressMsg(probe.key))
-
-			deadline := time.Now().Add(time.Second)
-			for time.Now().Before(deadline) {
-				if stream.String() == probe.want {
-					return
-				}
-				time.Sleep(time.Millisecond)
-			}
-			t.Fatalf("guest received %q, want %q", stream.String(), probe.want)
+			waitForGuestSilence(t, terminal, probe.want)
 		})
 	}
 }
@@ -177,14 +160,7 @@ func TestEmbeddedTerminalForwardsModifiedKeys(t *testing.T) {
 			defer terminal.close()
 
 			terminal.sendKey(tea.KeyPressMsg(probe.key))
-			deadline := time.Now().Add(2 * time.Second)
-			for time.Now().Before(deadline) {
-				if stream.String() == probe.want {
-					return
-				}
-				time.Sleep(time.Millisecond)
-			}
-			t.Fatalf("guest received %q, want %q", stream.String(), probe.want)
+			waitForGuestSilence(t, terminal, probe.want)
 		})
 	}
 }

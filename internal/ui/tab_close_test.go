@@ -3,6 +3,7 @@ package ui
 import (
 	"errors"
 	"io"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -13,14 +14,29 @@ import (
 	"github.com/opspresso/romty/internal/model"
 )
 
-func tabCloseSnapshot(tabs []model.Tab) (model.Snapshot, model.Workspace) {
+// openTabs returns count running tabs of workspace-1, named from 1.
+func openTabs(count int) []model.Tab {
+	tabs := make([]model.Tab, count)
+	for index := range tabs {
+		name := strconv.Itoa(index + 1)
+		tabs[index] = model.Tab{ID: "tab-" + name, WorkspaceID: "workspace-1", Name: name, Running: true}
+	}
+	return tabs
+}
+
+// tabCloseDashboard selects a workspace holding tabs.
+func tabCloseDashboard(tabs []model.Tab) (dashboard, *fakeBackend) {
 	workspace := model.Workspace{
 		ID: "workspace-1", RootID: "root-1", Name: "alpha", Path: "/projects/alpha",
 	}
-	return model.Snapshot{Roots: []model.RootView{{
+	snapshot := model.Snapshot{Roots: []model.RootView{{
 		Root:        model.Root{ID: "root-1", Name: "projects", Path: "/projects"},
 		Directories: []model.WorkspaceView{{Workspace: workspace, Tabs: tabs}},
-	}}}, workspace
+	}}}
+	backend := &fakeBackend{snapshot: snapshot}
+	value := newDashboard(backend, snapshot)
+	value.selectedWorkspaceID, value.selectedPath = workspace.ID, workspace.Path
+	return value, backend
 }
 
 func tabCloseLocalX(tabs []model.Tab, want int) int {
@@ -59,14 +75,8 @@ func clickTabClose(t *testing.T, value dashboard, tabs []model.Tab, index int) (
 // A close button that fires on the click alone would end a shell romty exists
 // to keep running, so the confirmation has to stand between the two.
 func TestDashboardKeepsTheTabUntilTheCloseIsConfirmed(t *testing.T) {
-	tabs := []model.Tab{
-		{ID: "tab-1", WorkspaceID: "workspace-1", Name: "1", Running: true},
-		{ID: "tab-2", WorkspaceID: "workspace-1", Name: "2", Running: true},
-	}
-	snapshot, workspace := tabCloseSnapshot(tabs)
-	backend := &fakeBackend{snapshot: snapshot}
-	value := newDashboard(backend, snapshot)
-	value.selectedWorkspaceID, value.selectedPath = workspace.ID, workspace.Path
+	tabs := openTabs(2)
+	value, backend := tabCloseDashboard(tabs)
 	value.focus = terminalPane
 	origin := value.dimensions().leftWidth + value.dimensions().separator
 
@@ -107,15 +117,8 @@ func TestTabHitSeparatesTheLabelAndCloseButton(t *testing.T) {
 }
 
 func TestDashboardClosesAnInactiveTabWithoutReplacingTheOpenTerminal(t *testing.T) {
-	tabs := []model.Tab{
-		{ID: "tab-1", WorkspaceID: "workspace-1", Name: "1", Running: true},
-		{ID: "tab-2", WorkspaceID: "workspace-1", Name: "2", Running: true},
-		{ID: "tab-3", WorkspaceID: "workspace-1", Name: "3", Running: true},
-	}
-	snapshot, workspace := tabCloseSnapshot(tabs)
-	backend := &fakeBackend{snapshot: snapshot}
-	value := newDashboard(backend, snapshot)
-	value.selectedWorkspaceID, value.selectedPath = workspace.ID, workspace.Path
+	tabs := openTabs(3)
+	value, backend := tabCloseDashboard(tabs)
 	value.focus = terminalPane
 	value.terminal = newEmbeddedTerminal(tabs[0].ID, newMemoryStream(""), 40, 10)
 	t.Cleanup(value.closeTerminal)
@@ -134,15 +137,8 @@ func TestDashboardClosesAnInactiveTabWithoutReplacingTheOpenTerminal(t *testing.
 }
 
 func TestDashboardClosesTheActiveTabAndOpensItsNextSibling(t *testing.T) {
-	tabs := []model.Tab{
-		{ID: "tab-1", WorkspaceID: "workspace-1", Name: "1", Running: true},
-		{ID: "tab-2", WorkspaceID: "workspace-1", Name: "2", Running: true},
-		{ID: "tab-3", WorkspaceID: "workspace-1", Name: "3", Running: true},
-	}
-	snapshot, workspace := tabCloseSnapshot(tabs)
-	backend := &fakeBackend{snapshot: snapshot}
-	value := newDashboard(backend, snapshot)
-	value.selectedWorkspaceID, value.selectedPath = workspace.ID, workspace.Path
+	tabs := openTabs(3)
+	value, _ := tabCloseDashboard(tabs)
 	value.focus, value.tabIndex = terminalPane, 1
 	value.terminal = newEmbeddedTerminal(tabs[1].ID, newMemoryStream(""), 40, 10)
 
@@ -164,11 +160,8 @@ func TestDashboardClosesTheActiveTabAndOpensItsNextSibling(t *testing.T) {
 }
 
 func TestDashboardClosesTheOnlyTabAndReturnsToTheWorkspacePane(t *testing.T) {
-	tabs := []model.Tab{{ID: "tab-1", WorkspaceID: "workspace-1", Name: "1", Running: true}}
-	snapshot, workspace := tabCloseSnapshot(tabs)
-	backend := &fakeBackend{snapshot: snapshot}
-	value := newDashboard(backend, snapshot)
-	value.selectedWorkspaceID, value.selectedPath = workspace.ID, workspace.Path
+	tabs := openTabs(1)
+	value, _ := tabCloseDashboard(tabs)
 	value.focus = terminalPane
 	value.terminal = newEmbeddedTerminal(tabs[0].ID, newMemoryStream(""), 40, 10)
 
@@ -182,12 +175,9 @@ func TestDashboardClosesTheOnlyTabAndReturnsToTheWorkspacePane(t *testing.T) {
 }
 
 func TestDashboardKeepsTheTabWhenCloseFails(t *testing.T) {
-	tabs := []model.Tab{{ID: "tab-1", WorkspaceID: "workspace-1", Name: "1", Running: true}}
-	snapshot, workspace := tabCloseSnapshot(tabs)
-	backend := &fakeBackend{snapshot: snapshot}
+	tabs := openTabs(1)
+	value, backend := tabCloseDashboard(tabs)
 	backend.fail("CloseTab", errors.New("daemon unavailable"))
-	value := newDashboard(backend, snapshot)
-	value.selectedWorkspaceID, value.selectedPath = workspace.ID, workspace.Path
 	updated, closeCommand := value.closeTab(tabs[0], 0)
 	value = updated.(dashboard)
 	updated, next := value.Update(commandMessage[tabClosedMsg](t, closeCommand))
