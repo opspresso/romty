@@ -150,7 +150,7 @@ const MaxAgentEventProcessGroups = 32
 // romty has no phase for is nothing to fail a hook over. Only an unnamed one
 // is, because it identifies nothing at all.
 func (e AgentEvent) Validate() error {
-	if e.Agent != model.AgentClaude && e.Agent != model.AgentCodex && e.Agent != model.AgentOpenCode {
+	if e.Agent != model.AgentClaude && e.Agent != model.AgentCodex && e.Agent != model.AgentOpenCode && e.Agent != model.AgentKiro {
 		return fmt.Errorf("unsupported agent %q", e.Agent)
 	}
 	if e.HookEvent == "" {

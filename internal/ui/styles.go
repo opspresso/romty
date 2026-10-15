@@ -13,6 +13,7 @@ type uiStyles struct {
 	agentClaude         lipgloss.Style
 	agentCodex          lipgloss.Style
 	agentOpenCode       lipgloss.Style
+	agentKiro           lipgloss.Style
 	agentNode           lipgloss.Style
 	agentPlain          lipgloss.Style
 	gitBranch           lipgloss.Style
@@ -87,6 +88,7 @@ func newUIStyles(hasDarkBackground bool) *uiStyles {
 		agentClaude:         lipgloss.NewStyle().Foreground(lightDark(lipgloss.Color("#B5482A"), lipgloss.Color("#E8906F"))),
 		agentCodex:          lipgloss.NewStyle().Foreground(lightDark(lipgloss.Color("#1D4ED8"), lipgloss.Color("#60A5FA"))),
 		agentOpenCode:       lipgloss.NewStyle().Foreground(lightDark(lipgloss.Color("#7E22CE"), lipgloss.Color("#C084FC"))),
+		agentKiro:           lipgloss.NewStyle().Foreground(lightDark(lipgloss.Color("#BE185D"), lipgloss.Color("#F472B6"))),
 		agentNode:           lipgloss.NewStyle().Foreground(lightDark(lipgloss.Color("#3F7D20"), lipgloss.Color("#8CCF6B"))),
 		agentPlain:          lipgloss.NewStyle().Foreground(text),
 		gitBranch:           lipgloss.NewStyle().Foreground(muted),

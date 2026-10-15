@@ -38,11 +38,15 @@ func TestProcessAgentsRecogniseNativeAgentExecutables(t *testing.T) {
 	output := []byte(`  101 /opt/homebrew/bin/claude-code --resume
   202 /Users/me/.cache/codex-aarch64-apple-darwin
   303 /opt/homebrew/bin/opencode --continue
+  404 kiro-cli
+  404 /Users/me/.local/bin/kiro-cli-chat
+  505 vim kiro-notes.md
 `)
 	want := map[int]model.Agent{
 		101: model.AgentClaude,
 		202: model.AgentCodex,
 		303: model.AgentOpenCode,
+		404: model.AgentKiro,
 	}
 
 	if got := processAgents(output); !reflect.DeepEqual(got, want) {

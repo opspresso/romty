@@ -222,7 +222,7 @@ func TestStatusAndListDescribeTheRunningDaemon(t *testing.T) {
 		fmt.Sprintf("protocol:   %d", protocol.Version),
 		"roots:      1",
 		"workspaces: 1",
-		"sessions:   1 (claude: 0, codex: 0, opencode: 0, shell: 1)",
+		"sessions:   1 (claude: 0, codex: 0, opencode: 0, kiro: 0, shell: 1)",
 	)
 
 	output.Reset()
