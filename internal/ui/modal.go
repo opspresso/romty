@@ -329,10 +329,14 @@ func (m dashboard) renderModalBody(width, height int) []string {
 	if m.modal == configModal {
 		return m.renderConfigModal(modalWidth, height)
 	}
-	return modalBoxFit(m.styles, minimumModalWidth, modalWidth, "About",
-		m.styles.modalStrong.Render("romty")+"  "+m.styles.empty.Render(version.String()),
+	lines := []string{
+		m.styles.modalStrong.Render("romty") + "  " + m.styles.empty.Render(version.String()),
 		m.styles.modalBody.Render(tagline),
-	)
+	}
+	if m.newerRelease != "" {
+		lines = append(lines, "", m.styles.navigationCurrent.Render("* "+display.Text(m.newerRelease)+" is available"))
+	}
+	return modalBoxFit(m.styles, minimumModalWidth, modalWidth, "About", lines...)
 }
 
 // configFloorWidth keeps the settings box from shrinking to the width of five

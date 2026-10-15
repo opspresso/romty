@@ -470,7 +470,11 @@ func (m dashboard) renderNavigation(width, height int) []string {
 	if m.focus == leftPane {
 		titleStyle = m.styles.paneTitleActive
 	}
-	lines := []string{m.paneHeader(titleStyle, " romty ", width), ""}
+	title := " romty "
+	if m.newerRelease != "" {
+		title = " romty* "
+	}
+	lines := []string{m.paneHeader(titleStyle, title, width), ""}
 	items := m.navigationItems()
 	available := max(height-len(lines), 0)
 	start, end := navigationWindow(items, m.navOffset, available)
