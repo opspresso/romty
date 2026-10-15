@@ -94,7 +94,7 @@ func helpReference() []helpEntry {
 		{description: "Rename tab", keys: []string{"Double-click tab"}},
 		{description: "Scroll workspace list", keys: []string{"Wheel over tree"}},
 		{description: "Resize workspace pane", keys: []string{"Drag divider"}},
-		{section: "CONTEXT", note: "workspace, picker, Config, modals and prompts"},
+		{section: "CONTEXT", note: "workspace, picker, Config and modals"},
 		{description: "Activate / submit / toggle", keys: []string{"Enter"}},
 		{description: "Close / cancel / leave", keys: []string{"Esc"}},
 		{description: "Type a picker path", keys: []string{"/"}},

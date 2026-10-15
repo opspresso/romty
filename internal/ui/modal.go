@@ -329,6 +329,9 @@ func (m dashboard) renderModalBody(width, height int) []string {
 	if m.modal == configModal {
 		return m.renderConfigModal(modalWidth, height)
 	}
+	if m.modal == inputModal {
+		return m.renderInputModal(modalWidth)
+	}
 	lines := []string{
 		m.styles.modalStrong.Render("romty") + "  " + m.styles.empty.Render(version.String()),
 		m.styles.modalBody.Render(tagline),
@@ -475,6 +478,8 @@ func (m dashboard) modalActions() []modalAction {
 			{shortcut: shortcut{key: "Enter", description: "install hooks"}, code: tea.KeyEnter},
 			{shortcut: shortcut{key: "Esc", description: "skip"}, code: tea.KeyEscape},
 		}
+	case inputModal:
+		return m.inputActions()
 	}
 	return nil
 }

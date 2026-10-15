@@ -210,7 +210,7 @@ func (m dashboard) handleBrowseKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd)
 		return m.addBrowseSelection()
 	case "/":
 		// Walking to a distant path is slow and a pasted one cannot be walked
-		// at all, so the prompt romty always had stays one key away.
+		// at all, so typing the path stays one key away.
 		return m.startRootInput()
 	}
 	return m, nil
