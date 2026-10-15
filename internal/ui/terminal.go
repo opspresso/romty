@@ -33,7 +33,14 @@ type embeddedTerminal struct {
 	// because the emulator reads the 0x9C inside characters such as "서" as
 	// the C1 string terminator and prints the rest of the title as text.
 	titles titleScrubber
+	// readBuffer is reused by every read. A read is issued only after the
+	// previous output was written to the emulator, so no two reads overlap.
+	readBuffer []byte
 }
+
+// lockModifiers are the lock keys a key event reports as modifiers. They
+// change no key's meaning for a guest, so encoding ignores them.
+const lockModifiers = tea.ModCapsLock | tea.ModNumLock | tea.ModScrollLock
 
 type terminalOutputMsg struct {
 	terminal     *embeddedTerminal
@@ -55,6 +62,7 @@ func newEmbeddedTerminal(id string, stream io.ReadWriteCloser, width, height int
 		emulator:   emulator,
 		inputDone:  make(chan struct{}),
 		guestMouse: make(map[ansi.DECMode]bool),
+		readBuffer: make([]byte, 32*1024),
 	}
 	emulator.SetCallbacks(vt.Callbacks{
 		EnableMode:  func(mode ansi.Mode) { terminal.trackGuestMode(mode, true) },
@@ -137,7 +145,7 @@ func clampParameter(params ansi.Params, index, limit int) {
 
 func (t *embeddedTerminal) read() tea.Cmd {
 	return func() tea.Msg {
-		buffer := make([]byte, 32*1024)
+		buffer := t.readBuffer
 		count, err := t.stream.Read(buffer)
 		t.inputMu.Lock()
 		inputFailure := t.inputErr != nil
@@ -170,7 +178,7 @@ func (t *embeddedTerminal) sendKey(message tea.KeyPressMsg) {
 		t.emulator.SendText(text)
 		return
 	}
-	key.Mod &^= tea.ModCapsLock | tea.ModNumLock | tea.ModScrollLock
+	key.Mod &^= lockModifiers
 	if sequence, ok := emulatorMissingSpecialKey(key); ok {
 		_, _ = io.WriteString(t.emulator.InputPipe(), sequence)
 		return
@@ -194,7 +202,7 @@ func (t *embeddedTerminal) sendKey(message tea.KeyPressMsg) {
 }
 
 func layoutControlKey(key tea.Key) (tea.Key, bool) {
-	mod := key.Mod &^ (tea.ModCapsLock | tea.ModNumLock | tea.ModScrollLock)
+	mod := key.Mod &^ lockModifiers
 	if mod&tea.ModCtrl == 0 || mod&^(tea.ModAlt|tea.ModCtrl) != 0 {
 		return key, true
 	}
@@ -319,7 +327,7 @@ func (t *embeddedTerminal) prepareKeypadKey(key tea.Key) (tea.Key, string) {
 		return key, ""
 	}
 	key.Text = ""
-	key.Mod &^= tea.ModCapsLock | tea.ModNumLock | tea.ModScrollLock
+	key.Mod &^= lockModifiers
 	if mapped, ok := keypadNavigationKeys[key.Code]; ok {
 		key.Code = mapped.normal
 		if t.applicationKeypad && key.Mod&xtermModifierMask == 0 {

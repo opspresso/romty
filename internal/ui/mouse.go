@@ -146,7 +146,7 @@ func (m dashboard) handleModalMouse(message tea.MouseMsg) (tea.Model, tea.Cmd, b
 	}
 	mouse := click.Mouse()
 	for _, hit := range m.modalActionHits(m.modalGeometry(m.bodySize())) {
-		if mouse.Y == hit.row && mouse.X >= hit.left && mouse.X < hit.right {
+		if hit.contains(mouse) {
 			updated, command := m.handleKey(tea.KeyPressMsg(tea.Key{Code: hit.action.code}))
 			return updated, command, true
 		}
@@ -168,7 +168,7 @@ func (m dashboard) hoverTargetAt(mouse tea.Mouse) hoverTarget {
 			return hoverTarget{kind: hoverModalClose}
 		}
 		for index, hit := range m.modalActionHits(geometry) {
-			if mouse.Y == hit.row && mouse.X >= hit.left && mouse.X < hit.right {
+			if hit.contains(mouse) {
 				return hoverTarget{kind: hoverModalAction, index: index}
 			}
 		}
@@ -198,18 +198,16 @@ func (m dashboard) hoverTargetAt(mouse tea.Mouse) hoverTarget {
 	}
 
 	view := m.dimensions()
-	if view.separator > 0 && mouse.Y < view.bodyHeight &&
-		mouse.X >= view.leftWidth && mouse.X < view.leftWidth+view.separator {
+	if view.onDivider(mouse) {
 		return hoverTarget{kind: hoverDivider}
 	}
-	if mouse.X < view.leftWidth && mouse.Y < view.bodyHeight {
+	if view.inNavigation(mouse) {
 		if index, ok := m.navigationIndexAtRow(mouse.Y, view.bodyHeight); ok {
 			return hoverTarget{kind: hoverNavigation, index: index}
 		}
 		return hoverTarget{}
 	}
-	if mouse.Y == 0 && mouse.X >= view.leftWidth+view.separator {
-		localX := mouse.X - view.leftWidth - view.separator
+	if localX, ok := view.tabBarX(mouse); ok {
 		if hit, ok := tabHitAtX(m.visibleTabs(), localX); ok {
 			kind := hoverTab
 			if hit.close {
@@ -280,7 +278,7 @@ func (m dashboard) handleDashboardMouse(message tea.MouseMsg) (tea.Model, tea.Cm
 		}
 	}
 
-	if wheel, ok := message.(tea.MouseWheelMsg); ok && mouse.X < view.leftWidth && mouse.Y < view.bodyHeight {
+	if wheel, ok := message.(tea.MouseWheelMsg); ok && view.inNavigation(mouse) {
 		switch wheel.Button {
 		case tea.MouseWheelUp:
 			m.scrollNavigation(-wheelLines)
@@ -297,7 +295,7 @@ func (m dashboard) handleDashboardMouse(message tea.MouseMsg) (tea.Model, tea.Cm
 	if !ok {
 		return m, nil, false
 	}
-	if click.Button == tea.MouseRight && mouse.X < view.leftWidth && mouse.Y < view.bodyHeight {
+	if click.Button == tea.MouseRight && view.inNavigation(mouse) {
 		item, ok := m.focusNavigationRow(mouse.Y, view.bodyHeight)
 		if !ok {
 			return m, nil, true
@@ -308,19 +306,17 @@ func (m dashboard) handleDashboardMouse(message tea.MouseMsg) (tea.Model, tea.Cm
 	if click.Button != tea.MouseLeft {
 		return m, nil, false
 	}
-	if view.separator > 0 && mouse.Y < view.bodyHeight &&
-		mouse.X >= view.leftWidth && mouse.X < view.leftWidth+view.separator {
+	if view.onDivider(mouse) {
 		m.navigationResize = true
 		return m, nil, true
 	}
-	if mouse.X < view.leftWidth && mouse.Y < view.bodyHeight {
+	if view.inNavigation(mouse) {
 		if _, ok := m.focusNavigationRow(mouse.Y, view.bodyHeight); !ok {
 			return m, nil, true
 		}
 		return m, m.selectWorkspace(), true
 	}
-	if mouse.Y == 0 && mouse.X >= view.leftWidth+view.separator {
-		localX := mouse.X - view.leftWidth - view.separator
+	if localX, ok := view.tabBarX(mouse); ok {
 		tabs := m.visibleTabs()
 		hit, ok := tabHitAtX(tabs, localX)
 		if !ok {
@@ -390,15 +386,15 @@ type tabHit struct {
 
 func tabHitAtX(tabs []model.Tab, x int) (tabHit, bool) {
 	position := 0
+	newTabWidth := lipgloss.Width(newTabLabel)
 	for index := 0; index <= len(tabs); index++ {
-		width := lipgloss.Width("  +  ")
+		width := newTabWidth
 		if index < len(tabs) {
 			width = tabLabelWidth(tabs[index])
 		}
 		end := position + width
 		if x >= position && x < end {
-			close := index < len(tabs) && x >= end-2
-			return tabHit{index: index, close: close}, true
+			return tabHit{index: index, close: index < len(tabs) && x >= end-2}, true
 		}
 		position = end + 1
 	}

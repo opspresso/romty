@@ -445,13 +445,12 @@ func (s *Server) agentStatusesSnapshot() map[string]model.AgentStatus {
 	for tabID, runtime := range s.agentStatuses {
 		reported[tabID] = runtime
 	}
-	workspaces := s.tabWorkspaces()
 	s.mu.Unlock()
 
 	agents := sessionAgents(sessions)
 	native := s.readCodexStatuses(sessions, agents)
 	inferred := inferPhases(sessions, agents, reported)
-	readings := s.sessionTranscripts(reported, workspaces)
+	readings := s.sessionTranscripts(reported)
 
 	result := make(map[string]model.AgentStatus, len(agents))
 	s.mu.Lock()

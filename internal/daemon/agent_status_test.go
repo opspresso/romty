@@ -30,17 +30,21 @@ func group(id int) func(*os.File) int {
 
 // writeClaudeTranscript writes a Claude Code transcript for a session run in
 // workspace, under a configuration directory the test owns.
-func writeClaudeTranscript(t *testing.T, workspace, sessionID, records string) {
+// writeClaudeTranscript writes a session transcript under a fresh Claude
+// config directory and returns its path, the one a hook would report.
+func writeClaudeTranscript(t *testing.T, workspace, sessionID, records string) string {
 	t.Helper()
 	configDir := t.TempDir()
 	t.Setenv("CLAUDE_CONFIG_DIR", configDir)
-	directory := filepath.Join(configDir, "projects", strings.NewReplacer("/", "-", ".", "-").Replace(workspace))
+	directory := filepath.Join(configDir, "projects", strings.NewReplacer("/", "-", ".", "-", "_", "-", " ", "-").Replace(workspace))
 	if err := os.MkdirAll(directory, 0o700); err != nil {
 		t.Fatalf("MkdirAll() error = %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(directory, sessionID+".jsonl"), []byte(records), 0o600); err != nil {
+	path := filepath.Join(directory, sessionID+".jsonl")
+	if err := os.WriteFile(path, []byte(records), 0o600); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
+	return path
 }
 
 func TestAgentHookEventsMapToPhases(t *testing.T) {
@@ -344,7 +348,7 @@ func TestAgentStatusRequiresLifecycleReportsForCodexAndClaude(t *testing.T) {
 // one romty cannot tell which of a directory's transcripts belongs to which tab.
 func TestAgentStatusReportsTheLedgerOnlyForAHookedSession(t *testing.T) {
 	workspace := "/projects/alpha"
-	writeClaudeTranscript(t, workspace, "session-1", `{"type":"assistant","message":{"usage":{"input_tokens":2,`+
+	path := writeClaudeTranscript(t, workspace, "session-1", `{"type":"assistant","message":{"usage":{"input_tokens":2,`+
 		`"cache_creation_input_tokens":1288,"cache_read_input_tokens":342813}}}`+"\n"+
 		`{"type":"summary","totalCostUSD":1.25}`+"\n")
 
@@ -363,7 +367,8 @@ func TestAgentStatusReportsTheLedgerOnlyForAHookedSession(t *testing.T) {
 		},
 		agentStatuses: map[string]agentRuntime{
 			"tab-1": {
-				AgentStatus: model.AgentStatus{Agent: model.AgentClaude, Phase: model.AgentPhaseWorking, SessionID: "session-1"},
+				AgentStatus:    model.AgentStatus{Agent: model.AgentClaude, Phase: model.AgentPhaseWorking, SessionID: "session-1"},
+				TranscriptPath: path,
 			},
 		},
 		transcripts: transcript.NewReader(),
@@ -473,16 +478,17 @@ func TestAgentStatusUsesForegroundProcessAsPresenceAuthority(t *testing.T) {
 // session's transcript and keeps the interrupted phase for later snapshots.
 func TestAgentStatusEndsATurnTheTranscriptRecordsAsInterrupted(t *testing.T) {
 	workspace := "/projects/alpha"
-	writeClaudeTranscript(t, workspace, "session-1",
+	path := writeClaudeTranscript(t, workspace, "session-1",
 		`{"type":"user","timestamp":"2026-10-15T09:00:05.000Z","message":{"content":[{"type":"text","text":"[Request interrupted by user]"}]}}`+"\n")
 	stubForeground(t, group(101), "101 claude\n")
 
 	server := &Server{
 		sessions: map[string]*session{"tab-1": newSessionForTest(new(os.File))},
 		agentStatuses: map[string]agentRuntime{"tab-1": {
-			AgentStatus: model.AgentStatus{Agent: model.AgentClaude, Phase: model.AgentPhaseWorking, SessionID: "session-1"},
-			Tools:       map[string]model.AgentPhase{"build": model.AgentPhaseWorking},
-			UpdatedAt:   time.Date(2026, 10, 15, 9, 0, 0, 0, time.UTC),
+			AgentStatus:    model.AgentStatus{Agent: model.AgentClaude, Phase: model.AgentPhaseWorking, SessionID: "session-1"},
+			Tools:          map[string]model.AgentPhase{"build": model.AgentPhaseWorking},
+			UpdatedAt:      time.Date(2026, 10, 15, 9, 0, 0, 0, time.UTC),
+			TranscriptPath: path,
 		}},
 		transcripts: transcript.NewReader(),
 	}
@@ -521,5 +527,33 @@ func TestOpenCodeEventsCountOnlyFromTheTabsForegroundJob(t *testing.T) {
 	report(7, 4242, 1)
 	if got := server.agentStatuses["tab"].Phase; got != model.AgentPhaseThinking {
 		t.Fatalf("foreground hook phase = %s, want thinking", got)
+	}
+}
+
+// Claude Code names a project's transcript folder by its own rules, which
+// change between versions. The daemon reads the path the hook reports, so a
+// workspace whose name holds an underscore or a space still gets its counters
+// and its interrupt.
+func TestAgentStatusReadsTheTranscriptPathTheHookReports(t *testing.T) {
+	workspace := "/projects/my_proj name"
+	path := writeClaudeTranscript(t, workspace, "session-1",
+		`{"type":"assistant","message":{"usage":{"input_tokens":3,"cache_creation_input_tokens":4,"cache_read_input_tokens":5}}}`+"\n")
+	stubForeground(t, group(101), "101 claude\n")
+	server := &Server{
+		sessions:      map[string]*session{"tab-1": newSessionForTest(new(os.File))},
+		agentStatuses: make(map[string]agentRuntime),
+		transcripts:   transcript.NewReader(),
+	}
+	server.value.Workspaces = []model.Workspace{{ID: "workspace-1", Path: workspace}}
+	server.value.Tabs = []model.Tab{{ID: "tab-1", WorkspaceID: "workspace-1"}}
+
+	event := protocol.AgentEvent{
+		Agent: model.AgentClaude, SessionID: "session-1", HookEvent: "UserPromptSubmit", TranscriptPath: path,
+	}
+	if response := server.recordAgentEvent("tab-1", &event); response.Error != "" {
+		t.Fatalf("recordAgentEvent() error = %s", response.Error)
+	}
+	if got := server.agentStatusesSnapshot()["tab-1"]; got.ContextTokens != 12 {
+		t.Fatalf("status = %+v, want the 12 tokens of the reported transcript", got)
 	}
 }

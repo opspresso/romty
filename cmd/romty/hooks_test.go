@@ -38,8 +38,13 @@ func TestDecodeHookEventKeepsOnlyStatusMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Marshal() error = %v", err)
 	}
-	if bytes.Contains(encoded, []byte(secret)) || bytes.Contains(encoded, []byte("transcript")) {
+	if bytes.Contains(encoded, []byte(secret)) {
 		t.Fatalf("sanitized event retained hook content: %s", encoded)
+	}
+	// The transcript's path is forwarded so the daemon can read its counters;
+	// nothing of its content is.
+	if event.TranscriptPath != "/private/transcript.jsonl" {
+		t.Fatalf("transcript path = %q, want the reported path", event.TranscriptPath)
 	}
 }
 

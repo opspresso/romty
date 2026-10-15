@@ -98,7 +98,7 @@ func helpReference() []helpEntry {
 		{description: "Activate / submit / toggle", keys: []string{"Enter"}},
 		{description: "Close / cancel / leave", keys: []string{"Esc"}},
 		{description: "Type a picker path", keys: []string{"/"}},
-		{description: "Erase path character", keys: []string{"Backspace"}},
+		{description: "Erase typed character", keys: []string{"Backspace"}},
 		{description: "Adjust pane width", keys: []string{"←/→", "[/]"}},
 		{description: "Toggle scrollback mouse", keys: []string{"m"}},
 		{description: "Toggle agent sounds", keys: []string{"d", "b"}},

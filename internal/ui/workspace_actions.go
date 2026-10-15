@@ -369,9 +369,9 @@ func (m dashboard) handleWorkspaceActionsMouse(message tea.MouseMsg) (tea.Model,
 		}
 		switch wheel.Button {
 		case tea.MouseWheelUp:
-			m.moveWorkspaceAction(-3)
+			m.moveWorkspaceAction(-wheelLines)
 		case tea.MouseWheelDown:
-			m.moveWorkspaceAction(3)
+			m.moveWorkspaceAction(wheelLines)
 		default:
 			return m, nil, false
 		}

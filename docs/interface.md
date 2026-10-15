@@ -143,7 +143,7 @@ Both file views allow directory rows to take the cursor. Press `Enter` to toggle
 |---|---|
 | `Enter` | Open, run, return, submit, confirm, or toggle a Config setting in the workspace, picker, Config, Git views, and input modals |
 | `Esc` | Close a modal or file view, cancel an input modal, or leave scrollback |
-| `Backspace` | Erase a path character |
+| `Backspace` | Erase the last typed character in a text field or the scrollback search |
 | `←`/`→` or `[`/`]` | Resize the workspace pane in Config |
 | `/` | Find in scrollback, or type a path in the root picker |
 | `n`/`N` | Move to the next or previous scrollback match |

@@ -426,9 +426,10 @@ func (m dashboard) Init() tea.Cmd {
 	return tea.Batch(commands...)
 }
 
-// Update wraps the state machine so every path that opens or leaves scrollback
-// moves the host's alternate scroll with it, rather than each of the seven
-// transitions having to remember the sequence.
+// Update runs the state machine, then brings the state derived from the model
+// in line with it: the agent animation timer, the PTY size the narrow layout
+// implies, and the host's alternate scroll. Every transition passes through
+// here, so none of them has to remember those three.
 func (m dashboard) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	updated, command := m.update(message)
 	value, ok := updated.(dashboard)

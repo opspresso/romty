@@ -26,6 +26,7 @@ type hookInput struct {
 	ToolName         string `json:"tool_name"`
 	NotificationType string `json:"notification_type"`
 	PermissionMode   string `json:"permission_mode"`
+	TranscriptPath   string `json:"transcript_path"`
 	BackgroundTasks  []struct {
 		Status string `json:"status"`
 	} `json:"background_tasks"`
@@ -92,6 +93,7 @@ func decodeHookEvent(provider string, input io.Reader) (protocol.AgentEvent, err
 	}
 	if event.Agent == model.AgentClaude {
 		event.TurnID = value.PromptID
+		event.TranscriptPath = value.TranscriptPath
 	}
 	// Refused here as well as at the daemon, so a payload the daemon would not
 	// record never costs a connection: a hook runs on the agent's critical

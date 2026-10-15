@@ -29,6 +29,24 @@ const (
 	allFilesView
 )
 
+// fileViewText is what the file view calls things in one mode.
+type fileViewText struct {
+	list, loadingList, emptyList, content, loadingContent, selectFile string
+}
+
+func (v fileViewMode) text() fileViewText {
+	if v == allFilesView {
+		return fileViewText{
+			list: "Files", loadingList: "Loading files…", emptyList: "No files",
+			content: "File", loadingContent: "Loading file…", selectFile: "Select a file",
+		}
+	}
+	return fileViewText{
+		list: "Changes", loadingList: "Loading changed files…", emptyList: "No changed files",
+		content: "Diff", loadingContent: "Loading diff…", selectFile: "Select a changed file",
+	}
+}
+
 type gitDiffView struct {
 	active            bool
 	mode              fileViewMode
@@ -174,9 +192,7 @@ func (m dashboard) handleGitChangedFiles(message gitChangedFilesMsg) (tea.Model,
 		}
 	}
 	m.gitDiff.treeRows = visibleGitDiffTreeRows(message.rows, m.gitDiff.collapsed)
-	if len(m.gitDiff.files) > 0 && len(m.gitDiff.treeRows) == 0 {
-		m.gitDiff.treeRows = visibleGitDiffTreeRows(fileViewTreeRows(m.gitDiff.files, m.gitDiff.mode), m.gitDiff.collapsed)
-	}
+	m.ensureGitDiffTreeRows()
 	selectedDirectory := m.gitDiff.selectedDirectory
 	m.gitDiff.fileIndex = 0
 	for index, file := range m.gitDiff.files {
@@ -350,9 +366,9 @@ func (m dashboard) handleGitDiffMouse(message tea.MouseMsg) (tea.Model, tea.Cmd)
 		if mouse.X >= 0 && mouse.X < view.leftWidth {
 			switch wheel.Button {
 			case tea.MouseWheelUp:
-				return m.moveGitDiffFile(-3)
+				return m.moveGitDiffFile(-wheelLines)
 			case tea.MouseWheelDown:
-				return m.moveGitDiffFile(3)
+				return m.moveGitDiffFile(wheelLines)
 			}
 			return m, nil
 		}
@@ -490,19 +506,16 @@ func (m dashboard) renderGitDiffPanes(leftWidth, rightWidth, height int) []strin
 }
 
 func (m dashboard) renderGitChangedFiles(width, height int) []string {
-	title, loading, empty := " Changes · ", "  Loading changed files…", "  No changed files"
-	if m.gitDiff.mode == allFilesView {
-		title, loading, empty = " Files · ", "  Loading files…", "  No files"
-	}
-	title += display.Text(m.gitDiff.target.Name) + " "
+	text := m.gitDiff.mode.text()
+	title := " " + text.list + " · " + display.Text(m.gitDiff.target.Name) + " "
 	lines := []string{m.paneHeader(m.styles.paneTitleActive, title, width), ""}
 	switch {
 	case m.gitDiff.filesPending:
-		return append(lines, m.styles.empty.Render(loading))
+		return append(lines, m.styles.empty.Render("  "+text.loadingList))
 	case m.gitDiff.err != "" && len(m.gitDiff.files) == 0:
 		return append(lines, m.styles.errorText.Render("  "+display.Text(m.gitDiff.err)))
 	case len(m.gitDiff.files) == 0:
-		return append(lines, m.styles.empty.Render(empty))
+		return append(lines, m.styles.empty.Render("  "+text.emptyList))
 	}
 	rows := m.gitDiff.treeRows
 	if len(rows) == 0 {
@@ -595,10 +608,8 @@ func (m dashboard) renderGitFileDiff(width, height int) []string {
 	if m.gitDiff.fileIndex >= 0 && m.gitDiff.fileIndex < len(m.gitDiff.files) {
 		path = m.gitDiff.files[m.gitDiff.fileIndex].Path
 	}
-	title := " Diff"
-	if m.gitDiff.mode == allFilesView {
-		title = " File"
-	}
+	text := m.gitDiff.mode.text()
+	title := " " + text.content
 	if path != "" {
 		title += " · " + display.Text(path)
 	}
@@ -613,19 +624,11 @@ func (m dashboard) renderGitFileDiff(width, height int) []string {
 	lines := []string{m.paneHeader(m.styles.paneTitle, title, width), ""}
 	switch {
 	case m.gitDiff.diffPending:
-		message := "  Loading diff…"
-		if m.gitDiff.mode == allFilesView {
-			message = "  Loading file…"
-		}
-		return append(lines, m.styles.empty.Render(message))
+		return append(lines, m.styles.empty.Render("  "+text.loadingContent))
 	case m.gitDiff.err != "":
 		return append(lines, m.styles.errorText.Render("  "+display.Text(m.gitDiff.err)))
 	case len(m.gitDiff.files) == 0 || m.gitDiff.fileIndex < 0 || m.gitDiff.fileIndex >= len(m.gitDiff.files):
-		message := "  Select a changed file"
-		if m.gitDiff.mode == allFilesView {
-			message = "  Select a file"
-		}
-		return append(lines, m.styles.empty.Render(message))
+		return append(lines, m.styles.empty.Render("  "+text.selectFile))
 	}
 	capacity := max(height-len(lines), 0)
 	start := min(m.gitDiff.diffOffset, m.maximumGitDiffOffset())
