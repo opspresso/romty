@@ -90,6 +90,11 @@ func callFor[T any](c *Client, request protocol.Request, field func(protocol.Res
 
 func snapshotOf(response protocol.Response) *model.Snapshot { return response.Snapshot }
 
+// snapshotCall sends a request whose reply is the workspace tree.
+func (c *Client) snapshotCall(request protocol.Request) (model.Snapshot, error) {
+	return callFor(c, request, snapshotOf, "snapshot")
+}
+
 func workspaceOf(response protocol.Response) *model.Workspace { return response.Workspace }
 
 func tabOf(response protocol.Response) *model.Tab { return response.Tab }
@@ -109,7 +114,7 @@ func (c *Client) ProtocolVersion() (int, error) {
 }
 
 func (c *Client) Snapshot() (model.Snapshot, error) {
-	return callFor(c, protocol.Request{Action: protocol.ActionSnapshot}, snapshotOf, "snapshot")
+	return c.snapshotCall(protocol.Request{Action: protocol.ActionSnapshot})
 }
 
 func (c *Client) Agents() (map[string]model.Agent, error) {
@@ -168,7 +173,7 @@ func (c *Client) AddRoot(path string) (model.Snapshot, error) {
 	if err != nil {
 		return model.Snapshot{}, err
 	}
-	return callFor(c, protocol.Request{Action: protocol.ActionAddRoot, Path: normalized}, snapshotOf, "snapshot")
+	return c.snapshotCall(protocol.Request{Action: protocol.ActionAddRoot, Path: normalized})
 }
 
 func normalizePath(path string) (string, error) {
@@ -187,18 +192,18 @@ func normalizePath(path string) (string, error) {
 }
 
 func (c *Client) RemoveRoot(rootID string) (model.Snapshot, error) {
-	return callFor(c, protocol.Request{Action: protocol.ActionRemoveRoot, RootID: rootID}, snapshotOf, "snapshot")
+	return c.snapshotCall(protocol.Request{Action: protocol.ActionRemoveRoot, RootID: rootID})
 }
 
 func (c *Client) RemoveWorkspace(rootID, path string) (model.Snapshot, error) {
 	if err := c.require(protocol.CapabilityRemoveWorkspace, "removing workspaces"); err != nil {
 		return model.Snapshot{}, err
 	}
-	return callFor(c, protocol.Request{
+	return c.snapshotCall(protocol.Request{
 		Action: protocol.ActionRemoveWorkspace,
 		RootID: rootID,
 		Path:   path,
-	}, snapshotOf, "snapshot")
+	})
 }
 
 func (c *Client) EnsureWorkspace(rootID, path string) (model.Workspace, error) {
@@ -227,14 +232,14 @@ func (c *Client) CloseTab(tabID string) (model.Snapshot, error) {
 	if err := c.require(protocol.CapabilityCloseTab, "closing tabs"); err != nil {
 		return model.Snapshot{}, err
 	}
-	return callFor(c, protocol.Request{Action: protocol.ActionCloseTab, TabID: tabID}, snapshotOf, "snapshot")
+	return c.snapshotCall(protocol.Request{Action: protocol.ActionCloseTab, TabID: tabID})
 }
 
 func (c *Client) RenameTab(tabID, name string) (model.Snapshot, error) {
 	if err := c.require(protocol.CapabilityRenameTab, "renaming tabs"); err != nil {
 		return model.Snapshot{}, err
 	}
-	return callFor(c, protocol.Request{Action: protocol.ActionRenameTab, TabID: tabID, Name: name}, snapshotOf, "snapshot")
+	return c.snapshotCall(protocol.Request{Action: protocol.ActionRenameTab, TabID: tabID, Name: name})
 }
 
 func (c *Client) Resize(tabID string, columns, rows uint16) error {

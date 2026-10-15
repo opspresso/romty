@@ -506,21 +506,20 @@ func newID() string {
 }
 
 func findRoot(values []model.Root, id string) (model.Root, bool) {
-	for _, value := range values {
-		if value.ID == id {
-			return value, true
-		}
-	}
-	return model.Root{}, false
+	return findByID(values, func(value model.Root) string { return value.ID }, id)
 }
 
 func findWorkspace(values []model.Workspace, id string) (model.Workspace, bool) {
-	for _, value := range values {
-		if value.ID == id {
-			return value, true
-		}
+	return findByID(values, func(value model.Workspace) string { return value.ID }, id)
+}
+
+func findByID[T any](values []T, idOf func(T) string, id string) (T, bool) {
+	index := slices.IndexFunc(values, func(value T) bool { return idOf(value) == id })
+	if index < 0 {
+		var zero T
+		return zero, false
 	}
-	return model.Workspace{}, false
+	return values[index], true
 }
 
 func nextTabName(values []model.Tab, workspaceID string) string {
