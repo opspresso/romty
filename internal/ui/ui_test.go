@@ -3412,8 +3412,8 @@ func TestDashboardKeepsGlobalKeysAtOnePrecedence(t *testing.T) {
 			value.result.Quit, command, value.input.text)
 	}
 	send(&value, key(tea.KeyEscape, ""))
-	if value.modal != noModal || value.input.text != "" {
-		t.Fatalf("Esc while typing = (modal %v, input %q), want the modal cancelled", value.modal, value.input.text)
+	if value.modal != browseModal || value.input.text != "" {
+		t.Fatalf("Esc while typing = (modal %v, input %q), want the picker back", value.modal, value.input.text)
 	}
 }
 

@@ -5,6 +5,7 @@ package ui
 
 import (
 	"errors"
+	"path/filepath"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -35,15 +36,32 @@ type inputState struct {
 	// tabID is the tab a name is for, held so the answer applies to the tab
 	// the modal opened for.
 	tabID string
+	// base is the directory a relative root path is resolved against: the
+	// one the root picker shows.
+	base string
+	// returnTo is the modal Esc goes back to: the root picker when the path
+	// modal was opened from it.
+	returnTo modal
 }
 
 // inputModalWidth is the width the input box always takes. A box sized to its
 // text would grow and shrink under the cursor with every key.
 const inputModalWidth = 56
 
+// startRootInput opens the path modal from the root picker. A relative path
+// is resolved against the directory the picker shows, so a path near it is a
+// few keys away, and an absolute or ~ path is taken as it is.
 func (m dashboard) startRootInput() (tea.Model, tea.Cmd) {
-	m.openInput(inputState{kind: rootPathInput})
+	m.openInput(inputState{kind: rootPathInput, base: m.browse.path, returnTo: browseModal})
 	return m, nil
+}
+
+// rootPath is the path the modal submits for value.
+func (s inputState) rootPath(value string) string {
+	if s.base == "" || filepath.IsAbs(value) || value == "~" || strings.HasPrefix(value, "~/") {
+		return value
+	}
+	return filepath.Join(s.base, value)
 }
 
 // startRenameTab opens the name modal with the tab's current name, so a small
@@ -67,7 +85,9 @@ func (m *dashboard) openInput(state inputState) {
 func (m dashboard) handleInput(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch message.String() {
 	case "esc":
+		returnTo := m.input.returnTo
 		m.closeInput()
+		m.modal = returnTo
 	case "enter":
 		value := strings.TrimSpace(m.input.text)
 		if value == "" {
@@ -92,12 +112,12 @@ type inputResultMsg struct {
 }
 
 func (m *dashboard) submitInput(value string) tea.Cmd {
-	kind, tabID := m.input.kind, m.input.tabID
+	kind, tabID, path := m.input.kind, m.input.tabID, m.input.rootPath(value)
 	request := m.snapshotRequest(func(backend Backend) (model.Snapshot, error) {
 		if kind == tabNameInput {
 			return backend.RenameTab(tabID, value)
 		}
-		return backend.AddRoot(value)
+		return backend.AddRoot(path)
 	})
 	return func() tea.Msg { return inputResultMsg{request()} }
 }
@@ -181,6 +201,8 @@ func (m dashboard) renderInputModal(maximum int) []string {
 		for _, line := range strings.Split(ansi.Wrap(display.Text(m.input.err), contentWidth, ""), "\n") {
 			lines = append(lines, m.styles.errorText.Render(line))
 		}
+	case m.input.kind == rootPathInput && m.input.base != "":
+		lines = append(lines, truncate(m.styles.empty.Render("Relative to "+display.Text(m.input.base)), contentWidth))
 	default:
 		lines = append(lines, "")
 	}

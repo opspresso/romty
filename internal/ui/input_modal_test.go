@@ -138,3 +138,36 @@ func TestInputModalShowsARejectedRootPath(t *testing.T) {
 		t.Fatalf("modal = %q, want the long error wrapped rather than cut", plain)
 	}
 }
+
+// The path modal opened from the picker resolves a relative path against the
+// directory the picker shows, and Esc goes back to the picker.
+func TestRootPathModalWorksFromThePickerDirectory(t *testing.T) {
+	backend := &fakeBackend{}
+	value := newDashboard(backend, model.Snapshot{})
+	value.width, value.height = 100, 24
+	value.browse.path = "/home/user/src"
+	value.modal = browseModal
+	updated, _ := value.startRootInput()
+	value = updated.(dashboard)
+	if box := ansi.Strip(strings.Join(value.renderModal(100, 22), "\n")); !strings.Contains(box, "Relative to /home/user/src") {
+		t.Fatalf("modal = %q, want the base directory named", box)
+	}
+	value.input.text = "romty"
+	command := send(&value, tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+	send(&value, commandMessage[inputResultMsg](t, command))
+	if backend.addedPath != "/home/user/src/romty" {
+		t.Fatalf("added path = %q, want it under the picker directory", backend.addedPath)
+	}
+
+	value.modal = browseModal
+	updated, _ = value.startRootInput()
+	value = updated.(dashboard)
+	value.input.text = "~/work"
+	if got := value.input.rootPath(value.input.text); got != "~/work" {
+		t.Fatalf("rootPath(~/work) = %q, want it left for the client to expand", got)
+	}
+	send(&value, tea.KeyPressMsg(tea.Key{Code: tea.KeyEscape}))
+	if value.modal != browseModal {
+		t.Fatalf("Esc = modal %v, want the picker back", value.modal)
+	}
+}
