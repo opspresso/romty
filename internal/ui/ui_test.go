@@ -707,8 +707,8 @@ func TestDashboardIgnoresRemovedPlusShortcut(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, model.Snapshot{})
 
 	command := send(&value, key('+', "+"))
-	if value.inputMode || command != nil {
-		t.Fatalf("+ result = (input mode %v, command %v), want no action", value.inputMode, command)
+	if value.modal != noModal || command != nil {
+		t.Fatalf("+ result = (modal %v, command %v), want no action", value.modal, command)
 	}
 }
 
@@ -3410,8 +3410,8 @@ func TestDashboardKeepsGlobalKeysAtOnePrecedence(t *testing.T) {
 		t.Fatalf("F2 with a modal open = modal %v, want the root picker", value.modal)
 	}
 	send(&value, key('/', "/"))
-	if !value.inputMode || value.modal != noModal {
-		t.Fatalf("/ in the picker = (input %v, modal %v), want root input", value.inputMode, value.modal)
+	if value.modal != inputModal {
+		t.Fatalf("/ in the picker = modal %v, want the path modal", value.modal)
 	}
 
 	// Root input owns every key except its own cancel, so F4 cannot discard it.
@@ -3422,8 +3422,8 @@ func TestDashboardKeepsGlobalKeysAtOnePrecedence(t *testing.T) {
 			value.result.Quit, command, value.input)
 	}
 	send(&value, key(tea.KeyEscape, ""))
-	if value.inputMode || value.input != "" {
-		t.Fatalf("Esc while typing = (input mode %v, input %q), want the prompt cancelled", value.inputMode, value.input)
+	if value.modal != noModal || value.input != "" {
+		t.Fatalf("Esc while typing = (modal %v, input %q), want the modal cancelled", value.modal, value.input)
 	}
 }
 
@@ -4057,14 +4057,14 @@ func TestDashboardReplacesControlCharactersInLabels(t *testing.T) {
 		t.Fatalf("tab label was not rendered safely: %q", tabBar)
 	}
 
-	value.inputMode = true
+	value.modal = inputModal
 	value.input = hostile
-	if rendered := value.renderStatus(120, 36)[1]; strings.Contains(rendered, "\x1b]8;;https://example.com") ||
+	if rendered := strings.Join(value.renderModal(120, 36), "\n"); strings.Contains(rendered, "\x1b]8;;https://example.com") ||
 		!strings.Contains(ansi.Strip(rendered), safe) {
 		t.Fatalf("root input was not rendered safely: %q", rendered)
 	}
 
-	value.inputMode = false
+	value.modal = noModal
 	value.setError(treeError, hostile)
 	if rendered := value.renderStatus(120, 36)[1]; strings.Contains(rendered, "\x1b]8;;https://example.com") ||
 		!strings.Contains(ansi.Strip(rendered), safe) {
@@ -5099,8 +5099,8 @@ func TestDashboardDoesNotCaptureWorkspaceShortcutsInTerminal(t *testing.T) {
 		key('i', "i"), key('a', "a"), key(',', ","), key('q', "q"), key('r', "r"), key('+', "+"), key('?', "?"),
 	} {
 		command := send(&value, message)
-		if command != nil || value.inputMode || value.modal != noModal {
-			t.Fatalf("terminal key %q was captured: command=%v input=%v modal=%v", message.String(), command, value.inputMode, value.modal)
+		if command != nil || value.modal != noModal {
+			t.Fatalf("terminal key %q was captured: command=%v modal=%v", message.String(), command, value.modal)
 		}
 	}
 }

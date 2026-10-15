@@ -44,14 +44,16 @@ func TestRootInputOwnsMouse(t *testing.T) {
 		Root: model.Root{ID: "root", Name: "projects", Path: "/projects"},
 	}}})
 	value.width, value.height = 100, 24
-	value.inputMode, value.input = true, "/typed/path"
+	updated, _ := value.startRootInput()
+	value = updated.(dashboard)
+	value.input = "/typed/path"
 	for _, message := range []tea.Msg{
 		tea.MouseClickMsg{X: 2, Y: 2, Button: tea.MouseLeft},
 		tea.MouseClickMsg{X: 2, Y: 2, Button: tea.MouseRight},
 	} {
 		updated, command := value.Update(message)
 		got := updated.(dashboard)
-		if command != nil || got.modal != noModal || !got.inputMode || got.input != value.input {
+		if command != nil || got.modal != inputModal || got.input != value.input {
 			t.Fatal("mouse activated the dashboard behind the path prompt")
 		}
 	}

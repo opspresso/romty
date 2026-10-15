@@ -39,6 +39,8 @@ type uiStyles struct {
 	shortcutDescription lipgloss.Style
 	promptLabel         lipgloss.Style
 	promptText          lipgloss.Style
+	inputField          lipgloss.Style
+	inputCursor         lipgloss.Style
 	errorLabel          lipgloss.Style
 	errorText           lipgloss.Style
 	noticeLabel         lipgloss.Style
@@ -111,6 +113,8 @@ func newUIStyles(hasDarkBackground bool) *uiStyles {
 		shortcutDescription: lipgloss.NewStyle().Foreground(muted),
 		promptLabel:         lipgloss.NewStyle().Foreground(accentText).Background(accentSurface).Bold(true),
 		promptText:          lipgloss.NewStyle().Foreground(text),
+		inputField:          lipgloss.NewStyle().Foreground(text).Background(surface),
+		inputCursor:         lipgloss.NewStyle().Background(accent),
 		errorLabel:          lipgloss.NewStyle().Foreground(errorText).Background(errorColor).Bold(true),
 		errorText:           lipgloss.NewStyle().Foreground(errorColor),
 		noticeLabel:         lipgloss.NewStyle().Foreground(text).Background(surface).Bold(true),

@@ -346,9 +346,9 @@ func TestBrowsePickerHandsOffToTheTypedPrompt(t *testing.T) {
 	value := browsing(t, &fakeBackend{}, t.TempDir())
 
 	value, command := press(t, value, key('/', "/"))
-	if !value.inputMode || value.modal != noModal || command != nil {
-		t.Fatalf("/ result = (input %v, modal %v, command %v), want the typed prompt",
-			value.inputMode, value.modal, command)
+	if value.modal != inputModal || value.inputKind != rootPathInput || command != nil {
+		t.Fatalf("/ result = (modal %v, kind %v, command %v), want the path modal",
+			value.modal, value.inputKind, command)
 	}
 }
 

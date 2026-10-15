@@ -126,14 +126,7 @@ const (
 	removeSelectionModal
 	shutdownModal
 	hookInstallModal
-)
-
-// inputKind names what the status bar prompt is asking for.
-type inputKind int
-
-const (
-	rootPathInput inputKind = iota
-	tabNameInput
+	inputModal
 )
 
 // doubleClickInterval is the longest gap between two clicks on one tab that
@@ -199,7 +192,6 @@ type dashboard struct {
 	rememberedWorkspacePath string
 	rememberedTabID         string
 	restorePending          bool
-	inputMode               bool
 	inputKind               inputKind
 	input                   string
 	inputError              string
@@ -226,8 +218,8 @@ type dashboard struct {
 	// newerRelease is the tag of a published release newer than this build,
 	// or empty when there is none or the check has not answered.
 	newerRelease string
-	// renameTabID is the tab the name prompt renames, held so the answer
-	// applies to the tab the prompt opened for.
+	// renameTabID is the tab the name modal renames, held so the answer
+	// applies to the tab the modal opened for.
 	renameTabID string
 	// lastTabClick is the previous click on a tab label, which is what turns
 	// a second click on the same tab into a double click.
@@ -560,10 +552,6 @@ func (m dashboard) update(message tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyPressMsg:
 		return m.handleKey(message)
 	case tea.MouseClickMsg, tea.MouseReleaseMsg, tea.MouseWheelMsg, tea.MouseMotionMsg:
-		if m.inputMode {
-			m.hover = hoverTarget{}
-			return m, nil
-		}
 		mouse := message.(tea.MouseMsg)
 		m.hover = m.hoverTargetAt(mouse.Mouse())
 		if click, ok := message.(tea.MouseClickMsg); ok && (click.Button != tea.MouseLeft || m.hover.kind != hoverTab) {
@@ -592,8 +580,9 @@ func (m dashboard) update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case tea.PasteMsg:
-		if m.inputMode {
+		if m.modal == inputModal {
 			m.input += message.Content
+			m.inputError = ""
 		} else if m.modal != noModal || m.shutdownPending || m.gitActionPending || m.hookInstallPending {
 			return m, nil
 		} else if m.scrollback && m.searchMode {
@@ -799,7 +788,7 @@ var globalKeys = map[string]func(dashboard) (tea.Model, tea.Cmd){
 }
 
 func (m dashboard) handleKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	if m.inputMode {
+	if m.modal == inputModal {
 		return m.handleInput(message)
 	}
 	// A shutdown already asked for, a Git command already running, an installer
@@ -959,30 +948,6 @@ func installedHooksNotice(results []agenthooks.Result) string {
 	return strings.Join(names, " and ") + " hooks installed; restart running agent sessions"
 }
 
-func (m dashboard) startRootInput() (tea.Model, tea.Cmd) {
-	m.modal = noModal
-	m.inputMode = true
-	m.inputKind = rootPathInput
-	m.input = ""
-	m.clearAnyError()
-	return m, nil
-}
-
-// startRenameTab opens the name prompt with the tab's current name, so a small
-// change does not mean retyping the whole name.
-func (m dashboard) startRenameTab(tab model.Tab) (tea.Model, tea.Cmd) {
-	if tab.ID == "" {
-		return m, nil
-	}
-	m.modal = noModal
-	m.inputMode = true
-	m.inputKind = tabNameInput
-	m.input = tab.Name
-	m.renameTabID = tab.ID
-	m.clearAnyError()
-	return m, nil
-}
-
 // isDoubleClick records a click on a tab label and reports whether it is the
 // second of two quick clicks on the same tab. update clears lastTabClick on any
 // other click, so a click elsewhere in between breaks the pair.
@@ -1053,62 +1018,7 @@ func (m dashboard) saveConfig() tea.Cmd {
 	}
 }
 
-func (m dashboard) handleInput(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	switch message.String() {
-	case "esc":
-		m.closeInput()
-	case "enter":
-		if m.inputKind == tabNameInput {
-			name := strings.TrimSpace(m.input)
-			if name == "" {
-				m.inputError = "tab name is required"
-				return m, nil
-			}
-			tabID := m.renameTabID
-			m.closeInput()
-			return m, m.renameTab(tabID, name)
-		}
-		if strings.TrimSpace(m.input) == "" {
-			m.inputError = "root path is required"
-			return m, nil
-		}
-		path := strings.TrimSpace(m.input)
-		m.closeInput()
-		return m, m.addRoot(path)
-	default:
-		m.input = editText(m.input, message)
-		m.inputError = ""
-	}
-	return m, nil
-}
-
-// closeInput leaves the status bar prompt. A validation error belongs to the
-// prompt, so it leaves with it.
-func (m *dashboard) closeInput() {
-	m.inputMode = false
-	m.input = ""
-	m.inputError = ""
-	m.renameTabID = ""
-}
-
-// editText applies one key to a line of typed text. The root prompt and the
-// scrollback search both read their input through it, so a keystroke does the
-// same thing in either.
-func editText(value string, message tea.KeyPressMsg) string {
-	if message.String() == "backspace" {
-		runes := []rune(value)
-		if len(runes) == 0 {
-			return value
-		}
-		return string(runes[:len(runes)-1])
-	}
-	if message.Text != "" {
-		return value + message.Text
-	}
-	return value
-}
-
-// addRoot is shared by the typed prompt and the picker: both name a directory
+// addRoot is shared by the path modal and the picker: both name a directory
 // and both leave the daemon to canonicalise and judge it.
 func (m *dashboard) addRoot(path string) tea.Cmd {
 	order := m.nextSnapshotOrder()

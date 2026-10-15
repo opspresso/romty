@@ -7,6 +7,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // clickTabLabel clicks inside a tab's label, clear of its close button.
@@ -24,23 +25,24 @@ func TestDashboardDoubleClickRenamesTab(t *testing.T) {
 	value.focus = terminalPane
 
 	clickTabLabel(&value, 1)
-	if value.inputMode {
+	if value.modal != noModal {
 		t.Fatal("a single click opened the name prompt")
 	}
 	clickTabLabel(&value, 1)
-	if !value.inputMode || value.inputKind != tabNameInput || value.input != "2" || value.renameTabID != "tab-2" {
-		t.Fatalf("double click = (input %v, kind %v, text %q, tab %q), want the prompt for tab-2",
-			value.inputMode, value.inputKind, value.input, value.renameTabID)
+	if value.modal != inputModal || value.inputKind != tabNameInput || value.input != "2" || value.renameTabID != "tab-2" {
+		t.Fatalf("double click = (modal %v, kind %v, text %q, tab %q), want the name modal for tab-2",
+			value.modal, value.inputKind, value.input, value.renameTabID)
 	}
-	if status := strings.Join(value.renderStatus(80, 20), "\n"); !strings.Contains(status, " NAME ") {
-		t.Fatalf("status = %q, want the NAME prompt", status)
+	if box := ansi.Strip(strings.Join(value.renderModal(80, 20), "\n")); !strings.Contains(box, "Rename tab") ||
+		!strings.Contains(box, "Enter  rename") {
+		t.Fatalf("modal = %q, want the Rename tab box", box)
 	}
 
 	send(&value, tea.KeyPressMsg(tea.Key{Code: tea.KeyBackspace}))
 	send(&value, tea.KeyPressMsg(tea.Key{Text: "api", Code: 'a'}))
 	command := send(&value, tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
-	if command == nil || value.inputMode {
-		t.Fatalf("enter = (command %v, input %v), want a rename request", command, value.inputMode)
+	if command == nil || value.modal != noModal {
+		t.Fatalf("enter = (command %v, modal %v), want a rename request", command, value.modal)
 	}
 	send(&value, command())
 	if backend.renamedTabID != "tab-2" || backend.renamedTabName != "api" {
@@ -62,12 +64,12 @@ func TestDashboardDoubleClickNeedsTheSameTabInQuickSuccession(t *testing.T) {
 
 	clickTabLabel(&value, 0)
 	clickTabLabel(&value, 1)
-	if value.inputMode {
+	if value.modal != noModal {
 		t.Fatal("clicks on two different tabs opened the name prompt")
 	}
 	current = current.Add(doubleClickInterval + time.Millisecond)
 	clickTabLabel(&value, 1)
-	if value.inputMode {
+	if value.modal != noModal {
 		t.Fatal("two slow clicks opened the name prompt")
 	}
 }
@@ -79,7 +81,7 @@ func TestDashboardTabRenamePromptCancelsAndReportsFailure(t *testing.T) {
 	updated, _ := value.startRenameTab(tabs[0])
 	value = updated.(dashboard)
 	send(&value, tea.KeyPressMsg(tea.Key{Code: tea.KeyEscape}))
-	if value.inputMode || value.renameTabID != "" {
+	if value.modal != noModal || value.renameTabID != "" {
 		t.Fatal("Esc left the name prompt open")
 	}
 
@@ -107,7 +109,7 @@ func TestDashboardDoubleClickIgnoresClicksWithAnotherClickBetween(t *testing.T) 
 	origin := value.dimensions().leftWidth + value.dimensions().separator
 	send(&value, tea.MouseClickMsg{X: origin + 2, Y: 5, Button: tea.MouseLeft})
 	clickTabLabel(&value, 0)
-	if value.inputMode {
+	if value.modal != noModal {
 		t.Fatal("clicks on one tab with another click between opened the name prompt")
 	}
 }
@@ -120,15 +122,20 @@ func TestDashboardTabNamePromptShowsAnEmptyNameError(t *testing.T) {
 	value = updated.(dashboard)
 
 	send(&value, tea.KeyPressMsg(tea.Key{Code: tea.KeyBackspace}))
-	if command := send(&value, tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter})); command != nil || !value.inputMode {
-		t.Fatalf("empty submit = (command %v, input %v), want the prompt kept open", command, value.inputMode)
+	if command := send(&value, tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter})); command != nil || value.modal != inputModal {
+		t.Fatalf("empty submit = (command %v, modal %v), want the modal kept open", command, value.modal)
 	}
-	if status := strings.Join(value.renderStatus(80, 20), "\n"); !strings.Contains(status, "tab name is required") {
-		t.Fatalf("status = %q, want the empty-name error beside the prompt", status)
+	empty := ansi.Strip(strings.Join(value.renderModal(80, 20), "\n"))
+	if !strings.Contains(empty, "tab name is required") {
+		t.Fatalf("modal = %q, want the empty-name error inside the box", empty)
 	}
 	send(&value, tea.KeyPressMsg(tea.Key{Text: "x", Code: 'x'}))
-	if status := strings.Join(value.renderStatus(80, 20), "\n"); strings.Contains(status, "tab name is required") {
-		t.Fatalf("status = %q, want the error cleared by typing", status)
+	typed := value.renderModal(80, 20)
+	if box := ansi.Strip(strings.Join(typed, "\n")); strings.Contains(box, "tab name is required") {
+		t.Fatalf("modal = %q, want the error cleared by typing", box)
+	}
+	if len(typed) != len(strings.Split(empty, "\n")) {
+		t.Fatalf("modal height changed from %d to %d when the error cleared", len(strings.Split(empty, "\n")), len(typed))
 	}
 	if backend.renamedTabID != "" {
 		t.Fatalf("empty submit reached the backend for %q", backend.renamedTabID)
