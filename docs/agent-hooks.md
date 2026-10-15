@@ -8,7 +8,7 @@ Process detection alone gives a tab its agent color and the `●` marker. The ph
 |---|---|---|
 | Codex | The local app-server's read-only APIs, with hooks for standalone sessions | `romty hooks`, then restart Codex and trust the hooks in `/hooks` |
 | Claude Code | Hooks in its user settings | `romty hooks` |
-| OpenCode | A generated plugin | `romty hooks`, then restart OpenCode |
+| OpenCode | A generated plugin; OpenCode 2 needs `opencode --standalone` | `romty hooks`, then restart OpenCode |
 
 Terminal output and silence do not establish Codex or Claude Code completion. Without a reporting channel, their status is unavailable. The [agent marker table](interface.md#agent-and-service-markers) lists every marker with its status rail label and `romty list` phase.
 
@@ -108,26 +108,44 @@ See the official [Codex app-server API](https://learn.chatgpt.com/docs/app-serve
 Hook events map to phases as follows:
 
 - `UserPromptSubmit` begins work.
-- `AskUserQuestion`, `PermissionRequest`, and MCP elicitation identify separate user interactions. Tool-use IDs keep an unanswered question visible while other parallel tools finish.
-- `Stop` means the response reached its stop hooks. Another hook can continue the same turn, so romty shows `stopped` without a completion sound until a definitive completion notification arrives.
-- The `idle_prompt` notification confirms that Claude Code finished responding. Claude Code sends it after about 60 seconds, and only if the user has not typed.
+- `PreToolUse` marks a tool as running. `PostToolUse`, `PostToolUseFailure`, and `PermissionDenied` end it. While any tool still runs, the tab stays `working` (or `planning` in plan mode), even after a parallel tool ends.
+- `AskUserQuestion`, `PermissionRequest`, and MCP elicitation identify separate user interactions. Tool-use IDs keep an unanswered question or approval visible while other parallel tools finish. An approval outranks a question, and a question outranks running work.
+- `Stop` means the response reached its stop hooks. Another hook can continue the same turn, so romty shows `stopped` without a completion sound until a definitive completion notification arrives. A `Stop` with running background tasks shows `background`.
+- The `idle_prompt` notification arrives about 60 seconds after Claude Code finished responding, and only if the user has not typed. After `stopped` or `background`, it confirms `completed`. While the turn is still running, it means the turn ended without a `Stop` hook, and romty shows `interrupted`.
 - `StopFailure` reports failure.
+
+Claude Code runs no hook when the user interrupts a turn or rejects a tool at a permission prompt. It writes a `[Request interrupted by user…]` record to the session transcript instead. romty already reads that transcript for [token and cost readings](#token-and-cost-readings). When the newest conversation record is that interrupt and it is newer than the last hook event, the running or waiting turn becomes `interrupted` at the next status refresh. A later prompt or response record cancels it.
 
 Session, prompt/turn, and subagent IDs prevent unrelated events from changing the main agent's state. Scheduled future cron wakeups alone do not mean work is currently running.
 
-Claude Code's public hooks do not expose every final transition immediately: for example, a user interrupt need not emit `Stop`, and a blocking Stop hook can continue work. romty does not claim that this hook-only path proves immediate final task completion. See the [Claude Code hooks reference](https://code.claude.com/docs/en/hooks).
+The phase stays as reported until the next event: romty does not age a running turn to idle. A tool that the user approves at a permission prompt runs without a new hook event, so the tab shows `waiting_approval` until that tool's `PostToolUse`. A blocking Stop hook can continue work. See the [Claude Code hooks reference](https://code.claude.com/docs/en/hooks).
 
 ### OpenCode plugin
 
-OpenCode uses its plugin's lifecycle events. Its terminal-output fallback remains an estimate and never confirms completion.
+The generated plugin supports both plugin APIs from one default export. OpenCode 2 calls its `setup()`; OpenCode 1.18.29 and later call its `server()`.
+
+OpenCode 2 events map to phases as follows:
+
+- `session.execution.started` and `session.retry.scheduled` begin work.
+- The `execute.before` and `execute.after` tool hooks start and end a tool call by its call ID. A failed tool reports `PostToolUseFailure`.
+- `permission.asked` waits for approval.
+- `session.compaction.started` compacts; `session.compaction.ended` or `session.compaction.failed` returns to work.
+- Each turn ends with one outcome: `session.execution.succeeded` is `completed`, `session.execution.failed` is `error`, and `session.execution.interrupted` is `interrupted`.
+- Child sessions (subagents) do not report; the parent's tool call represents them.
+
+OpenCode 2 runs plugins in a server process. By default this is the shared background service, which serves every terminal and can carry the `ROMTY_TAB_ID` of the terminal that started it. Each hook therefore reports the process groups above it, and romty accepts an OpenCode event only when the tab's foreground job is among them. Events from the shared service are dropped, so a tab running plain `opencode` shows the terminal-output estimate. Start OpenCode with `opencode --standalone` to run its server inside the tab and get lifecycle phases.
+
+The terminal-output fallback remains an estimate and never confirms completion.
 
 ## What a hook sends
 
-The hook command sends only tab, provider, session, turn/prompt, subagent and tool-use identifiers, event name, tool name, notification type, permission mode, and whether background work remains. It does not send or retain prompts, transcripts, tool inputs, tool outputs, or assistant messages. It is silent outside a romty tab or when the daemon is unavailable.
+The hook command sends only tab, provider, session, turn/prompt, subagent and tool-use identifiers, event name, tool name, notification type, permission mode, whether background work remains, and, for OpenCode, the process groups above the hook. It does not send or retain prompts, transcripts, tool inputs, tool outputs, or assistant messages. It is silent outside a romty tab or when the daemon is unavailable.
 
 ## Token and cost readings
 
 A hooked Claude Code session also reports what it has spent. romty reads the counters Claude Code writes to its own transcript under `${CLAUDE_CONFIG_DIR:-~/.claude}/projects`. While that terminal is open, the rail above the status row shows two readings: the tokens the newest request carried into the model, and the session cost the agent totalled.
+
+romty decodes only these counters, each record's type and time, and the text of a record that starts with Claude Code's interrupt marker. It does not decode prompts, tool inputs, or responses.
 
 Both are the agent's own numbers. romty never estimates them, and never converts them to a share of a context window — a transcript records no window size, so a percentage could only come from a table of model limits that would go stale as models change. A tab shows no reading when the transcript cannot be read.
 

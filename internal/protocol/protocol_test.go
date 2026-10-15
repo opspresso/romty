@@ -189,6 +189,10 @@ func TestAgentEventValidate(t *testing.T) {
 			Agent: model.AgentClaude, HookEvent: "Stop", NotificationType: long}},
 		{name: "oversized permission mode", event: protocol.AgentEvent{
 			Agent: model.AgentClaude, HookEvent: "Stop", PermissionMode: long}},
+		{name: "bounded ancestry", event: protocol.AgentEvent{
+			Agent: model.AgentOpenCode, HookEvent: "Stop", ProcessGroups: make([]int, protocol.MaxAgentEventProcessGroups)}, valid: true},
+		{name: "oversized ancestry", event: protocol.AgentEvent{
+			Agent: model.AgentOpenCode, HookEvent: "Stop", ProcessGroups: make([]int, protocol.MaxAgentEventProcessGroups+1)}},
 	} {
 		t.Run(probe.name, func(t *testing.T) {
 			err := probe.event.Validate()

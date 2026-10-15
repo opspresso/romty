@@ -10,6 +10,7 @@ import (
 	"github.com/opspresso/romty/internal/client"
 	"github.com/opspresso/romty/internal/model"
 	"github.com/opspresso/romty/internal/paths"
+	"github.com/opspresso/romty/internal/procinfo"
 	"github.com/opspresso/romty/internal/protocol"
 )
 
@@ -38,6 +39,12 @@ func runHookCommand(provider string, input io.Reader) {
 	event, err := decodeHookEvent(provider, input)
 	if err != nil {
 		return
+	}
+	if event.Agent == model.AgentOpenCode {
+		// OpenCode's shared background service can carry the tab ID of the
+		// terminal that started it. The daemon accepts the event only if the
+		// tab's foreground job is an ancestor of this hook.
+		event.ProcessGroups = procinfo.AncestorGroups()
 	}
 	runtime, err := paths.Resolve()
 	if err != nil {

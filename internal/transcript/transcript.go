@@ -1,4 +1,5 @@
-// Package usage reads the token counters an agent already writes to disk.
+// Package transcript reads what an agent already writes to its own transcript:
+// its token counters, and whether the user interrupted its last turn.
 //
 // Nothing here derives a number from what an agent drew. The counters are the
 // agent's own record of what it sent, and a transcript that does not carry them
@@ -6,10 +7,14 @@
 // share of a context window: a transcript records no window size, so a
 // percentage could only come from a table of model limits that romty would have
 // to keep correct as models change.
-package usage
+//
+// Claude Code runs no hook when the user interrupts a turn or rejects a tool.
+// The record it writes for that is the only signal the turn has ended.
+package transcript
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"errors"
 	"io"
@@ -20,20 +25,28 @@ import (
 	"time"
 )
 
-// Usage is what an agent has spent on one session.
-type Usage struct {
+// Reading is what one session's transcript reports.
+type Reading struct {
 	// ContextTokens is what the newest request carried into the model: the
 	// prompt plus everything the cache held for it. That sum is the session's
 	// context occupancy, which is what a long-running agent is judged by.
 	ContextTokens int
 	// CostUSD is what the session has cost so far, as the agent totalled it.
 	CostUSD float64
+	// InterruptedAt is when the user interrupted the session's last turn. It
+	// is zero unless that interrupt is the newest conversation record: a later
+	// prompt or response means the session went on.
+	InterruptedAt time.Time
 }
 
-// Empty reports a reading that found no counters at all.
-func (u Usage) Empty() bool {
-	return u.ContextTokens == 0 && u.CostUSD == 0
+// Empty reports a reading that found neither counters nor an interrupt.
+func (r Reading) Empty() bool {
+	return r.ContextTokens == 0 && r.CostUSD == 0 && r.InterruptedAt.IsZero()
 }
+
+// interruptMarker starts the user record Claude Code writes when the user
+// interrupts a turn or rejects a tool call.
+var interruptMarker = []byte("[Request interrupted by user")
 
 // maxTranscriptTail bounds the read. The newest counters are at the end of the
 // file, a transcript grows to hundreds of megabytes, and none of the rest of it
@@ -68,7 +81,7 @@ type Reader struct {
 type entry struct {
 	modified time.Time
 	size     int64
-	value    Usage
+	value    Reading
 	found    bool
 }
 
@@ -76,17 +89,17 @@ func NewReader() *Reader {
 	return &Reader{entries: make(map[string]entry)}
 }
 
-// ReadClaude returns the newest counters recorded for one Claude Code session.
+// ReadClaude returns what one Claude Code session's transcript reports.
 // configDir is the agent's configuration directory, workspace the directory the
 // session runs in, and sessionID the identifier its hooks reported.
-func (r *Reader) ReadClaude(configDir, workspace, sessionID string) (Usage, bool) {
+func (r *Reader) ReadClaude(configDir, workspace, sessionID string) (Reading, bool) {
 	if configDir == "" || workspace == "" || !SafeSessionID(sessionID) {
-		return Usage{}, false
+		return Reading{}, false
 	}
 	path := filepath.Join(configDir, "projects", transcriptDirectory(workspace), sessionID+".jsonl")
 	info, err := os.Stat(path)
 	if err != nil || !info.Mode().IsRegular() {
-		return Usage{}, false
+		return Reading{}, false
 	}
 
 	r.mu.Lock()
@@ -139,7 +152,9 @@ func SafeSessionID(value string) bool {
 // else in it — prompts, tool inputs, assistant messages — is deliberately not
 // described here, so it is never decoded and never held.
 type transcriptRecord struct {
-	Message *struct {
+	Type      string `json:"type"`
+	Timestamp string `json:"timestamp"`
+	Message   *struct {
 		Usage *struct {
 			InputTokens              int `json:"input_tokens"`
 			CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
@@ -149,15 +164,23 @@ type transcriptRecord struct {
 	TotalCostUSD *float64 `json:"totalCostUSD"`
 }
 
-func readTranscript(path string) (Usage, bool) {
+// interruptRecord is decoded only from a line that contains the marker, so
+// the text it holds is the marker Claude Code wrote, not a user's prompt.
+type interruptRecord struct {
+	Message struct {
+		Content json.RawMessage `json:"content"`
+	} `json:"message"`
+}
+
+func readTranscript(path string) (Reading, bool) {
 	file, err := os.Open(path)
 	if err != nil {
-		return Usage{}, false
+		return Reading{}, false
 	}
 	defer file.Close()
 	info, err := file.Stat()
 	if err != nil || !info.Mode().IsRegular() {
-		return Usage{}, false
+		return Reading{}, false
 	}
 	offset := max(info.Size()-maxTranscriptTail, 0)
 	if offset > 0 {
@@ -168,60 +191,90 @@ func readTranscript(path string) (Usage, bool) {
 		offset--
 	}
 	if _, err := file.Seek(offset, io.SeekStart); err != nil {
-		return Usage{}, false
+		return Reading{}, false
 	}
 	reader := bufio.NewReaderSize(file, 64<<10)
 	if offset > 0 {
 		// The read began mid-file, so the first line is the tail of whatever
 		// record straddles the seek and is not valid JSON on its own.
 		if _, err := readRecord(reader); err != nil {
-			return Usage{}, false
+			return Reading{}, false
 		}
 	}
 
-	var result Usage
-	var found bool
+	var result Reading
 	for {
 		line, err := readRecord(reader)
-		if value, ok := decodeRecord(line); ok {
-			if value.ContextTokens > 0 {
-				result.ContextTokens = value.ContextTokens
-			}
-			if value.CostUSD > 0 {
-				result.CostUSD = value.CostUSD
-			}
-			found = found || !value.Empty()
-		}
+		applyRecord(&result, line)
 		if err != nil {
-			return result, found
+			return result, !result.Empty()
 		}
 	}
 }
 
-// decodeRecord reads the counters one record carries, if it carries any.
-func decodeRecord(line []byte) (Usage, bool) {
+// applyRecord folds one record into the reading, in file order.
+func applyRecord(result *Reading, line []byte) {
 	if len(line) == 0 {
-		return Usage{}, false
+		return
 	}
 	var record transcriptRecord
 	if err := json.Unmarshal(line, &record); err != nil {
-		return Usage{}, false
+		return
 	}
-	var value Usage
 	if record.Message != nil && record.Message.Usage != nil {
 		counters := record.Message.Usage
-		value.ContextTokens = counters.InputTokens +
-			counters.CacheCreationInputTokens + counters.CacheReadInputTokens
+		if tokens := counters.InputTokens + counters.CacheCreationInputTokens + counters.CacheReadInputTokens; tokens > 0 {
+			result.ContextTokens = tokens
+		}
 	}
-	if record.TotalCostUSD != nil {
-		value.CostUSD = *record.TotalCostUSD
+	if record.TotalCostUSD != nil && *record.TotalCostUSD > 0 {
+		result.CostUSD = *record.TotalCostUSD
 	}
-	return value, !value.Empty()
+	// Only conversation records order the turn. Summaries, attachments and
+	// system notes can follow an interrupt without resuming the session.
+	switch record.Type {
+	case "assistant":
+		result.InterruptedAt = time.Time{}
+	case "user":
+		result.InterruptedAt = time.Time{}
+		if bytes.Contains(line, interruptMarker) && isInterrupt(line) {
+			// An unreadable time leaves the interrupt unknown rather than
+			// dated to an instant that could precede the hook it must follow.
+			result.InterruptedAt, _ = time.Parse(time.RFC3339Nano, record.Timestamp)
+		}
+	}
+}
+
+// isInterrupt reports whether a user record's content starts with the marker,
+// as a plain string or as a text part.
+func isInterrupt(line []byte) bool {
+	var record interruptRecord
+	if err := json.Unmarshal(line, &record); err != nil {
+		return false
+	}
+	var text string
+	if json.Unmarshal(record.Message.Content, &text) == nil {
+		return strings.HasPrefix(text, string(interruptMarker))
+	}
+	var parts []struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	}
+	if json.Unmarshal(record.Message.Content, &parts) != nil {
+		return false
+	}
+	for _, part := range parts {
+		if part.Type == "text" && strings.HasPrefix(part.Text, string(interruptMarker)) {
+			return true
+		}
+	}
+	return false
 }
 
 // readRecord returns the next line, or nothing for a line too long to be one
-// that carries counters. The error is returned alongside whatever was read, so
-// the last line of a file with no trailing newline is not dropped.
+// that carries counters or an interrupt. The error is returned alongside
+// whatever was read, so the last line of a file with no trailing newline is
+// not dropped.
 func readRecord(reader *bufio.Reader) ([]byte, error) {
 	var line []byte
 	var oversized bool
