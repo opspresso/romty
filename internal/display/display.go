@@ -4,8 +4,7 @@
 // Git repository or an agent, and every one of them ends up written to the
 // user's terminal. A control character in one of those is not text: it moves
 // the cursor, clears the screen, or opens a sequence the terminal will answer.
-// The TUI and the command line each had their own copy of the same scrub, and
-// two copies of a rule like that agree only until one of them is fixed.
+// The TUI and the command line both use this package, so they scrub alike.
 package display
 
 import (

@@ -72,11 +72,9 @@ func New(socket string) *Client {
 	return &Client{socket: socket, id: fmt.Sprintf("%d-%d", os.Getpid(), nextClientID.Add(1))}
 }
 
-// callFor sends a request and hands back the one field of the reply the action
-// asked for. Seven actions each repeated the same three steps — call, refuse a
-// reply that carries no such field, dereference — which is seven places for the
-// middle one to be forgotten in, and a forgotten one is a nil dereference in
-// the TUI rather than a message naming the daemon.
+// callFor sends a request and returns the one field of the reply the action
+// asked for. A reply without that field is an error that names the daemon,
+// not a nil value for the caller to dereference.
 func callFor[T any](c *Client, request protocol.Request, field func(protocol.Response) *T, noun string) (T, error) {
 	var value T
 	response, err := c.call(request)
@@ -330,9 +328,7 @@ func (c *Client) openAttach(tabID string) (net.Conn, *bufio.Reader, protocol.Res
 	}
 	// Bound the handshake alone. A daemon that accepts the connection and then
 	// says nothing — stopped, wedged, or another program holding the socket
-	// path — used to leave this read blocked for good, and with it the command
-	// goroutine that opens a terminal: the tab simply never appeared, with
-	// nothing on the status bar to say why.
+	// path — must fail the attach with an error, not block it forever.
 	if err := connection.SetDeadline(time.Now().Add(handshakeTimeout)); err != nil {
 		connection.Close()
 		return nil, nil, protocol.Response{}, fmt.Errorf("set daemon deadline: %w", err)

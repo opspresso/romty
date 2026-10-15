@@ -40,10 +40,9 @@ type Config struct {
 }
 
 // knownConfigFields are the JSON names Config declares, read from its own tags
-// rather than listed a second time. A field added to the struct but forgotten
-// in a hand-kept list would be filed as unknown, and MarshalJSON would then
-// restore the old value of anything omitempty had just dropped — turning a
-// setting off would silently turn it back on.
+// rather than listed a second time. A field missing from this set would be
+// kept as unknown, and MarshalJSON would then restore its old value whenever
+// omitempty dropped it: turning a setting off would turn it back on.
 var knownConfigFields = configFieldNames()
 
 func configFieldNames() map[string]struct{} {
@@ -147,9 +146,7 @@ func validateConfig(value Config) error {
 // does.
 //
 // The name and the value are separate so the modal can put each in a column of
-// its own. As one string — "Sound on done: off" — the values landed wherever
-// the names happened to end, and reading five settings meant reading five
-// sentences rather than glancing down a column.
+// its own, and the values line up under one another.
 type configRow struct {
 	name   string
 	value  func(dashboard) string

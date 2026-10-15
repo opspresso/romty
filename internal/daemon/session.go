@@ -364,11 +364,8 @@ func (s *session) replay(connection net.Conn, modes, recording []byte) error {
 
 // writeReplay pushes the recording out a piece at a time, refreshing the
 // deadline before each one, so the timeout means "this client has stopped
-// reading" and not "this client is taking a while".
-//
-// One deadline over the whole replay meant the second: an attach that was
-// making steady progress was cut off for being long, then retried the same
-// recording and was cut off again.
+// reading" and not "this client is taking a while". One deadline over the
+// whole replay would cut off a long replay that is making progress.
 func writeReplay(connection net.Conn, data []byte) error {
 	for len(data) > 0 {
 		if err := connection.SetWriteDeadline(time.Now().Add(replayTimeout)); err != nil {

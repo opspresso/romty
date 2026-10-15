@@ -158,10 +158,8 @@ func (m dashboard) handleModalKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 	return m, nil
 }
 
-// overlayModal draws the modal over what is already on screen. It used to
-// blank the whole body first, which meant opening Config took the workspace
-// tree and the terminal away to show five settings — and left the user with no
-// sight of what they were about to change. The box interior is opaque, so
+// overlayModal draws the modal over what is already on screen, so the user
+// keeps sight of what the modal is about. The box interior is opaque, so
 // laying it on top is enough for it to read as something in front.
 func (m dashboard) overlayModal(base []string, width, height int) []string {
 	box := m.renderModal(width, height)
@@ -274,10 +272,8 @@ func (m dashboard) renderModalBody(width, height int) []string {
 				m.styles.errorText.Render("Its running shells will be terminated."),
 			))
 		}
-		// What is about to be deleted comes first, its path under it as the
-		// context it is, and the consequences below the break. The path used to
-		// trail the two red lines in the body colour, where it read as a third
-		// consequence rather than as the thing being named.
+		// What is about to be deleted comes first, its path under it as
+		// context, and the consequences below the break.
 		return m.withModalActions(modalBoxFit(m.styles, minimumModalWidth, modalWidth, "Delete workspace",
 			m.styles.modalStrong.Render("Delete "+display.Text(m.removeTarget.workspace.Name)+"?"),
 			m.styles.empty.Render(display.Text(m.removeTarget.workspace.Path)),
@@ -503,10 +499,9 @@ func (m dashboard) withModalActions(lines []string) []string {
 }
 
 // modalGeometry is where the modal box lands on screen. Rendering the modal is
-// the only way to find out, so every question a pointer raises about one —
-// which action is under it, which content row, whether it is inside the box at
-// all — used to render the box again. In all-motion mouse mode that came to
-// half a dozen renders of the same box per pointer move.
+// the only way to find out, so a pointer handler renders the box once into a
+// geometry and asks it every question: which action is under the pointer,
+// which content row, and whether it is inside the box at all.
 type modalGeometry struct {
 	lines []string
 	left  int
@@ -586,10 +581,8 @@ func modalCapacity(height int) int {
 	return max(height-2, 1)
 }
 
-// modalBoxFit draws the box at the width its content needs, up to a cap. A
-// confirmation of four short lines used to be laid out at the cap itself,
-// which covered most of the screen to ask one question — and, now that the
-// modal no longer blanks what is behind it, covered it for no reason at all.
+// modalBoxFit draws the box at the width its content needs, between minimum
+// and maximum, so a short question does not cover the screen behind it.
 func modalBoxFit(styles *uiStyles, minimum, maximum int, title string, values ...string) []string {
 	content := 0
 	for _, value := range values {

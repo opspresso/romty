@@ -347,9 +347,8 @@ func (m dashboard) handleDashboardMouse(message tea.MouseMsg) (tea.Model, tea.Cm
 	return m, nil, false
 }
 
-// navigationItemAtRow is the tree item drawn on a body row, and where it sits.
-// Both are wanted together: the click handlers used to ask for the index, then
-// rebuild the whole tree once more per field they read off the item.
+// navigationItemAtRow is the tree item drawn on a body row, and its index.
+// Both come from one build of the tree.
 func (m dashboard) navigationItemAtRow(row, height int) (navItem, int, bool) {
 	items := m.navigationItems()
 	available := max(height-2, 0)

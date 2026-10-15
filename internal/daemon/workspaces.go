@@ -70,8 +70,8 @@ func (s *Server) removeRoot(rootID string) protocol.Response {
 // is released: closing a shell waits for it to be reaped, and waiting for that
 // under the lock stops every other request the daemon is serving.
 //
-// Forgetting a root and deleting a workspace directory differ only in which
-// workspaces they name. Everything after that was written out twice.
+// Forgetting a root and deleting a workspace directory both use it; they
+// differ only in which workspaces they name.
 func (s *Server) dropWorkspacesLocked(matches func(model.Workspace) bool) ([]*session, int) {
 	orphaned := make(map[string]struct{})
 	workspaces := make([]model.Workspace, 0, len(s.value.Workspaces))
@@ -359,8 +359,8 @@ func (s *Server) createTab(request protocol.Request) protocol.Response {
 }
 
 // snapshot never fails: a root romty cannot read is reported as one unreadable
-// root rather than taken out of the tree, because one unmounted volume used to
-// fail every refresh, and with it every path that needs a snapshot.
+// root rather than taken out of the tree, so one unmounted volume cannot fail
+// every refresh.
 func (s *Server) snapshot() model.Snapshot {
 	s.mu.Lock()
 	value := cloneState(s.value)

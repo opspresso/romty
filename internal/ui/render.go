@@ -60,9 +60,8 @@ func openTabMarker(styles *uiStyles, base lipgloss.Style, tab model.Tab, animati
 	return style.Render(marker)
 }
 
-// layout is the one description of where things sit. It used to be four
-// unnamed ints, which every one of nineteen call sites unpacked positionally:
-// swapping two widths compiled, rendered, and only looked wrong.
+// layout is the one description of where things sit on screen. Its fields
+// are named so a call site cannot swap two widths unnoticed.
 type layout struct {
 	leftWidth int
 	// separator is what sits between the panes, which is zero while the
@@ -175,8 +174,7 @@ func (m dashboard) render() string {
 	view := m.dimensions()
 	width := m.screenWidth()
 	// Scrollback replaces the split rather than drawing over it, so the panes
-	// it hides are not built at all: rendering both meant every frame drew the
-	// workspace tree and a second terminal viewport it then threw away.
+	// it hides are not built at all.
 	var lines []string
 	switch {
 	case m.gitDiff.active:

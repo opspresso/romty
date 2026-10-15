@@ -22,8 +22,7 @@ import (
 )
 
 const (
-	// tagline is what About says romty is, and what help repeats now that
-	// About has no function key. Two copies of one sentence drift apart.
+	// tagline is what About and help say romty is.
 	tagline = "Persistent terminal workspace manager"
 
 	terminalTop        = 2
@@ -218,9 +217,9 @@ type dashboard struct {
 	// a second click on the same tab into a double click.
 	lastTabClick   tabClick
 	terminalExited bool
-	// reattachTab and reattachAttempts damp the loop a dropped connection
-	// used to start: romty reattached at once, the daemon replayed the whole
-	// recording, the client fell behind, and the daemon cut it off again.
+	// reattachTab and reattachAttempts back off repeated reattaches to a tab
+	// whose connection keeps dropping: each attach replays the recording, and
+	// a client that falls behind it is cut off again.
 	reattachTab      string
 	reattachAttempts int
 	// terminalOpenedAt is when the open terminal attached, which is what tells
@@ -578,9 +577,8 @@ func (m dashboard) update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.ensureWorkspaceCursor()
 		m.clampTabIndex()
 		// A refresh says the tree is current; it says nothing about a failed
-		// resize or a daemon that would not stop. Clearing unconditionally
-		// meant the F5 a user presses after a failure erased the reason for
-		// it, and that an in-flight refresh could erase one at random.
+		// resize or a daemon that would not stop, so it clears tree errors
+		// only.
 		m.clearError(treeError)
 		if m.terminalExited {
 			return m.settleAfterExit()
@@ -635,11 +633,9 @@ func (m dashboard) update(message tea.Msg) (tea.Model, tea.Cmd) {
 	case terminalOutputMsg:
 		return m.handleTerminalOutput(message)
 	case configSavedMsg:
-		// What the save reported comes first. Holding an arrow key in the
-		// config modal outruns the disk, and reading the width before the
-		// error meant a save that failed under a width that had already moved
-		// on was dropped without a word — the one outcome the user has to
-		// hear about.
+		// What the save reported comes first, even when a later change has
+		// already made this save out of date: a failed save must reach the
+		// user.
 		if message.err != nil {
 			m.setError(settingError, message.err.Error())
 		} else {
@@ -696,10 +692,8 @@ func (m dashboard) update(message tea.Msg) (tea.Model, tea.Cmd) {
 // globalKeys are handled in both panes and with a modal open. Routing every
 // function key through one table keeps their precedence at a single point.
 var globalKeys = map[string]func(dashboard) (tea.Model, tea.Cmd){
-	// F1 is help everywhere else in computing, and romty used to spend it on
-	// About while help sat on `?` in the workspace pane only. That left the
-	// terminal pane, where the shortcuts are hardest to remember, with no way
-	// to look them up at all.
+	// F1 is help, as it is elsewhere, and it works in the terminal pane where
+	// `?` goes to the shell.
 	"f1": func(m dashboard) (tea.Model, tea.Cmd) { return m.openModal(helpModal) },
 	"f2": func(m dashboard) (tea.Model, tea.Cmd) { return m.startBrowse() },
 	"f3": func(m dashboard) (tea.Model, tea.Cmd) { return m.openModal(configModal) },
@@ -1131,11 +1125,9 @@ func (m dashboard) settleAfterExit() (tea.Model, tea.Cmd) {
 }
 
 // attachWasHealthy reports whether the terminal that just dropped had been
-// attached long enough that the drop starts a fresh incident. The counter only
-// ever went up without it: it measured how many times a tab had dropped rather
-// than whether it was dropping now, so four drops spread over an afternoon were
-// damped exactly like four in a second and a working terminal was eventually
-// left saying it keeps disconnecting.
+// attached long enough that the drop starts a fresh incident. The retry count
+// then restarts, so drops spread over hours are not damped like drops in one
+// second.
 func (m dashboard) attachWasHealthy() bool {
 	return !m.terminalOpenedAt.IsZero() && now().Sub(m.terminalOpenedAt) >= healthyAttachInterval
 }
