@@ -440,8 +440,12 @@ func TestForegroundClientOwnsTerminalSize(t *testing.T) {
 	if err != nil {
 		t.Fatalf("pty.Open() error = %v", err)
 	}
-	defer terminal.Close()
 	defer peer.Close()
+	terminal, err = pollableTerminal(terminal)
+	if err != nil {
+		t.Fatalf("pollableTerminal() error = %v", err)
+	}
+	defer terminal.Close()
 
 	first, firstPeer := net.Pipe()
 	second, secondPeer := net.Pipe()
