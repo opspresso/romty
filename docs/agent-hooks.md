@@ -90,7 +90,9 @@ These states describe the agent runtime. A question written only in ordinary res
 
 Run `codex`, `codex resume`, and other Codex commands with their usual arguments. The command, executable, `PATH`, working directory, authentication, and execution policy stay under Codex's control.
 
-`romty hooks` adds `thread-id` to `tui.terminal_title` in `${CODEX_HOME:-~/.codex}/config.toml`. When the list is absent, it installs `["thread-id", "activity", "thread-title", "project-name"]`. It replaces the unsupported `thread-name` item from older romty defaults with `thread-title`, preserving other title items, comments, and settings. An explicitly empty title list stays disabled. If a profile or command-line override replaces the title items, include `thread-id` in that selection too. `codex doctor` reports unknown title items; the default selection is verified with Codex 0.162.1.
+`romty hooks` adds `thread-id` to `tui.terminal_title` in `${CODEX_HOME:-~/.codex}/config.toml`. When the list is absent, it installs `["thread-id", "activity", "thread-title", "project-name"]`. Existing title items, comments, and other settings are preserved. An explicitly empty title list stays disabled. If a profile or command-line override replaces the title items, include `thread-id` in that selection too.
+
+Codex Doctor 0.162.1 and 0.163.0 report `thread-name` as unknown even though the TUI supports it. To avoid this diagnostic mismatch, `romty hooks` migrates only the exact older default `["thread-id", "activity", "thread-name", "project-name"]` to the new default. Custom selections keep `thread-name`. The two items differ for unnamed threads: `thread-name` is omitted, while `thread-title` falls back to the thread identifier.
 
 The TUI emits this identifier in its window title; romty already tracks titles without displaying them. Codex 0.160.0 shortens that title item, so romty resolves it only when it uniquely matches a loaded session. It never selects a session by working directory, transcript recency, or a guessed task description.
 

@@ -80,28 +80,20 @@ func TestCodexTitleRepairsLegacyNameWithoutChangingOtherText(t *testing.T) {
 			`tui.terminal_title = ["thread-id", "activity", "thread-title", "project-name"]`,
 		},
 		"table": {
-			"[tui]\nterminal_title = [\n  'thread-id',\n  # thread-name comment\n  'thread-name',\n] # preserve\n[other]\nname = 'thread-name'\n",
-			"[tui]\nterminal_title = [\n  'thread-id',\n  # thread-name comment\n  \"thread-title\",\n] # preserve\n[other]\nname = 'thread-name'\n",
+			"[tui]\nterminal_title = [\n  'thread-id', 'activity',\n  # thread-name comment\n  'thread-name', 'project-name',\n] # preserve\n[other]\nname = 'thread-name'\n",
+			"[tui]\nterminal_title = [\n  'thread-id', 'activity',\n  # thread-name comment\n  \"thread-title\", 'project-name',\n] # preserve\n[other]\nname = 'thread-name'\n",
 		},
 		"quoted": {
-			`"tui"."terminal_title" = ["thread-id", "thread-name"]`,
-			`"tui"."terminal_title" = ["thread-id", "thread-title"]`,
+			`"tui"."terminal_title" = ["thread-id", "activity", "thread-name", "project-name"]`,
+			`"tui"."terminal_title" = ["thread-id", "activity", "thread-title", "project-name"]`,
 		},
 		"inline": {
-			`tui = { terminal_title = ["session-id", "thread-name"], theme = "thread-name" }`,
-			`tui = { terminal_title = ["session-id", "thread-title"], theme = "thread-name" }`,
+			`tui = { terminal_title = ["thread-id", "activity", "thread-name", "project-name"], theme = "thread-name" }`,
+			`tui = { terminal_title = ["thread-id", "activity", "thread-title", "project-name"], theme = "thread-name" }`,
 		},
 		"escaped": {
-			`tui.terminal_title = ["thread-id", "thread-\u006eame"]`,
-			`tui.terminal_title = ["thread-id", "thread-title"]`,
-		},
-		"multiple": {
-			`tui.terminal_title = ["thread-name", "thread-id", 'thread-name']`,
-			`tui.terminal_title = ["thread-title", "thread-id", "thread-title"]`,
-		},
-		"without identity": {
-			`tui.terminal_title = ["thread-name", "model"]`,
-			`tui.terminal_title = ["thread-id", "thread-title", "model"]`,
+			`tui.terminal_title = ["thread-id", "activity", "thread-\u006eame", "project-name"]`,
+			`tui.terminal_title = ["thread-id", "activity", "thread-title", "project-name"]`,
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -149,11 +141,23 @@ func TestCodexTitleRepairMarksInstalledHooksOutdated(t *testing.T) {
 }
 
 func TestCodexTitlePreservesExplicitChoicesAndRefusesMalformedConfig(t *testing.T) {
-	for _, input := range []string{`tui.terminal_title = []`, `tui.terminal_title = ["session-id", "model"]`} {
+	for _, input := range []string{
+		`tui.terminal_title = []`,
+		`tui.terminal_title = ["session-id", "model"]`,
+		`tui.terminal_title = ["thread-id", "thread-name", "model"]`,
+		`tui.terminal_title = ["session-id", "activity", "thread-name", "project-name"]`,
+		`tui.terminal_title = ["thread-id", "thread-name", "activity", "project-name"]`,
+		`tui.terminal_title = ["thread-id", "activity", "thread-name", "project-name", "model"]`,
+	} {
 		got, changed, err := normalizeCodexTitle([]byte(input))
 		if err != nil || changed || string(got) != input {
 			t.Fatalf("explicit selection changed: %s, %v", got, err)
 		}
+	}
+	custom := []byte(`tui.terminal_title = ["thread-name", "model"]`)
+	got, changed, err := normalizeCodexTitle(custom)
+	if err != nil || !changed || string(got) != `tui.terminal_title = ["thread-id", "thread-name", "model"]` {
+		t.Fatalf("custom selection = %s, %v, %v", got, changed, err)
 	}
 	testutil.UseReleaseBuild(t)
 	home := t.TempDir()
