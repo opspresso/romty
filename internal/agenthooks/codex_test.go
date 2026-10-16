@@ -41,6 +41,13 @@ func TestCodexTitleAddsIdentityWithoutChangingOtherSettings(t *testing.T) {
 			if tui["terminal_title"].([]any)[0] != "thread-id" {
 				t.Fatalf("identity was not added first: %s", data)
 			}
+			previous, _ := before["tui"].(map[string]any)
+			if _, exists := previous["terminal_title"]; !exists {
+				want := []any{"thread-id", "activity", "thread-title", "project-name"}
+				if !reflect.DeepEqual(tui["terminal_title"], want) {
+					t.Fatalf("default title = %v, want %v", tui["terminal_title"], want)
+				}
+			}
 			if previous, ok := before["tui"].(map[string]any); ok {
 				if title, exists := previous["terminal_title"]; exists {
 					tui["terminal_title"] = title
@@ -63,6 +70,81 @@ func TestCodexTitleAddsIdentityWithoutChangingOtherSettings(t *testing.T) {
 				t.Fatal("title installation is not idempotent")
 			}
 		})
+	}
+}
+
+func TestCodexTitleRepairsLegacyNameWithoutChangingOtherText(t *testing.T) {
+	for name, tc := range map[string]struct{ input, want string }{
+		"old defaults": {
+			`tui.terminal_title = ["thread-id", "activity", "thread-name", "project-name"]`,
+			`tui.terminal_title = ["thread-id", "activity", "thread-title", "project-name"]`,
+		},
+		"table": {
+			"[tui]\nterminal_title = [\n  'thread-id',\n  # thread-name comment\n  'thread-name',\n] # preserve\n[other]\nname = 'thread-name'\n",
+			"[tui]\nterminal_title = [\n  'thread-id',\n  # thread-name comment\n  \"thread-title\",\n] # preserve\n[other]\nname = 'thread-name'\n",
+		},
+		"quoted": {
+			`"tui"."terminal_title" = ["thread-id", "thread-name"]`,
+			`"tui"."terminal_title" = ["thread-id", "thread-title"]`,
+		},
+		"inline": {
+			`tui = { terminal_title = ["session-id", "thread-name"], theme = "thread-name" }`,
+			`tui = { terminal_title = ["session-id", "thread-title"], theme = "thread-name" }`,
+		},
+		"escaped": {
+			`tui.terminal_title = ["thread-id", "thread-\u006eame"]`,
+			`tui.terminal_title = ["thread-id", "thread-title"]`,
+		},
+		"multiple": {
+			`tui.terminal_title = ["thread-name", "thread-id", 'thread-name']`,
+			`tui.terminal_title = ["thread-title", "thread-id", "thread-title"]`,
+		},
+		"without identity": {
+			`tui.terminal_title = ["thread-name", "model"]`,
+			`tui.terminal_title = ["thread-id", "thread-title", "model"]`,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			got, changed, err := normalizeCodexTitle([]byte(tc.input))
+			if err != nil || !changed || string(got) != tc.want {
+				t.Fatalf("normalize = %s, %v, %v; want %s", got, changed, err, tc.want)
+			}
+			again, changed, err := normalizeCodexTitle(got)
+			if err != nil || changed || !bytes.Equal(again, got) {
+				t.Fatal("title repair is not idempotent")
+			}
+		})
+	}
+}
+
+func TestCodexTitleRepairMarksInstalledHooksOutdated(t *testing.T) {
+	testutil.UseReleaseBuild(t)
+	home := t.TempDir()
+	t.Setenv("CODEX_HOME", home)
+	if _, err := Install([]Provider{ProviderCodex}); err != nil {
+		t.Fatal(err)
+	}
+	hooksPath := filepath.Join(home, "hooks.json")
+	hooks, err := os.ReadFile(hooksPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(home, "config.toml")
+	if err := os.WriteFile(path, []byte(`tui.terminal_title = ["thread-id", "activity", "thread-name", "project-name"]`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	definition, _ := findDefinition(ProviderCodex)
+	if got := inspect(definition); got.State != StateOutdated || got.Err != nil {
+		t.Fatalf("legacy title status = %#v, want outdated", got)
+	}
+	results, err := Install([]Provider{ProviderCodex})
+	if err != nil || len(results) != 1 || results[0].Action != ActionUpdated {
+		t.Fatalf("repair = %v, %v; want updated", results, err)
+	}
+	assertFileHolds(t, path, []byte(`tui.terminal_title = ["thread-id", "activity", "thread-title", "project-name"]`), "legacy title was not repaired")
+	assertFileHolds(t, hooksPath, hooks, "title repair changed installed hooks")
+	if got := inspect(definition); got.State != StateCurrent || got.Err != nil {
+		t.Fatalf("repaired title status = %#v, want current", got)
 	}
 }
 
