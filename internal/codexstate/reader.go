@@ -40,20 +40,31 @@ const (
 var titleID = regexp.MustCompile(`(?i)[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-(?:[0-9a-f]{12}|[0-9a-f]{5}\.\.\.)`)
 
 // SessionPrefix returns the lower-case session ID, whole or shortened, that a
-// terminal title shows. It returns "" when the title shows none or shows two
-// different ones, so an ambiguous title binds no session.
+// terminal title shows. Repeated full and shortened forms retain the shorter
+// prefix for unique loaded-session resolution. Conflicting IDs bind no session.
 func SessionPrefix(title string) string {
 	matches := titleID.FindAllStringIndex(title, -1)
 	prefix := ""
+	fullID := ""
 	for _, span := range matches {
 		if span[0] > 0 && identifierByte(title[span[0]-1]) || span[1] < len(title) && identifierByte(title[span[1]]) {
 			continue
 		}
 		candidate := strings.TrimSuffix(strings.ToLower(title[span[0]:span[1]]), "...")
-		if prefix != "" && prefix != candidate {
+		if len(candidate) == sessionIDLength {
+			if fullID != "" && fullID != candidate {
+				return ""
+			}
+			fullID = candidate
+		}
+		switch {
+		case prefix == "", strings.HasPrefix(prefix, candidate):
+			prefix = candidate
+		case strings.HasPrefix(candidate, prefix):
+			// Keep the shorter prefix so a title cannot hide an inventory collision.
+		default:
 			return ""
 		}
-		prefix = candidate
 	}
 	return prefix
 }
