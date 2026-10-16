@@ -151,10 +151,9 @@ type Snapshot struct {
 // Tabs yields every tab the snapshot holds, by address, a root's own tabs
 // before those of the directories under it — the order the tree draws them.
 //
-// A snapshot keeps tabs at two levels, and four callers walked both by hand.
-// Each of them had to remember that a root holds tabs of its own; one that
-// forgets reads as working code that is simply blind to every terminal opened
-// on a root itself.
+// A snapshot keeps tabs at two levels: a root holds tabs of its own as well as
+// those of its directories. Walking it through Tabs keeps a caller from
+// missing the root's own terminals.
 func (s *Snapshot) Tabs() iter.Seq[*Tab] {
 	return func(yield func(*Tab) bool) {
 		for rootIndex := range s.Roots {

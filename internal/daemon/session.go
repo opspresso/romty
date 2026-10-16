@@ -205,11 +205,10 @@ func (s *session) codexPrefix() string {
 // master outlives the shell: it stops answering once the slave is gone, but the
 // descriptor stays open, and by then wait has already told the server to drop
 // the session, so nothing holds the only reference that could close it. A
-// descriptor is not memory, so the finalizer that would eventually release it
-// is not pressured by running out of them — a daemon left running for days
-// leaked one per terminal that exited. Closing here rather than after Wait is
-// what keeps the shell's last words: the read loop ends when the master has
-// no more to give, not when the process does.
+// finalizer is not run because descriptors run out, so a long-running daemon
+// would leak one descriptor per exited terminal. Closing here rather than
+// after Wait keeps the shell's last words: the read loop ends when the master
+// has no more to give, not when the process does.
 func (s *session) read() {
 	defer func() {
 		s.mu.Lock()

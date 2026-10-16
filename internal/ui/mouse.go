@@ -79,8 +79,7 @@ func (m dashboard) handleTerminalWheel(wheel tea.MouseWheelMsg) (tea.Model, tea.
 // history is its own — romty has none to offer — and this is what a terminal
 // does with the wheel in the alternate screen: mouse reports to an application
 // that asked for the mouse, and the cursor keys of alternate scroll to one that
-// did not. Without it the wheel did nothing at all inside vim, less, or an
-// agent, which is every full-screen program romty exists to keep running.
+// did not. vim, less, and agents all scroll this way.
 func (m dashboard) scrollGuest(mouse uv.Mouse, button tea.MouseButton) (tea.Model, tea.Cmd) {
 	if m.terminal.guestMouseMode() != tea.MouseModeNone {
 		m.terminal.sendMouse(uv.MouseWheelEvent(mouse))

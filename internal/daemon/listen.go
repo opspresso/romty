@@ -101,9 +101,8 @@ func bindPrivateSocket(path string) (*net.UnixListener, os.FileInfo, error) {
 	if err != nil {
 		// The bind is what decides who owns the socket, not the probe in
 		// prepareSocket: two daemons starting at once can both find nothing to
-		// dial and race to create it. The one that loses is not broken, and
-		// reporting that as a bind failure sent it to daemon.log as an error
-		// and exited non-zero for what is the ordinary outcome of a race.
+		// dial and race to create it. Losing that race is not a failure, so it
+		// is reported as ErrAlreadyRunning rather than as a bind error.
 		if errors.Is(err, syscall.EADDRINUSE) {
 			return nil, nil, ErrAlreadyRunning
 		}

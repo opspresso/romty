@@ -342,16 +342,13 @@ type hooksInstalledMsg struct {
 	err     error
 }
 
-// resizeFailedMsg keeps a failed resize out of snapshotMsg, which means "a new
-// snapshot arrived" and whose handler clears the status bar. Borrowing it made
-// a resize failure erase itself and, worse, made every snapshotMsg handler
-// unable to trust message.value.
+// resizeFailedMsg reports a failed resize. It is not a snapshotMsg, because
+// that message means "a new snapshot arrived" and its handler clears the
+// status bar.
 //
 // It names its tab, like every other answer romty waits on. A resize is a
-// round trip, so dragging a window and then switching tabs leaves one in
-// flight for the tab just left: the daemon answers "running terminal session
-// not found" for a terminal nobody is looking at any more, and the status bar
-// hung that on whichever terminal had taken its place.
+// round trip, so a switch of tabs can leave one in flight for the tab just
+// left, and its failure must not be reported against the terminal on screen.
 type resizeFailedMsg struct {
 	tabID string
 	err   error
@@ -743,8 +740,8 @@ var globalKeys = map[string]func(dashboard) (tea.Model, tea.Cmd){
 	"ctrl+shift+t": func(m dashboard) (tea.Model, tea.Cmd) { return m.newTab() },
 	"ctrl+shift+g": func(m dashboard) (tea.Model, tea.Cmd) { return m.openGitActions() },
 	"ctrl+shift+f": func(m dashboard) (tea.Model, tea.Cmd) { return m.toggleFileView() },
-	// Switching tabs from the terminal pane took Ctrl+/ and then two more keys.
-	// Ctrl+Shift+Left/Right is the chord a terminal with tabs binds, and a
+	// Ctrl+Shift+Left/Right switches tabs from either pane. It is the chord a
+	// terminal with tabs binds, and a
 	// terminal reports it distinctly — Ctrl+Shift+Tab is not, because most
 	// terminals send it as a plain Shift+Tab. The unshifted arrows stay with
 	// the shell, where word-wise movement lives.
@@ -752,9 +749,7 @@ var globalKeys = map[string]func(dashboard) (tea.Model, tea.Cmd){
 	"ctrl+shift+right": func(m dashboard) (tea.Model, tea.Cmd) { return m.switchTab(1) },
 	// The other axis of the same chord: Left and Right move along one
 	// workspace's terminals, Up and Down move between the workspaces that
-	// have any. Reaching a terminal in another workspace took leaving the
-	// terminal pane, walking the tree and pressing Enter, which is three
-	// keys and a change of pane for the move a user makes most often.
+	// have any, without leaving the terminal pane.
 	"ctrl+shift+up":   func(m dashboard) (tea.Model, tea.Cmd) { return m.switchWorkspace(-1) },
 	"ctrl+shift+down": func(m dashboard) (tea.Model, tea.Cmd) { return m.switchWorkspace(1) },
 	// The third axis: not where the user was going, but where an agent is
