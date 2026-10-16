@@ -199,9 +199,3 @@ func (l *socketListener) Close() error {
 	}
 	return err
 }
-
-func (l *socketListener) Addr() net.Addr {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	return l.listener.Addr()
-}
