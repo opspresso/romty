@@ -2601,17 +2601,17 @@ func TestDashboardReportsBackendFailures(t *testing.T) {
 	for _, probe := range []struct {
 		name   string
 		method string
-		act    func(dashboard) (tea.Model, tea.Cmd)
+		act    func(*testing.T, dashboard) (tea.Model, tea.Cmd)
 	}{
 		{
 			name:   "refresh",
 			method: "Snapshot",
-			act:    func(m dashboard) (tea.Model, tea.Cmd) { return m.Update(key(tea.KeyF5, "")) },
+			act:    func(_ *testing.T, m dashboard) (tea.Model, tea.Cmd) { return m.Update(key(tea.KeyF5, "")) },
 		},
 		{
 			name:   "opening a workspace",
 			method: "EnsureWorkspace",
-			act: func(m dashboard) (tea.Model, tea.Cmd) {
+			act: func(t *testing.T, m dashboard) (tea.Model, tea.Cmd) {
 				command := chooseNewSession(t, &m)
 				return m, command
 			},
@@ -2625,7 +2625,7 @@ func TestDashboardReportsBackendFailures(t *testing.T) {
 			value.height = 40
 			value.setNavigation(1)
 
-			updated, command := probe.act(value)
+			updated, command := probe.act(t, value)
 			value = updated.(dashboard)
 			if command == nil {
 				t.Fatalf("%s produced no command to fail", probe.name)
