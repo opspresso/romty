@@ -94,7 +94,7 @@ Run `codex`, `codex resume`, and other Codex commands with their usual arguments
 
 Codex Doctor 0.162.1 and 0.163.0 report `thread-name` as unknown even though the TUI supports it. To avoid this diagnostic mismatch, `romty hooks` migrates only the exact older default `["thread-id", "activity", "thread-name", "project-name"]` to the new default. Custom selections keep `thread-name`. The two items differ for unnamed threads: `thread-name` is omitted, while `thread-title` falls back to the thread identifier.
 
-The TUI emits this identifier in its window title; romty already tracks titles without displaying them. Codex 0.160.0 shortens that title item, so romty resolves it only when it uniquely matches a loaded session. It never selects a session by working directory, transcript recency, or a guessed task description.
+The TUI emits this identifier in its window title; romty already tracks titles without displaying them. Codex 0.160.0 shortens that title item, so romty resolves it only when it uniquely matches a loaded session. If an unnamed thread also shows its full ID through `thread-title`, romty keeps the shorter prefix and still requires a unique loaded match. Conflicting full IDs remain unavailable. It never selects a session by working directory, transcript recency, or a guessed task description.
 
 romty polls the local app-server's read-only APIs: `thread/loaded/list`, `thread/read`, `thread/turns/list` with `itemsView: notLoaded`, and `thread/goal/get`.
 

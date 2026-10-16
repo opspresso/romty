@@ -225,3 +225,33 @@ func TestSessionIdentityDoesNotGuessFromDirectoriesOrAmbiguousPrefixes(t *testin
 		t.Fatalf("short identity matched %q", got)
 	}
 }
+
+func TestSessionIdentityKeepsSharedPrefixForRepeatedTitleFields(t *testing.T) {
+	prefix := sessionID[:29]
+	for _, title := range []string{
+		prefix + "... | Ready | " + sessionID,
+		sessionID + " | " + prefix + "...",
+		prefix + "... | " + prefix + "...",
+	} {
+		got := SessionPrefix(title)
+		if got != prefix {
+			t.Fatalf("title %q matched %q, want conservative prefix %q", title, got, prefix)
+		}
+		if id := matchSession(got, []string{sessionID}); id != sessionID {
+			t.Fatalf("consistent title did not resolve to its loaded session: %q", id)
+		}
+		if id := matchSession(got, []string{sessionID, prefix + "0000000"}); id != "" {
+			t.Fatalf("full title field hid an ambiguous loaded prefix: %q", id)
+		}
+	}
+	otherID := prefix + "0000000"
+	for _, title := range []string{
+		prefix + "... | " + sessionID + " | " + otherID,
+		sessionID + " | " + prefix + "... | " + otherID,
+		sessionID + " | " + otherID + " | " + prefix + "...",
+	} {
+		if got := SessionPrefix(title); got != "" {
+			t.Fatalf("conflicting full IDs in %q matched %q", title, got)
+		}
+	}
+}
