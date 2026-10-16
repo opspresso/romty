@@ -67,5 +67,9 @@ class Romty < Formula
   def install
     bin.install "romty"
   end
+
+  test do
+    assert_match version.to_s, shell_output("#{bin}/romty version")
+  end
 end
 EOF
