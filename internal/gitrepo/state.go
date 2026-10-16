@@ -37,12 +37,6 @@ func command(ctx context.Context, path string, environment []string, arguments .
 	return cmd
 }
 
-// RunRemote runs a git command that may reach a remote and returns its
-// combined output, bounded by ctx and by the output limit.
-func RunRemote(ctx context.Context, path string, arguments ...string) ([]byte, error) {
-	return combinedOutput(ctx, path, remoteEnvironment, arguments...)
-}
-
 // State is the branch line romty shows for a repository.
 type State struct {
 	Branch     string

@@ -2,10 +2,8 @@ package ui
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
-	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -15,15 +13,14 @@ import (
 	"github.com/opspresso/romty/internal/model"
 )
 
-const gitActionTimeout = 2 * time.Minute
-
-type gitAction int
+// gitAction is the Git command a choice in the actions modal runs.
+type gitAction = gitrepo.Action
 
 const (
-	gitStatusAction gitAction = iota
-	gitFetchAction
-	gitPullAction
-	gitPushAction
+	gitStatusAction = gitrepo.ActionStatus
+	gitFetchAction  = gitrepo.ActionFetch
+	gitPullAction   = gitrepo.ActionPull
+	gitPushAction   = gitrepo.ActionPush
 )
 
 var gitActionChoices = [...]gitAction{
@@ -33,23 +30,9 @@ var gitActionChoices = [...]gitAction{
 	gitPushAction,
 }
 
-func (a gitAction) label() string {
-	switch a {
-	case gitStatusAction:
-		return "Status"
-	case gitFetchAction:
-		return "Fetch"
-	case gitPullAction:
-		return "Pull"
-	case gitPushAction:
-		return "Push"
-	default:
-		return "Git"
-	}
-}
-
-func (a gitAction) description() string {
-	switch a {
+// gitActionDescription is what the actions modal says beside an action's name.
+func gitActionDescription(action gitAction) string {
+	switch action {
 	case gitStatusAction:
 		return "Show changed files"
 	case gitFetchAction:
@@ -60,21 +43,6 @@ func (a gitAction) description() string {
 		return "Push current branch"
 	default:
 		return ""
-	}
-}
-
-func (a gitAction) arguments() ([]string, error) {
-	switch a {
-	case gitStatusAction:
-		return []string{"status", "--short", "--branch"}, nil
-	case gitFetchAction:
-		return []string{"fetch"}, nil
-	case gitPullAction:
-		return []string{"pull", "--ff-only"}, nil
-	case gitPushAction:
-		return []string{"push"}, nil
-	default:
-		return nil, fmt.Errorf("unknown Git action %d", a)
 	}
 }
 
@@ -100,21 +68,6 @@ type gitActionMsg struct {
 	action gitAction
 	output string
 	err    error
-}
-
-func executeGitActionContext(parent context.Context, path string, action gitAction) (string, error) {
-	arguments, err := action.arguments()
-	if err != nil {
-		return "", err
-	}
-	ctx, cancel := context.WithTimeout(parent, gitActionTimeout)
-	defer cancel()
-	output, err := gitrepo.RunRemote(ctx, path, arguments...)
-	value := strings.TrimSpace(string(output))
-	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-		return value, fmt.Errorf("%s timed out after %s", action.label(), gitActionTimeout)
-	}
-	return value, err
 }
 
 func (m dashboard) openGitActions() (tea.Model, tea.Cmd) {
@@ -157,7 +110,7 @@ func (m dashboard) startGitAction() (tea.Model, tea.Cmd) {
 	ctx, cancel := context.WithCancel(context.Background())
 	m.gitRun.cancel = cancel
 	return m, func() tea.Msg {
-		output, err := executeGitActionContext(ctx, path, action)
+		output, err := gitrepo.Run(ctx, path, action)
 		return gitActionMsg{path: path, action: action, output: output, err: err}
 	}
 }
@@ -259,7 +212,7 @@ func (m dashboard) renderGitActionsModal(maximum, height int) []string {
 	target := m.styles.modalStrong.Render(display.Text(m.gitRun.target.Name)) +
 		m.styles.empty.Render("  "+display.Text(m.gitRun.target.Path))
 	if m.gitRun.pending {
-		return modalBoxFit(m.styles, minimumModalWidth, maximum, "Git · "+m.gitRun.action.label(),
+		return modalBoxFit(m.styles, minimumModalWidth, maximum, "Git · "+m.gitRun.action.String(),
 			target,
 			"",
 			m.styles.modalBody.Render("Running…"),
@@ -272,7 +225,7 @@ func (m dashboard) renderGitActionsModal(maximum, height int) []string {
 		labels := make([]string, len(gitActionChoices))
 		contentWidth := lipgloss.Width(target)
 		for index, action := range gitActionChoices {
-			labels[index] = pad(action.label(), gitActionLabelWidth) + action.description()
+			labels[index] = pad(action.String(), gitActionLabelWidth) + gitActionDescription(action)
 			contentWidth = max(contentWidth, lipgloss.Width(labels[index])+2)
 		}
 		contentWidth = min(contentWidth, max(maximum-6, 0))
@@ -295,7 +248,7 @@ func (m dashboard) renderGitActionsModal(maximum, height int) []string {
 	capacity := gitActionResultCapacity(height)
 	offset := min(max(m.gitRun.offset, 0), max(len(result)-capacity, 0))
 	end := min(offset+capacity, len(result))
-	title := "Git · " + m.gitRun.action.label()
+	title := "Git · " + m.gitRun.action.String()
 	if len(result) > capacity {
 		title += fmt.Sprintf(" %d-%d/%d", offset+1, end, len(result))
 	}
