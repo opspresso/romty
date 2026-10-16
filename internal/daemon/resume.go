@@ -93,43 +93,34 @@ func (s *resumeStore) save(id string, meta resumeSnapshot, recording []byte) err
 // output is offered once rather than on every later restart. Newest stop
 // first — it is the one the user is coming back to — and the lowest tab name
 // within it, so a workspace saved with several tabs restores them in the
-// order they were named. An entry that cannot be read is skipped, not fatal:
-// one corrupt file must not keep a workspace from opening.
+// order they were named. Only snapshots list accepts are candidates: one past
+// the retention or one that cannot be read is skipped, so a daemon that runs
+// for weeks does not replay a stale stop and one corrupt file does not keep a
+// workspace from opening.
 func (s *resumeStore) take(workspaceID string) (resumeSnapshot, []byte, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	entries, err := os.ReadDir(s.directory)
-	if err != nil {
+	values := s.listLocked(time.Now())[workspaceID]
+	if len(values) == 0 {
 		return resumeSnapshot{}, nil, false
 	}
-	var bestID string
-	var best resumeSnapshot
-	for _, entry := range entries {
-		id, found := strings.CutSuffix(entry.Name(), ".json")
-		if !found {
-			continue
+	best := values[0]
+	for _, value := range values[1:] {
+		if !value.meta.SavedAt.Equal(best.meta.SavedAt) {
+			break
 		}
-		meta, err := jsonfile.Read[resumeSnapshot](s.metaPath(id))
-		if err != nil || meta.WorkspaceID != workspaceID {
-			continue
-		}
-		if bestID == "" ||
-			meta.SavedAt.After(best.SavedAt) ||
-			(meta.SavedAt.Equal(best.SavedAt) && meta.TabName < best.TabName) {
-			bestID, best = id, meta
+		if value.meta.TabName < best.meta.TabName {
+			best = value
 		}
 	}
-	if bestID == "" {
-		return resumeSnapshot{}, nil, false
-	}
-	recording, err := os.ReadFile(s.recordingPath(bestID))
+	recording, err := os.ReadFile(s.recordingPath(best.id))
 	// Consumed either way: a snapshot that failed once would fail again, and
 	// leaving it behind would repeat the failure on every tab.
-	s.removeLocked(bestID)
+	s.removeLocked(best.id)
 	if err != nil {
 		recording = nil
 	}
-	return best, recording, true
+	return best.meta, recording, true
 }
 
 func (s *resumeStore) removeLocked(id string) {
