@@ -213,6 +213,7 @@ func (m dashboard) render() string {
 	if m.modal == workspaceActionsModal {
 		// The action palette is anchored on the row it belongs to and is meant
 		// to read as part of the tree, so what is around it stays as it was.
+		// The session choice is drawn the same way, in the terminal pane.
 		lines = m.overlayWorkspaceActions(lines, width, view.bodyHeight)
 	} else if m.modal != noModal {
 		lines = m.overlayModal(dimBackdrop(m.styles, lines), width, view.bodyHeight)
