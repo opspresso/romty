@@ -36,11 +36,13 @@ func normalizeCodexTitle(data []byte) ([]byte, bool, error) {
 		return nil, false, fmt.Errorf("decode Codex config.toml: %w", err)
 	}
 	items := config.TUI.TerminalTitle
-	// An explicitly empty title list is an opt-out. Keep every selected item.
-	if items != nil && (len(*items) == 0 || slices.Contains(*items, "thread-id") || slices.Contains(*items, "session-id")) {
+	hasIdentity := items != nil && (slices.Contains(*items, "thread-id") || slices.Contains(*items, "session-id"))
+	// An explicitly empty title list is an opt-out. Repair the unsupported name
+	// from older romty defaults even when the identity is already present.
+	if items != nil && (len(*items) == 0 || (hasIdentity && !slices.Contains(*items, "thread-name"))) {
 		return data, false, nil
 	}
-	const defaults = `["thread-id", "activity", "thread-name", "project-name"]`
+	const defaults = `["thread-id", "activity", "thread-title", "project-name"]`
 	var parser unstable.Parser
 	parser.Reset(data)
 	var table []string
@@ -57,7 +59,23 @@ func normalizeCodexTitle(data []byte) ([]byte, bool, error) {
 			start++
 		}
 		if slices.Equal(keys, []string{"tui", "terminal_title"}) && value.Kind == unstable.Array {
-			updated = insertBytes(data, start+1, `"thread-id", `)
+			var out bytes.Buffer
+			cursor := 0
+			if !hasIdentity {
+				out.Write(data[:start+1])
+				out.WriteString(`"thread-id", `)
+				cursor = start + 1
+			}
+			for it := value.Children(); it.Next(); {
+				item := it.Node()
+				if item.Kind == unstable.String && string(item.Data) == "thread-name" {
+					out.Write(data[cursor:item.Raw.Offset])
+					out.WriteString(`"thread-title"`)
+					cursor = int(item.Raw.Offset + item.Raw.Length)
+				}
+			}
+			out.Write(data[cursor:])
+			updated = out.Bytes()
 		} else if slices.Equal(keys, []string{"tui"}) && value.Kind == unstable.InlineTable && items == nil {
 			field := "terminal_title = " + defaults
 			if value.Child() != nil {

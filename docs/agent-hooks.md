@@ -90,7 +90,7 @@ These states describe the agent runtime. A question written only in ordinary res
 
 Run `codex`, `codex resume`, and other Codex commands with their usual arguments. The command, executable, `PATH`, working directory, authentication, and execution policy stay under Codex's control.
 
-`romty hooks` adds `thread-id` to `tui.terminal_title` in `${CODEX_HOME:-~/.codex}/config.toml`. It preserves existing title items, comments, and other settings. An explicitly empty title list stays disabled. If a profile or command-line override replaces the title items, include `thread-id` in that selection too.
+`romty hooks` adds `thread-id` to `tui.terminal_title` in `${CODEX_HOME:-~/.codex}/config.toml`. When the list is absent, it installs `["thread-id", "activity", "thread-title", "project-name"]`. It replaces the unsupported `thread-name` item from older romty defaults with `thread-title`, preserving other title items, comments, and settings. An explicitly empty title list stays disabled. If a profile or command-line override replaces the title items, include `thread-id` in that selection too. `codex doctor` reports unknown title items; the default selection is verified with Codex 0.162.1.
 
 The TUI emits this identifier in its window title; romty already tracks titles without displaying them. Codex 0.160.0 shortens that title item, so romty resolves it only when it uniquely matches a loaded session. It never selects a session by working directory, transcript recency, or a guessed task description.
 
