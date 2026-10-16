@@ -840,6 +840,7 @@ func TestServerRefusesAnActionTheSelectedProtocolPredates(t *testing.T) {
 		{action: "agent_statuses", version: 4, capability: protocol.CapabilityAgentStatus},
 		{action: "close_tab", version: 5, capability: protocol.CapabilityCloseTab},
 		{action: "rename_tab", version: 6, capability: protocol.CapabilityRenameTab},
+		{action: "reopen_tab", version: 7, capability: protocol.CapabilityReopenTab},
 	} {
 		response := speakRaw(t, socket, map[string]any{
 			"action":       testCase.action,
@@ -1228,6 +1229,100 @@ func TestStopDoesNotResumeAnAgentThatExited(t *testing.T) {
 	}
 	if strings.Contains(string(meta), "claude") {
 		t.Fatalf("saved session names the exited agent: %s", meta)
+	}
+}
+
+// Closing a tab keeps its output and agent session in the closed history,
+// newest first and at most three per workspace. Reopening one
+// replays the output, types the agent's resume command, takes back the tab
+// name, and consumes the entry.
+func TestClosedTabCanBeReopenedWithItsOutputAndAgent(t *testing.T) {
+	base := testutil.ShortTempDir(t)
+	workspacePath := filepath.Join(base, "alpha")
+	if err := os.MkdirAll(workspacePath, 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	backend := startDaemonAt(t, filepath.Join(base, "daemon.sock"), filepath.Join(base, "state.json"), "/bin/sh").connect(t)
+	_, workspace := openWorkspace(t, backend, base, workspacePath)
+	const closedHistoryLimit = 3
+
+	// Three plain tabs closed first, then the agent tab: the oldest plain one
+	// falls out of the history.
+	for range closedHistoryLimit {
+		tab := createTab(t, backend, workspace)
+		if _, err := backend.CloseTab(tab.ID); err != nil {
+			t.Fatalf("CloseTab() error = %v", err)
+		}
+	}
+	tab := createTab(t, backend, workspace)
+	const sessionID = "0123abcd-89ef-4567-0123-456789abcdef"
+	connection, reader := attach(t, backend, tab)
+	writeCommand(t, connection, `echo CLOSED''PROOF`)
+	readUntil(t, connection, reader, "CLOSEDPROOF")
+	writeCommand(t, connection, fakeAgent(t, base, "claude")+" 60")
+	waitForAgent(t, backend, tab.ID, model.AgentClaude)
+	if err := backend.ReportAgentEvent(tab.ID, protocol.AgentEvent{
+		Agent: model.AgentClaude, HookEvent: "SessionStart", SessionID: sessionID,
+	}); err != nil {
+		t.Fatalf("ReportAgentEvent() error = %v", err)
+	}
+	connection.Close()
+	snapshot, err := backend.CloseTab(tab.ID)
+	if err != nil {
+		t.Fatalf("CloseTab() error = %v", err)
+	}
+	closed := snapshot.Roots[0].Directories[0].Closed
+	if len(closed) != closedHistoryLimit {
+		t.Fatalf("closed sessions = %#v, want %d", closed, closedHistoryLimit)
+	}
+	if closed[0].ID != tab.ID || closed[0].Name != tab.Name || closed[0].Agent != model.AgentClaude {
+		t.Fatalf("newest closed session = %#v, want tab %q with claude", closed[0], tab.ID)
+	}
+
+	if _, err := backend.ReopenTab(workspace.ID, "../state", 80, 24); err == nil {
+		t.Fatal("ReopenTab() accepted an ID that is not a closed session")
+	}
+	reopened, err := backend.ReopenTab(workspace.ID, tab.ID, 80, 24)
+	if err != nil {
+		t.Fatalf("ReopenTab() error = %v", err)
+	}
+	if reopened.Name != tab.Name {
+		t.Fatalf("reopened tab name = %q, want %q", reopened.Name, tab.Name)
+	}
+	connection, reader, err = backend.OpenAttach(reopened.ID)
+	if err != nil {
+		t.Fatalf("OpenAttach() error = %v", err)
+	}
+	defer connection.Close()
+	if err := connection.SetReadDeadline(time.Now().Add(3 * time.Second)); err != nil {
+		t.Fatalf("SetReadDeadline() error = %v", err)
+	}
+	var output strings.Builder
+	buffer := make([]byte, 4096)
+	for !strings.Contains(output.String(), "claude --resume "+sessionID) {
+		count, err := reader.Read(buffer)
+		if err != nil {
+			t.Fatalf("read reopened output: %v; output = %q", err, output.String())
+		}
+		output.Write(buffer[:count])
+	}
+	proof := strings.Index(output.String(), "CLOSEDPROOF")
+	marker := strings.Index(output.String(), "reopened from a closed tab")
+	if proof < 0 || marker < proof {
+		t.Fatalf("reopened output out of order (proof %d, marker %d): %q", proof, marker, output.String())
+	}
+
+	snapshot, err = backend.Snapshot()
+	if err != nil {
+		t.Fatalf("Snapshot() error = %v", err)
+	}
+	for _, value := range snapshot.Roots[0].Directories[0].Closed {
+		if value.ID == tab.ID {
+			t.Fatal("a reopened session is still in the closed history")
+		}
+	}
+	if _, err := backend.ReopenTab(workspace.ID, tab.ID, 80, 24); err == nil {
+		t.Fatal("ReopenTab() reopened the same session twice")
 	}
 }
 

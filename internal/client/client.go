@@ -246,6 +246,22 @@ func (c *Client) CreateTab(workspaceID string, columns, rows uint16) (model.Tab,
 	}, tabOf, "tab")
 }
 
+// ReopenTab starts a tab from one of the workspace's closed sessions.
+func (c *Client) ReopenTab(workspaceID, closedID string, columns, rows uint16) (model.Tab, error) {
+	if err := c.require(protocol.CapabilityReopenTab, "reopening closed sessions"); err != nil {
+		return model.Tab{}, err
+	}
+	return callFor(c, protocol.Request{
+		Action:      protocol.ActionReopenTab,
+		WorkspaceID: workspaceID,
+		TabID:       closedID,
+		Columns:     columns,
+		Rows:        rows,
+		Environment: os.Environ(),
+		Shell:       os.Getenv("SHELL"),
+	}, tabOf, "tab")
+}
+
 // CloseTab terminates a tab's shell and removes the tab.
 func (c *Client) CloseTab(tabID string) (model.Snapshot, error) {
 	if err := c.require(protocol.CapabilityCloseTab, "closing tabs"); err != nil {

@@ -65,6 +65,8 @@ type Server struct {
 	logger *log.Logger
 
 	resume *resumeStore
+	// closed keeps the snapshots of tabs the user closed, for reopening.
+	closed *resumeStore
 
 	mu            sync.Mutex
 	value         model.State
@@ -108,6 +110,7 @@ func New(socket, statePath, shell string) (*Server, error) {
 		// Beside the state file rather than named by paths.Resolve, so every
 		// caller that could already build a daemon keeps being able to.
 		resume:        &resumeStore{directory: filepath.Join(filepath.Dir(statePath), "resume")},
+		closed:        &resumeStore{directory: filepath.Join(filepath.Dir(statePath), "closed")},
 		logger:        log.New(os.Stderr, "romty: ", log.LstdFlags),
 		value:         value,
 		sessions:      make(map[string]*session),
@@ -164,6 +167,7 @@ func (s *Server) Serve(ctx context.Context) error {
 		return err
 	}
 	s.resume.discardStale(time.Now())
+	s.closed.discardStale(time.Now())
 	if err := prepareSocket(s.socket); err != nil {
 		return err
 	}
@@ -266,29 +270,33 @@ func (s *Server) resumeSnapshotsLocked() []resumeSave {
 		if !ok {
 			continue
 		}
-		runtime := s.agentStatuses[tab.ID]
-		if runtime.Agent == model.AgentCodex {
-			prefix := value.codexPrefix()
-			if prefix == "" {
-				runtime = agentRuntime{}
-			} else if !ownsCodexSession(prefix, runtime.SessionID) {
-				runtime.SessionID = ""
-			}
-		}
-		saves = append(saves, resumeSave{
-			id: tab.ID,
-			meta: resumeSnapshot{
-				Format:         1,
-				WorkspaceID:    tab.WorkspaceID,
-				TabName:        tab.Name,
-				Agent:          runtime.Agent,
-				AgentSessionID: runtime.SessionID,
-				SavedAt:        now,
-			},
-			recording: value.snapshotRecording,
-		})
+		saves = append(saves, s.resumeSaveLocked(tab, value, now))
 	}
 	return saves
+}
+
+func (s *Server) resumeSaveLocked(tab model.Tab, value *session, now time.Time) resumeSave {
+	runtime := s.agentStatuses[tab.ID]
+	if runtime.Agent == model.AgentCodex {
+		prefix := value.codexPrefix()
+		if prefix == "" {
+			runtime = agentRuntime{}
+		} else if !ownsCodexSession(prefix, runtime.SessionID) {
+			runtime.SessionID = ""
+		}
+	}
+	return resumeSave{
+		id: tab.ID,
+		meta: resumeSnapshot{
+			Format:         1,
+			WorkspaceID:    tab.WorkspaceID,
+			TabName:        tab.Name,
+			Agent:          runtime.Agent,
+			AgentSessionID: runtime.SessionID,
+			SavedAt:        now,
+		},
+		recording: value.snapshotRecording,
+	}
 }
 
 func (s *Server) resize(tabID, clientID string, columns, rows uint16) protocol.Response {
@@ -377,8 +385,31 @@ func (s *Server) closeTab(tabID string) protocol.Response {
 	if !ok {
 		return protocol.Response{Error: errNoSession}
 	}
+	s.saveClosed(tabID, value)
 	value.close()
 	return s.snapshotResponse()
+}
+
+// saveClosed keeps a closing tab's output and agent session in the closed
+// history. A failed save is logged and the tab still closes: the user asked
+// for the shell to end, and the history is a convenience.
+func (s *Server) saveClosed(tabID string, value *session) {
+	// Only an agent that still runs has a session to resume.
+	s.scanAgents(map[string]*session{tabID: value})
+	s.mu.Lock()
+	index := slices.IndexFunc(s.value.Tabs, func(tab model.Tab) bool { return tab.ID == tabID })
+	if index < 0 {
+		s.mu.Unlock()
+		return
+	}
+	now := time.Now()
+	save := s.resumeSaveLocked(s.value.Tabs[index], value, now)
+	s.mu.Unlock()
+	if err := s.closed.save(save.id, save.meta, save.recording()); err != nil {
+		s.logger.Printf("save closed session for tab %s: %v", tabID, err)
+		return
+	}
+	s.closed.trim(save.meta.WorkspaceID, closedHistoryLimit, now)
 }
 
 // maxTabNameLength bounds a tab name in runes. The tab bar is one row shared by

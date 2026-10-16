@@ -43,6 +43,7 @@ type fakeBackend struct {
 	createdColumns         uint16
 	createdRows            uint16
 	createCount            int
+	reopenedID             string
 	closedTabID            string
 	renamedTabID           string
 	renamedTabName         string
@@ -228,6 +229,24 @@ func (f *fakeBackend) RenameTab(tabID, name string) (model.Snapshot, error) {
 	return f.snapshot, nil
 }
 
+// chooseNewSession selects the highlighted workspace, which has no running
+// terminal, and picks New session from the choice it asks.
+func chooseNewSession(t *testing.T, value *dashboard) tea.Cmd {
+	t.Helper()
+	if command := send(value, key(tea.KeyEnter, "")); command != nil {
+		t.Fatalf("selecting a workspace without a terminal ran %T before a choice", command())
+	}
+	if value.modal != workspaceActionsModal || !value.palette.sessionChoice {
+		t.Fatalf("selecting a workspace without a terminal opened modal %v, want the session choice", value.modal)
+	}
+	return send(value, key(tea.KeyEnter, ""))
+}
+
+func (f *fakeBackend) ReopenTab(workspaceID, closedID string, columns, rows uint16) (model.Tab, error) {
+	f.reopenedID = closedID
+	return f.CreateTab(workspaceID, columns, rows)
+}
+
 func (f *fakeBackend) CloseTab(tabID string) (model.Snapshot, error) {
 	f.closedTabID = tabID
 	if err := f.failure("CloseTab"); err != nil {
@@ -289,7 +308,7 @@ func TestDashboardSelectsWorkspaceAndCreatesTerminal(t *testing.T) {
 	value.height = 40
 
 	send(&value, key(tea.KeyDown, ""))
-	command := send(&value, key(tea.KeyEnter, ""))
+	command := chooseNewSession(t, &value)
 	if command == nil {
 		t.Fatal("select workspace command = nil")
 	}
@@ -355,7 +374,7 @@ func TestDashboardSelectsRootAndCreatesTerminal(t *testing.T) {
 	if rendered := ansi.Strip(value.render()); !strings.Contains(rendered, "▌▾ projects") || !strings.Contains(rendered, "  - cloned") {
 		t.Fatalf("root and indented workspace are not distinguishable:\n%s", rendered)
 	}
-	selectCommand := send(&value, key(tea.KeyEnter, ""))
+	selectCommand := chooseNewSession(t, &value)
 	if selectCommand == nil {
 		t.Fatal("root selection command = nil")
 	}
@@ -819,7 +838,7 @@ func TestDashboardMouseSelectsWorkspaceAndTab(t *testing.T) {
 	value := newDashboard(backend, snapshot)
 	value.width, value.height = 120, 30
 
-	command := send(&value, tea.MouseClickMsg{X: 2, Y: 3, Button: tea.MouseLeft})
+	command := send(&value, tea.MouseClickMsg{X: 2, Y: 4, Button: tea.MouseLeft})
 	if value.navIndex != 1 || value.cursorPath != workspace.Path || command == nil {
 		t.Fatalf("workspace click = (index %d, path %q, command %v)", value.navIndex, value.cursorPath, command)
 	}
@@ -2582,17 +2601,20 @@ func TestDashboardReportsBackendFailures(t *testing.T) {
 	for _, probe := range []struct {
 		name   string
 		method string
-		act    func(dashboard) (tea.Model, tea.Cmd)
+		act    func(*testing.T, dashboard) (tea.Model, tea.Cmd)
 	}{
 		{
 			name:   "refresh",
 			method: "Snapshot",
-			act:    func(m dashboard) (tea.Model, tea.Cmd) { return m.Update(key(tea.KeyF5, "")) },
+			act:    func(_ *testing.T, m dashboard) (tea.Model, tea.Cmd) { return m.Update(key(tea.KeyF5, "")) },
 		},
 		{
 			name:   "opening a workspace",
 			method: "EnsureWorkspace",
-			act:    func(m dashboard) (tea.Model, tea.Cmd) { return m.Update(key(tea.KeyEnter, "")) },
+			act: func(t *testing.T, m dashboard) (tea.Model, tea.Cmd) {
+				command := chooseNewSession(t, &m)
+				return m, command
+			},
 		},
 	} {
 		t.Run(probe.name, func(t *testing.T) {
@@ -2603,7 +2625,7 @@ func TestDashboardReportsBackendFailures(t *testing.T) {
 			value.height = 40
 			value.setNavigation(1)
 
-			updated, command := probe.act(value)
+			updated, command := probe.act(t, value)
 			value = updated.(dashboard)
 			if command == nil {
 				t.Fatalf("%s produced no command to fail", probe.name)
@@ -4268,7 +4290,7 @@ func TestNavigationShowsGitStateOnSecondLine(t *testing.T) {
 	t.Fatalf("navigation does not contain workspace %q:\n%s", workspace.Name, navigation)
 }
 
-func TestNavigationUsesOneRootLineAndTwoWorkspaceLines(t *testing.T) {
+func TestNavigationSetsRootsApartAndUsesTwoWorkspaceLines(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, projectsSnapshot([]model.WorkspaceView{
 		{Workspace: model.Workspace{ID: "workspace-1", RootID: "root-1", Name: "first", Path: "/projects/first"}},
 		{Workspace: model.Workspace{ID: "workspace-2", RootID: "root-1", Name: "last", Path: "/projects/last"}},
@@ -4277,18 +4299,18 @@ func TestNavigationUsesOneRootLineAndTwoWorkspaceLines(t *testing.T) {
 	value.selectedPath = "/projects/first"
 	value.gitStates = map[string]gitrepo.State{"/projects/first": {Branch: "main"}}
 	lines := value.renderNavigation(28, 20)
-	if len(lines) != 7 {
-		t.Fatalf("navigation lines = %d, want header, one root line, and two lines per workspace\n%s", len(lines), strings.Join(lines, "\n"))
+	if len(lines) != 8 {
+		t.Fatalf("navigation lines = %d, want header, root and blank lines, and two lines per workspace\n%s", len(lines), strings.Join(lines, "\n"))
 	}
 	plain := make([]string, len(lines))
 	for index, line := range lines {
 		plain[index] = strings.TrimRight(ansi.Strip(line), " ")
 	}
-	if plain[2] != " ▾ projects" || plain[3] != "▎ - first" || plain[4] != "▎   (main)" {
-		t.Fatalf("root and workspace rows = %#v", plain[2:5])
+	if plain[2] != " ▾ projects" || plain[3] != "" || plain[4] != "▎ - first" || plain[5] != "▎   (main)" {
+		t.Fatalf("root and workspace rows = %#v", plain[2:6])
 	}
-	if plain[6] != "" {
-		t.Fatalf("last workspace continuation = %q, want blank", plain[6])
+	if plain[7] != "" {
+		t.Fatalf("last workspace continuation = %q, want blank", plain[7])
 	}
 }
 
@@ -4298,11 +4320,35 @@ func TestNavigationSeparatesRootsWithOneBlankLine(t *testing.T) {
 		{Root: model.Root{ID: "root-2", Name: "archive", Path: "/archive"}},
 	}})
 	lines := value.renderNavigation(28, 20)
-	if len(lines) != 5 {
-		t.Fatalf("navigation lines = %d, want header, two roots, and one separator\n%s", len(lines), strings.Join(lines, "\n"))
+	if len(lines) != 6 {
+		t.Fatalf("navigation lines = %d, want header, two roots, and a blank line below each\n%s", len(lines), strings.Join(lines, "\n"))
 	}
-	if strings.TrimSpace(ansi.Strip(lines[3])) != "" || strings.TrimSpace(ansi.Strip(lines[4])) != "▾ archive" {
-		t.Fatalf("second root rows = %#v, want a blank line before archive", lines[3:5])
+	if strings.TrimSpace(ansi.Strip(lines[3])) != "" || strings.TrimSpace(ansi.Strip(lines[4])) != "▾ archive" ||
+		strings.TrimSpace(ansi.Strip(lines[5])) != "" {
+		t.Fatalf("second root rows = %#v, want one blank line before and after archive", lines[3:6])
+	}
+}
+
+func TestNavigationLeavesABlankLineAboveARootAfterWorkspaces(t *testing.T) {
+	value := newDashboard(&fakeBackend{}, model.Snapshot{Roots: []model.RootView{
+		{Root: projectsRoot, Directories: []model.WorkspaceView{
+			{Workspace: model.Workspace{RootID: projectsRoot.ID, Name: "first", Path: "/projects/first"}},
+		}},
+		{Root: model.Root{ID: "root-2", Name: "archive", Path: "/archive"}},
+	}})
+	value.focus = terminalPane
+	value.gitStates = map[string]gitrepo.State{"/projects/first": {Branch: "main"}}
+	lines := value.renderNavigation(28, 20)
+	plain := make([]string, len(lines))
+	for index, line := range lines {
+		plain[index] = strings.TrimSpace(ansi.Strip(line))
+	}
+	want := []string{"", "▾ projects", "", "- first", "(main)", "", "▾ archive", ""}
+	if !slices.Equal(plain[1:], want) {
+		t.Fatalf("navigation rows = %#v, want %#v", plain[1:], want)
+	}
+	if index, ok := value.navigationIndexAtRow(8, 20); !ok || index != 2 {
+		t.Fatalf("row of archive = (%d, %v), want item 2", index, ok)
 	}
 }
 

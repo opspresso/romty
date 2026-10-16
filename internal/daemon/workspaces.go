@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/opspresso/romty/internal/model"
 	"github.com/opspresso/romty/internal/protocol"
@@ -303,6 +304,23 @@ func (s *Server) ensureWorkspace(rootID, path string) protocol.Response {
 }
 
 func (s *Server) createTab(request protocol.Request) protocol.Response {
+	return s.startTab(request, "")
+}
+
+// reopenTab starts a tab from a closed session in the request's workspace:
+// the saved output replays first, and the agent's resume command waits at
+// the prompt, as after `romty stop`.
+func (s *Server) reopenTab(request protocol.Request) protocol.Response {
+	if request.TabID == "" {
+		return protocol.Response{Error: "closed session is required"}
+	}
+	return s.startTab(request, request.TabID)
+}
+
+// startTab starts a shell in a workspace. closedID names the closed session
+// to restore; empty restores the workspace's next `romty stop` snapshot, if
+// any.
+func (s *Server) startTab(request protocol.Request, closedID string) protocol.Response {
 	workspaceID := request.WorkspaceID
 	shell := s.shell
 	if request.Shell != "" {
@@ -315,10 +333,29 @@ func (s *Server) createTab(request protocol.Request) protocol.Response {
 		s.mu.Unlock()
 		return protocol.Response{Error: "workspace not found"}
 	}
+	name := nextTabName(s.value.Tabs, workspaceID)
+	var closedMeta resumeSnapshot
+	var closedRecording []byte
+	if closedID != "" {
+		// Read under the server lock, and removed only after the tab is
+		// saved: two reopen requests for one session are serialized here,
+		// and a shell that fails to start leaves the session to try again.
+		meta, recording, err := s.closed.read(workspaceID, closedID)
+		if err != nil {
+			s.mu.Unlock()
+			return protocol.Response{Error: err.Error()}
+		}
+		closedMeta, closedRecording = meta, recording
+		if meta.TabName != "" && !slices.ContainsFunc(s.value.Tabs, func(tab model.Tab) bool {
+			return tab.WorkspaceID == workspaceID && tab.Name == meta.TabName
+		}) {
+			name = meta.TabName
+		}
+	}
 	tab := model.Tab{
 		ID:          newID(),
 		WorkspaceID: workspaceID,
-		Name:        nextTabName(s.value.Tabs, workspaceID),
+		Name:        name,
 		Running:     true,
 	}
 
@@ -342,8 +379,10 @@ func (s *Server) createTab(request protocol.Request) protocol.Response {
 	// copied before the preload never shows it: history is filled directly,
 	// not broadcast. The lock is already held across starting the shell for
 	// the same reason; reading one snapshot costs less than that.
-	if meta, recording, ok := s.resume.take(workspaceID); ok {
-		value.restore(recording, resumeCommand(meta.Agent, meta.AgentSessionID))
+	if closedID != "" {
+		value.restore(closedRecording, closedMarker, resumeCommand(closedMeta.Agent, closedMeta.AgentSessionID))
+	} else if meta, recording, ok := s.resume.take(workspaceID); ok {
+		value.restore(recording, resumeMarker, resumeCommand(meta.Agent, meta.AgentSessionID))
 	}
 	previous := cloneState(s.value)
 	s.value.Tabs = append(s.value.Tabs, tab)
@@ -353,6 +392,9 @@ func (s *Server) createTab(request protocol.Request) protocol.Response {
 		s.mu.Unlock()
 		value.close()
 		return protocol.Response{Error: err.Error()}
+	}
+	if closedID != "" {
+		s.closed.remove(closedID)
 	}
 	s.mu.Unlock()
 	return protocol.Response{Tab: &tab}
@@ -367,6 +409,7 @@ func (s *Server) snapshot() model.Snapshot {
 	revision := s.revision
 	s.mu.Unlock()
 	statuses := s.agentStatusesSnapshot()
+	closed := closedSessions(s.closed.list(time.Now()))
 	for index := range value.Tabs {
 		value.Tabs[index].SetAgentStatus(statuses[value.Tabs[index].ID])
 	}
@@ -375,7 +418,7 @@ func (s *Server) snapshot() model.Snapshot {
 	result := model.Snapshot{Revision: revision, Roots: make([]model.RootView, 0, len(value.Roots))}
 	for _, root := range value.Roots {
 		rootWorkspace, _ := index.workspaceAt(root.ID, root.Path)
-		view := model.RootView{Root: root, Tabs: index.tabsFor(rootWorkspace.ID)}
+		view := model.RootView{Root: root, Tabs: index.tabsFor(rootWorkspace.ID), Closed: closed[rootWorkspace.ID]}
 		entries, err := readDirectory(root.Path)
 		if err != nil {
 			view.Error = err.Error()
@@ -398,6 +441,7 @@ func (s *Server) snapshot() model.Snapshot {
 			directories = append(directories, model.WorkspaceView{
 				Workspace: workspace,
 				Tabs:      index.tabsFor(workspace.ID),
+				Closed:    closed[workspace.ID],
 			})
 		}
 		directories = index.appendRunningWorkspaces(directories, root)
@@ -406,6 +450,23 @@ func (s *Server) snapshot() model.Snapshot {
 		})
 		view.Directories = directories
 		result.Roots = append(result.Roots, view)
+	}
+	return result
+}
+
+// closedSessions describes the closed history by workspace. A workspace
+// without an ID has never held a tab, so an empty key matches nothing.
+func closedSessions(stored map[string][]storedSnapshot) map[string][]model.ClosedSession {
+	result := make(map[string][]model.ClosedSession, len(stored))
+	for workspaceID, values := range stored {
+		if workspaceID == "" {
+			continue
+		}
+		for _, value := range values[:min(len(values), closedHistoryLimit)] {
+			result[workspaceID] = append(result[workspaceID], model.ClosedSession{
+				ID: value.id, Name: value.meta.TabName, Agent: value.meta.Agent, ClosedAt: value.meta.SavedAt,
+			})
+		}
 	}
 	return result
 }

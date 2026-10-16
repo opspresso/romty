@@ -75,6 +75,7 @@ type Backend interface {
 	RemoveWorkspace(rootID, path string) (model.Snapshot, error)
 	EnsureWorkspace(rootID, path string) (model.Workspace, error)
 	CreateTab(workspaceID string, columns, rows uint16) (model.Tab, error)
+	ReopenTab(workspaceID, closedID string, columns, rows uint16) (model.Tab, error)
 	CloseTab(tabID string) (model.Snapshot, error)
 	RenameTab(tabID, name string) (model.Snapshot, error)
 	OpenTerminal(tabID string) (io.ReadWriteCloser, []byte, error)
@@ -297,7 +298,9 @@ type workspaceMsg struct {
 	selection uint64
 	tabID     string
 	createTab bool
-	err       error
+	// reopenID names the closed session the created tab restores.
+	reopenID string
+	err      error
 }
 
 type tabMsg struct {
@@ -832,7 +835,7 @@ func (m dashboard) handleKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "right", "l":
 		m.moveTab(1)
 	case "enter":
-		return m, m.selectWorkspace()
+		return m.activateWorkspace()
 	}
 	return m, nil
 }
@@ -1004,7 +1007,7 @@ func (m dashboard) handleWorkspace(message workspaceMsg) (tea.Model, tea.Cmd) {
 	if message.createTab {
 		m.tabIndex = len(tabs)
 		m.tabPending = true
-		return m, m.createTab()
+		return m, m.createTabFrom(message.reopenID)
 	}
 	for index, tab := range tabs {
 		if tab.ID == message.tabID {
@@ -1211,6 +1214,12 @@ func (m dashboard) hasPendingActivity() bool {
 }
 
 func (m *dashboard) selectWorkspace() tea.Cmd {
+	return m.selectWorkspaceFor("")
+}
+
+// selectWorkspaceFor opens the selected workspace. A non-empty reopenID
+// creates its tab from that closed session.
+func (m *dashboard) selectWorkspaceFor(reopenID string) tea.Cmd {
 	if m.tabPending {
 		return nil
 	}
@@ -1219,7 +1228,7 @@ func (m *dashboard) selectWorkspace() tea.Cmd {
 		return nil
 	}
 	tabs := runningTabs(item.tabs)
-	createTab := m.tabIndex >= len(tabs)
+	createTab := reopenID != "" || m.tabIndex >= len(tabs)
 	tabID := ""
 	if !createTab {
 		tabID = tabs[m.tabIndex].ID
@@ -1235,11 +1244,15 @@ func (m *dashboard) selectWorkspace() tea.Cmd {
 		}
 		snapshot, err := backend.Snapshot()
 		return workspaceMsg{value: workspace, snapshot: snapshot, order: order,
-			selection: selection, tabID: tabID, createTab: createTab, err: err}
+			selection: selection, tabID: tabID, createTab: createTab, reopenID: reopenID, err: err}
 	}
 }
 
 func (m *dashboard) createTab() tea.Cmd {
+	return m.createTabFrom("")
+}
+
+func (m *dashboard) createTabFrom(reopenID string) tea.Cmd {
 	selection := m.selectionRequest
 	if m.selectedWorkspaceID == "" {
 		return func() tea.Msg {
@@ -1251,7 +1264,13 @@ func (m *dashboard) createTab() tea.Cmd {
 	backend := m.backend
 	workspaceID := m.selectedWorkspaceID
 	return func() tea.Msg {
-		tab, err := backend.CreateTab(workspaceID, columns, rows)
+		var tab model.Tab
+		var err error
+		if reopenID != "" {
+			tab, err = backend.ReopenTab(workspaceID, reopenID, columns, rows)
+		} else {
+			tab, err = backend.CreateTab(workspaceID, columns, rows)
+		}
 		if err != nil {
 			return tabMsg{selection: selection, err: err}
 		}

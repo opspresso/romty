@@ -508,12 +508,11 @@ func navigationWindow(items []navItem, offset, available int) (int, int) {
 	return start, end
 }
 
+// navigationRows is the height of an item in the tree. A root is set apart
+// by a blank row below it, and by one above when another root precedes it.
 func navigationRows(item navItem) int {
-	if item.isRoot {
-		if item.separator {
-			return 2
-		}
-		return 1
+	if item.isRoot && item.separator {
+		return 3
 	}
 	return 2
 }
@@ -562,9 +561,9 @@ func (m dashboard) renderNavigationItem(item navItem, index, width int) []string
 	}
 	if item.isRoot {
 		if item.separator {
-			return []string{"", nameLine}
+			return []string{"", nameLine, ""}
 		}
-		return []string{nameLine}
+		return []string{nameLine, ""}
 	}
 	return []string{nameLine, m.renderNavigationGit(item, indicator, style, width)}
 }

@@ -9,14 +9,20 @@
 // Snapshots are keyed by workspace, not by tab: the next daemon discards
 // every recorded tab before it listens and issues fresh IDs, so a tab ID
 // names nothing across a restart while a workspace directory still does.
+//
+// Closing a tab saves the same snapshot into a second store, the closed
+// history. Those are not consumed by the next tab: the user picks one by ID
+// when opening a workspace that has no running tab.
 
 package daemon
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -34,6 +40,16 @@ const resumeRetention = 7 * 24 * time.Hour
 // resumeMarker separates the restored output from the fresh shell that
 // follows it, so old output is not mistaken for something that just ran.
 const resumeMarker = "\r\n\x1b[0m\x1b[2m── restored from the previous romty session ──\x1b[0m\r\n"
+
+// closedMarker does the same for a reopened closed tab, which comes from
+// this daemon rather than a previous one.
+const closedMarker = "\r\n\x1b[0m\x1b[2m── reopened from a closed tab ──\x1b[0m\r\n"
+
+// closedHistoryLimit is how many closed sessions each workspace keeps for
+// reopening. The newest are the ones a user comes back to.
+const closedHistoryLimit = 3
+
+var errClosedSessionNotFound = errors.New("closed session not found")
 
 type resumeStore struct {
 	directory string
@@ -109,12 +125,102 @@ func (s *resumeStore) take(workspaceID string) (resumeSnapshot, []byte, bool) {
 	recording, err := os.ReadFile(s.recordingPath(bestID))
 	// Consumed either way: a snapshot that failed once would fail again, and
 	// leaving it behind would repeat the failure on every tab.
-	_ = os.Remove(s.metaPath(bestID))
-	_ = os.Remove(s.recordingPath(bestID))
+	s.removeLocked(bestID)
 	if err != nil {
 		recording = nil
 	}
 	return best, recording, true
+}
+
+func (s *resumeStore) removeLocked(id string) {
+	_ = os.Remove(s.metaPath(id))
+	_ = os.Remove(s.recordingPath(id))
+}
+
+// storedID is the shape of the tab IDs snapshots are saved under. An ID a
+// client sends names a file, so nothing else may reach the filesystem.
+var storedID = regexp.MustCompile(`^[0-9a-f]{1,64}$`)
+
+type storedSnapshot struct {
+	id   string
+	meta resumeSnapshot
+}
+
+// list returns the readable snapshots inside the retention, grouped by
+// workspace and newest first. A server built without a store has none.
+func (s *resumeStore) list(now time.Time) map[string][]storedSnapshot {
+	if s == nil {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.listLocked(now)
+}
+
+func (s *resumeStore) listLocked(now time.Time) map[string][]storedSnapshot {
+	entries, err := os.ReadDir(s.directory)
+	if err != nil {
+		return nil
+	}
+	result := make(map[string][]storedSnapshot)
+	for _, entry := range entries {
+		id, found := strings.CutSuffix(entry.Name(), ".json")
+		if !found || !storedID.MatchString(id) {
+			continue
+		}
+		meta, err := jsonfile.Read[resumeSnapshot](s.metaPath(id))
+		if err != nil || meta.WorkspaceID == "" || now.Sub(meta.SavedAt) > resumeRetention {
+			continue
+		}
+		result[meta.WorkspaceID] = append(result[meta.WorkspaceID], storedSnapshot{id: id, meta: meta})
+	}
+	for _, values := range result {
+		sort.Slice(values, func(i, j int) bool {
+			if !values[i].meta.SavedAt.Equal(values[j].meta.SavedAt) {
+				return values[i].meta.SavedAt.After(values[j].meta.SavedAt)
+			}
+			return values[i].id < values[j].id
+		})
+	}
+	return result
+}
+
+// trim keeps the newest keep snapshots of a workspace and removes the rest.
+func (s *resumeStore) trim(workspaceID string, keep int, now time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	values := s.listLocked(now)[workspaceID]
+	for index := keep; index < len(values); index++ {
+		s.removeLocked(values[index].id)
+	}
+}
+
+// read returns the snapshot saved under id when it belongs to workspaceID.
+// It does not consume it: the caller removes it once the snapshot is used.
+func (s *resumeStore) read(workspaceID, id string) (resumeSnapshot, []byte, error) {
+	if !storedID.MatchString(id) {
+		return resumeSnapshot{}, nil, errClosedSessionNotFound
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	meta, err := jsonfile.Read[resumeSnapshot](s.metaPath(id))
+	if err != nil || meta.WorkspaceID != workspaceID {
+		return resumeSnapshot{}, nil, errClosedSessionNotFound
+	}
+	recording, err := os.ReadFile(s.recordingPath(id))
+	if err != nil {
+		recording = nil
+	}
+	return meta, recording, nil
+}
+
+func (s *resumeStore) remove(id string) {
+	if !storedID.MatchString(id) {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.removeLocked(id)
 }
 
 // discardStale removes snapshots past the retention, going by file age so an
