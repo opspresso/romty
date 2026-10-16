@@ -261,10 +261,7 @@ func (m *dashboard) ensureWorkspaceActionVisible() {
 		}
 	}
 	maximum := max(len(rows)-capacity, 0)
-	m.palette.offset = min(max(m.palette.offset, 0), maximum)
-	if selectedRow < m.palette.offset {
-		m.palette.offset = selectedRow
-	}
+	m.palette.offset = min(selectedRow, min(max(m.palette.offset, 0), maximum))
 	if selectedRow >= m.palette.offset+capacity {
 		m.palette.offset = selectedRow - capacity + 1
 	}

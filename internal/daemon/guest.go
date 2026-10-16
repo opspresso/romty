@@ -184,7 +184,7 @@ func (t *guestTracker) apply(params string, enabled bool) {
 	if !strings.HasPrefix(params, "?") {
 		return
 	}
-	for _, field := range strings.Split(params[1:], ";") {
+	for field := range strings.SplitSeq(params[1:], ";") {
 		mode, err := strconv.Atoi(field)
 		if err == nil && slices.Contains(trackedModes, mode) {
 			t.set[mode] = enabled

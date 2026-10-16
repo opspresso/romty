@@ -195,7 +195,7 @@ func (m dashboard) resetGitActionResult() dashboard {
 func (m dashboard) gitActionResultLines() []string {
 	lines := make([]string, 0)
 	if m.gitRun.output != "" {
-		for _, line := range strings.Split(m.gitRun.output, "\n") {
+		for line := range strings.SplitSeq(m.gitRun.output, "\n") {
 			lines = append(lines, display.Text(line))
 		}
 	}

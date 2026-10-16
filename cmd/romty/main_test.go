@@ -311,8 +311,7 @@ func TestRunStopsDaemon(t *testing.T) {
 		t.Fatalf("New() error = %v", err)
 	}
 	server.SetLogger(testutil.QuietLogger())
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	done := make(chan error, 1)
 	go func() { done <- server.Serve(ctx) }()
 	testutil.WaitForDaemon(t, client.New(runtime.Socket))

@@ -131,8 +131,7 @@ func (m dashboard) handleInputResult(message inputResultMsg) (tea.Model, tea.Cmd
 		m.input.err = message.err.Error()
 		// The modal already says what was asked, so a refusal shows the
 		// daemon's reason alone.
-		var refused *protocol.RefusedError
-		if errors.As(message.err, &refused) {
+		if refused, ok := errors.AsType[*protocol.RefusedError](message.err); ok {
 			m.input.err = refused.Message
 		}
 		return m, nil
@@ -188,7 +187,7 @@ func (m dashboard) renderInputModal(maximum int) []string {
 	case m.input.pending:
 		lines = append(lines, m.styles.empty.Render(m.input.kind.pending()))
 	case m.input.err != "":
-		for _, line := range strings.Split(ansi.Wrap(display.Text(m.input.err), contentWidth, ""), "\n") {
+		for line := range strings.SplitSeq(ansi.Wrap(display.Text(m.input.err), contentWidth, ""), "\n") {
 			lines = append(lines, m.styles.errorText.Render(line))
 		}
 	case m.input.kind == rootPathInput && m.input.base != "":

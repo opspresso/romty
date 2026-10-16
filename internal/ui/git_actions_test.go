@@ -152,11 +152,11 @@ func TestDashboardClosesGitResultWithMouse(t *testing.T) {
 			}
 			for row, line := range geometry.lines {
 				plain := ansi.Strip(line)
-				column := strings.Index(plain, "×")
-				if column < 0 {
+				before, _, ok := strings.Cut(plain, "×")
+				if !ok {
 					continue
 				}
-				x := geometry.left + lipgloss.Width(plain[:column])
+				x := geometry.left + lipgloss.Width(before)
 				y := geometry.top + row
 				send(&value, tea.MouseMotionMsg{X: x, Y: y})
 				if value.hover.kind != hoverModalClose {

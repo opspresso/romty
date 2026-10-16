@@ -1855,12 +1855,12 @@ func TestDashboardNamesTheDeleteTargetBeforeItsConsequences(t *testing.T) {
 // configRowReads reports whether the Config modal draws a setting with the
 // value given. Name and value sit in columns of their own on one row.
 func configRowReads(rendered, name, value string) bool {
-	for _, line := range strings.Split(rendered, "\n") {
-		at := strings.Index(line, name)
-		if at < 0 {
+	for line := range strings.SplitSeq(rendered, "\n") {
+		_, after, ok := strings.Cut(line, name)
+		if !ok {
 			continue
 		}
-		if strings.Contains(line[at+len(name):], value) {
+		if strings.Contains(after, value) {
 			return true
 		}
 	}
@@ -4033,7 +4033,7 @@ func TestDashboardHighlightsNavigationAndShowsOpenTabs(t *testing.T) {
 	leftWidth, bodyHeight := view.leftWidth, view.bodyHeight
 	navigation := ansi.Strip(strings.Join(value.renderNavigation(leftWidth, bodyHeight), "\n"))
 	snowClash := ""
-	for _, line := range strings.Split(navigation, "\n") {
+	for line := range strings.SplitSeq(navigation, "\n") {
 		if strings.Contains(line, "SnowClash") {
 			snowClash = strings.TrimRight(line, " ")
 		}

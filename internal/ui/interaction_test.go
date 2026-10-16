@@ -65,11 +65,11 @@ func TestModalTitleClose(t *testing.T) {
 		value.width, value.height, value.modal = 80, 24, kind
 		geometry := value.modalGeometry(value.bodySize())
 		title := ansi.Strip(geometry.lines[0])
-		at := strings.Index(title, "×")
-		if at < 0 {
+		before, _, ok := strings.Cut(title, "×")
+		if !ok {
 			t.Fatalf("modal %v has no close button: %s", kind, title)
 		}
-		x, y := geometry.left+lipgloss.Width(title[:at]), geometry.top
+		x, y := geometry.left+lipgloss.Width(before), geometry.top
 		updated, _ := value.Update(tea.MouseMotionMsg{X: x, Y: y})
 		hovered := updated.(dashboard)
 		if strings.Join(hovered.renderModal(value.bodySize()), "\n") == strings.Join(geometry.lines, "\n") {

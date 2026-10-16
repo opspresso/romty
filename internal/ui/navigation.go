@@ -240,9 +240,9 @@ func nextOccupiedWorkspace(items []navItem, anchor, delta int) (int, bool) {
 		first := occupied[0]
 		return first, first != anchor
 	}
-	for position := len(occupied) - 1; position >= 0; position-- {
-		if occupied[position] < anchor {
-			return occupied[position], true
+	for _, o := range slices.Backward(occupied) {
+		if o < anchor {
+			return o, true
 		}
 	}
 	last := occupied[len(occupied)-1]

@@ -89,7 +89,7 @@ func TestWorkspaceActionsExposeEveryGitOperationDirectly(t *testing.T) {
 		}
 	}
 	dividers := 0
-	for _, line := range strings.Split(plain, "\n") {
+	for line := range strings.SplitSeq(plain, "\n") {
 		if strings.HasPrefix(strings.TrimSpace(line), "│─") {
 			dividers++
 		}

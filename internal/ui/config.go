@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"maps"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -54,8 +55,8 @@ var knownConfigFields = configFieldNames()
 func configFieldNames() map[string]struct{} {
 	names := make(map[string]struct{})
 	value := reflect.TypeFor[Config]()
-	for index := range value.NumField() {
-		name, _, _ := strings.Cut(value.Field(index).Tag.Get("json"), ",")
+	for field := range value.Fields() {
+		name, _, _ := strings.Cut(field.Tag.Get("json"), ",")
 		if name != "" && name != "-" {
 			names[name] = struct{}{}
 		}
@@ -238,11 +239,9 @@ func (m dashboard) runConfigKey(name string) (tea.Model, tea.Cmd, bool) {
 		if row.action == nil {
 			continue
 		}
-		for _, key := range row.keys {
-			if key == name {
-				updated, command := row.action(m)
-				return updated, command, true
-			}
+		if slices.Contains(row.keys, name) {
+			updated, command := row.action(m)
+			return updated, command, true
 		}
 	}
 	return m, nil, false
