@@ -3,7 +3,10 @@
 // snapshot that carries the whole tree across the socket.
 package model
 
-import "iter"
+import (
+	"iter"
+	"time"
+)
 
 type State struct {
 	Roots      []Root      `json:"roots"`
@@ -167,9 +170,22 @@ type RootView struct {
 	// must not take the whole snapshot with it.
 	Error       string          `json:"error,omitempty"`
 	Directories []WorkspaceView `json:"directories"`
+	// Closed lists the root's own closed sessions, newest first.
+	Closed []ClosedSession `json:"closed,omitempty"`
 }
 
 type WorkspaceView struct {
 	Workspace Workspace `json:"workspace"`
 	Tabs      []Tab     `json:"tabs"`
+	// Closed lists the workspace's closed sessions, newest first.
+	Closed []ClosedSession `json:"closed,omitempty"`
+}
+
+// ClosedSession is a tab the user closed whose output and agent session the
+// daemon kept, so the tab can be reopened with that output and agent.
+type ClosedSession struct {
+	ID       string    `json:"id"`
+	Name     string    `json:"name"`
+	Agent    Agent     `json:"agent,omitempty"`
+	ClosedAt time.Time `json:"closed_at"`
 }

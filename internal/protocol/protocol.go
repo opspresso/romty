@@ -18,7 +18,7 @@ import (
 // speak. Ping advertises the range so peers choose the highest overlap instead
 // of requiring the same build on both sides.
 const (
-	Version        = 7
+	Version        = 8
 	MinimumVersion = 1
 )
 
@@ -30,6 +30,7 @@ const (
 	CapabilityAgentStatus      = "agent_status"
 	CapabilityCloseTab         = "close_tab"
 	CapabilityRenameTab        = "rename_tab"
+	CapabilityReopenTab        = "reopen_tab"
 )
 
 var capabilities = []struct {
@@ -43,6 +44,7 @@ var capabilities = []struct {
 	{name: CapabilityAgentStatus, since: 5},
 	{name: CapabilityCloseTab, since: 6},
 	{name: CapabilityRenameTab, since: 7},
+	{name: CapabilityReopenTab, since: 8},
 }
 
 const (
@@ -58,6 +60,7 @@ const (
 	ActionCreateTab       = "create_tab"
 	ActionCloseTab        = "close_tab"
 	ActionRenameTab       = "rename_tab"
+	ActionReopenTab       = "reopen_tab"
 	ActionAttach          = "attach"
 	ActionResize          = "resize"
 	ActionShutdown        = "shutdown"
@@ -89,7 +92,8 @@ type Request struct {
 	Path         string   `json:"path,omitempty"`
 	RootID       string   `json:"root_id,omitempty"`
 	WorkspaceID  string   `json:"workspace_id,omitempty"`
-	TabID        string   `json:"tab_id,omitempty"`
+	// TabID names a running tab, or with reopen_tab the closed session.
+	TabID string `json:"tab_id,omitempty"`
 	// Name is the new tab name, sent with rename_tab.
 	Name string `json:"name,omitempty"`
 	// ClientID connects an attachment to its out-of-band resize requests.

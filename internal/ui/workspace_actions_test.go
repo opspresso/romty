@@ -3,6 +3,7 @@ package ui
 import (
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -205,7 +206,7 @@ func TestDashboardRightClickOpensActionsForThePointedWorkspace(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, snapshot)
 	value.width, value.height = 120, 30
 
-	command := send(&value, tea.MouseClickMsg{X: 2, Y: 3, Button: tea.MouseRight})
+	command := send(&value, tea.MouseClickMsg{X: 2, Y: 4, Button: tea.MouseRight})
 	if command != nil || value.modal != workspaceActionsModal || value.navIndex != 1 ||
 		value.palette.target.workspace.Path != workspace.Path {
 		t.Fatalf("right click = (command %v, modal %v, index %d, target %q)",
@@ -213,8 +214,8 @@ func TestDashboardRightClickOpensActionsForThePointedWorkspace(t *testing.T) {
 	}
 
 	popup, left, top := value.workspaceActionPopup(value.width, value.dimensions().bodyHeight)
-	if left != 2 || top != 3 || len(popup) == 0 {
-		t.Fatalf("popup anchor = (%d, %d), want the click at (2, 3)", left, top)
+	if left != 2 || top != 4 || len(popup) == 0 {
+		t.Fatalf("popup anchor = (%d, %d), want the click at (2, 4)", left, top)
 	}
 	send(&value, tea.MouseMotionMsg{X: left + 1, Y: top + 1})
 	if value.hover.kind != hoverWorkspaceAction || value.hover.index != 0 {
@@ -251,13 +252,13 @@ func TestWorkspaceActionsOverlayOnlyItsPopupRectangle(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, snapshot)
 	value.width, value.height = 120, 30
 	value.setNavigation(1)
-	send(&value, tea.MouseClickMsg{X: 2, Y: 3, Button: tea.MouseRight})
+	send(&value, tea.MouseClickMsg{X: 2, Y: 4, Button: tea.MouseRight})
 
 	rendered := strings.Split(ansi.Strip(value.render()), "\n")
 	if !strings.Contains(rendered[0], "romty") || !strings.Contains(strings.Join(rendered, "\n"), "Select +") {
 		t.Fatalf("context popup hid the dashboard behind it:\n%s", strings.Join(rendered, "\n"))
 	}
-	if !strings.Contains(rendered[3], "╭") || !strings.Contains(rendered[4], "New tab") {
+	if !strings.Contains(rendered[4], "╭") || !strings.Contains(rendered[5], "New tab") {
 		t.Fatalf("context popup is not anchored at the click:\n%s", strings.Join(rendered, "\n"))
 	}
 	updated, _ := value.Update(tea.MouseClickMsg{X: 100, Y: 2, Button: tea.MouseLeft})
@@ -280,5 +281,61 @@ func TestWorkspaceActionsClampThePopupToTheScreen(t *testing.T) {
 		y+len(popup) > value.dimensions().bodyHeight {
 		t.Fatalf("clamped popup = (x %d, y %d, width %d, height %d) in %dx%d",
 			x, y, ansi.StringWidth(popup[0]), len(popup), value.width, value.dimensions().bodyHeight)
+	}
+}
+
+// Selecting a workspace with no running terminal, by click or Enter, asks
+// which session to open instead of starting a shell: a new one, or one of
+// its closed sessions, newest first. Picking a closed one reopens it.
+func TestSelectingAnIdleWorkspaceOffersItsClosedSessions(t *testing.T) {
+	snapshot, workspace := alphaWorkspaceSnapshot(nil)
+	closedAt := time.Date(2026, 10, 15, 9, 30, 0, 0, time.Local)
+	snapshot.Roots[0].Directories[0].Closed = []model.ClosedSession{
+		{ID: "closed-2", Name: "2", Agent: model.AgentClaude, ClosedAt: closedAt},
+		{ID: "closed-1", Name: "1", ClosedAt: closedAt.Add(-time.Hour)},
+	}
+	backend := &fakeBackend{
+		snapshot: snapshot, workspace: workspace,
+		createdTab: model.Tab{ID: "tab-1", WorkspaceID: workspace.ID, Name: "2", Running: true},
+	}
+	value := newDashboard(backend, snapshot)
+	value.width, value.height = 120, 30
+
+	if command := send(&value, tea.MouseClickMsg{X: 4, Y: 4, Button: tea.MouseLeft}); command != nil {
+		t.Fatalf("clicking an idle workspace ran %T before a choice", command())
+	}
+	if value.modal != workspaceActionsModal || !value.palette.sessionChoice || value.navIndex != 1 {
+		t.Fatalf("click = (modal %v, session choice %v, index %d)", value.modal, value.palette.sessionChoice, value.navIndex)
+	}
+	popup, _, _ := value.workspaceActionPopup(value.width, value.dimensions().bodyHeight)
+	rendered := ansi.Strip(strings.Join(popup, "\n"))
+	newSession := strings.Index(rendered, "New session")
+	newest := strings.Index(rendered, "Reopen 2 · claude · 10-15 09:30")
+	older := strings.Index(rendered, "Reopen 1 · 10-15 08:30")
+	if newSession < 0 || newest < newSession || older < newest || strings.Contains(rendered, "Delete workspace") {
+		t.Fatalf("session choice:\n%s", rendered)
+	}
+
+	send(&value, key(tea.KeyDown, ""))
+	command := send(&value, key(tea.KeyEnter, ""))
+	if command == nil || value.modal != noModal {
+		t.Fatalf("reopen = (command %v, modal %v)", command, value.modal)
+	}
+	command = send(&value, commandMessage[workspaceMsg](t, command))
+	send(&value, commandMessage[tabMsg](t, command))
+	if backend.reopenedID != "closed-2" || backend.createCount != 1 {
+		t.Fatalf("reopened = %q after %d creates, want closed-2 once", backend.reopenedID, backend.createCount)
+	}
+}
+
+func TestClosedSessionLabelShowsTheDateOnlyBeforeToday(t *testing.T) {
+	now := time.Date(2026, 10, 16, 14, 0, 0, 0, time.Local)
+	today := model.ClosedSession{Name: "1", Agent: model.AgentCodex, ClosedAt: now.Add(-time.Hour)}
+	if got := closedSessionLabel(today, now); got != "Reopen 1 · codex · 13:00" {
+		t.Fatalf("today label = %q", got)
+	}
+	earlier := model.ClosedSession{Name: "3", ClosedAt: now.AddDate(0, 0, -1)}
+	if got := closedSessionLabel(earlier, now); got != "Reopen 3 · 10-15 14:00" {
+		t.Fatalf("earlier label = %q", got)
 	}
 }

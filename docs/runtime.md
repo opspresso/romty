@@ -27,7 +27,7 @@ New terminals use the environment and `$SHELL` of the romty client that creates 
 
 Each session retains up to 8 MiB of terminal output. Terminal modes are tracked separately so a replay remains usable after older output is trimmed. Completed terminal queries are omitted from a replay to prevent an unsolicited response from reaching the shell command line. Reconnect replay starts at the PTY dimensions that produced the latest output, then resizes the local emulator to the current pane; width-sensitive shell redraws therefore keep the wrapping and erase behavior they had when recorded.
 
-A dropped terminal connection reconnects automatically with backoff. Press `Enter` on a disconnected tab to retry after automatic attempts stop. Closing a tab from its `×` or from the workspace actions terminates its shell and removes the tab, after a confirmation. When a shell exits on its own, its tab is also removed. If the daemon or operating system stops, roots and workspace metadata remain but stale PTY tabs are discarded.
+A dropped terminal connection reconnects automatically with backoff. Press `Enter` on a disconnected tab to retry after automatic attempts stop. Closing a tab from its `×` or from the workspace actions terminates its shell and removes the tab, after a confirmation. The daemon first saves the tab's output and agent session under `closed/`, so the tab can be reopened from the workspace; see [Opening a workspace without a terminal](interface.md#opening-a-workspace-without-a-terminal). When a shell exits on its own, its tab is also removed. If the daemon or operating system stops, roots and workspace metadata remain but stale PTY tabs are discarded.
 
 More than one TUI can attach to the same terminal. Every client receives output, while the client that most recently sent input owns the PTY size. Resizing a background TUI does not disturb the active terminal; sending input promotes that client and applies its viewport first. If an attached client stops reading and exhausts its bounded output queue, only that client is disconnected.
 
@@ -65,6 +65,7 @@ romty stores data in a `romty` directory under the user configuration directory:
 | `state.json` | Roots, workspaces, and terminal tab metadata |
 | `config.json` | TUI settings such as the last workspace and tab, workspace pane width, mouse passthrough, and diff layout |
 | `resume/` | Output and agent session of each tab that was running at `romty stop`; unconsumed snapshots are discarded after seven days |
+| `closed/` | Output and agent session of the last three tabs closed in each workspace, for reopening; entries are discarded after seven days |
 | `daemon.sock` | Local client-daemon Unix socket |
 | `daemon.sock.lock` | Lock held by the running daemon |
 | `daemon.log` | Detached daemon output and failures; archived before daemon startup after reaching 3 MiB |

@@ -157,9 +157,20 @@ Both file views allow directory rows to take the cursor. Press `Enter` to toggle
 
 Tabs have a wider click target and an `×` at the right edge. Clicking the label opens the tab; clicking `×` asks for confirmation, then terminates its shell and removes it. Double-clicking the label opens the `Rename tab` modal with the current name. Edit it and press `Enter` to rename the tab, or press `Esc` to keep the old name. An empty or rejected name keeps the modal open and shows the reason inside it. A name is 1 to 32 characters after surrounding spaces are removed and cannot contain control characters. Renaming keeps the shell running, and the daemon saves the new name. The `+` key is not a shortcut. Select the wider `+` tab with `←`/`→` and press `Enter`, or use `Ctrl`+`Shift`+`T`. From the workspace pane the shortcut uses the workspace under the cursor; from the terminal pane or scrollback it uses the open terminal workspace. The switch shortcuts wrap at both ends.
 
+### Opening a workspace without a terminal
+
+Selecting a root or workspace that has no running terminal, with `Enter` or a click, does not start a shell at once. A menu opens on the row instead:
+
+- `New session` starts a new terminal tab.
+- `Reopen <tab> · <agent> · <time>` reopens one of the workspace's last three closed sessions, newest first. The agent is shown when one was running at close. The time shows the date as well when the session closed before today.
+
+Press `Esc` or click outside the menu to cancel. A reopened tab replays the closed tab's output behind a `── restored from the previous romty session ──` marker and takes back its name when no running tab uses it. When an agent was running at close, its resume command is typed at the prompt, as after `romty stop`; see [Stopping and resuming](runtime.md#stopping-and-resuming). A reopened session leaves the list.
+
+Closing a tab from its `×` or from the workspace actions saves it to this list. A shell that exits on its own is not saved. `New tab`, `Ctrl`+`Shift`+`T`, and the `+` tab still create a tab directly.
+
 Pane focus and scrollback toggles are reversible. In the terminal pane only Global and Switch shortcuts are captured. Other keyboard and paste input, including `F8`, `F9`, and ordinary `Ctrl` combinations, is forwarded to the PTY.
 
-The dashboard chrome is mouse-aware. Click a root or workspace to select and open it, click a terminal tab or `+` to activate it, and use the wheel over the workspace tree to scroll its viewport without moving the cursor or keyboard focus. Arrow-key cursor movement scrolls the viewport only when the selected row would otherwise leave it. Drag the vertical divider to resize the workspace pane; the terminal resizes live and the final width is saved when the button is released.
+The dashboard chrome is mouse-aware. Click a root or workspace to select and open it (or to choose a session when it has no running terminal), click a terminal tab or `+` to activate it, and use the wheel over the workspace tree to scroll its viewport without moving the cursor or keyboard focus. Arrow-key cursor movement scrolls the viewport only when the selected row would otherwise leave it. Drag the vertical divider to resize the workspace pane; the terminal resizes live and the final width is saved when the button is released.
 
 Mouse targets identify themselves before activation. Workspace, tab, picker, Git, Config, and dialog-action targets gain a muted background on hover, while the draggable divider changes to the accent color. Keyboard selection keeps the stronger accent treatment and is never replaced by hover.
 

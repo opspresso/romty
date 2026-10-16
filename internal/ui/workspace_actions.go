@@ -6,9 +6,12 @@ package ui
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+
+	"github.com/opspresso/romty/internal/model"
 )
 
 type workspaceAction int
@@ -17,6 +20,7 @@ const (
 	workspaceOpenTerminalAction workspaceAction = iota
 	workspaceNewTabAction
 	workspaceCloseTabAction
+	workspaceReopenAction
 	workspaceAllFilesAction
 	workspaceFileChangesAction
 	workspaceGitStatusAction
@@ -30,6 +34,7 @@ type workspaceActionGroup int
 
 const (
 	workspaceTerminalGroup workspaceActionGroup = iota
+	workspaceClosedGroup
 	workspaceFileGitGroup
 	workspaceDestructiveGroup
 )
@@ -39,6 +44,8 @@ type workspaceActionChoice struct {
 	label       string
 	group       workspaceActionGroup
 	destructive bool
+	// closedID names the closed session a reopen action restores.
+	closedID string
 }
 
 // workspacePalette is the open workspace action palette.
@@ -46,8 +53,12 @@ type workspacePalette struct {
 	// target is captured when the palette opens, so a refresh cannot
 	// retarget a destructive or remote action behind it.
 	target navItem
-	index  int
-	offset int
+	// sessionChoice limits the palette to a new session and the target's
+	// closed sessions. Selecting a workspace without a running terminal
+	// opens it this way instead of starting a shell at once.
+	sessionChoice bool
+	index         int
+	offset        int
 	// anchorX and anchorY are the screen cell the palette opened at.
 	anchorX int
 	anchorY int
@@ -81,6 +92,37 @@ func (m dashboard) openWorkspaceActionsAt(target navItem, x, y int) (tea.Model, 
 	return m, nil
 }
 
+// needsSessionChoice reports whether selecting item asks which session to
+// open: a readable workspace with no running terminal.
+func (m dashboard) needsSessionChoice(item navItem) bool {
+	return item.failure == "" && len(runningTabs(item.tabs)) == 0
+}
+
+// activateWorkspace is Enter on the workspace tree: it opens the selected
+// terminal, or asks which session to open when none is running.
+func (m dashboard) activateWorkspace() (tea.Model, tea.Cmd) {
+	item, ok := m.navigationItem()
+	if !ok || !m.needsSessionChoice(item) || m.tabPending {
+		return m, m.selectWorkspace()
+	}
+	m.ensureNavigationVisible()
+	row, ok := m.navigationRowForIndex(m.navIndex, m.dimensions().bodyHeight)
+	if !ok {
+		return m, m.selectWorkspace()
+	}
+	return m.openSessionChoiceAt(item, max(m.dimensions().leftWidth-1, 0), row)
+}
+
+func (m dashboard) openSessionChoiceAt(target navItem, x, y int) (tea.Model, tea.Cmd) {
+	if m.modal != noModal || m.tabPending {
+		return m, nil
+	}
+	updated, command := m.openWorkspaceActionsAt(target, x, y)
+	value := updated.(dashboard)
+	value.palette.sessionChoice = true
+	return value, command
+}
+
 func (m dashboard) navigationRowForIndex(want, height int) (int, bool) {
 	items := m.navigationItems()
 	start, end := navigationWindow(items, m.navOffset, max(height-2, 0))
@@ -99,6 +141,9 @@ func (m dashboard) navigationRowForIndex(want, height int) (int, bool) {
 
 func (m dashboard) workspaceActionChoices() []workspaceActionChoice {
 	target := m.palette.target
+	if m.palette.sessionChoice {
+		return sessionChoices(target, time.Now())
+	}
 	choices := make([]workspaceActionChoice, 0, 10)
 	if target.failure == "" {
 		if len(runningTabs(target.tabs)) > 0 {
@@ -137,6 +182,35 @@ func (m dashboard) workspaceActionChoices() []workspaceActionChoice {
 	}
 	choices = append(choices, remove)
 	return choices
+}
+
+// sessionChoices offers a new session first, then the closed sessions newest
+// first.
+func sessionChoices(target navItem, now time.Time) []workspaceActionChoice {
+	choices := []workspaceActionChoice{{action: workspaceNewTabAction, label: "New session"}}
+	for _, closed := range target.closed {
+		choices = append(choices, workspaceActionChoice{
+			action: workspaceReopenAction, label: closedSessionLabel(closed, now),
+			group: workspaceClosedGroup, closedID: closed.ID,
+		})
+	}
+	return choices
+}
+
+// closedSessionLabel names a closed session by its tab, its agent, and when
+// it closed: the time alone today, the date as well before that.
+func closedSessionLabel(closed model.ClosedSession, now time.Time) string {
+	parts := []string{"Reopen " + closed.Name}
+	if closed.Agent != "" {
+		parts = append(parts, string(closed.Agent))
+	}
+	at := closed.ClosedAt.Local()
+	layout := "01-02 15:04"
+	if year, month, day := at.Date(); now.Local().Year() == year && now.Local().Month() == month && now.Local().Day() == day {
+		layout = "15:04"
+	}
+	parts = append(parts, at.Format(layout))
+	return strings.Join(parts, " · ")
 }
 
 func (m dashboard) workspaceActionRows() []workspaceActionRow {
@@ -220,12 +294,13 @@ func (m dashboard) handleWorkspaceActionKey(message tea.KeyPressMsg) (tea.Model,
 		m.palette.index = len(choices) - 1
 		m.ensureWorkspaceActionVisible()
 	case "enter":
-		return m.runWorkspaceAction(choices[m.palette.index].action)
+		return m.runWorkspaceAction(choices[m.palette.index])
 	}
 	return m, nil
 }
 
-func (m dashboard) runWorkspaceAction(action workspaceAction) (tea.Model, tea.Cmd) {
+func (m dashboard) runWorkspaceAction(choice workspaceActionChoice) (tea.Model, tea.Cmd) {
+	action := choice.action
 	target, ok := m.currentWorkspaceActionTarget()
 	if !ok {
 		m.modal = noModal
@@ -248,6 +323,10 @@ func (m dashboard) runWorkspaceAction(action workspaceAction) (tea.Model, tea.Cm
 		m.tabIndex = len(runningTabs(target.tabs))
 		m.modal = noModal
 		return m, m.selectWorkspace()
+	case workspaceReopenAction:
+		m.tabIndex = len(runningTabs(target.tabs))
+		m.modal = noModal
+		return m, m.selectWorkspaceFor(choice.closedID)
 	case workspaceCloseTabAction:
 		tabs := runningTabs(target.tabs)
 		if m.tabIndex >= len(tabs) {
@@ -389,7 +468,7 @@ func (m dashboard) handleWorkspaceActionsMouse(message tea.MouseMsg) (tea.Model,
 	}
 	m.palette.index = index
 	choices := m.workspaceActionChoices()
-	updated, command := m.runWorkspaceAction(choices[index].action)
+	updated, command := m.runWorkspaceAction(choices[index])
 	return updated, command, true
 }
 

@@ -16,6 +16,7 @@ type navItem struct {
 	root      model.Root
 	workspace model.Workspace
 	tabs      []model.Tab
+	closed    []model.ClosedSession
 	git       gitrepo.State
 	hasGit    bool
 	isRoot    bool
@@ -432,9 +433,12 @@ func (m dashboard) navigationItems() []navItem {
 				Name:   root.Root.Name,
 				Path:   root.Root.Path,
 			},
-			tabs:      root.Tabs,
-			isRoot:    true,
-			separator: rootIndex > 0,
+			tabs:   root.Tabs,
+			closed: root.Closed,
+			isRoot: true,
+			// A root already leaves a blank row below itself, so the one
+			// above is only needed after the previous root's workspaces.
+			separator: rootIndex > 0 && len(m.state.Roots[rootIndex-1].Directories) > 0,
 			failure:   root.Error,
 		})
 		for _, directory := range root.Directories {
@@ -443,6 +447,7 @@ func (m dashboard) navigationItems() []navItem {
 				root:      root.Root,
 				workspace: directory.Workspace,
 				tabs:      directory.Tabs,
+				closed:    directory.Closed,
 				git:       directoryGit,
 				hasGit:    directoryHasGit,
 			})
