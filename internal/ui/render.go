@@ -213,6 +213,7 @@ func (m dashboard) render() string {
 	if m.modal == workspaceActionsModal {
 		// The action palette is anchored on the row it belongs to and is meant
 		// to read as part of the tree, so what is around it stays as it was.
+		// The session choice is drawn the same way, in the terminal pane.
 		lines = m.overlayWorkspaceActions(lines, width, view.bodyHeight)
 	} else if m.modal != noModal {
 		lines = m.overlayModal(dimBackdrop(m.styles, lines), width, view.bodyHeight)
@@ -508,11 +509,14 @@ func navigationWindow(items []navItem, offset, available int) (int, int) {
 	return start, end
 }
 
-// navigationRows is the height of an item in the tree. A root is set apart
-// by a blank row below it, and by one above when another root precedes it.
+// navigationRows is the height of an item in the tree. A root takes one row,
+// plus the blank row that sets it apart from the item above.
 func navigationRows(item navItem) int {
-	if item.isRoot && item.separator {
-		return 3
+	if item.isRoot {
+		if item.separator {
+			return 2
+		}
+		return 1
 	}
 	return 2
 }
@@ -561,9 +565,9 @@ func (m dashboard) renderNavigationItem(item navItem, index, width int) []string
 	}
 	if item.isRoot {
 		if item.separator {
-			return []string{"", nameLine, ""}
+			return []string{"", nameLine}
 		}
-		return []string{nameLine, ""}
+		return []string{nameLine}
 	}
 	return []string{nameLine, m.renderNavigationGit(item, indicator, style, width)}
 }
@@ -578,6 +582,10 @@ func (m dashboard) renderTerminal(width int) []string {
 		closeHover = m.hover.index
 	}
 	lines := renderTabBarWithHover(m.styles, tabs, m.tabIndex, hover, closeHover, m.agentAnimationFrame, width)
+	if m.modal == workspaceActionsModal && m.palette.sessionChoice {
+		// The session choice is drawn over this pane, which it replaces.
+		return lines
+	}
 	if m.terminal != nil {
 		return append(lines, m.terminal.renderViewport(m.scrollOffset)...)
 	}

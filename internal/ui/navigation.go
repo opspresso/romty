@@ -417,7 +417,7 @@ func (m *dashboard) rememberSelection(tabID string) bool {
 
 func (m dashboard) navigationItems() []navItem {
 	result := make([]navItem, 0)
-	for rootIndex, root := range m.state.Roots {
+	for _, root := range m.state.Roots {
 		// A root is only a workspace once it holds a terminal, so a snapshot
 		// names its identifier nowhere else. Its own tabs carry it, and
 		// without it the root row compares as a workspace that never matches.
@@ -436,9 +436,10 @@ func (m dashboard) navigationItems() []navItem {
 			tabs:   root.Tabs,
 			closed: root.Closed,
 			isRoot: true,
-			// A root already leaves a blank row below itself, so the one
-			// above is only needed after the previous root's workspaces.
-			separator: rootIndex > 0 && len(m.state.Roots[rootIndex-1].Directories) > 0,
+			// One blank row sets a root apart from what is above it. A
+			// workspace without Git already ends in a blank row, so a root
+			// after one adds none, and the gap stays one row either way.
+			separator: len(result) > 0 && !endsBlank(result[len(result)-1]),
 			failure:   root.Error,
 		})
 		for _, directory := range root.Directories {
@@ -454,6 +455,12 @@ func (m dashboard) navigationItems() []navItem {
 		}
 	}
 	return result
+}
+
+// endsBlank reports whether an item's last tree row is empty: the Git row of
+// a workspace that is not a repository.
+func endsBlank(item navItem) bool {
+	return !item.isRoot && !item.hasGit
 }
 
 func (m dashboard) navigationItem() (navItem, bool) {

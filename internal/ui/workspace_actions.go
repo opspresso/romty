@@ -11,6 +11,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
+	"github.com/opspresso/romty/internal/display"
 	"github.com/opspresso/romty/internal/model"
 )
 
@@ -54,8 +55,9 @@ type workspacePalette struct {
 	// retarget a destructive or remote action behind it.
 	target navItem
 	// sessionChoice limits the palette to a new session and the target's
-	// closed sessions. Selecting a workspace without a running terminal
-	// opens it this way instead of starting a shell at once.
+	// closed sessions, drawn in the middle of the terminal pane instead of
+	// on the row. Selecting a workspace without a running terminal opens it
+	// this way instead of starting a shell at once.
 	sessionChoice bool
 	index         int
 	offset        int
@@ -106,21 +108,17 @@ func (m dashboard) activateWorkspace() (tea.Model, tea.Cmd) {
 		return m, m.selectWorkspace()
 	}
 	m.ensureNavigationVisible()
-	row, ok := m.navigationRowForIndex(m.navIndex, m.dimensions().bodyHeight)
-	if !ok {
-		return m, m.selectWorkspace()
-	}
-	return m.openSessionChoiceAt(item, max(m.dimensions().leftWidth-1, 0), row)
+	return m.openSessionChoice(item)
 }
 
-func (m dashboard) openSessionChoiceAt(target navItem, x, y int) (tea.Model, tea.Cmd) {
+func (m dashboard) openSessionChoice(target navItem) (tea.Model, tea.Cmd) {
 	if m.modal != noModal || m.tabPending {
 		return m, nil
 	}
-	updated, command := m.openWorkspaceActionsAt(target, x, y)
-	value := updated.(dashboard)
-	value.palette.sessionChoice = true
-	return value, command
+	m.modal = workspaceActionsModal
+	m.palette = workspacePalette{target: target, sessionChoice: true}
+	m.clearAnyError()
+	return m, nil
 }
 
 func (m dashboard) navigationRowForIndex(want, height int) (int, bool) {
@@ -388,6 +386,9 @@ func (m dashboard) startWorkspaceGitAction(action workspaceAction, target navIte
 }
 
 func (m dashboard) workspaceActionPopup(width, height int) (lines []string, x, y int) {
+	if m.palette.sessionChoice {
+		return m.sessionChoicePanel(height)
+	}
 	choices := m.workspaceActionChoices()
 	rows := m.workspaceActionRows()
 	offset, end := m.workspaceActionWindow(height)
@@ -426,6 +427,47 @@ func (m dashboard) workspaceActionPopup(width, height int) (lines []string, x, y
 	lines = append(lines, m.styles.modalBorder.Render("╰"+strings.Repeat("─", innerWidth)+"╯"))
 	x = min(max(m.palette.anchorX, 0), max(width-popupWidth, 0))
 	y = min(max(m.palette.anchorY, 0), max(height-len(lines), 0))
+	return lines, x, y
+}
+
+// sessionChoicePanel draws the session choice in the middle of the terminal
+// pane, which shows nothing else while it is open. It has no border: a title
+// row above the choices and a blank row below them take the border's place,
+// so pointer hit-testing is the same as for the palette.
+func (m dashboard) sessionChoicePanel(height int) (lines []string, x, y int) {
+	view := m.dimensions()
+	choices := m.workspaceActionChoices()
+	rows := m.workspaceActionRows()
+	offset, end := m.workspaceActionWindow(height)
+	title := " Open a session in " + display.Text(m.palette.target.workspace.Name)
+	labelWidth := lipgloss.Width(title)
+	for _, row := range rows[offset:end] {
+		if !row.divider {
+			labelWidth = max(labelWidth, lipgloss.Width(choices[row.choiceIndex].label)+1)
+		}
+	}
+	panelWidth := min(labelWidth+4, max(view.rightWidth, 1))
+	innerWidth := max(panelWidth-2, 0)
+	lines = make([]string, 0, end-offset+2)
+	lines = append(lines, " "+m.styles.navigationRoot.Render(pad(truncate(title, innerWidth), innerWidth))+" ")
+	for _, row := range rows[offset:end] {
+		if row.divider {
+			lines = append(lines, " "+m.styles.divider.Render(strings.Repeat("─", innerWidth))+" ")
+			continue
+		}
+		style := m.styles.modalBody
+		if row.choiceIndex == m.palette.index {
+			style = m.styles.navigationSelected
+		} else if m.hover.kind == hoverWorkspaceAction && m.hover.index == row.choiceIndex {
+			style = m.styles.hovered(style)
+		}
+		label := " " + choices[row.choiceIndex].label
+		lines = append(lines, " "+style.Render(pad(truncate(label, innerWidth), innerWidth))+" ")
+	}
+	lines = append(lines, strings.Repeat(" ", panelWidth))
+	originX, originY := view.terminalOrigin()
+	x = originX + max(view.rightWidth-panelWidth, 0)/2
+	y = originY + max(height-originY-len(lines), 0)/2
 	return lines, x, y
 }
 
