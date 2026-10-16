@@ -1306,8 +1306,10 @@ func TestClosedTabCanBeReopenedWithItsOutputAndAgent(t *testing.T) {
 		}
 		output.Write(buffer[:count])
 	}
-	if !strings.Contains(output.String(), "CLOSEDPROOF") {
-		t.Fatalf("reopened output lacks the closed tab's output: %q", output.String())
+	proof := strings.Index(output.String(), "CLOSEDPROOF")
+	marker := strings.Index(output.String(), "reopened from a closed tab")
+	if proof < 0 || marker < proof {
+		t.Fatalf("reopened output out of order (proof %d, marker %d): %q", proof, marker, output.String())
 	}
 
 	snapshot, err = backend.Snapshot()

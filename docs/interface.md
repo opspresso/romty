@@ -164,7 +164,7 @@ Selecting a root or workspace that has no running terminal, with `Enter` or a cl
 - `New session` starts a new terminal tab.
 - `Reopen <tab> · <agent> · <time>` reopens one of the workspace's last three closed sessions, newest first. The agent is shown when one was running at close. The time shows the date as well when the session closed before today.
 
-Press `Esc` or click outside the menu to cancel. A reopened tab replays the closed tab's output behind a `── restored from the previous romty session ──` marker and takes back its name when no running tab uses it. When an agent was running at close, its resume command is typed at the prompt, as after `romty stop`; see [Stopping and resuming](runtime.md#stopping-and-resuming). A reopened session leaves the list.
+Press `Esc` or click outside the menu to cancel. A reopened tab replays the closed tab's output behind a `── reopened from a closed tab ──` marker and takes back its name when no running tab uses it. When an agent was running at close, its resume command is typed at the prompt, as after `romty stop`; see [Stopping and resuming](runtime.md#stopping-and-resuming). A reopened session leaves the list.
 
 Closing a tab from its `×` or from the workspace actions saves it to this list. A shell that exits on its own is not saved. `New tab`, `Ctrl`+`Shift`+`T`, and the `+` tab still create a tab directly.
 

@@ -477,11 +477,11 @@ func (s *session) snapshotRecording() []byte {
 // Enter, declining is one Ctrl+C. The recording goes straight into history
 // rather than through broadcast: the guest tracker must not adopt modes a
 // dead shell set, and there is no client yet to send it to.
-func (s *session) restore(recording []byte, command string) {
+func (s *session) restore(recording []byte, marker, command string) {
 	if len(recording) > 0 {
 		s.mu.Lock()
 		s.history.append(recording)
-		s.history.append([]byte(resumeMarker))
+		s.history.append([]byte(marker))
 		s.mu.Unlock()
 	}
 	if command != "" {

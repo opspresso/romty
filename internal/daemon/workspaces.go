@@ -380,9 +380,9 @@ func (s *Server) startTab(request protocol.Request, closedID string) protocol.Re
 	// not broadcast. The lock is already held across starting the shell for
 	// the same reason; reading one snapshot costs less than that.
 	if closedID != "" {
-		value.restore(closedRecording, resumeCommand(closedMeta.Agent, closedMeta.AgentSessionID))
+		value.restore(closedRecording, closedMarker, resumeCommand(closedMeta.Agent, closedMeta.AgentSessionID))
 	} else if meta, recording, ok := s.resume.take(workspaceID); ok {
-		value.restore(recording, resumeCommand(meta.Agent, meta.AgentSessionID))
+		value.restore(recording, resumeMarker, resumeCommand(meta.Agent, meta.AgentSessionID))
 	}
 	previous := cloneState(s.value)
 	s.value.Tabs = append(s.value.Tabs, tab)

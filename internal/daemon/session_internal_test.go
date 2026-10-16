@@ -111,7 +111,7 @@ func TestSessionBoundsInputToAnUnresponsivePTY(t *testing.T) {
 
 func TestSessionTracksOnlyLiveOutputAsAgentActivity(t *testing.T) {
 	value := newSessionForTest(nil)
-	value.restore([]byte("saved output\r\n"), "")
+	value.restore([]byte("saved output\r\n"), resumeMarker, "")
 	_, _, lastOutput := value.recentOutput(phaseHintBytes)
 	if !lastOutput.IsZero() {
 		t.Fatal("restoring recorded output renewed activity")

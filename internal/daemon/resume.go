@@ -41,6 +41,10 @@ const resumeRetention = 7 * 24 * time.Hour
 // follows it, so old output is not mistaken for something that just ran.
 const resumeMarker = "\r\n\x1b[0m\x1b[2m── restored from the previous romty session ──\x1b[0m\r\n"
 
+// closedMarker does the same for a reopened closed tab, which comes from
+// this daemon rather than a previous one.
+const closedMarker = "\r\n\x1b[0m\x1b[2m── reopened from a closed tab ──\x1b[0m\r\n"
+
 // closedHistoryLimit is how many closed sessions each workspace keeps for
 // reopening. The newest are the ones a user comes back to.
 const closedHistoryLimit = 3
