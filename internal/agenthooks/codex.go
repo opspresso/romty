@@ -37,9 +37,10 @@ func normalizeCodexTitle(data []byte) ([]byte, bool, error) {
 	}
 	items := config.TUI.TerminalTitle
 	hasIdentity := items != nil && (slices.Contains(*items, "thread-id") || slices.Contains(*items, "session-id"))
-	// An explicitly empty title list is an opt-out. Repair the unsupported name
-	// from older romty defaults even when the identity is already present.
-	if items != nil && (len(*items) == 0 || (hasIdentity && !slices.Contains(*items, "thread-name"))) {
+	legacyDefault := items != nil && slices.Equal(*items, []string{"thread-id", "activity", "thread-name", "project-name"})
+	// Codex Doctor omits thread-name from its accepted items, although the TUI
+	// supports it. Migrate only our old default; preserve custom choices and opt-outs.
+	if items != nil && (len(*items) == 0 || (hasIdentity && !legacyDefault)) {
 		return data, false, nil
 	}
 	const defaults = `["thread-id", "activity", "thread-title", "project-name"]`
@@ -68,7 +69,7 @@ func normalizeCodexTitle(data []byte) ([]byte, bool, error) {
 			}
 			for it := value.Children(); it.Next(); {
 				item := it.Node()
-				if item.Kind == unstable.String && string(item.Data) == "thread-name" {
+				if legacyDefault && item.Kind == unstable.String && string(item.Data) == "thread-name" {
 					out.Write(data[cursor:item.Raw.Offset])
 					out.WriteString(`"thread-title"`)
 					cursor = int(item.Raw.Offset + item.Raw.Length)
