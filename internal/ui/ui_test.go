@@ -838,7 +838,7 @@ func TestDashboardMouseSelectsWorkspaceAndTab(t *testing.T) {
 	value := newDashboard(backend, snapshot)
 	value.width, value.height = 120, 30
 
-	command := send(&value, tea.MouseClickMsg{X: 2, Y: 4, Button: tea.MouseLeft})
+	command := send(&value, tea.MouseClickMsg{X: 2, Y: 3, Button: tea.MouseLeft})
 	if value.navIndex != 1 || value.cursorPath != workspace.Path || command == nil {
 		t.Fatalf("workspace click = (index %d, path %q, command %v)", value.navIndex, value.cursorPath, command)
 	}
@@ -4290,7 +4290,7 @@ func TestNavigationShowsGitStateOnSecondLine(t *testing.T) {
 	t.Fatalf("navigation does not contain workspace %q:\n%s", workspace.Name, navigation)
 }
 
-func TestNavigationSetsRootsApartAndUsesTwoWorkspaceLines(t *testing.T) {
+func TestNavigationUsesOneRootLineAndTwoWorkspaceLines(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, projectsSnapshot([]model.WorkspaceView{
 		{Workspace: model.Workspace{ID: "workspace-1", RootID: "root-1", Name: "first", Path: "/projects/first"}},
 		{Workspace: model.Workspace{ID: "workspace-2", RootID: "root-1", Name: "last", Path: "/projects/last"}},
@@ -4299,18 +4299,18 @@ func TestNavigationSetsRootsApartAndUsesTwoWorkspaceLines(t *testing.T) {
 	value.selectedPath = "/projects/first"
 	value.gitStates = map[string]gitrepo.State{"/projects/first": {Branch: "main"}}
 	lines := value.renderNavigation(28, 20)
-	if len(lines) != 8 {
-		t.Fatalf("navigation lines = %d, want header, root and blank lines, and two lines per workspace\n%s", len(lines), strings.Join(lines, "\n"))
+	if len(lines) != 7 {
+		t.Fatalf("navigation lines = %d, want header, one root line, and two lines per workspace\n%s", len(lines), strings.Join(lines, "\n"))
 	}
 	plain := make([]string, len(lines))
 	for index, line := range lines {
 		plain[index] = strings.TrimRight(ansi.Strip(line), " ")
 	}
-	if plain[2] != " ▾ projects" || plain[3] != "" || plain[4] != "▎ - first" || plain[5] != "▎   (main)" {
-		t.Fatalf("root and workspace rows = %#v", plain[2:6])
+	if plain[2] != " ▾ projects" || plain[3] != "▎ - first" || plain[4] != "▎   (main)" {
+		t.Fatalf("root and workspace rows = %#v", plain[2:5])
 	}
-	if plain[7] != "" {
-		t.Fatalf("last workspace continuation = %q, want blank", plain[7])
+	if plain[6] != "" {
+		t.Fatalf("last workspace continuation = %q, want blank", plain[6])
 	}
 }
 
@@ -4320,35 +4320,51 @@ func TestNavigationSeparatesRootsWithOneBlankLine(t *testing.T) {
 		{Root: model.Root{ID: "root-2", Name: "archive", Path: "/archive"}},
 	}})
 	lines := value.renderNavigation(28, 20)
-	if len(lines) != 6 {
-		t.Fatalf("navigation lines = %d, want header, two roots, and a blank line below each\n%s", len(lines), strings.Join(lines, "\n"))
+	if len(lines) != 5 {
+		t.Fatalf("navigation lines = %d, want header, two roots, and one separator\n%s", len(lines), strings.Join(lines, "\n"))
 	}
-	if strings.TrimSpace(ansi.Strip(lines[3])) != "" || strings.TrimSpace(ansi.Strip(lines[4])) != "▾ archive" ||
-		strings.TrimSpace(ansi.Strip(lines[5])) != "" {
-		t.Fatalf("second root rows = %#v, want one blank line before and after archive", lines[3:6])
+	if strings.TrimSpace(ansi.Strip(lines[3])) != "" || strings.TrimSpace(ansi.Strip(lines[4])) != "▾ archive" {
+		t.Fatalf("second root rows = %#v, want a blank line before archive", lines[3:5])
 	}
 }
 
-func TestNavigationLeavesABlankLineAboveARootAfterWorkspaces(t *testing.T) {
-	value := newDashboard(&fakeBackend{}, model.Snapshot{Roots: []model.RootView{
-		{Root: projectsRoot, Directories: []model.WorkspaceView{
-			{Workspace: model.Workspace{RootID: projectsRoot.ID, Name: "first", Path: "/projects/first"}},
-		}},
-		{Root: model.Root{ID: "root-2", Name: "archive", Path: "/archive"}},
-	}})
-	value.focus = terminalPane
-	value.gitStates = map[string]gitrepo.State{"/projects/first": {Branch: "main"}}
-	lines := value.renderNavigation(28, 20)
-	plain := make([]string, len(lines))
-	for index, line := range lines {
-		plain[index] = strings.TrimSpace(ansi.Strip(line))
-	}
-	want := []string{"", "▾ projects", "", "- first", "(main)", "", "▾ archive", ""}
-	if !slices.Equal(plain[1:], want) {
-		t.Fatalf("navigation rows = %#v, want %#v", plain[1:], want)
-	}
-	if index, ok := value.navigationIndexAtRow(8, 20); !ok || index != 2 {
-		t.Fatalf("row of archive = (%d, %v), want item 2", index, ok)
+// One blank row sets a root apart from the item above it. A workspace that is
+// not a Git repository already ends in a blank row, so the gap stays one row.
+func TestNavigationKeepsOneBlankLineAboveARoot(t *testing.T) {
+	for _, probe := range []struct {
+		name   string
+		hasGit bool
+		want   []string
+		row    int
+	}{
+		{name: "after a repository", hasGit: true,
+			want: []string{"", "▾ projects", "- first", "(main)", "", "▾ archive"}, row: 6},
+		{name: "after a plain directory",
+			want: []string{"", "▾ projects", "- first", "", "▾ archive"}, row: 5},
+	} {
+		t.Run(probe.name, func(t *testing.T) {
+			value := newDashboard(&fakeBackend{}, model.Snapshot{Roots: []model.RootView{
+				{Root: projectsRoot, Directories: []model.WorkspaceView{
+					{Workspace: model.Workspace{RootID: projectsRoot.ID, Name: "first", Path: "/projects/first"}},
+				}},
+				{Root: model.Root{ID: "root-2", Name: "archive", Path: "/archive"}},
+			}})
+			value.focus = terminalPane
+			if probe.hasGit {
+				value.gitStates = map[string]gitrepo.State{"/projects/first": {Branch: "main"}}
+			}
+			lines := value.renderNavigation(28, 20)
+			plain := make([]string, len(lines))
+			for index, line := range lines {
+				plain[index] = strings.TrimSpace(ansi.Strip(line))
+			}
+			if !slices.Equal(plain[1:], probe.want) {
+				t.Fatalf("navigation rows = %#v, want %#v", plain[1:], probe.want)
+			}
+			if index, ok := value.navigationIndexAtRow(probe.row, 20); !ok || index != 2 {
+				t.Fatalf("row %d = (item %d, %v), want archive", probe.row, index, ok)
+			}
+		})
 	}
 }
 

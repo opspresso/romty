@@ -316,7 +316,7 @@ func (m dashboard) handleDashboardMouse(message tea.MouseMsg) (tea.Model, tea.Cm
 			return m, nil, true
 		}
 		if m.needsSessionChoice(item) {
-			updated, command := m.openSessionChoiceAt(item, mouse.X, mouse.Y)
+			updated, command := m.openSessionChoice(item)
 			return updated, command, true
 		}
 		return m, m.selectWorkspace(), true

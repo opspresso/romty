@@ -206,7 +206,7 @@ func TestDashboardRightClickOpensActionsForThePointedWorkspace(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, snapshot)
 	value.width, value.height = 120, 30
 
-	command := send(&value, tea.MouseClickMsg{X: 2, Y: 4, Button: tea.MouseRight})
+	command := send(&value, tea.MouseClickMsg{X: 2, Y: 3, Button: tea.MouseRight})
 	if command != nil || value.modal != workspaceActionsModal || value.navIndex != 1 ||
 		value.palette.target.workspace.Path != workspace.Path {
 		t.Fatalf("right click = (command %v, modal %v, index %d, target %q)",
@@ -214,8 +214,8 @@ func TestDashboardRightClickOpensActionsForThePointedWorkspace(t *testing.T) {
 	}
 
 	popup, left, top := value.workspaceActionPopup(value.width, value.dimensions().bodyHeight)
-	if left != 2 || top != 4 || len(popup) == 0 {
-		t.Fatalf("popup anchor = (%d, %d), want the click at (2, 4)", left, top)
+	if left != 2 || top != 3 || len(popup) == 0 {
+		t.Fatalf("popup anchor = (%d, %d), want the click at (2, 3)", left, top)
 	}
 	send(&value, tea.MouseMotionMsg{X: left + 1, Y: top + 1})
 	if value.hover.kind != hoverWorkspaceAction || value.hover.index != 0 {
@@ -252,13 +252,13 @@ func TestWorkspaceActionsOverlayOnlyItsPopupRectangle(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, snapshot)
 	value.width, value.height = 120, 30
 	value.setNavigation(1)
-	send(&value, tea.MouseClickMsg{X: 2, Y: 4, Button: tea.MouseRight})
+	send(&value, tea.MouseClickMsg{X: 2, Y: 3, Button: tea.MouseRight})
 
 	rendered := strings.Split(ansi.Strip(value.render()), "\n")
 	if !strings.Contains(rendered[0], "romty") || !strings.Contains(strings.Join(rendered, "\n"), "Select +") {
 		t.Fatalf("context popup hid the dashboard behind it:\n%s", strings.Join(rendered, "\n"))
 	}
-	if !strings.Contains(rendered[4], "╭") || !strings.Contains(rendered[5], "New tab") {
+	if !strings.Contains(rendered[3], "╭") || !strings.Contains(rendered[4], "New tab") {
 		t.Fatalf("context popup is not anchored at the click:\n%s", strings.Join(rendered, "\n"))
 	}
 	updated, _ := value.Update(tea.MouseClickMsg{X: 100, Y: 2, Button: tea.MouseLeft})
@@ -301,14 +301,23 @@ func TestSelectingAnIdleWorkspaceOffersItsClosedSessions(t *testing.T) {
 	value := newDashboard(backend, snapshot)
 	value.width, value.height = 120, 30
 
-	if command := send(&value, tea.MouseClickMsg{X: 4, Y: 4, Button: tea.MouseLeft}); command != nil {
+	if command := send(&value, tea.MouseClickMsg{X: 4, Y: 3, Button: tea.MouseLeft}); command != nil {
 		t.Fatalf("clicking an idle workspace ran %T before a choice", command())
 	}
 	if value.modal != workspaceActionsModal || !value.palette.sessionChoice || value.navIndex != 1 {
 		t.Fatalf("click = (modal %v, session choice %v, index %d)", value.modal, value.palette.sessionChoice, value.navIndex)
 	}
-	popup, _, _ := value.workspaceActionPopup(value.width, value.dimensions().bodyHeight)
+	view := value.dimensions()
+	popup, left, top := value.workspaceActionPopup(value.width, view.bodyHeight)
+	originX, originY := view.terminalOrigin()
+	panelWidth := ansi.StringWidth(popup[0])
+	if left-originX != (view.rightWidth-panelWidth)/2 || top-originY != (view.bodyHeight-originY-len(popup))/2 {
+		t.Fatalf("session choice at (%d, %d), want the middle of the terminal pane", left, top)
+	}
 	rendered := ansi.Strip(strings.Join(popup, "\n"))
+	if !strings.Contains(rendered, "Open a session in alpha") {
+		t.Fatalf("session choice has no title:\n%s", rendered)
+	}
 	newSession := strings.Index(rendered, "New session")
 	newest := strings.Index(rendered, "Reopen 2 · claude · 10-15 09:30")
 	older := strings.Index(rendered, "Reopen 1 · 10-15 08:30")
@@ -316,8 +325,9 @@ func TestSelectingAnIdleWorkspaceOffersItsClosedSessions(t *testing.T) {
 		t.Fatalf("session choice:\n%s", rendered)
 	}
 
-	send(&value, key(tea.KeyDown, ""))
-	command := send(&value, key(tea.KeyEnter, ""))
+	// The title takes the first row and a divider follows New session, so
+	// the newest closed session is three rows down.
+	command := send(&value, tea.MouseClickMsg{X: left + 2, Y: top + 3, Button: tea.MouseLeft})
 	if command == nil || value.modal != noModal {
 		t.Fatalf("reopen = (command %v, modal %v)", command, value.modal)
 	}
