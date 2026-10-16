@@ -9,9 +9,10 @@ import (
 	"github.com/opspresso/romty/internal/model"
 )
 
-// Terminal-derived phases are a compatibility fallback for OpenCode. Codex
-// and Claude Code require lifecycle events; redraws and silence cannot prove
-// whether their work is active, awaiting a response, or complete.
+// Terminal-derived phases are a fallback for OpenCode and Kiro CLI tabs that
+// no hook reports. Codex and Claude Code require lifecycle events; redraws and
+// silence cannot prove whether their work is active, awaiting a response, or
+// complete.
 
 // phaseHintBytes is how much of the end of the recording is read back. The
 // recording holds megabytes; what an agent last drew is the final screen or
