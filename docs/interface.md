@@ -147,6 +147,7 @@ Both file views allow directory rows to take the cursor. Press `Enter` to toggle
 | `←`/`→` or `[`/`]` | Resize the workspace pane in Config |
 | `/` | Find in scrollback, or type a path in the root picker |
 | `n`/`N` | Move to the next or previous scrollback match |
+| `p` | Toggle mouse passthrough in Config |
 | `m` | Toggle the scrollback mouse in Config |
 | `d`/`b` | Toggle the done and waiting sounds in Config |
 | `s` | Play the done sound in Config |
@@ -201,7 +202,7 @@ Full-screen applications such as `vim`, `less`, and Claude Code use an alternate
 
 On the live main screen, the mouse wheel enters scrollback and scrolls three lines per notch. Scrolling up with no history to show reports why in the status bar, so scrolling up with no response at all means the terminal is not sending wheel events and its mouse reporting setting needs checking. Because romty captures the live mouse, native selection uses the terminal bypass modifier: `Option` on macOS or `Shift` elsewhere. Scrollback releases mouse capture, so plain click-drag selects the full-width terminal output. File view captures the wheel to move through its tree or scroll its content, according to the pane under the pointer.
 
-Set `mouse_passthrough` in `config.json` to let applications receive the mouse when they request it instead:
+Press `p` in Config, or set `mouse_passthrough` in `config.json`, to let applications receive the mouse when they request it instead:
 
 ```json
 { "mouse_passthrough": true }

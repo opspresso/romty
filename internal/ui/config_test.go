@@ -245,15 +245,15 @@ func TestConfigWalksAndTogglesWithTheCursor(t *testing.T) {
 		t.Fatalf("up at the first row = %d, want it to stay", value.configIndex)
 	}
 
-	// Down to "Scrollback mouse", then Enter runs the row the cursor is on.
+	// Down to "Mouse passthrough", then Enter runs the row the cursor is on.
 	send(&value, key(tea.KeyDown, ""))
 	if value.configIndex != 1 {
 		t.Fatalf("cursor = %d, want the second setting", value.configIndex)
 	}
 	command := send(&value, key(tea.KeyEnter, ""))
-	if !value.config.ScrollbackMouse || command == nil {
-		t.Fatalf("Enter = (scrollback mouse %v, command %v), want the setting on and saved",
-			value.config.ScrollbackMouse, command)
+	if !value.config.MousePassthrough || command == nil {
+		t.Fatalf("Enter = (mouse passthrough %v, command %v), want the setting on and saved",
+			value.config.MousePassthrough, command)
 	}
 
 	// The row it is on is marked, and no other row is.
@@ -275,7 +275,7 @@ func TestConfigWalksAndTogglesWithTheCursor(t *testing.T) {
 	// Space runs the row too. Bubble Tea reports the space bar as "space", not
 	// as the literal " " a key case would otherwise be written with.
 	send(&value, key(tea.KeySpace, " "))
-	if value.config.ScrollbackMouse {
+	if value.config.MousePassthrough {
 		t.Fatal("Space did not run the setting the cursor is on")
 	}
 
@@ -285,7 +285,7 @@ func TestConfigWalksAndTogglesWithTheCursor(t *testing.T) {
 		t.Fatalf("End = %d, want the last setting", value.configIndex)
 	}
 	send(&value, key(tea.KeyEnter, ""))
-	if value.config.ScrollbackMouse {
+	if value.config.MousePassthrough {
 		t.Fatal("Enter on the last setting toggled a different one")
 	}
 }

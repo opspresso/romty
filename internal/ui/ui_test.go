@@ -1976,11 +1976,11 @@ func TestDashboardClicksConfigControls(t *testing.T) {
 	left, top := value.modalGeometry(value.width, value.dimensions().bodyHeight).contentOrigin()
 
 	save := send(&value, tea.MouseClickMsg{X: left + 2, Y: top + 2, Button: tea.MouseLeft})
-	if !value.config.ScrollbackMouse || save == nil || value.configIndex != 1 {
-		t.Fatalf("scrollback mouse click = (enabled %v, save %v, cursor %d)",
-			value.config.ScrollbackMouse, save, value.configIndex)
+	if !value.config.MousePassthrough || save == nil || value.configIndex != 1 {
+		t.Fatalf("mouse passthrough click = (enabled %v, save %v, cursor %d)",
+			value.config.MousePassthrough, save, value.configIndex)
 	}
-	soundCommand := send(&value, tea.MouseClickMsg{X: left + 2, Y: top + 5, Button: tea.MouseLeft})
+	soundCommand := send(&value, tea.MouseClickMsg{X: left + 2, Y: top + 6, Button: tea.MouseLeft})
 	if played := commandMessage[soundPlayedMsg](t, soundCommand); played.kind != sound.Done {
 		t.Fatalf("test sound click = %q, want done", played.kind)
 	}

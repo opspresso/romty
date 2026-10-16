@@ -176,6 +176,13 @@ func configRows() []configRow {
 			hint:  "←/→",
 		},
 		{
+			name:   "Mouse passthrough",
+			value:  func(m dashboard) string { return onOff(m.config.MousePassthrough) },
+			hint:   "p",
+			keys:   []string{"p"},
+			action: dashboard.toggleMousePassthrough,
+		},
+		{
 			name:   "Scrollback mouse",
 			value:  func(m dashboard) string { return onOff(m.config.ScrollbackMouse) },
 			hint:   "m",

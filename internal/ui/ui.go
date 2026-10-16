@@ -956,6 +956,11 @@ func (m *dashboard) setLeftWidth(width int) {
 	m.config.LeftWidth = min(max(width, minimumLeftWidth), maximum)
 }
 
+func (m dashboard) toggleMousePassthrough() (tea.Model, tea.Cmd) {
+	m.config.MousePassthrough = !m.config.MousePassthrough
+	return m, m.saveConfig()
+}
+
 func (m dashboard) toggleScrollbackMouse() (tea.Model, tea.Cmd) {
 	m.config.ScrollbackMouse = !m.config.ScrollbackMouse
 	return m, m.saveConfig()
