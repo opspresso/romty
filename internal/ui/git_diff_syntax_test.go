@@ -41,7 +41,7 @@ func TestDashboardHighlightsCodeDiffsInBothLayouts(t *testing.T) {
 		syntaxHighlighted: true,
 	}
 	inline := strings.Join(value.renderFileViewContent(100, 20), "\n")
-	for _, line := range strings.Split(inline, "\n") {
+	for line := range strings.SplitSeq(inline, "\n") {
 		plain := ansi.Strip(line)
 		if (strings.HasPrefix(plain, `-var message`) || strings.HasPrefix(plain, `+var message`)) && lipgloss.Width(line) != 100 {
 			t.Fatalf("changed inline row width = %d, want full 100-column background: %q", lipgloss.Width(line), plain)

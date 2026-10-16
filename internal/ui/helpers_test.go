@@ -1,8 +1,6 @@
 package ui
 
 import (
-	"context"
-
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/opspresso/romty/internal/gitrepo"
@@ -10,10 +8,6 @@ import (
 )
 
 // Test conveniences over the production entry points.
-
-func executeGitAction(path string, action gitAction) (string, error) {
-	return executeGitActionContext(context.Background(), path, action)
-}
 
 func fileTreeRowsOf(files []gitrepo.ChangedFile) []fileTreeRow {
 	return buildFileViewTreeRows(files, false)

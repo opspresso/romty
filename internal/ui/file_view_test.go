@@ -538,7 +538,7 @@ func TestDashboardPersistsAndRestoresTheDiffLayout(t *testing.T) {
 }
 
 func lineContainsInOrder(value string, fragments ...string) bool {
-	for _, line := range strings.Split(value, "\n") {
+	for line := range strings.SplitSeq(value, "\n") {
 		position := 0
 		matched := true
 		for _, fragment := range fragments {

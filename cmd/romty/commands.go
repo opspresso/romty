@@ -100,9 +100,7 @@ func (t commandTheme) failure(value string) string {
 }
 
 // failed and okay are the two sentences a doctor check writes about what it
-// inspected. Spelling them out at each call site is what left one check
-// quoting its path and another not, and "error" inside the value here and
-// beside the label there.
+// inspected, so every check quotes its detail the same way.
 func (t commandTheme) failed(reason string) string {
 	return t.failure("error " + strconv.Quote(reason))
 }
@@ -199,8 +197,7 @@ func printField(output io.Writer, theme commandTheme, label, value string) error
 }
 
 // writeField is printField for a report built in memory, where a write has no
-// failure mode. The doctor checks called printField and dropped its error,
-// which reads as an unchecked write rather than as one that cannot fail.
+// failure mode.
 func writeField(output *strings.Builder, theme commandTheme, label, value string) {
 	output.WriteString(fieldLine(theme, label, value))
 }

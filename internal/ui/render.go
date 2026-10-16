@@ -325,7 +325,7 @@ func (m dashboard) renderStatus(width, bodyHeight int) []string {
 			shortcut{key: "Esc", description: "cancel"},
 		)
 	case m.modal == gitActionsModal && m.gitRun.pending:
-		status = m.renderActivityStatus("RUNNING", m.gitRun.action.label()+" in "+display.Text(m.gitRun.target.Name), width)
+		status = m.renderActivityStatus("RUNNING", m.gitRun.action.String()+" in "+display.Text(m.gitRun.target.Name), width)
 	case m.modal == gitActionsModal && m.gitRun.complete:
 		shortcuts := []shortcut{
 			{key: "Enter", description: "actions"},

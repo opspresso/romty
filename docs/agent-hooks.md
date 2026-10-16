@@ -54,7 +54,7 @@ OpenCode has no JSON hook settings; its plugin API is the extension point. romty
 
 Kiro CLI loads standalone hook files. romty generates both files whole; each hook runs `romty hook kiro`. A file at either path that romty did not write is refused rather than overwritten.
 
-All writes are atomic and preserve a settings-file symlink by updating its target.
+All writes are atomic, preserve a settings-file symlink by updating its target, and leave each written file readable and writable only by the current user (mode `0600`).
 
 Installed handlers use the absolute path of the current romty executable so an untrusted working directory or modified `PATH` cannot substitute another command. Re-run `romty hooks` after moving a manually installed romty binary; the installer updates an old executable path.
 

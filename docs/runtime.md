@@ -33,7 +33,7 @@ More than one TUI can attach to the same terminal. Every client receives output,
 
 Disconnecting a slow client never waits for terminal input, so output continues to drain even when the guest is busy writing. Input to a guest that stops reading is interrupted after two seconds and that attachment closes. Closing a terminal also interrupts pending PTY I/O, allowing tab and daemon shutdown to finish.
 
-The daemon reads a hooked Claude Code session's own transcript to report its token and cost counters and to detect a user interrupt, which runs no hook. It reads at most the last mebibyte of that file, skips any record larger than 64 KiB, and re-reads a transcript only after it changes. It decodes the counter fields and each record's type and time. It decodes a record's message content only when the line contains Claude Code's interrupt marker, and keeps only the interrupt time. Prompts, tool inputs, and assistant messages are not retained.
+The daemon reads a hooked Claude Code session's own transcript to report its token and cost counters and to detect a user interrupt, which runs no hook. It reads at most the last mebibyte of that file, skips any record larger than 64 KiB, and re-reads a transcript only after it changes. It decodes the counter fields and each record's type and time. It decodes a record's message content only when the line contains Claude Code's interrupt marker, and keeps only the interrupt time. For a hooked Kiro CLI session, the daemon reads the session record under the Kiro home with the same bounds, only to detect a cancelled turn, which runs no Stop hook. Prompts, tool inputs, and assistant messages are not retained.
 
 romty refuses to start inside one of its own terminal sessions.
 

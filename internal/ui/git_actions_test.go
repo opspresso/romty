@@ -2,7 +2,6 @@ package ui
 
 import (
 	"errors"
-	"reflect"
 	"strings"
 	"testing"
 
@@ -12,7 +11,6 @@ import (
 
 	"github.com/opspresso/romty/internal/gitrepo"
 	"github.com/opspresso/romty/internal/model"
-	"github.com/opspresso/romty/internal/testutil"
 )
 
 func TestDashboardRunsGitActionForContextWorkspace(t *testing.T) {
@@ -152,11 +150,11 @@ func TestDashboardClosesGitResultWithMouse(t *testing.T) {
 			}
 			for row, line := range geometry.lines {
 				plain := ansi.Strip(line)
-				column := strings.Index(plain, "×")
-				if column < 0 {
+				before, _, ok := strings.Cut(plain, "×")
+				if !ok {
 					continue
 				}
-				x := geometry.left + lipgloss.Width(plain[:column])
+				x := geometry.left + lipgloss.Width(before)
 				y := geometry.top + row
 				send(&value, tea.MouseMotionMsg{X: x, Y: y})
 				if value.hover.kind != hoverModalClose {
@@ -265,38 +263,6 @@ func TestDashboardRecognisesCtrlShiftGAcrossInputLayouts(t *testing.T) {
 	command := send(&value, physicalG)
 	if command != nil || value.modal != gitActionsModal {
 		t.Fatalf("Ctrl+Shift+G with a Korean layout = (command %v, modal %v)", command, value.modal)
-	}
-}
-
-func TestGitActionArguments(t *testing.T) {
-	probes := []struct {
-		action gitAction
-		want   []string
-	}{
-		{action: gitStatusAction, want: []string{"status", "--short", "--branch"}},
-		{action: gitFetchAction, want: []string{"fetch"}},
-		{action: gitPullAction, want: []string{"pull", "--ff-only"}},
-		{action: gitPushAction, want: []string{"push"}},
-	}
-	for _, probe := range probes {
-		arguments, err := probe.action.arguments()
-		if err != nil || !reflect.DeepEqual(arguments, probe.want) {
-			t.Fatalf("%s arguments = (%v, %v), want %v", probe.action.label(), arguments, err, probe.want)
-		}
-	}
-	if _, err := gitAction(99).arguments(); err == nil {
-		t.Fatal("unknown Git action did not fail")
-	}
-}
-
-func TestExecuteGitStatusAction(t *testing.T) {
-	repository := t.TempDir()
-	testutil.RunGit(t, "init", "--initial-branch=main", repository)
-	testutil.WriteFile(t, repository, "untracked.txt", "new")
-
-	output, err := executeGitAction(repository, gitStatusAction)
-	if err != nil || !strings.Contains(output, "## No commits yet on main") || !strings.Contains(output, "?? untracked.txt") {
-		t.Fatalf("Git status = (%q, %v), want branch and untracked file", output, err)
 	}
 }
 

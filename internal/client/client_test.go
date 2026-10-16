@@ -87,7 +87,7 @@ func TestShutdownWaitsForTheDaemonToReleaseItsSocket(t *testing.T) {
 	acknowledged := make(chan struct{})
 	release := make(chan struct{})
 	go func() {
-		for requestIndex := 0; requestIndex < 2; requestIndex++ {
+		for range 2 {
 			connection, err := listener.Accept()
 			if err != nil {
 				return

@@ -12,6 +12,7 @@ import (
 	"github.com/opspresso/romty/internal/agenthooks"
 	"github.com/opspresso/romty/internal/client"
 	"github.com/opspresso/romty/internal/daemon"
+	"github.com/opspresso/romty/internal/model"
 	"github.com/opspresso/romty/internal/paths"
 	"github.com/opspresso/romty/internal/ui"
 )
@@ -29,13 +30,11 @@ func run() error {
 
 func runCommandWithInput(arguments []string, output io.Writer, input io.Reader) error {
 	if len(arguments) == 2 && arguments[0] == "hook" {
-		switch arguments[1] {
-		case "claude", "codex", "opencode", "kiro":
-			runHookCommand(arguments[1], input)
-			return nil
-		default:
+		if !model.Agent(arguments[1]).ReportsPhases() {
 			return fmt.Errorf("unknown hook provider %q", arguments[1])
 		}
+		runHookCommand(arguments[1], input)
+		return nil
 	}
 	if len(arguments) > 1 {
 		return fmt.Errorf("usage: romty <command>; run `romty help` for details")

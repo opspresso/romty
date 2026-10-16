@@ -37,12 +37,6 @@ func command(ctx context.Context, path string, environment []string, arguments .
 	return cmd
 }
 
-// RunRemote runs a git command that may reach a remote and returns its
-// combined output, bounded by ctx and by the output limit.
-func RunRemote(ctx context.Context, path string, arguments ...string) ([]byte, error) {
-	return combinedOutput(ctx, path, remoteEnvironment, arguments...)
-}
-
 // State is the branch line romty shows for a repository.
 type State struct {
 	Branch     string
@@ -73,7 +67,7 @@ func readState(path string, fetch bool) (State, bool) {
 
 func parseState(output string) State {
 	var state State
-	for _, line := range strings.Split(output, "\n") {
+	for line := range strings.SplitSeq(output, "\n") {
 		switch {
 		case strings.HasPrefix(line, "# branch.oid "):
 			state.Revision = strings.TrimPrefix(line, "# branch.oid ")
@@ -126,9 +120,7 @@ func States(paths []string, fetch bool) map[string]State {
 	var mu sync.Mutex
 	var workers sync.WaitGroup
 	for range min(len(unique), statusWorkers) {
-		workers.Add(1)
-		go func() {
-			defer workers.Done()
+		workers.Go(func() {
 			for path := range jobs {
 				state, ok := readState(path, fetch)
 				if ok {
@@ -137,7 +129,7 @@ func States(paths []string, fetch bool) map[string]State {
 					mu.Unlock()
 				}
 			}
-		}()
+		})
 	}
 	workers.Wait()
 	return result

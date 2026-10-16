@@ -466,13 +466,13 @@ func validateTabName(name string) error {
 	return nil
 }
 
+// agents answers a client that predates phase reporting. It needs only the
+// foreground scan, not the Codex, transcript, and output reads a status takes.
 func (s *Server) agents() map[string]model.Agent {
-	statuses := s.agentStatusesSnapshot()
-	result := make(map[string]model.Agent, len(statuses))
-	for tabID, status := range statuses {
-		result[tabID] = status.Agent
-	}
-	return result
+	s.mu.Lock()
+	sessions := s.sessionsLocked()
+	s.mu.Unlock()
+	return s.scanAgents(sessions)
 }
 
 func (s *Server) agentStatusesSnapshot() map[string]model.AgentStatus {
@@ -483,9 +483,7 @@ func (s *Server) agentStatusesSnapshot() map[string]model.AgentStatus {
 	agents := s.scanAgents(sessions)
 	s.mu.Lock()
 	reported := make(map[string]agentRuntime, len(s.agentStatuses))
-	for tabID, runtime := range s.agentStatuses {
-		reported[tabID] = runtime
-	}
+	maps.Copy(reported, s.agentStatuses)
 	s.mu.Unlock()
 	native := s.readCodexStatuses(sessions, agents)
 	inferred := inferPhases(sessions, agents, reported)
@@ -512,7 +510,7 @@ func (s *Server) agentStatusesSnapshot() map[string]model.AgentStatus {
 			// title no longer shows, so what is left belongs to this tab.
 			if report, ok := native[tabID]; ok && report.prefix == sessions[tabID].codexPrefix() {
 				s.agentStatuses[tabID] = agentRuntime{AgentStatus: report.status}
-			} else if current, ok := s.agentStatuses[tabID]; ok && current.Agent == model.AgentCodex && current.Source == "runtime" {
+			} else if current, ok := s.agentStatuses[tabID]; ok && current.Agent == model.AgentCodex && current.Source == model.AgentSourceRuntime {
 				current.Phase, current.Active = model.AgentPhaseUnknown, false
 				s.agentStatuses[tabID] = current
 			}

@@ -367,10 +367,10 @@ func Unavailable(err error) bool {
 }
 
 // OpenAttach hands back the attach stream without interpreting the replay
-// boundary, so the recorded history and the live output arrive as one stream
-// the way they did before that boundary existed. Tests that read the replay as
-// it comes off the socket use it. The TUI wants OpenTerminal instead, because
-// a terminal has to restore its history before it is put on screen.
+// boundary, so the recorded history and the live output arrive as one stream.
+// Tests that read the replay as it comes off the socket use it. The TUI uses
+// OpenTerminal, because a terminal has to restore its history before it is
+// put on screen.
 func (c *Client) OpenAttach(tabID string) (net.Conn, *bufio.Reader, error) {
 	connection, reader, _, err := c.openAttach(tabID)
 	return connection, reader, err

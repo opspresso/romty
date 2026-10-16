@@ -359,7 +359,7 @@ func TestServeLeavesTheModesOfConcurrentDirectoriesAlone(t *testing.T) {
 	base := testutil.ShortTempDir(t)
 	served := startDaemonAt(t, filepath.Join(base, "daemon.sock"), filepath.Join(base, "state.json"), "/bin/sh")
 
-	for index := 0; index < 200; index++ {
+	for index := range 200 {
 		directory := filepath.Join(base, fmt.Sprintf("workspace-%d", index))
 		if err := os.Mkdir(directory, 0o755); err != nil {
 			t.Fatalf("Mkdir() error = %v", err)

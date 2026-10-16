@@ -286,6 +286,50 @@
           <span class="icon">
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <circle cx="12" cy="12" r="9" />
+              <path d="M8 12l3 3 5-6" />
+            </svg>
+          </span>
+          <h3>Knows what each agent is doing</h3>
+          <p>
+            Claude Code, Codex, OpenCode, and Kiro CLI report work, questions, approvals, and
+            completion to their tab. <kbd>Ctrl+Shift+A</kbd> opens the next agent that is waiting
+            for you, and optional sounds announce it.
+          </p>
+        </div>
+        <div class="card">
+          <span class="icon">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M4 12a8 8 0 1 0 2.3-5.7" />
+              <path d="M4 4v4h4" />
+            </svg>
+          </span>
+          <h3>A stop is not the end</h3>
+          <p>
+            <code>romty stop</code> saves each tab's output and agent session. The next tab in
+            that workspace replays the output with the resume command already typed, and a
+            closed tab can be reopened the same way.
+          </p>
+        </div>
+        <div class="card">
+          <span class="icon">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="6" cy="6" r="2" />
+              <circle cx="6" cy="18" r="2" />
+              <circle cx="18" cy="9" r="2" />
+              <path d="M6 8v8M18 11c0 4-6 3-11 6" />
+            </svg>
+          </span>
+          <h3>Git at a glance</h3>
+          <p>
+            Every workspace shows its branch, changes, and ahead or behind counts.
+            <kbd>Ctrl+Shift+G</kbd> runs status, fetch, pull, and push, and
+            <kbd>Ctrl+Shift+F</kbd> opens highlighted diffs of the changed files.
+          </p>
+        </div>
+        <div class="card">
+          <span class="icon">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="12" cy="12" r="9" />
               <path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor" stroke="none" />
             </svg>
           </span>
@@ -410,6 +454,7 @@
             <div class="key-row"><span class="caps"><kbd>n/N</kbd></span><span>Move to the next or previous scrollback match</span></div>
             <div class="key-row"><span class="caps"><kbd>Backspace</kbd></span><span>Erase the last typed character</span></div>
             <div class="key-row"><span class="caps"><kbd>←/→</kbd><kbd>[/]</kbd></span><span>Resize the workspace pane in Config</span></div>
+            <div class="key-row"><span class="caps"><kbd>p</kbd></span><span>Toggle mouse passthrough in Config</span></div>
             <div class="key-row"><span class="caps"><kbd>m</kbd></span><span>Toggle the scrollback mouse in Config</span></div>
             <div class="key-row"><span class="caps"><kbd>d</kbd><kbd>b</kbd></span><span>Toggle the done and waiting sounds in Config</span></div>
             <div class="key-row"><span class="caps"><kbd>s</kbd></span><span>Play the done sound in Config</span></div>

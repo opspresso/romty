@@ -114,8 +114,7 @@ func readDirectory(path string) browser {
 // which directory is open, and the reason is at the end of the message — which
 // is the half a narrow box drops.
 func failureReason(err error) string {
-	var pathError *fs.PathError
-	if errors.As(err, &pathError) {
+	if pathError, ok := errors.AsType[*fs.PathError](err); ok {
 		return pathError.Err.Error()
 	}
 	return err.Error()

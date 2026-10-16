@@ -18,9 +18,9 @@ func TestResumeStoreTakesNewestStopThenLowestTabName(t *testing.T) {
 		name    string
 		savedAt time.Time
 	}{
-		{id: "tab-old", name: "1", savedAt: older},
-		{id: "tab-two", name: "2", savedAt: newer},
-		{id: "tab-one", name: "1", savedAt: newer},
+		{id: "0a", name: "1", savedAt: older},
+		{id: "0b", name: "2", savedAt: newer},
+		{id: "0c", name: "1", savedAt: newer},
 	} {
 		meta := resumeSnapshot{
 			Format: 1, WorkspaceID: "workspace-1", TabName: save.name, SavedAt: save.savedAt,
@@ -29,7 +29,7 @@ func TestResumeStoreTakesNewestStopThenLowestTabName(t *testing.T) {
 			t.Fatalf("save(%s) error = %v", save.id, err)
 		}
 	}
-	if err := store.save("tab-other", resumeSnapshot{
+	if err := store.save("0d", resumeSnapshot{
 		Format: 1, WorkspaceID: "workspace-2", TabName: "1", SavedAt: newer,
 	}, []byte("other")); err != nil {
 		t.Fatalf("save(tab-other) error = %v", err)
@@ -41,9 +41,9 @@ func TestResumeStoreTakesNewestStopThenLowestTabName(t *testing.T) {
 	}{
 		// The newest stop first, and inside it the lowest tab name; the older
 		// generation only after the newer one is used up.
-		{name: "1", recording: "output tab-one"},
-		{name: "2", recording: "output tab-two"},
-		{name: "1", recording: "output tab-old"},
+		{name: "1", recording: "output 0c"},
+		{name: "2", recording: "output 0b"},
+		{name: "1", recording: "output 0a"},
 	}
 	for index, want := range wants {
 		meta, recording, ok := store.take("workspace-1")
@@ -66,7 +66,7 @@ func TestResumeStoreTakesNewestStopThenLowestTabName(t *testing.T) {
 func TestResumeStoreDiscardsStaleSnapshots(t *testing.T) {
 	directory := t.TempDir()
 	store := &resumeStore{directory: directory}
-	if err := store.save("tab-1", resumeSnapshot{
+	if err := store.save("01", resumeSnapshot{
 		Format: 1, WorkspaceID: "workspace-1", TabName: "1", SavedAt: time.Now(),
 	}, []byte("output")); err != nil {
 		t.Fatalf("save() error = %v", err)
@@ -77,7 +77,7 @@ func TestResumeStoreDiscardsStaleSnapshots(t *testing.T) {
 		t.Fatal("discardStale removed a fresh snapshot")
 	}
 
-	if err := store.save("tab-1", resumeSnapshot{
+	if err := store.save("01", resumeSnapshot{
 		Format: 1, WorkspaceID: "workspace-1", TabName: "1", SavedAt: time.Now(),
 	}, []byte("output")); err != nil {
 		t.Fatalf("save() again error = %v", err)
@@ -95,13 +95,28 @@ func TestResumeStoreDiscardsStaleSnapshots(t *testing.T) {
 	}
 }
 
+// A daemon can run for weeks after the stop it restores from, so take
+// applies the retention itself rather than relying on the cleanup at startup.
+func TestResumeStoreTakeSkipsAnExpiredSnapshot(t *testing.T) {
+	store := &resumeStore{directory: t.TempDir()}
+	if err := store.save("01", resumeSnapshot{
+		Format: 1, WorkspaceID: "workspace-1", TabName: "1",
+		SavedAt: time.Now().Add(-resumeRetention - time.Hour),
+	}, []byte("output")); err != nil {
+		t.Fatalf("save() error = %v", err)
+	}
+	if _, _, ok := store.take("workspace-1"); ok {
+		t.Fatal("take() restored a snapshot past its retention")
+	}
+}
+
 func TestResumeStoreSkipsACorruptSnapshot(t *testing.T) {
 	directory := t.TempDir()
 	store := &resumeStore{directory: directory}
 	if err := os.WriteFile(filepath.Join(directory, "broken.json"), []byte("{"), 0o600); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
-	if err := store.save("tab-1", resumeSnapshot{
+	if err := store.save("01", resumeSnapshot{
 		Format: 1, WorkspaceID: "workspace-1", TabName: "1", SavedAt: time.Now(),
 	}, []byte("output")); err != nil {
 		t.Fatalf("save() error = %v", err)
