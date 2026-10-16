@@ -466,13 +466,13 @@ func validateTabName(name string) error {
 	return nil
 }
 
+// agents answers a client that predates phase reporting. It needs only the
+// foreground scan, not the Codex, transcript, and output reads a status takes.
 func (s *Server) agents() map[string]model.Agent {
-	statuses := s.agentStatusesSnapshot()
-	result := make(map[string]model.Agent, len(statuses))
-	for tabID, status := range statuses {
-		result[tabID] = status.Agent
-	}
-	return result
+	s.mu.Lock()
+	sessions := s.sessionsLocked()
+	s.mu.Unlock()
+	return s.scanAgents(sessions)
 }
 
 func (s *Server) agentStatusesSnapshot() map[string]model.AgentStatus {
