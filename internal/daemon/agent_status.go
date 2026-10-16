@@ -83,7 +83,7 @@ func (s *Server) recordAgentEvent(tabID string, event *protocol.AgentEvent) prot
 		return protocol.Response{}
 	}
 	current, exists := s.agentStatuses[tabID]
-	if exists && current.Source == "runtime" && current.Agent == event.Agent && current.SessionID == event.SessionID && current.Phase != model.AgentPhaseUnknown {
+	if exists && current.Source == model.AgentSourceRuntime && current.Agent == event.Agent && current.SessionID == event.SessionID && current.Phase != model.AgentPhaseUnknown {
 		return protocol.Response{}
 	}
 	if terminal {

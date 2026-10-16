@@ -512,7 +512,7 @@ func (s *Server) agentStatusesSnapshot() map[string]model.AgentStatus {
 			// title no longer shows, so what is left belongs to this tab.
 			if report, ok := native[tabID]; ok && report.prefix == sessions[tabID].codexPrefix() {
 				s.agentStatuses[tabID] = agentRuntime{AgentStatus: report.status}
-			} else if current, ok := s.agentStatuses[tabID]; ok && current.Agent == model.AgentCodex && current.Source == "runtime" {
+			} else if current, ok := s.agentStatuses[tabID]; ok && current.Agent == model.AgentCodex && current.Source == model.AgentSourceRuntime {
 				current.Phase, current.Active = model.AgentPhaseUnknown, false
 				s.agentStatuses[tabID] = current
 			}

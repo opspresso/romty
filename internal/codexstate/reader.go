@@ -317,7 +317,7 @@ func (c *rpc) readSession(ctx context.Context, id string) (model.AgentStatus, er
 	if thread.Thread.ID != id {
 		return model.AgentStatus{}, errors.New("Codex returned a different thread")
 	}
-	state := model.AgentStatus{Agent: model.AgentCodex, Source: "runtime", Phase: model.AgentPhaseUnknown, SessionID: id}
+	state := model.AgentStatus{Agent: model.AgentCodex, Source: model.AgentSourceRuntime, Phase: model.AgentPhaseUnknown, SessionID: id}
 	switch thread.Thread.Status.Type {
 	case "active":
 		if thread.Thread.Status.Flags == nil {

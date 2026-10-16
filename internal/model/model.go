@@ -38,6 +38,20 @@ const (
 	AgentNode Agent = "node"
 )
 
+// ReportsPhases reports an agent whose hooks or runtime report turn phases.
+// Node.js is detected as a foreground process only.
+func (a Agent) ReportsPhases() bool {
+	switch a {
+	case AgentClaude, AgentCodex, AgentOpenCode, AgentKiro:
+		return true
+	}
+	return false
+}
+
+// AgentSourceRuntime marks a status read from the agent's own runtime, such as
+// the Codex app-server, rather than derived from hook events.
+const AgentSourceRuntime = "runtime"
+
 type AgentPhase string
 
 const (
