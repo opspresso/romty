@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"os"
 	"slices"
 	"strings"
 	"sync"
@@ -245,6 +246,8 @@ type dashboard struct {
 	configPath  string
 	// homePath is where the root picker opens, resolved once at startup.
 	homePath string
+	// hostname names the machine in the tree title, resolved once at startup.
+	hostname string
 	// browse is the root picker's state, kept on the dashboard so the modal
 	// renders from it and the keys move it.
 	browse  browser
@@ -387,6 +390,19 @@ func Run(backend Backend, initial model.Snapshot, configPath string, hookStatuse
 	return value.result, nil
 }
 
+var osHostname = os.Hostname
+
+// shortHostname is the machine name without its domain, or empty when the
+// system cannot report one.
+func shortHostname() string {
+	name, err := osHostname()
+	if err != nil {
+		return ""
+	}
+	name, _, _ = strings.Cut(name, ".")
+	return name
+}
+
 func newDashboardWithConfig(backend Backend, initial model.Snapshot, configPath string, config Config) dashboard {
 	value := dashboard{
 		backend:      backend,
@@ -396,6 +412,7 @@ func newDashboardWithConfig(backend Backend, initial model.Snapshot, configPath 
 		height:       24,
 		configPath:   configPath,
 		homePath:     userHomeDirectory(),
+		hostname:     shortHostname(),
 		config:       config,
 		styles:       newUIStyles(true),
 		gitFetchedAt: now(),

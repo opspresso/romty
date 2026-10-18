@@ -56,3 +56,17 @@ func TestDashboardDoesNotMarkTheCurrentRelease(t *testing.T) {
 		}
 	}
 }
+
+func TestNavigationTitleNamesTheHost(t *testing.T) {
+	testutil.Set(t, &osHostname, func() (string, error) { return "build-01.example.com", nil })
+	value := releaseCheckDashboard(t, "v0.34.0")
+	if title := navigationTitle(value); !strings.Contains(title, " romty · build-01 ") {
+		t.Fatalf("title = %q, want the short hostname beside the name", title)
+	}
+
+	testutil.Set(t, &osHostname, func() (string, error) { return "", errors.New("no hostname") })
+	value = releaseCheckDashboard(t, "v0.34.0")
+	if title := navigationTitle(value); strings.Contains(title, "·") {
+		t.Fatalf("title without a hostname = %q, want the name alone", title)
+	}
+}
