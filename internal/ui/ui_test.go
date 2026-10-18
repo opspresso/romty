@@ -4613,6 +4613,7 @@ func TestDashboardRewritesAStaleSelectionSave(t *testing.T) {
 }
 
 func TestDashboardAdaptsChromeToTerminalBackground(t *testing.T) {
+	testutil.Set(t, &osHostname, func() (string, error) { return "host", nil })
 	value := newDashboard(&fakeBackend{}, model.Snapshot{})
 	if value.Init() == nil {
 		t.Fatal("Init() did not request the terminal background color")
@@ -4626,7 +4627,7 @@ func TestDashboardAdaptsChromeToTerminalBackground(t *testing.T) {
 	if reflect.DeepEqual(darkAccent, value.styles.paneTitleActive.GetForeground()) {
 		t.Fatal("light and dark palettes use the same accent color")
 	}
-	if !strings.Contains(value.render(), value.styles.paneTitleActive.Render(" romty ")) {
+	if !strings.Contains(value.render(), value.styles.paneTitleActive.Render(" romty · host ")) {
 		t.Fatal("light palette was not applied to the dashboard")
 	}
 }

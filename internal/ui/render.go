@@ -468,6 +468,9 @@ func (m dashboard) renderNavigation(width, height int) []string {
 	if m.newerRelease != "" {
 		title = " romty* "
 	}
+	if m.hostname != "" {
+		title += "· " + display.Text(m.hostname) + " "
+	}
 	lines := []string{m.paneHeader(titleStyle, title, width), ""}
 	items := m.navigationItems()
 	available := max(height-len(lines), 0)
