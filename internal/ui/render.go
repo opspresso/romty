@@ -178,11 +178,20 @@ func (m dashboard) terminalSize() (uint16, uint16) {
 	return uint16(min(view.rightWidth, 65535)), uint16(min(view.terminalHeight, 65535))
 }
 
+// windowTitle names romty and the machine so terminal tabs on different hosts
+// stay distinguishable.
+func (m dashboard) windowTitle() string {
+	if m.hostname == "" {
+		return "romty"
+	}
+	return "romty · " + display.Text(m.hostname)
+}
+
 func (m dashboard) View() tea.View {
 	content := m.render()
 	view := tea.NewView(content)
 	view.AltScreen = true
-	view.WindowTitle = "romty"
+	view.WindowTitle = m.windowTitle()
 	view.MouseMode = m.mouseMode()
 	view.KeyboardEnhancements.ReportAlternateKeys = true
 	if !m.fileView.active && !m.scrollback && m.focus == terminalPane && m.terminal != nil {

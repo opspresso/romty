@@ -63,10 +63,16 @@ func TestNavigationTitleNamesTheHost(t *testing.T) {
 	if title := navigationTitle(value); !strings.Contains(title, " romty · build-01 ") {
 		t.Fatalf("title = %q, want the short hostname beside the name", title)
 	}
+	if title := value.View().WindowTitle; title != "romty · build-01" {
+		t.Fatalf("window title = %q, want the short hostname beside the name", title)
+	}
 
 	testutil.Set(t, &osHostname, func() (string, error) { return "", errors.New("no hostname") })
 	value = releaseCheckDashboard(t, "v0.34.0")
 	if title := navigationTitle(value); strings.Contains(title, "·") {
 		t.Fatalf("title without a hostname = %q, want the name alone", title)
+	}
+	if title := value.View().WindowTitle; title != "romty" {
+		t.Fatalf("window title without a hostname = %q, want the name alone", title)
 	}
 }

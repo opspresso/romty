@@ -4,7 +4,7 @@ This guide describes the romty TUI: its panes, agent markers, Git views, keyboar
 
 ## Workspace tree and terminal pane
 
-The left pane shows roots, their direct child workspaces, Git state, and one marker for each running terminal tab. The right pane contains the selected tab rail and embedded terminal. The divider arrow points toward the focused pane. The left pane title shows the machine's hostname without its domain next to `romty`, for example `romty · build-01`.
+The left pane shows roots, their direct child workspaces, Git state, and one marker for each running terminal tab. The right pane contains the selected tab rail and embedded terminal. The divider arrow points toward the focused pane. The left pane title shows the machine's hostname without its domain next to `romty`, for example `romty · build-01`. The terminal window or tab title uses the same text.
 
 A release build checks GitHub for the newest romty release when the dashboard starts and every 12 hours after that. When a newer release exists, the left pane title shows `romty*`, and About (`i`) names the new version. A failed check, for example when the machine is offline or rate limited, keeps the previous result and shows no error. Development builds do not check.
 
