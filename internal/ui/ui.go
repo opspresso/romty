@@ -848,6 +848,8 @@ func (m dashboard) handleKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.moveTab(1)
 	case "enter":
 		return m.activateWorkspace()
+	case "space":
+		return m.toggleRoot()
 	}
 	return m, nil
 }

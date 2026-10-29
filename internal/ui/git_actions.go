@@ -89,11 +89,7 @@ func (m dashboard) gitActionWorkspace() (navItem, bool) {
 	if m.focus == leftPane && !m.scrollback {
 		return m.navigationItem()
 	}
-	items := m.navigationItems()
-	if index := workspaceIndex(items, m.selectedPath); index >= 0 {
-		return items[index], true
-	}
-	return navItem{}, false
+	return m.workspaceItem(m.selectedPath)
 }
 
 func (m dashboard) startGitAction() (tea.Model, tea.Cmd) {

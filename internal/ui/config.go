@@ -43,7 +43,10 @@ type Config struct {
 	// LastWorkspacePath and LastTabID are the terminal romty reopens on start.
 	LastWorkspacePath string `json:"last_workspace_path,omitempty"`
 	LastTabID         string `json:"last_tab_id,omitempty"`
-	unknownFields     map[string]json.RawMessage
+	// CollapsedRoots are the paths of the roots whose workspaces the tree
+	// hides.
+	CollapsedRoots []string `json:"collapsed_roots,omitempty"`
+	unknownFields  map[string]json.RawMessage
 }
 
 // knownConfigFields are the JSON names Config declares, read from its own tags

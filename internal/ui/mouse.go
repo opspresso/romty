@@ -314,6 +314,12 @@ func (m dashboard) handleDashboardMouse(message tea.MouseMsg) (tea.Model, tea.Cm
 		if !ok {
 			return m, nil, true
 		}
+		if item.isRoot && mouse.X <= rootArrowColumn {
+			if row, ok := m.navigationRowForIndex(m.navIndex, view.bodyHeight); ok && row == mouse.Y {
+				updated, command := m.toggleRoot()
+				return updated, command, true
+			}
+		}
 		if m.needsSessionChoice(item) {
 			updated, command := m.openSessionChoice(item)
 			return updated, command, true
@@ -346,6 +352,10 @@ func (m dashboard) handleDashboardMouse(message tea.MouseMsg) (tea.Model, tea.Cm
 	}
 	return m, nil, false
 }
+
+// rootArrowColumn is the column of the ▾/▸ on a root row, after the cursor
+// mark. A click on it, or on the mark, folds the root instead of opening it.
+const rootArrowColumn = 1
 
 // navigationItemAtRow is the tree item drawn on a body row, and its index.
 // Both come from one build of the tree.
