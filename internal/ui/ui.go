@@ -81,6 +81,12 @@ type Backend interface {
 	CloseTab(tabID string) (model.Snapshot, error)
 	RenameTab(tabID, name string) (model.Snapshot, error)
 	MoveTab(tabID string, offset int) (model.Snapshot, error)
+	// Subscribe opens the daemon's stream of changes; a daemon that predates
+	// it returns model.ErrNeedsNewerDaemon and the dashboard polls instead.
+	Subscribe() (model.EventStream, error)
+	// RefreshGit asks the daemon to read Git state now, fetching first when
+	// fetch is set; the result arrives on the stream.
+	RefreshGit(fetch bool) error
 	DaemonInfo() (model.DaemonInfo, error)
 	OpenTerminal(tabID string) (io.ReadWriteCloser, []byte, error)
 	Resize(tabID string, columns, rows uint16) error
@@ -297,6 +303,10 @@ type dashboard struct {
 	treeQuery     string
 	// tabMovePending is set while a tab move waits for the daemon.
 	tabMovePending bool
+	// events is the daemon's change stream while subscribed; polling is set
+	// instead for a daemon that predates the stream.
+	events  model.EventStream
+	polling bool
 	// hooksDeferred holds the agent hook offer until the first root exists.
 	hooksDeferred bool
 	// branches is the branch picker while it is open, and branchRequest
@@ -486,7 +496,7 @@ func (m dashboard) Init() tea.Cmd {
 	// The host starts with alternate scroll on, which is what turns a wheel
 	// notch into arrow keys romty cannot tell from typed ones. Only scrollback
 	// wants them, so the mode is off until it opens.
-	commands := []tea.Cmd{tea.RequestBackgroundColor, m.refreshAgents(), m.initialGitStatus(), altScrollCommand(false), m.readDaemonInfo()}
+	commands := []tea.Cmd{tea.RequestBackgroundColor, m.subscribe(), altScrollCommand(false), m.readDaemonInfo()}
 	// Bubble Tea only asks terminals it can name for synchronized output and
 	// skips SSH sessions outright — but an SSH session is where romty lives.
 	// Asked blind, a terminal that supports the mode reports it and every
@@ -700,25 +710,7 @@ func (m dashboard) update(message tea.Msg) (tea.Model, tea.Cmd) {
 		return m, readGit
 	case agentSnapshotMsg:
 		if message.err == nil {
-			// The first snapshot after startup is the state romty found, not
-			// a transition, so it stays silent.
-			var alerts []tea.Cmd
-			if m.agentSoundReady {
-				if kind, ring := m.soundForAgentTransitions(message.value); ring {
-					alerts = append(alerts, soundAlert(kind))
-				}
-				found := m.agentAlerts(message.value)
-				alerts = append(alerts, m.notifyAgentAlerts(found))
-				for _, alert := range found {
-					if alert.kind == sound.Waiting {
-						m.lastAlertTab = alert.tab.ID
-						break
-					}
-				}
-			}
-			m.updateAgents(message.value)
-			m.heardAgents = maps.Clone(message.value)
-			m.agentSoundReady = true
+			alerts := m.applyAgentStatuses(message.value)
 			if m.daemonDown {
 				// Something else, such as romty in another terminal, started
 				// the daemon again. Its tree is the one to show.
@@ -730,6 +722,17 @@ func (m dashboard) update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.noteDaemonError(message.err)
 		return m, m.refreshAgents()
+	case gitRefreshFailedMsg:
+		if !m.noteDaemonError(message.err) {
+			m.setError(gitError, message.err.Error())
+		}
+		return m, nil
+	case subscribedMsg:
+		return m.handleSubscribed(message)
+	case eventMsg:
+		return m.handleEvent(message)
+	case resubscribeMsg:
+		return m, m.subscribe()
 	case daemonRestartedMsg:
 		return m.handleDaemonRestarted(message)
 	case daemonInfoMsg:
@@ -990,6 +993,9 @@ func (m dashboard) handleKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m dashboard) quit() (tea.Model, tea.Cmd) {
+	if m.events != nil {
+		_ = m.events.Close()
+	}
 	m.cancelGitAction()
 	m.closeTerminal()
 	m.result.Quit = true
@@ -1412,6 +1418,31 @@ type daemonRestartedMsg struct {
 	err error
 }
 
+// applyAgentStatuses takes in the agent statuses the daemon reported, polled
+// or pushed, and returns the alerts their transitions call for. The first
+// report after startup is the state romty found, not a transition, so it
+// stays silent.
+func (m *dashboard) applyAgentStatuses(value map[string]model.AgentStatus) []tea.Cmd {
+	var alerts []tea.Cmd
+	if m.agentSoundReady {
+		if kind, ring := m.soundForAgentTransitions(value); ring {
+			alerts = append(alerts, soundAlert(kind))
+		}
+		found := m.agentAlerts(value)
+		alerts = append(alerts, m.notifyAgentAlerts(found))
+		for _, alert := range found {
+			if alert.kind == sound.Waiting {
+				m.lastAlertTab = alert.tab.ID
+				break
+			}
+		}
+	}
+	m.updateAgents(value)
+	m.heardAgents = maps.Clone(value)
+	m.agentSoundReady = true
+	return alerts
+}
+
 // daemonInfoMsg is the running daemon's report on itself.
 type daemonInfoMsg struct {
 	info model.DaemonInfo
@@ -1486,7 +1517,11 @@ func (m dashboard) handleDaemonRestarted(message daemonRestartedMsg) (tea.Model,
 	m.daemonDown = false
 	m.setNotice(daemonError, "romty daemon started again; Enter on a workspace reopens its saved sessions")
 	updated, command := m.refreshAll()
-	return updated, tea.Batch(command, m.readDaemonInfo())
+	commands := []tea.Cmd{command, m.readDaemonInfo()}
+	if m.events == nil && !m.polling {
+		commands = append(commands, m.subscribe())
+	}
+	return updated, tea.Batch(commands...)
 }
 
 // requestPending reports a request a modal is waiting on: a daemon shutdown, a

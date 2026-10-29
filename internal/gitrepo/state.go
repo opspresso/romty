@@ -6,6 +6,8 @@ package gitrepo
 
 import (
 	"context"
+	"fmt"
+	"github.com/opspresso/romty/internal/model"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -37,16 +39,9 @@ func command(ctx context.Context, path string, environment []string, arguments .
 	return cmd
 }
 
-// State is the branch line romty shows for a repository.
-type State struct {
-	Branch     string
-	Revision   string
-	Detached   bool
-	Dirty      bool
-	Conflicted bool
-	Ahead      int
-	Behind     int
-}
+// State is the branch line romty shows for a repository. It is the model's
+// type, so the daemon can send it to clients.
+type State = model.GitState
 
 func readState(path string, fetch bool) (State, bool) {
 	if _, err := os.Stat(filepath.Join(path, ".git")); err != nil {
@@ -133,4 +128,36 @@ func States(paths []string, fetch bool) map[string]State {
 	}
 	workers.Wait()
 	return result
+}
+
+// Read reads one repository's state, fetching first when fetch is set. It
+// reports false for a directory that is not a repository or that git could
+// not read in time.
+func Read(path string, fetch bool) (State, bool) {
+	return readState(path, fetch)
+}
+
+// signatureFiles are the files whose change means a repository's state may
+// have changed without its working tree being touched: a commit, a checkout,
+// a stage, a fetch, a pull, or a gc.
+var signatureFiles = []string{"HEAD", "index", "FETCH_HEAD", "ORIG_HEAD", "packed-refs"}
+
+// Signature is a cheap fingerprint of a repository's metadata: the size and
+// modification time of each signature file. It costs a few stat calls where
+// git status walks the whole working tree, so a poller can skip a repository
+// whose fingerprint is unchanged. It does not see an edit to a tracked file
+// that has not been staged; the caller reads such repositories on another
+// cue. A .git file, which a linked worktree has, yields an empty signature.
+func Signature(path string) string {
+	directory := filepath.Join(path, ".git")
+	if info, err := os.Stat(directory); err != nil || !info.IsDir() {
+		return ""
+	}
+	var signature strings.Builder
+	for _, name := range signatureFiles {
+		if info, err := os.Stat(filepath.Join(directory, name)); err == nil {
+			fmt.Fprintf(&signature, "%s:%d:%d;", name, info.Size(), info.ModTime().UnixNano())
+		}
+	}
+	return signature.String()
 }

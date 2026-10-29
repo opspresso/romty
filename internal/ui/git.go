@@ -9,6 +9,17 @@ import (
 )
 
 func (m dashboard) readGitStatus(forceFetch, reschedule bool) tea.Cmd {
+	if m.events != nil {
+		// The daemon reads Git for every client; asking it is enough, and
+		// the result arrives on the stream.
+		backend := m.backend
+		return func() tea.Msg {
+			if err := backend.RefreshGit(forceFetch); err != nil {
+				return gitRefreshFailedMsg{err: err}
+			}
+			return nil
+		}
+	}
 	paths := m.workspacePaths()
 	fetch := forceFetch || m.gitFetchedAt.IsZero() || now().Sub(m.gitFetchedAt) >= gitFetchInterval
 	fetchedAt := time.Time{}
@@ -39,4 +50,9 @@ func (m dashboard) workspacePaths() []string {
 		}
 	}
 	return paths
+}
+
+// gitRefreshFailedMsg is a refresh the daemon would not take.
+type gitRefreshFailedMsg struct {
+	err error
 }

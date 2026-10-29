@@ -403,8 +403,14 @@ func (s *Server) snapshot() model.Snapshot {
 	s.mu.Lock()
 	value := cloneState(s.value)
 	revision := s.revision
+	sessions := s.sessionsLocked()
 	s.mu.Unlock()
 	statuses := s.agentStatusesSnapshot()
+	for index := range value.Tabs {
+		if running := sessions[value.Tabs[index].ID]; running != nil {
+			value.Tabs[index].BellAt = running.lastBell()
+		}
+	}
 	closed := closedSessions(s.closed.list(time.Now()))
 	for index := range value.Tabs {
 		value.Tabs[index].SetAgentStatus(statuses[value.Tabs[index].ID])

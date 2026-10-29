@@ -109,6 +109,10 @@ type Server struct {
 	logPath    string
 	configPath string
 	awake      *awakeHold
+
+	// subs are the subscribed clients and git the Git state read for them.
+	subs *subscriptions
+	git  *gitPoller
 }
 
 func New(socket, statePath, shell string) (*Server, error) {
@@ -143,6 +147,8 @@ func New(socket, statePath, shell string) (*Server, error) {
 		transcripts:   transcript.NewReader(),
 		codex:         codexstate.NewReader(),
 		awake:         &awakeHold{},
+		subs:          newSubscriptions(),
+		git:           &gitPoller{},
 	}
 	server.resume.retention = server.retention
 	server.closed.retention = server.retention
@@ -205,6 +211,7 @@ func (s *Server) Serve(ctx context.Context) error {
 	defer s.shutdown()
 	defer listener.Close()
 	go s.housekeep()
+	go s.publish()
 	// tmutil can take seconds, so the exclusion is made once the socket is
 	// up rather than before.
 	go func() {

@@ -7,6 +7,10 @@ import "errors"
 // can tell a stopped daemon from a failed request without knowing sockets.
 var ErrDaemonUnavailable = errors.New("romty daemon is not running")
 
+// ErrNeedsNewerDaemon is what a request for a feature the running daemon
+// predates returns, so a caller can fall back to an older way.
+var ErrNeedsNewerDaemon = errors.New("the running romty daemon is too old for this")
+
 // RefusedError is a request the daemon answered with an error. Message is
 // the daemon's reason as it wrote it, for a caller that shows the reason
 // beside the request and needs no "daemon:" prefix.

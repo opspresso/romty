@@ -60,6 +60,9 @@ type session struct {
 	// Live output includes TUI spinner redraws even when the phase hint is
 	// no longer in history's tail. Replayed history does not renew activity.
 	lastOutputAt time.Time
+	// bells finds the bells in the output, and bellAt is the last one.
+	bells        bellScanner
+	bellAt       time.Time
 	codexHome    string
 	// modes survives the recording being trimmed, so a mode the guest set
 	// long ago is still restored to a reattaching client.
@@ -257,6 +260,9 @@ func (s *session) broadcast(data []byte) {
 	s.history.append(data)
 	if len(data) > 0 {
 		s.lastOutputAt = time.Now()
+	}
+	if s.bells.scan(data) {
+		s.bellAt = time.Now()
 	}
 	stalled := make([]net.Conn, 0)
 	for connection, attached := range s.clients {
@@ -577,6 +583,13 @@ func (s *session) trimRecording(limit int) int {
 	before := len(s.history.data)
 	s.history.reshape(limit)
 	return before - len(s.history.data)
+}
+
+// lastBell is when the session's program last rang the bell.
+func (s *session) lastBell() time.Time {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.bellAt
 }
 
 // lastOutput is when the session last printed.

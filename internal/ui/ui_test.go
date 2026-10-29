@@ -50,6 +50,8 @@ type fakeBackend struct {
 	movedTabID             string
 	movedOffset            int
 	daemonInfo             model.DaemonInfo
+	events                 model.EventStream
+	gitRefreshes           []bool
 	addedPath              string
 	removedRootID          string
 	removedWorkspaceRootID string
@@ -224,6 +226,20 @@ func (f *fakeBackend) MoveTab(tabID string, offset int) (model.Snapshot, error) 
 		return model.Snapshot{}, err
 	}
 	return f.snapshot, nil
+}
+
+// Subscribe answers as a daemon from before subscriptions, so the fixtures
+// poll the way they always have; events_test.go uses a stream of its own.
+func (f *fakeBackend) Subscribe() (model.EventStream, error) {
+	if f.events != nil {
+		return f.events, nil
+	}
+	return nil, model.ErrNeedsNewerDaemon
+}
+
+func (f *fakeBackend) RefreshGit(fetch bool) error {
+	f.gitRefreshes = append(f.gitRefreshes, fetch)
+	return f.failure("RefreshGit")
 }
 
 func (f *fakeBackend) DaemonInfo() (model.DaemonInfo, error) {
