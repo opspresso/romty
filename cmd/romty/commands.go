@@ -41,6 +41,7 @@ var commands = []command{
 	{name: "doctor", description: "Check the local romty environment"},
 	{name: "hooks", description: "Install or update agent status hooks"},
 	{name: "list", description: "List roots, workspaces, and sessions"},
+	{name: "service", description: "Start the daemon at login: install, uninstall, or status"},
 	{name: "stop", description: "Stop the daemon and all running sessions", destructive: true},
 }
 

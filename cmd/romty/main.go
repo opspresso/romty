@@ -36,6 +36,12 @@ func runCommandWithInput(arguments []string, output io.Writer, input io.Reader) 
 		runHookCommand(arguments[1], input)
 		return nil
 	}
+	if len(arguments) >= 1 && arguments[0] == "service" {
+		if len(arguments) > 2 {
+			return fmt.Errorf("usage: romty service [install|uninstall|status]")
+		}
+		return runService(arguments[1:], output, newCommandTheme(output))
+	}
 	if len(arguments) > 1 {
 		return fmt.Errorf("usage: romty <command>; run `romty help` for details")
 	}
