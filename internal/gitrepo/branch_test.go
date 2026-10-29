@@ -135,3 +135,29 @@ func TestBranchSharingATagNameCanBeSwitchedTo(t *testing.T) {
 		t.Fatalf("Switch(v1) = (%q, %v)", output, err)
 	}
 }
+
+// The signature changes with a commit and a stage, and not with an unstaged
+// edit, which the poller reads on other cues.
+func TestSignatureFollowsRepositoryMetadata(t *testing.T) {
+	repository := branchRepository(t)
+	before := Signature(repository)
+	if before == "" {
+		t.Fatal("a repository has no signature")
+	}
+	testutil.WriteFile(t, repository, "a.txt", "edited\n")
+	if Signature(repository) != before {
+		t.Fatal("an unstaged edit changed the signature")
+	}
+	testutil.RunGit(t, "-C", repository, "add", "a.txt")
+	staged := Signature(repository)
+	if staged == before {
+		t.Fatal("staging did not change the signature")
+	}
+	testutil.RunGit(t, "-C", repository, "commit", "-m", "edit")
+	if Signature(repository) == staged {
+		t.Fatal("a commit did not change the signature")
+	}
+	if Signature(t.TempDir()) != "" {
+		t.Fatal("a plain directory has a signature")
+	}
+}

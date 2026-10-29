@@ -64,6 +64,16 @@ func (s *Server) handle(connection net.Conn) {
 		s.handleAttach(connection, request)
 		return
 	}
+	if request.Action == protocol.ActionSubscribe {
+		finish, ok := s.beginRequest(request.Action)
+		if !ok {
+			_ = replyFor(connection, request, protocol.Response{Error: errShuttingDown})
+			return
+		}
+		finish()
+		s.handleSubscribe(connection, request)
+		return
+	}
 	if request.Action == protocol.ActionShutdown {
 		// Stop even when the acknowledgement cannot be delivered, so a client
 		// that already timed out never leaves the daemon running unnoticed.
@@ -101,6 +111,10 @@ func checkClientCapability(request protocol.Request) error {
 		required = protocol.CapabilityRenameTab
 	case protocol.ActionReopenTab:
 		required = protocol.CapabilityReopenTab
+	case protocol.ActionMoveTab:
+		required = protocol.CapabilityMoveTab
+	case protocol.ActionSubscribe, protocol.ActionRefreshGit:
+		required = protocol.CapabilitySubscribe
 	}
 	if required == "" || protocol.HasCapability(requestCapabilities(request), required) {
 		return nil
@@ -180,6 +194,9 @@ func (s *Server) dispatch(request protocol.Request) protocol.Response {
 		}
 	case protocol.ActionMoveTab:
 		return s.moveTab(request.TabID, request.Offset)
+	case protocol.ActionRefreshGit:
+		s.subs.requestRefresh(request.Fetch)
+		return protocol.Response{}
 	case protocol.ActionSnapshot:
 		return s.snapshotResponse()
 	case protocol.ActionAgents:

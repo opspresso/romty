@@ -122,6 +122,9 @@ type Tab struct {
 	// AgentStatus.
 	AgentContextTokens int     `json:"agent_context_tokens,omitempty"`
 	AgentCostUSD       float64 `json:"agent_cost_usd,omitempty"`
+	// BellAt is when the tab's program last rang the terminal bell, which
+	// programs do to ask for attention. Zero when it never has.
+	BellAt time.Time `json:"bell_at,omitzero"`
 }
 
 // AgentStatus is the agent status the tab carries, the inverse of

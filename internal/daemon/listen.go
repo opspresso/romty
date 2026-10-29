@@ -147,9 +147,24 @@ func (l *socketListener) Accept() (net.Conn, error) {
 		if err := listener.SetDeadline(time.Now().Add(time.Second)); err != nil {
 			return nil, err
 		}
-		connection, err := listener.Accept()
+		connection, err := listener.AcceptUnix()
+		if err == nil {
+			// The socket's mode is what keeps other users out; the peer's
+			// user ID is checked as well, so a romty home on a shared or
+			// misconfigured mount cannot hand every shell to another user.
+			if uid, uidErr := peerUID(connection); uidErr != nil || uid != os.Geteuid() {
+				if l.logger != nil {
+					l.logger.Printf("refused a connection from user %d: %v", uid, uidErr)
+				}
+				connection.Close()
+				continue
+			}
+			return connection, nil
+		}
 		if !errors.Is(err, os.ErrDeadlineExceeded) {
-			return connection, err
+			// nil, not the typed nil connection, so the caller's interface
+			// value is nil too.
+			return nil, err
 		}
 		if err := l.restore(); err != nil {
 			return nil, err

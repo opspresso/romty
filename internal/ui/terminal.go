@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"encoding/base64"
 	"fmt"
 	"io"
 	"strings"
@@ -36,6 +37,42 @@ type embeddedTerminal struct {
 	// readBuffer is reused by every read. A read is issued only after the
 	// previous output was written to the emulator, so no two reads overlap.
 	readBuffer []byte
+	// live is false while the recorded output replays, which already rang
+	// its bells and made its copies when it first ran. bell and copies are
+	// what the live output asked of the host since the last takeEffects.
+	live   bool
+	bell   bool
+	copies []string
+}
+
+// maxClipboardBytes bounds one copy a guest asks for. A clipboard holds text
+// a person selected, not megabytes of output.
+const maxClipboardBytes = 1 << 20
+
+// observeClipboard takes an OSC 52 sequence, "52;<selection>;<base64>", and
+// keeps the text a guest asked to copy. Only writes are taken: a read ("?")
+// would hand the host's clipboard to whatever runs in the tab, so it is
+// never answered.
+func (t *embeddedTerminal) observeClipboard(data []byte) {
+	if !t.live {
+		return
+	}
+	parts := strings.SplitN(string(data), ";", 3)
+	if len(parts) != 3 || parts[2] == "?" || base64.StdEncoding.DecodedLen(len(parts[2])) > maxClipboardBytes {
+		return
+	}
+	text, err := base64.StdEncoding.DecodeString(parts[2])
+	if err != nil {
+		return
+	}
+	t.copies = append(t.copies, string(text))
+}
+
+// takeEffects returns, and clears, what the live output asked of the host.
+func (t *embeddedTerminal) takeEffects() (bell bool, copies []string) {
+	bell, copies = t.bell, t.copies
+	t.bell, t.copies = false, nil
+	return bell, copies
 }
 
 // lockModifiers are the lock keys a key event reports as modifiers. They
@@ -63,12 +100,22 @@ func newEmbeddedTerminal(id string, stream io.ReadWriteCloser, width, height int
 		inputDone:  make(chan struct{}),
 		guestMouse: make(map[ansi.DECMode]bool),
 		readBuffer: make([]byte, 32*1024),
+		live:       true,
 	}
 	emulator.SetCallbacks(vt.Callbacks{
 		EnableMode:  func(mode ansi.Mode) { terminal.trackGuestMode(mode, true) },
 		DisableMode: func(mode ansi.Mode) { terminal.trackGuestMode(mode, false) },
+		Bell: func() {
+			if terminal.live {
+				terminal.bell = true
+			}
+		},
 	})
 	clampMargins(emulator)
+	emulator.Emulator.RegisterOscHandler(52, func(data []byte) bool {
+		terminal.observeClipboard(data)
+		return true
+	})
 	go func() {
 		defer close(terminal.inputDone)
 		if _, err := io.Copy(stream, emulator); err != nil {
@@ -101,7 +148,9 @@ func newEmbeddedTerminalWithReplay(
 		}
 	}
 	terminal := newEmbeddedTerminal(id, stream, replayWidth, replayHeight)
+	terminal.live = false
 	terminal.writeOutput(replay)
+	terminal.live = true
 	return terminal
 }
 

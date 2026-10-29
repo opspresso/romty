@@ -47,6 +47,8 @@ The daemon reads a hooked Claude Code session's own transcript to report its tok
 
 romty refuses to start inside one of its own terminal sessions.
 
+Each open TUI subscribes to the daemon, which sends it the workspace tree, the agent statuses, and the Git states when they change. The daemon reads Git state once for all TUIs. It reads a repository when the repository's metadata changes (`HEAD`, `index`, `FETCH_HEAD`, `ORIG_HEAD`, or `packed-refs`), when one of its terminals printed since the last read, when the last read is a minute old, or when a TUI asks with `F5`. It fetches remote-tracking refs every five minutes. An edit to a tracked file that is not staged changes no metadata, so a repository whose terminals print nothing shows it within a minute. A daemon from before v0.49.0 has no subscription, and the TUI polls it as earlier versions did.
+
 The daemon rotates `daemon.log` when it reaches 3 MiB, keeping one previous log as `daemon.log.1`, both at start and while it runs.
 
 Agent status requests from several open TUIs share one scan of the process table for up to a second. An agent's own report and every change to a tab start a new scan.
@@ -68,7 +70,20 @@ The next daemon offers a saved snapshot back through the first tab created in it
 | OpenCode | `opencode --session <id>` | `opencode --continue` |
 | Kiro CLI | `kiro-cli --resume-id <id>` | `kiro-cli --resume` |
 
-Without an identifier, the agent chooses its most recent session. Unconsumed snapshots are discarded after seven days.
+Without an identifier, the agent chooses its most recent session. Unconsumed snapshots are discarded after seven days, or after `output_retention_days` (1 to 30) in `config.json`.
+
+### After a crash
+
+`romty stop` is not the only way a daemon ends: it can crash, be killed, or lose power with the machine. Every five minutes the daemon therefore saves the session of each tab that runs an agent into `checkpoint/`, the same way a stop does; a tab that printed nothing and kept its agent session since its last checkpoint is not written again. The next daemon moves those checkpoints into `resume/` and offers them like a stop's snapshots; a stop's newer snapshot of the same tab is kept instead. A tab that closes, or whose shell ends, drops its checkpoint. Plain shells are not checkpointed.
+
+### Saved output and privacy
+
+A saved session holds the tab's recent terminal output, up to 8 MiB, which can include anything the terminal printed: a token, the contents of a `.env` file, or a password typed into a prompt that echoed it. The files are readable only by you (mode `0600`) and are not encrypted.
+
+- On macOS the daemon excludes the runtime directory from Time Machine with `tmutil addexclusion` when it starts. On Linux, exclude the runtime directory (`~/.config/romty` by default) in your backup tool.
+- Set `"save_output": "off"` in `config.json` to save no output. A reopened or resumed session then starts empty, still with its agent's resume command typed at the prompt.
+- Set `output_retention_days` (1 to 30) to keep saved sessions for a number of days other than the default seven.
+- A `config.json` romty cannot read saves no output; a field it cannot read falls back on its own, and `save_output` then falls back to `off`.
 
 ## Data and configuration
 
@@ -78,8 +93,9 @@ romty stores data in a `romty` directory under the user configuration directory:
 |---|---|
 | `state.json` | Roots, workspaces, and terminal tab metadata |
 | `config.json` | TUI settings such as the last workspace and tab, workspace pane width, mouse passthrough, and diff layout |
-| `resume/` | Output and agent session of each tab that was running at `romty stop`; unconsumed snapshots are discarded after seven days |
-| `closed/` | Output and agent session of the last three tabs closed in each workspace, for reopening; entries are discarded after seven days |
+| `resume/` | Output and agent session of each tab that was running at `romty stop`; unconsumed snapshots are discarded after `output_retention_days` (seven by default) |
+| `closed/` | Output and agent session of the last three tabs closed in each workspace, for reopening; entries are discarded after `output_retention_days` |
+| `checkpoint/` | The latest session of each running agent tab, so a crash leaves sessions to resume; the next daemon moves them into `resume/` |
 | `daemon.sock` | Local client-daemon Unix socket |
 | `daemon.sock.lock` | Lock held by the running daemon |
 | `daemon.log` | Detached daemon output and failures; archived before daemon startup after reaching 3 MiB |
@@ -95,7 +111,9 @@ Keep the path shallow. The `daemon.sock` path must remain below the operating sy
 
 ## Security boundary
 
-The runtime directory and Unix socket are private to the current user. Access to the socket is equivalent to control of every shell owned by romty: a connected process can read and write terminals, create sessions, or stop the daemon.
+The runtime directory and Unix socket are private to the current user. Access to the socket is equivalent to control of every shell owned by romty: a connected process can read and write terminals, create sessions, or stop the daemon. Besides the socket's mode, the daemon reads the user ID of each connecting process (`LOCAL_PEERCRED` on macOS, `SO_PEERCRED` on Linux) and refuses every user but its own, so a runtime directory on a shared or misconfigured mount does not open the shells to other users.
+
+A program in a tab can copy text to your clipboard with OSC 52, which is how vim, tmux, and agents copy over SSH. romty passes on such a copy only; a request to read the clipboard is never answered, so a program cannot see what you copied elsewhere. Turn copying off with `c` in Config or `"block_clipboard": true`.
 
 The runtime directory must be owned by the current user and cannot be a symbolic link. romty narrows it to mode `0700` and `daemon.log` to mode `0600`. It rejects a socket owned by another user or accessible by group or other users, and a log that is not a singly linked regular file owned by the current user.
 

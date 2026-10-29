@@ -6,6 +6,7 @@ package ui
 
 import (
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"time"
@@ -161,7 +162,7 @@ func (m dashboard) tabPlace(tab model.Tab) string {
 // attention counts the running agents that need the user: waiting for an
 // answer, waiting for an approval, or failed.
 type attention struct {
-	input, approval, failed int
+	input, approval, failed, bells int
 }
 
 func (m dashboard) attention() attention {
@@ -178,6 +179,9 @@ func (m dashboard) attention() attention {
 		case model.AgentPhaseError:
 			result.failed++
 		}
+		if m.unseenBell(*tab) {
+			result.bells++
+		}
 	}
 	return result
 }
@@ -189,7 +193,7 @@ func (a attention) summary() string {
 	for _, part := range []struct {
 		marker string
 		count  int
-	}{{"▲", a.input}, {"■", a.approval}, {"★", a.failed}} {
+	}{{"▲", a.input}, {"■", a.approval}, {"★", a.failed}, {"!", a.bells}} {
 		if part.count > 0 {
 			parts = append(parts, fmt.Sprintf("%s%d", part.marker, part.count))
 		}
@@ -388,4 +392,29 @@ func formatTokens(count int) string {
 	default:
 		return fmt.Sprintf("%d", count)
 	}
+}
+
+// applyAgentStatuses takes in the agent statuses the daemon reported, polled
+// or pushed, and returns the alerts their transitions call for. The first
+// report after startup is the state romty found, not a transition, so it
+// stays silent.
+func (m *dashboard) applyAgentStatuses(value map[string]model.AgentStatus) []tea.Cmd {
+	var alerts []tea.Cmd
+	if m.agentSoundReady {
+		if kind, ring := m.soundForAgentTransitions(value); ring {
+			alerts = append(alerts, soundAlert(kind))
+		}
+		found := m.agentAlerts(value)
+		alerts = append(alerts, m.notifyAgentAlerts(found))
+		for _, alert := range found {
+			if alert.kind == sound.Waiting {
+				m.lastAlertTab = alert.tab.ID
+				break
+			}
+		}
+	}
+	m.updateAgents(value)
+	m.heardAgents = maps.Clone(value)
+	m.agentSoundReady = true
+	return alerts
 }

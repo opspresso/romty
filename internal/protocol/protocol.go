@@ -18,7 +18,7 @@ import (
 // speak. Ping advertises the range so peers choose the highest overlap instead
 // of requiring the same build on both sides.
 const (
-	Version        = 9
+	Version        = 10
 	MinimumVersion = 1
 )
 
@@ -32,6 +32,7 @@ const (
 	CapabilityRenameTab        = "rename_tab"
 	CapabilityReopenTab        = "reopen_tab"
 	CapabilityMoveTab          = "move_tab"
+	CapabilitySubscribe        = "subscribe"
 )
 
 var capabilities = []struct {
@@ -47,6 +48,7 @@ var capabilities = []struct {
 	{name: CapabilityRenameTab, since: 7},
 	{name: CapabilityReopenTab, since: 8},
 	{name: CapabilityMoveTab, since: 9},
+	{name: CapabilitySubscribe, since: 10},
 }
 
 const (
@@ -64,9 +66,15 @@ const (
 	ActionRenameTab       = "rename_tab"
 	ActionReopenTab       = "reopen_tab"
 	ActionMoveTab         = "move_tab"
-	ActionAttach          = "attach"
-	ActionResize          = "resize"
-	ActionShutdown        = "shutdown"
+	// ActionSubscribe keeps the connection open and sends a model.Event
+	// whenever the tree, the agent statuses, or the Git states change.
+	ActionSubscribe = "subscribe"
+	// ActionRefreshGit asks the daemon to read the Git state now, and to
+	// fetch first when Fetch is set.
+	ActionRefreshGit = "refresh_git"
+	ActionAttach     = "attach"
+	ActionResize     = "resize"
+	ActionShutdown   = "shutdown"
 )
 
 // Remedy is what the user has to do about a mismatch, and every message that
@@ -102,6 +110,8 @@ type Request struct {
 	// Offset is how many places move_tab moves a tab among its workspace's
 	// tabs: negative towards the first.
 	Offset int `json:"offset,omitempty"`
+	// Fetch asks refresh_git to fetch remote-tracking refs first.
+	Fetch bool `json:"fetch,omitempty"`
 	// ClientID connects an attachment to its out-of-band resize requests.
 	// Empty keeps the global-resize behavior of clients that predate the field.
 	ClientID string `json:"client_id,omitempty"`
@@ -216,11 +226,7 @@ type Response struct {
 // RefusedError is a request the daemon answered with an error. Message is the
 // daemon's reason as it wrote it, for a caller that shows the reason beside
 // the request and needs no "daemon:" prefix.
-type RefusedError struct {
-	Message string
-}
-
-func (e *RefusedError) Error() string { return "daemon: " + e.Message }
+type RefusedError = model.RefusedError
 
 // SelectVersion returns the highest revision both peers support.
 func SelectVersion(firstMin, firstMax, secondMin, secondMax int) (int, bool) {

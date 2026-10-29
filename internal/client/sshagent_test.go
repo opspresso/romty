@@ -1,12 +1,14 @@
 package client
 
 import (
+	"errors"
 	"net"
 	"os"
 	"path/filepath"
 	"slices"
 	"testing"
 
+	"github.com/opspresso/romty/internal/model"
 	"github.com/opspresso/romty/internal/testutil"
 )
 
@@ -88,5 +90,15 @@ func TestLinkSSHAgentDoesNotLoopWithAProfileLink(t *testing.T) {
 	}
 	if _, err := os.Stat(link); err != nil {
 		t.Fatalf("the link does not reach the agent: %v", err)
+	}
+}
+
+// A dial that finds nothing listening is reported as model.ErrDaemonUnavailable,
+// which is how callers outside this package recognise a stopped daemon.
+func TestNothingListeningIsReportedAsUnavailable(t *testing.T) {
+	socket := filepath.Join(testutil.ShortTempDir(t), "none.sock")
+	_, err := New(socket).Snapshot()
+	if !errors.Is(err, model.ErrDaemonUnavailable) || !Unavailable(err) {
+		t.Fatalf("Snapshot() with no daemon = %v, want ErrDaemonUnavailable", err)
 	}
 }

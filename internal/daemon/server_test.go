@@ -1440,3 +1440,53 @@ func TestMoveTabReordersAWorkspacesTabs(t *testing.T) {
 		t.Fatalf("DaemonInfo() = (%+v, %v), want this build", info, err)
 	}
 }
+
+// A subscription opens with the whole picture, then sends what changes: the
+// tree after a tab is made, and the Git state after a refresh.
+func TestSubscriptionSendsChanges(t *testing.T) {
+	socket := startDaemon(t).socket
+	root := t.TempDir()
+	workspacePath := filepath.Join(root, "alpha")
+	testutil.RunGit(t, "init", "--initial-branch=main", workspacePath)
+	backend := client.New(socket)
+	testutil.WaitForDaemon(t, backend)
+	_, workspace := openWorkspace(t, backend, root, workspacePath)
+
+	subscription, err := backend.Subscribe()
+	if err != nil {
+		t.Fatalf("Subscribe() error = %v", err)
+	}
+	defer subscription.Close()
+	first, err := subscription.Next()
+	if err != nil || first.Snapshot == nil {
+		t.Fatalf("first event = (%+v, %v), want the snapshot", first, err)
+	}
+
+	tab := createTab(t, backend, workspace)
+	sawTab, sawGit := false, false
+	if err := backend.RefreshGit(false); err != nil {
+		t.Fatalf("RefreshGit() error = %v", err)
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) && (!sawTab || !sawGit) {
+		event, err := subscription.Next()
+		if err != nil {
+			t.Fatalf("Next() error = %v", err)
+		}
+		if event.Snapshot != nil {
+			for value := range event.Snapshot.Tabs() {
+				if value.ID == tab.ID {
+					sawTab = true
+				}
+			}
+		}
+		// The daemon keys Git state by the workspace path it stored, which
+		// is resolved (/var is /private/var on macOS).
+		if state, ok := event.GitStates[workspace.Path]; ok && state.Branch == "main" {
+			sawGit = true
+		}
+	}
+	if !sawTab || !sawGit {
+		t.Fatalf("events = (tab %v, git %v), want both", sawTab, sawGit)
+	}
+}

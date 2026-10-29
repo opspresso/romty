@@ -17,7 +17,11 @@
 
 package ui
 
-import "github.com/opspresso/romty/internal/display"
+import (
+	"bytes"
+
+	"github.com/opspresso/romty/internal/display"
+)
 
 // titleHoldLimit bounds a sequence held back between chunks. A window title
 // is a line of text; anything longer is not one being split, and holding it
@@ -32,8 +36,16 @@ type titleScrubber struct {
 	skip int
 }
 
-// scrub returns data with every complete OSC 0, 1 and 2 sequence removed,
-// holding one that is still missing its terminator until the next call.
+// scrub returns data with every complete OSC 0, 1 and 2 sequence removed and
+// every OSC 8 hyperlink put in the order the emulator reads it, holding a
+// sequence that is still missing its terminator until the next call.
+//
+// The emulator stores an OSC 8 sequence's two fields the wrong way round — the
+// parameters as the URI and the URI as the parameters — and draws them back in
+// the standard order, so a link reached the host terminal as
+// "8;https://…;" and opened nothing. Handing it the fields swapped makes the
+// link it draws the one the guest sent. TestHyperlinksReachTheHostIntact fails
+// if the emulator is ever fixed, so the swap cannot outlive the bug.
 func (s *titleScrubber) scrub(data []byte) []byte {
 	scan := data
 	if len(s.pending) > 0 {
@@ -65,6 +77,10 @@ func (s *titleScrubber) scrub(data []byte) []byte {
 		}
 		filtered = append(filtered, scan[copied:from]...)
 		copied = to
+	}
+	replace := func(from, to int, value []byte) {
+		drop(from, to)
+		filtered = append(filtered, value...)
 	}
 
 	index := 0
@@ -110,7 +126,8 @@ func (s *titleScrubber) scrub(data []byte) []byte {
 		if cursor >= len(scan) {
 			return hold(index)
 		}
-		if scan[cursor] != ';' || cursor != body+1 || scan[body] > '2' {
+		link := scan[cursor] == ';' && cursor == body+1 && scan[body] == '8'
+		if !link && (scan[cursor] != ';' || cursor != body+1 || scan[body] > '2') {
 			// Some other OSC: leave it to the emulator.
 			index = body
 			continue
@@ -128,7 +145,11 @@ func (s *titleScrubber) scrub(data []byte) []byte {
 				continue
 			}
 			if scan[position] == display.Bell || scan[position] == display.ST {
-				drop(index, position+1)
+				if link {
+					replace(index, position, swapLinkFields(scan[index:cursor+1], scan[cursor+1:position]))
+				} else {
+					drop(index, position+1)
+				}
 				index = position + 1
 				break
 			}
@@ -137,8 +158,17 @@ func (s *titleScrubber) scrub(data []byte) []byte {
 					return hold(index)
 				}
 				if scan[position+1] == '\\' {
-					drop(index, position+2)
+					if link {
+						replace(index, position, swapLinkFields(scan[index:cursor+1], scan[cursor+1:position]))
+					} else {
+						drop(index, position+2)
+					}
 					index = position + 2
+					break
+				}
+				if link {
+					// An abandoned link is left to the emulator as it came.
+					index = position
 					break
 				}
 				// The escape abandons the string: the parser consumes what
@@ -151,4 +181,18 @@ func (s *titleScrubber) scrub(data []byte) []byte {
 		}
 	}
 	return finish(len(scan))
+}
+
+// swapLinkFields rebuilds an OSC 8 sequence up to its terminator with its
+// parameters and URI exchanged. introducer is ESC ] 8 ; (or OSC 8 ;) and
+// payload is "params;URI". A payload without the separator is left as it is.
+func swapLinkFields(introducer, payload []byte) []byte {
+	params, uri, found := bytes.Cut(payload, []byte{';'})
+	result := append([]byte(nil), introducer...)
+	if !found {
+		return append(result, payload...)
+	}
+	result = append(result, uri...)
+	result = append(result, ';')
+	return append(result, params...)
 }

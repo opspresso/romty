@@ -42,6 +42,8 @@ An agent that waits for input (`▲`) or approval (`■`), or that failed (`★`
 
 romty sends a desktop notification when an agent finishes, fails, or starts waiting, for example `romty Claude Code: Needs your answer · api / 1`. It uses the OSC 9 escape sequence, which travels to the terminal on your own device, so the notification also reaches you over SSH. iTerm2, WezTerm, Ghostty, kitty, and Windows Terminal show it; a terminal without OSC 9 support ignores it. Several transitions in one poll share one notification. A notification for a waiting agent ends with `press a in romty`, and `a` opens that agent first. The first agent poll after startup does not notify. Press `n` in Config, or set `mute_notifications` in `config.json`, to turn notifications off.
 
+A program that rings the terminal bell in the open tab rings your terminal's bell. A bell in a tab that is not on screen marks the workspace row with an amber `!`, counts in the badge as `!1`, and sends a desktop notification such as `romty bell · api / 2`. Opening the tab marks the bell heard.
+
 While the workspace pane has focus, the shortcut rail spells out the tabs of the workspace under the cursor, for example `1: Claude Code · Working  server: Node.js  zsh: shell`.
 
 Press `a` in the workspace pane, or `Ctrl`+`Shift`+`A` in either pane, to open the next terminal whose agent is waiting for input or approval. While an agent waits, the shortcut rail offers this key first. It walks those terminals in the order the tree draws them and wraps at the end, so repeated presses cycle every agent that stopped to ask something. When the only waiting agent is the terminal already open, the keyboard moves to it rather than reattaching. When nothing is waiting, the status bar says so and the open terminal is left alone.
@@ -50,7 +52,7 @@ Press `a` in the workspace pane, or `Ctrl`+`Shift`+`A` in either pane, to open t
 
 Git metadata is rendered as `(branch*) ↑N ↓N`. `*` means the worktree has tracked or untracked changes, `!` replaces it for conflicts, and the arrows count commits ahead of or behind the upstream. A detached HEAD appears as `(@abcdef0)`.
 
-romty refreshes local Git state every 10 seconds. It fetches remote-tracking refs in the background at startup and every 5 minutes. `F5` refreshes local state immediately and starts another background fetch; fetches never prompt for credentials and time out without blocking the interface.
+The daemon reads Git state for every open TUI and sends it when it changes; see [Session lifecycle](runtime.md#session-lifecycle) for when it reads. `F5` asks it to read every repository and fetch now. Fetches never prompt for credentials and time out without blocking the interface.
 
 Press `g` in the workspace pane, or `Ctrl`+`Shift`+`G` in either pane, to open Git actions for a workspace. From the workspace pane it targets the row under the cursor; from the terminal pane or scrollback it targets the open terminal workspace. The menu provides `Status` (`s`), `Fetch` (`u`), `Pull` (`p`), `Push` (`P`), and `Switch branch` (`b`). The letters run an action directly. The `GIT` section of the workspace actions (`F8`) is the same list.
 
@@ -233,6 +235,12 @@ Press `Space` in the workspace pane, or click the `▾` arrow of a root, to coll
 - The root row shows the markers of the running tabs in its hidden workspaces.
 - When the open terminal belongs to a hidden workspace, the root row shows the current-workspace mark. `Ctrl`+`/`, `F7`, and the terminal restored at startup put the cursor on the root and keep it collapsed.
 - `Ctrl`+`Shift`+`↑`/`↓` and `Ctrl`+`Shift`+`A` can open a hidden workspace. They expand its root first, so the cursor lands on that workspace.
+
+## Copying and links
+
+A program in a tab copies to your clipboard with OSC 52, for example vim's `"+y` or tmux's copy mode, and romty passes the copy to your terminal, so it works over SSH when your terminal allows OSC 52. romty never answers a request to read your clipboard, and output replayed when a tab reattaches copies nothing. Turn copying off with `c` in Config.
+
+A link a program prints with OSC 8 stays a link in your terminal.
 
 ## Scrollback and mouse
 

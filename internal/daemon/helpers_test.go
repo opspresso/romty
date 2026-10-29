@@ -25,4 +25,6 @@ func (s *session) attachReady(connection net.Conn, ready func(int) error) error 
 func init() {
 	agentStatusCacheTTL = 0
 	terminateGrace = 200 * time.Millisecond
+	// Every test daemon would otherwise run tmutil on its temporary home.
+	excludeFromBackup = func(string) error { return nil }
 }

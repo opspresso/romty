@@ -13,6 +13,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/opspresso/romty/internal/jsonfile"
+	"github.com/opspresso/romty/internal/sound"
 )
 
 const (
@@ -41,6 +42,10 @@ type Config struct {
 	// default because they reach the device the user is on.
 	MuteNotifications bool `json:"mute_notifications,omitempty"`
 	SoundOnWaiting    bool `json:"sound_on_waiting,omitempty"`
+	// BlockClipboard stops programs in a tab from copying to the host's
+	// clipboard with OSC 52. Copying is allowed by default: it is how vim,
+	// tmux and agents copy over SSH. Reading the clipboard is never allowed.
+	BlockClipboard bool `json:"block_clipboard,omitempty"`
 	// AllowSleep lets the machine sleep while an agent works. The daemon
 	// reads it: by default it holds the machine awake while any agent is
 	// busy, because a sleeping machine stops the agent and drops SSH.
@@ -215,6 +220,13 @@ func configRows() []configRow {
 			action: dashboard.toggleKeepAwake,
 		},
 		{
+			name:   "Programs may copy (OSC 52)",
+			value:  func(m dashboard) string { return onOff(!m.config.BlockClipboard) },
+			hint:   "c",
+			keys:   []string{"c"},
+			action: dashboard.toggleClipboard,
+		},
+		{
 			name:   "Sound on done",
 			value:  func(m dashboard) string { return onOff(m.config.SoundOnDone) },
 			hint:   "d",
@@ -273,4 +285,64 @@ func (m dashboard) runConfigRow(row int) (tea.Model, tea.Cmd, bool) {
 	}
 	updated, command := rows[row].action(m)
 	return updated, command, true
+}
+
+func (m dashboard) adjustLeftWidth(delta int) (tea.Model, tea.Cmd) {
+	m.setLeftWidth(m.paneWidth() + delta)
+	return m, m.saveConfig()
+}
+
+func (m *dashboard) setLeftWidth(width int) {
+	maximum := max(min(maximumLeftWidth, m.screenWidth()-20), 0)
+	m.config.LeftWidth = min(max(width, minimumLeftWidth), maximum)
+}
+
+func (m dashboard) toggleMousePassthrough() (tea.Model, tea.Cmd) {
+	m.config.MousePassthrough = !m.config.MousePassthrough
+	return m, m.saveConfig()
+}
+
+func (m dashboard) toggleScrollbackMouse() (tea.Model, tea.Cmd) {
+	m.config.ScrollbackMouse = !m.config.ScrollbackMouse
+	return m, m.saveConfig()
+}
+
+func (m dashboard) toggleClipboard() (tea.Model, tea.Cmd) {
+	m.config.BlockClipboard = !m.config.BlockClipboard
+	return m, m.saveConfig()
+}
+
+func (m dashboard) toggleKeepAwake() (tea.Model, tea.Cmd) {
+	m.config.AllowSleep = !m.config.AllowSleep
+	return m, m.saveConfig()
+}
+
+func (m dashboard) toggleNotifications() (tea.Model, tea.Cmd) {
+	m.config.MuteNotifications = !m.config.MuteNotifications
+	return m, m.saveConfig()
+}
+
+// Turning a sound on plays it, so the user hears what it will sound like
+// and that the host can play it at all.
+func (m dashboard) toggleSoundOnDone() (tea.Model, tea.Cmd) {
+	m.config.SoundOnDone = !m.config.SoundOnDone
+	if m.config.SoundOnDone {
+		return m, tea.Batch(m.saveConfig(), soundAlert(sound.Done))
+	}
+	return m, m.saveConfig()
+}
+
+func (m dashboard) toggleSoundOnWaiting() (tea.Model, tea.Cmd) {
+	m.config.SoundOnWaiting = !m.config.SoundOnWaiting
+	if m.config.SoundOnWaiting {
+		return m, tea.Batch(m.saveConfig(), soundAlert(sound.Waiting))
+	}
+	return m, m.saveConfig()
+}
+
+func (m dashboard) saveConfig() tea.Cmd {
+	path, config := m.configPath, m.config.clone()
+	return func() tea.Msg {
+		return configSavedMsg{saved: config, err: saveConfig(path, config)}
+	}
 }
