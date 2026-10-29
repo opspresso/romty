@@ -23,7 +23,7 @@ func navigationTitle(value dashboard) string {
 
 func TestDashboardMarksANewerRelease(t *testing.T) {
 	value := releaseCheckDashboard(t, "v0.34.0")
-	if title := navigationTitle(value); strings.Contains(title, "romty*") {
+	if title := navigationTitle(value); strings.Contains(title, "romty ↑") {
 		t.Fatalf("title before the check = %q, want no marker", title)
 	}
 
@@ -31,7 +31,7 @@ func TestDashboardMarksANewerRelease(t *testing.T) {
 	if command == nil {
 		t.Fatal("a finished check did not schedule the next one")
 	}
-	if title := navigationTitle(value); !strings.Contains(title, " romty* ") {
+	if title := navigationTitle(value); !strings.Contains(title, " romty ↑ ") {
 		t.Fatalf("title = %q, want the newer-release marker", title)
 	}
 	value.modal = aboutModal
@@ -41,7 +41,7 @@ func TestDashboardMarksANewerRelease(t *testing.T) {
 
 	// A failed check keeps the answer it has; the release is still out there.
 	send(&value, releaseCheckedMsg{err: errors.New("offline")})
-	if title := navigationTitle(value); !strings.Contains(title, " romty* ") {
+	if title := navigationTitle(value); !strings.Contains(title, " romty ↑ ") {
 		t.Fatalf("title after a failed check = %q, want the marker kept", title)
 	}
 }
@@ -51,7 +51,7 @@ func TestDashboardDoesNotMarkTheCurrentRelease(t *testing.T) {
 		value := releaseCheckDashboard(t, "v0.34.0")
 		value.newerRelease = "v0.34.0"
 		send(&value, releaseCheckedMsg{latest: latest})
-		if title := navigationTitle(value); strings.Contains(title, "romty*") {
+		if title := navigationTitle(value); strings.Contains(title, "romty ↑") {
 			t.Fatalf("latest %s: title = %q, want no marker", latest, title)
 		}
 	}

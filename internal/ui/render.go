@@ -517,7 +517,9 @@ func (m dashboard) renderNavigation(width, height int) []string {
 	}
 	title := " romty "
 	if m.newerRelease != "" {
-		title = " romty* "
+		// An arrow says "newer version" where an asterisk said nothing a
+		// user could guess; About names the version.
+		title = " romty ↑ "
 	}
 	if m.hostname != "" {
 		title += "· " + display.Text(m.hostname) + " "

@@ -329,6 +329,11 @@ func (m dashboard) agentStatusNote() string {
 // count instead.
 func (m dashboard) railNote() string {
 	note := m.agentStatusNote()
+	if m.focus == leftPane && !m.scrollback {
+		// In the tree the markers on the cursor's row are what the user is
+		// reading, so the rail spells them out.
+		note = m.cursorTabsNote()
+	}
 	if !m.navigationHidden() {
 		return note
 	}
@@ -340,6 +345,31 @@ func (m dashboard) railNote() string {
 		return summary + " waiting"
 	default:
 		return summary + " waiting · " + note
+	}
+}
+
+// cursorTabsNote names each running tab of the workspace under the cursor and
+// what runs in it, such as "1: Claude Code · Working  server: Node.js", so the
+// markers on the row can be read without learning them first.
+func (m dashboard) cursorTabsNote() string {
+	tabs := m.navigationTabs()
+	parts := make([]string, 0, len(tabs))
+	for _, tab := range tabs {
+		parts = append(parts, display.Text(tab.Name)+": "+tabActivity(tab))
+	}
+	return strings.Join(parts, "  ")
+}
+
+// tabActivity is what runs in a tab, in words: the agent and its phase, the
+// Node.js service, or a plain shell.
+func tabActivity(tab model.Tab) string {
+	switch {
+	case tab.Agent == "":
+		return "shell"
+	case tab.Agent == model.AgentNode:
+		return agentDisplayNames[tab.Agent]
+	default:
+		return agentDisplayNames[tab.Agent] + " · " + agentPhaseLabels[tab.AgentPhase]
 	}
 }
 

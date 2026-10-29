@@ -166,3 +166,19 @@ func TestCrowdedTabRowKeepsEveryTabAndTheNewTabSlot(t *testing.T) {
 		t.Fatalf("click on + = (%+v, %v), want the new-tab slot", hit, ok)
 	}
 }
+
+// In the tree the rail spells out the markers on the cursor's row.
+func TestTreeRailNamesWhatRunsInEachTab(t *testing.T) {
+	tabs := []model.Tab{
+		{ID: "t1", WorkspaceID: "workspace-1", Name: "1", Running: true, Agent: model.AgentClaude, AgentPhase: model.AgentPhaseWaitingInput},
+		{ID: "t2", WorkspaceID: "workspace-1", Name: "server", Running: true, Agent: model.AgentNode},
+		{ID: "t3", WorkspaceID: "workspace-1", Name: "zsh", Running: true},
+	}
+	snapshot, _ := alphaWorkspaceSnapshot(tabs)
+	value := newDashboard(&fakeBackend{}, snapshot)
+	value.focus = leftPane
+	value.setNavigation(1)
+	if got, want := value.railNote(), "1: Claude Code · Needs your answer  server: Node.js  zsh: shell"; got != want {
+		t.Fatalf("tree rail note = %q, want %q", got, want)
+	}
+}
