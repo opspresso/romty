@@ -238,8 +238,8 @@ type dashboard struct {
 	// coming back to a workspace lands on the terminal the user left rather
 	// than on its first one. It is replaced, never written in place, because
 	// copies of the dashboard share the map.
-	lastTabs map[string]string
-	scrollback       bool
+	lastTabs   map[string]string
+	scrollback bool
 	// altScroll is the host's alternate scroll as romty last set it, so the
 	// sequence is sent on the transitions and not on every message.
 	altScroll bool

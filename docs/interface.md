@@ -1,12 +1,16 @@
 # Interface
 
-This guide describes the romty TUI: its panes, agent markers, Git views, keyboard shortcuts, scrollback, mouse behavior, and settings. Press `F1` in romty for the in-app key reference.
+This guide describes the romty TUI: its panes, agent markers, Git views, keyboard shortcuts, scrollback, mouse behavior, and settings. Press `F1` in romty for the in-app key reference, and press `/` in it to search the shortcuts by name or key. `Enter` keeps the filter; `Esc` clears it, and a second `Esc` closes Help.
 
 ## Workspace tree and terminal pane
 
-The left pane shows roots, their direct child workspaces, Git state, and one marker for each running terminal tab. The right pane contains the selected tab rail and embedded terminal. The divider arrow points toward the focused pane. The left pane title shows the machine's hostname without its domain next to `romty`, for example `romty · build-01`. The terminal window or tab title uses the same text.
+The workspace pane on the left shows the workspace tree: roots, their direct child workspaces, Git state, and one marker for each running terminal tab. A workspace that is a Git repository takes two rows, its name and its Git state; any other workspace takes one row. The terminal pane on the right contains the tab row and the embedded terminal. The divider arrow points toward the focused pane.
 
-A release build checks GitHub for the newest romty release when the dashboard starts and every 12 hours after that. When a newer release exists, the left pane title shows `romty*`, and About (`i`) names the new version. A failed check, for example when the machine is offline or rate limited, keeps the previous result and shows no error. Development builds do not check.
+The workspace pane title shows the machine's hostname without its domain next to `romty`, for example `romty · build-01`. The terminal window or tab title uses the same text. When agents need you, both titles add their count, for example `romty · build-01 · ▲2 ■1`; see [Agents that need you](#agents-that-need-you).
+
+Before the first root is added, the terminal pane explains how to start and the shortcut rail names `F2` only.
+
+A release build checks GitHub for the newest romty release when the dashboard starts and every 12 hours after that. When a newer release exists, the workspace pane title shows `romty ↑`, and About (`i`) names the new version. A failed check, for example when the machine is offline or rate limited, keeps the previous result and shows no error. Development builds do not check.
 
 Below 80 columns the workspace pane takes half the screen from the terminal, so focusing the terminal hides it and gives the terminal the full width. `Ctrl`+`/` or `F7` brings it back and moves the focus with it. The layout and terminal use the actual reported width even below 40 columns. At 80 columns and above both panes stay on screen, and focus never resizes the terminal. A terminal that speaks the Kitty keyboard protocol reports `Ctrl`+`/` as itself; every other terminal, including phone SSH clients, sends it as `Ctrl`+`_`, and romty accepts both.
 
@@ -32,7 +36,15 @@ The status rail shows the label for the open terminal's agent. `romty list` prin
 
 If a marker stays `●`, see [Status stays unavailable](agent-hooks.md#status-stays-unavailable).
 
-Press `Ctrl`+`Shift`+`A` to open the next terminal whose agent is waiting for input or approval. It walks those terminals in the order the tree draws them and wraps at the end, so repeated presses cycle every agent that stopped to ask something. When the only waiting agent is the terminal already open, the keyboard moves to it rather than reattaching. When nothing is waiting, the status bar says so and the open terminal is left alone.
+### Agents that need you
+
+An agent that waits for input (`▲`) or approval (`■`), or that failed (`★`), is drawn in reverse so it stands out from busy agents. Their count is shown in an amber badge at the right end of the workspace pane title and in the window title. When the narrow layout hides the workspace pane, the shortcut rail shows the count instead, for example `▲1 waiting`.
+
+romty sends a desktop notification when an agent finishes, fails, or starts waiting, for example `romty Claude Code: Needs your answer · api / 1`. It uses the OSC 9 escape sequence, which travels to the terminal on your own device, so the notification also reaches you over SSH. iTerm2, WezTerm, Ghostty, kitty, and Windows Terminal show it; a terminal without OSC 9 support ignores it. Several transitions in one poll share one notification. The first agent poll after startup does not notify. Press `n` in Config, or set `mute_notifications` in `config.json`, to turn notifications off.
+
+While the workspace pane has focus, the shortcut rail spells out the tabs of the workspace under the cursor, for example `1: Claude Code · Working  server: Node.js  zsh: shell`.
+
+Press `a` in the workspace pane, or `Ctrl`+`Shift`+`A` in either pane, to open the next terminal whose agent is waiting for input or approval. While an agent waits, the shortcut rail offers this key first. It walks those terminals in the order the tree draws them and wraps at the end, so repeated presses cycle every agent that stopped to ask something. When the only waiting agent is the terminal already open, the keyboard moves to it rather than reattaching. When nothing is waiting, the status bar says so and the open terminal is left alone.
 
 ## Git state and actions
 
@@ -82,7 +94,7 @@ Both file views allow directory rows to take the cursor. Press `Enter` to toggle
 
 ## Keyboard shortcuts
 
-`F1` through `F7` work in both panes and with regular modals open. Alternatives listed beside them are contextual; file view assigns its own action to `F5`, and changed-file view also assigns `F6`. The root path modal and the tab name modal own keyboard and paste input until submitted or cancelled, including `F4`. After `Enter`, the modal stays open until the daemon answers. If the daemon rejects the value, the modal keeps the typed text and shows the reason inside it. Clicks reach only the modal's `×` and action buttons, not the dashboard behind it. While daemon shutdown, hook installation, a Git command, or a modal submit is running, only `F4` is accepted. Press `F1` for the in-app reference.
+`F1` through `F7` work in both panes and with regular modals open. Each `Ctrl`+`Shift`+letter shortcut also has a single letter in the workspace pane. A terminal without the Kitty keyboard protocol, such as macOS Terminal and many phone SSH clients, sends `Ctrl`+`Shift`+`A` as the same byte as `Ctrl`+`A`, so the shell receives it. In such a terminal, press `Ctrl`+`/` to move to the workspace pane and then press the letter. Alternatives listed beside them are contextual; file view assigns its own action to `F5`, and changed-file view also assigns `F6`. The root path modal and the tab name modal own keyboard and paste input until submitted or cancelled, including `F4`. After `Enter`, the modal stays open until the daemon answers. If the daemon rejects the value, the modal keeps the typed text and shows the reason inside it. Clicks reach only the modal's `×` and action buttons, not the dashboard behind it. While daemon shutdown, hook installation, a Git command, or a modal submit is running, only `F4` is accepted. Press `F1` for the in-app reference.
 
 ### Global
 
@@ -110,12 +122,12 @@ Both file views allow directory rows to take the cursor. Press `Enter` to toggle
 
 | Key | Action |
 |---|---|
-| `Ctrl`+`Shift`+`T` | Create and open a terminal tab |
-| `Ctrl`+`Shift`+`G` | Open Git actions for the contextual workspace |
-| `Ctrl`+`Shift`+`F` | Toggle changed files and Git diff |
+| `Ctrl`+`Shift`+`T`, or `t` in the workspace pane | Create and open a terminal tab |
+| `Ctrl`+`Shift`+`G`, or `g` in the workspace pane | Open Git actions for the contextual workspace |
+| `Ctrl`+`Shift`+`F`, or `f` in the workspace pane | Toggle changed files and Git diff |
 | `Ctrl`+`Shift`+`←`/`→` | Switch terminal tab |
 | `Ctrl`+`Shift`+`↑`/`↓` | Switch to a workspace with a running terminal |
-| `Ctrl`+`Shift`+`A` | Open the next terminal whose agent is waiting |
+| `Ctrl`+`Shift`+`A`, or `a` in the workspace pane | Open the next terminal whose agent is waiting |
 
 ### Move
 
@@ -146,12 +158,12 @@ Both file views allow directory rows to take the cursor. Press `Enter` to toggle
 | `Esc` | Close a modal or file view, cancel an input modal, or leave scrollback |
 | `Backspace` | Erase the last typed character in a text field or the scrollback search |
 | `←`/`→` or `[`/`]` | Resize the workspace pane in Config |
-| `/` | Find in scrollback, or type a path in the root picker |
+| `/` | Find in scrollback, search Help, or type a path in the root picker |
 | `n`/`N` | Move to the next or previous scrollback match |
 | `p` | Toggle mouse passthrough in Config |
 | `m` | Toggle the scrollback mouse in Config |
 | `d`/`b` | Toggle the done and waiting sounds in Config |
-| `s` | Play the done sound in Config |
+| `n` | Toggle desktop notifications in Config |
 
 ## Roots, workspaces, and tabs
 
@@ -161,7 +173,7 @@ Tabs have a wider click target and an `×` at the right edge. Clicking the label
 
 ### Opening a workspace without a terminal
 
-Selecting a root or workspace that has no running terminal, with `Enter` or a click, does not start a shell at once. A menu titled `Open a session in <workspace>` opens in the middle of the terminal pane instead, and the pane shows nothing else until you choose:
+Selecting a root or workspace that has no running terminal, with `Enter` or a click, starts a new terminal at once when the workspace has no closed sessions. When it has closed sessions, a menu titled `Open a session in <workspace>` opens in the middle of the terminal pane instead, and the pane shows nothing else until you choose:
 
 - `New session` starts a new terminal tab.
 - `Reopen <tab> · <agent> · <time>` reopens one of the workspace's last three closed sessions, newest first. The agent is shown when one was running at close. The time shows the date as well when the session closed before today.
@@ -169,6 +181,8 @@ Selecting a root or workspace that has no running terminal, with `Enter` or a cl
 Use `↑`/`↓` and `Enter`, or click a choice. Press `Esc` or click outside the menu to cancel. A reopened tab replays the closed tab's output behind a `── reopened from a closed tab ──` marker and takes back its name when no running tab uses it. When an agent was running at close, its resume command is typed at the prompt, as after `romty stop`; see [Stopping and resuming](runtime.md#stopping-and-resuming). A reopened session leaves the list.
 
 Closing a tab from its `×` or from the workspace actions saves it to this list. A shell that exits on its own is not saved. `New tab`, `Ctrl`+`Shift`+`T`, and the `+` tab still create a tab directly.
+
+When you move the cursor to a workspace, the tab cursor goes to the tab you last opened there, so `Enter` returns to it. While the cursor is on a workspace other than the open one, the tab row shows that workspace's tabs above the open terminal, and the end of the row says `tabs of <workspace> · Enter opens`. When the tabs do not fit in the row, the longest names are shortened so every tab and the `+` tab stay visible.
 
 Pane focus and scrollback toggles are reversible. In the terminal pane only Global and Switch shortcuts are captured. Other keyboard and paste input, including `F8`, `F9`, and ordinary `Ctrl` combinations, is forwarded to the PTY.
 
@@ -229,12 +243,12 @@ The wheel then scrolls scrollback on any terminal that reports the mouse, at the
 
 ## Destructive actions and config
 
-`F8` opens a compact action menu beside the highlighted row; right-clicking a workspace or root opens the same menu at the pointer. The menu offers terminal creation, closing the selected tab, read-only access to all files, changed-file review, Git status/fetch/pull/push, and removal directly when they apply. Closing a tab asks before it terminates that shell. Deleting a workspace recursively removes all of its contents. Forgetting a root removes it only from romty. Both removal actions require confirmation and terminate terminal sessions under the selected item.
+`F8` opens a compact action menu beside the highlighted row; right-clicking a workspace or root opens the same menu at the pointer. The menu offers terminal creation, closing the selected tab, read-only access to all files, changed-file review, Git status/fetch/pull/push, and removal directly when they apply. Closing a tab asks before it terminates that shell. Deleting a workspace recursively removes all of its contents, so the confirmation accepts `Enter` only after you type the workspace's name exactly. Forgetting a root removes it only from romty and confirms with `Enter`. Both removal actions terminate terminal sessions under the selected item.
 
 `F9` asks before stopping the daemon because this terminates every running shell. Once confirmed, shutdown cannot be cancelled.
 
-The last opened workspace and terminal tab, workspace pane width, and inline or split diff layout are saved automatically in `config.json`. Reopening romty reconnects to that tab when it is still running; a removed workspace or stopped tab falls back to the workspace list. The pane width is constrained to 18 through 40 columns and may shrink further when the terminal is narrow.
+The last opened workspace and terminal tab, workspace pane width, collapsed roots, and inline or split diff layout are saved automatically in `config.json`. Reopening romty reconnects to that tab when it is still running; a removed workspace or stopped tab falls back to the workspace list. The pane width is constrained to 18 through 40 columns and may shrink further when the terminal is narrow.
 
 Config lists each setting as a name, its value, and the key that runs it. Walk the list with `↑`/`↓` and run the row under the cursor with `Enter`; each row's own key still works from anywhere in the modal.
 
-Sound alerts are off by default. Open Config with `F3`, press `d` to toggle the embedded done sound when an agent reports confirmed completion or failure, `b` to toggle the embedded waiting sound when an agent begins waiting for input or approval, and `s` to test the done sound. A response that stopped without confirmed completion, an interruption, and an unavailable status do not play the done sound; see [agent status hooks](agent-hooks.md). A stable state does not play repeatedly, and the first agent snapshot after startup stays silent. Playback uses the first supported audio tool on the host running romty, so an SSH session plays on the remote host rather than the connecting device; a host without a supported player remains silent.
+Desktop notifications are on by default; see [Agents that need you](#agents-that-need-you). Sound alerts are off by default. Open Config with `F3`, press `d` to toggle the embedded done sound when an agent reports confirmed completion or failure, or `b` to toggle the embedded waiting sound when an agent begins waiting for input or approval. Turning a sound on plays it once, so you can hear it and confirm that the host can play it. A response that stopped without confirmed completion, an interruption, and an unavailable status do not play the done sound; see [agent status hooks](agent-hooks.md). A stable state does not play repeatedly, and the first agent snapshot after startup stays silent. Playback uses the first supported audio tool on the host running romty, so an SSH session plays on the remote host rather than the connecting device; a host without a supported player remains silent.

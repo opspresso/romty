@@ -178,7 +178,7 @@ type configRow struct {
 func configRows() []configRow {
 	return []configRow{
 		{
-			name:  "Left pane",
+			name:  "Workspace pane width",
 			value: func(m dashboard) string { return strconv.Itoa(m.paneWidth()) },
 			hint:  "←/→",
 		},

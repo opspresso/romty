@@ -69,7 +69,7 @@ func helpReference() []helpEntry {
 		{description: "About", keys: []string{"i"}},
 		{description: "Focus terminal", keys: []string{"Tab"}},
 		{description: "Collapse / expand root", keys: []string{"Space"}},
-		{section: "SWITCH", note: "chord in any pane; letter in the workspace tree"},
+		{section: "SWITCH", note: "chord in any pane; letter in the workspace pane"},
 		{description: "Jump to a waiting agent", keys: []string{"Ctrl+Shift+A", "a"}},
 		{description: "New tab", keys: []string{"Ctrl+Shift+T", "t"}},
 		{description: "Git actions", keys: []string{"Ctrl+Shift+G", "g"}},

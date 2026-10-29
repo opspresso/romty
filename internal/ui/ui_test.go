@@ -5253,7 +5253,7 @@ func TestDashboardAdjustsAndPersistsLeftPaneWidth(t *testing.T) {
 	if err != nil {
 		t.Fatalf("loadConfig() error = %v", err)
 	}
-	if loaded.LeftWidth != 29 || !configRowReads(ansi.Strip(value.render()), "Left pane", "29") {
+	if loaded.LeftWidth != 29 || !configRowReads(ansi.Strip(value.render()), "Workspace pane width", "29") {
 		t.Fatalf("persisted config = %#v\n%s", loaded, ansi.Strip(value.render()))
 	}
 

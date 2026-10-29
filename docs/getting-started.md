@@ -41,11 +41,14 @@ The daemon starts automatically. Press `F2` to open a directory picker, select a
 ▾ projects
   - api
     (main)
+  - notes
   - web
     (main*) ↓2
 ```
 
-Use `↑`/`↓` to select a root or workspace. Use `←`/`→` to select an existing terminal tab or the `+` tab, then press `Enter`. Selecting a workspace without an open tab creates one automatically.
+A Git repository shows its branch and state on a second row. Any other directory, such as `notes`, takes one row.
+
+Use `↑`/`↓` to select a root or workspace, then press `Enter` to open its terminal. Use `←`/`→` first to select another terminal tab or the `+` tab. `Enter` on a workspace without a running tab starts one. When the workspace has closed sessions, romty first asks whether to reopen one.
 
 Both roots and workspaces can host terminal tabs. A root tab starts in the root directory; a workspace tab starts in that direct child directory. Closing the TUI leaves all shells running so a later `romty` can reconnect.
 

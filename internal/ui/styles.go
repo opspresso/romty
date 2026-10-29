@@ -3,21 +3,21 @@ package ui
 import "charm.land/lipgloss/v2"
 
 type uiStyles struct {
-	paneTitle           lipgloss.Style
-	paneTitleActive     lipgloss.Style
-	navigationItem      lipgloss.Style
-	navigationRoot      lipgloss.Style
-	navigationCurrent   lipgloss.Style
-	navigationSelected  lipgloss.Style
-	interactiveHover    lipgloss.Style
-	agentClaude         lipgloss.Style
-	agentCodex          lipgloss.Style
-	agentOpenCode       lipgloss.Style
-	agentKiro           lipgloss.Style
-	agentNode           lipgloss.Style
-	agentPlain          lipgloss.Style
+	paneTitle          lipgloss.Style
+	paneTitleActive    lipgloss.Style
+	navigationItem     lipgloss.Style
+	navigationRoot     lipgloss.Style
+	navigationCurrent  lipgloss.Style
+	navigationSelected lipgloss.Style
+	interactiveHover   lipgloss.Style
+	agentClaude        lipgloss.Style
+	agentCodex         lipgloss.Style
+	agentOpenCode      lipgloss.Style
+	agentKiro          lipgloss.Style
+	agentNode          lipgloss.Style
+	agentPlain         lipgloss.Style
 	// attention is the chip that counts the agents waiting for the user.
-	attention lipgloss.Style
+	attention           lipgloss.Style
 	gitBranch           lipgloss.Style
 	gitStatus           lipgloss.Style
 	gitConflict         lipgloss.Style
@@ -88,15 +88,15 @@ func newUIStyles(hasDarkBackground bool) *uiStyles {
 		// terracotta, Codex blue, OpenCode violet, Node.js green, and a neutral
 		// for a terminal with no detected program, which would otherwise take
 		// the row's teal.
-		agentClaude:         lipgloss.NewStyle().Foreground(lightDark(lipgloss.Color("#B5482A"), lipgloss.Color("#E8906F"))),
-		agentCodex:          lipgloss.NewStyle().Foreground(lightDark(lipgloss.Color("#1D4ED8"), lipgloss.Color("#60A5FA"))),
-		agentOpenCode:       lipgloss.NewStyle().Foreground(lightDark(lipgloss.Color("#7E22CE"), lipgloss.Color("#C084FC"))),
-		agentKiro:           lipgloss.NewStyle().Foreground(lightDark(lipgloss.Color("#BE185D"), lipgloss.Color("#F472B6"))),
-		agentNode:           lipgloss.NewStyle().Foreground(lightDark(lipgloss.Color("#3F7D20"), lipgloss.Color("#8CCF6B"))),
-		agentPlain:          lipgloss.NewStyle().Foreground(text),
+		agentClaude:   lipgloss.NewStyle().Foreground(lightDark(lipgloss.Color("#B5482A"), lipgloss.Color("#E8906F"))),
+		agentCodex:    lipgloss.NewStyle().Foreground(lightDark(lipgloss.Color("#1D4ED8"), lipgloss.Color("#60A5FA"))),
+		agentOpenCode: lipgloss.NewStyle().Foreground(lightDark(lipgloss.Color("#7E22CE"), lipgloss.Color("#C084FC"))),
+		agentKiro:     lipgloss.NewStyle().Foreground(lightDark(lipgloss.Color("#BE185D"), lipgloss.Color("#F472B6"))),
+		agentNode:     lipgloss.NewStyle().Foreground(lightDark(lipgloss.Color("#3F7D20"), lipgloss.Color("#8CCF6B"))),
+		agentPlain:    lipgloss.NewStyle().Foreground(text),
 		// Amber, apart from the error red, because waiting is a request and
 		// not a failure.
-		attention: lipgloss.NewStyle().Foreground(errorText).Background(attentionColor).Bold(true),
+		attention:           lipgloss.NewStyle().Foreground(errorText).Background(attentionColor).Bold(true),
 		gitBranch:           lipgloss.NewStyle().Foreground(muted),
 		gitStatus:           lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B")),
 		gitConflict:         lipgloss.NewStyle().Foreground(errorColor),

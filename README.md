@@ -46,7 +46,7 @@ go install github.com/opspresso/romty/cmd/romty@latest
 romty
 ```
 
-Press `F2` to add a root directory. Use `↑`/`↓` to select a root or workspace, `←`/`→` to select a terminal tab or `+`, and `Enter` to open it. Closing the TUI with `F4` leaves its shell sessions running.
+Press `F2` to add a root directory. Use `↑`/`↓` to select a root or workspace, `←`/`→` to select a terminal tab or `+`, and `Enter` to open it. When an agent waits for you, romty shows its count in the window title and sends a desktop notification to your terminal; press `a` in the workspace pane to open it. Closing the TUI with `F4` leaves its shell sessions running.
 
 Inside a tab, run `codex`, `claude`, `opencode`, or `kiro-cli` normally. The [agent status setup](docs/agent-hooks.md) connects their lifecycle reports to the tab.
 

@@ -356,7 +356,7 @@ func (m dashboard) renderModalBody(width, height int) []string {
 		m.styles.modalBody.Render(tagline),
 	}
 	if m.newerRelease != "" {
-		lines = append(lines, "", m.styles.navigationCurrent.Render("* "+display.Text(m.newerRelease)+" is available"))
+		lines = append(lines, "", m.styles.navigationCurrent.Render("↑ "+display.Text(m.newerRelease)+" is available"))
 	}
 	return modalBoxFit(m.styles, minimumModalWidth, modalWidth, "About", lines...)
 }
