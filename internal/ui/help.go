@@ -9,6 +9,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/opspresso/romty/internal/display"
 	"github.com/opspresso/romty/internal/version"
 )
 
@@ -68,20 +69,20 @@ func helpReference() []helpEntry {
 		{description: "About", keys: []string{"i"}},
 		{description: "Focus terminal", keys: []string{"Tab"}},
 		{description: "Collapse / expand root", keys: []string{"Space"}},
-		{section: "SWITCH", note: "workspace and terminal context"},
-		{description: "New tab", keys: []string{"Ctrl+Shift+T"}},
-		{description: "Git actions", keys: []string{"Ctrl+Shift+G"}},
-		{description: "Toggle file view", keys: []string{"Ctrl+Shift+F"}},
+		{section: "SWITCH", note: "chord in any pane; letter in the workspace pane"},
+		{description: "Jump to a waiting agent", keys: []string{"Ctrl+Shift+A", "a"}},
+		{description: "New tab", keys: []string{"Ctrl+Shift+T", "t"}},
+		{description: "Git actions", keys: []string{"Ctrl+Shift+G", "g"}},
+		{description: "Toggle file view", keys: []string{"Ctrl+Shift+F", "f"}},
 		{description: "Switch tab", keys: []string{"Ctrl+Shift+←/→"}},
 		{description: "Switch workspace", keys: []string{"Ctrl+Shift+↑/↓"}},
-		{description: "Jump to a waiting agent", keys: []string{"Ctrl+Shift+A"}},
 		{section: "MOVE", note: "lists, output and file view"},
 		{description: "Move one item / line", keys: []string{"↑/↓", "k/j"}},
 		{description: "Tab; picker child/parent", keys: []string{"←/→", "h/l"}},
 		{description: "Previous / next page", keys: []string{"PgUp/PgDn", "Ctrl+B/F"}},
 		{description: "First / last item/line", keys: []string{"Home/End", "g/G"}},
 		{description: "Enter / page scrollback", keys: []string{"Shift+PgUp/PgDn"}},
-		{description: "Find in scrollback", keys: []string{"/"}},
+		{description: "Find in scrollback or Help", keys: []string{"/"}},
 		{description: "Next / previous match", keys: []string{"n/N"}},
 		{description: "Scroll Help/history/diff", keys: []string{"Wheel"}},
 		{section: "FILE VIEW", note: "file tree, contents and diffs"},
@@ -107,12 +108,69 @@ func helpReference() []helpEntry {
 	}
 }
 
+// handleHelpSearchKey edits the Help filter while `/` has the keyboard. The
+// list narrows with every key; Enter keeps the filter and gives the arrow
+// keys back, and Esc drops it.
+func (m dashboard) handleHelpSearchKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	switch message.String() {
+	case "enter":
+		m.helpTyping = false
+	case "esc":
+		m.helpTyping, m.helpQuery = false, ""
+	default:
+		m.helpQuery = editText(m.helpQuery, message)
+	}
+	m.helpOffset = 0
+	return m, nil
+}
+
+// filterHelp keeps the shortcuts whose description or keys contain query,
+// ignoring case, and the headings of the sections they are in.
+func filterHelp(reference []helpEntry, query string) []helpEntry {
+	query = strings.ToLower(strings.TrimSpace(query))
+	if query == "" {
+		return reference
+	}
+	matches := func(entry helpEntry) bool {
+		if strings.Contains(strings.ToLower(entry.description), query) {
+			return true
+		}
+		for _, key := range entry.keys {
+			if strings.Contains(strings.ToLower(key), query) {
+				return true
+			}
+		}
+		return false
+	}
+	result := make([]helpEntry, 0, len(reference))
+	var section *helpEntry
+	for index, entry := range reference {
+		if entry.isSection() {
+			section = &reference[index]
+			continue
+		}
+		if !matches(entry) {
+			continue
+		}
+		if section != nil {
+			result = append(result, *section)
+			section = nil
+		}
+		result = append(result, entry)
+	}
+	return result
+}
+
 func (m dashboard) helpEntries() []string {
-	reference := helpReference()
+	reference := filterHelp(helpReference(), m.helpQuery)
 	lines := make([]string, 0, len(reference)+1)
-	lines = append(lines, m.styles.modalStrong.Render("romty")+
-		m.styles.empty.Render("  "+version.String())+
-		m.styles.modalBody.Render("  "+tagline))
+	if m.helpQuery == "" {
+		lines = append(lines, m.styles.modalStrong.Render("romty")+
+			m.styles.empty.Render("  "+version.String())+
+			m.styles.modalBody.Render("  "+tagline))
+	} else if len(reference) == 0 {
+		lines = append(lines, m.styles.empty.Render("No shortcut matches "+display.Text(m.helpQuery)))
+	}
 	for _, entry := range reference {
 		if entry.isSection() {
 			lines = append(lines, renderHelpSection(m.styles, entry.section, entry.note))

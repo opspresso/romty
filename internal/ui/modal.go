@@ -14,6 +14,7 @@ import (
 	"github.com/opspresso/romty/internal/display"
 	"github.com/opspresso/romty/internal/model"
 	"github.com/opspresso/romty/internal/version"
+	"golang.org/x/text/unicode/norm"
 )
 
 type modalAction struct {
@@ -30,12 +31,22 @@ type modalActionHit struct {
 func (m dashboard) openModal(value modal) (tea.Model, tea.Cmd) {
 	m.modal = value
 	m.helpOffset = 0
+	m.helpQuery, m.helpTyping = "", false
 	m.configIndex = 0
 	m.clearAnyError()
 	return m, nil
 }
 
 func (m dashboard) handleModalKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if m.modal == helpModal && m.helpTyping {
+		return m.handleHelpSearchKey(message)
+	}
+	if message.String() == "esc" && m.modal == helpModal && m.helpQuery != "" {
+		// Esc clears a filter before it closes Help, so it steps back the
+		// way it came.
+		m.helpQuery, m.helpOffset = "", 0
+		return m, nil
+	}
 	if message.String() == "esc" {
 		if m.modal == hookInstallModal {
 			// The skipped agents keep an unavailable status for this run; the
@@ -96,8 +107,14 @@ func (m dashboard) handleModalKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 		}
 	case removeSelectionModal:
 		if message.String() == "enter" {
+			if !m.removeConfirmed() {
+				return m, nil
+			}
 			m.modal = noModal
 			return m, m.removeSelection()
+		}
+		if !m.removeTarget.isRoot {
+			m.removeConfirm = editText(m.removeConfirm, message)
 		}
 	case shutdownModal:
 		if message.String() == "enter" {
@@ -112,6 +129,9 @@ func (m dashboard) handleModalKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 	case helpModal:
 		page := max(modalCapacity(m.dimensions().bodyHeight)-1, 1)
 		switch message.String() {
+		case "/":
+			m.helpTyping = true
+			return m, nil
 		case "up", "k":
 			return m.scrollHelp(-1)
 		case "down", "j":
@@ -273,12 +293,18 @@ func (m dashboard) renderModalBody(width, height int) []string {
 		}
 		// What is about to be deleted comes first, its path under it as
 		// context, and the consequences below the break.
+		// The field is last, where the eye ends after reading what it costs.
+		name := display.Text(m.removeTarget.workspace.Name)
+		fieldWidth := max(min(inputModalWidth, modalWidth)-6, lipgloss.Width(name)+2)
 		return m.withModalActions(modalBoxFit(m.styles, minimumModalWidth, modalWidth, "Delete workspace",
-			m.styles.modalStrong.Render("Delete "+display.Text(m.removeTarget.workspace.Name)+"?"),
+			m.styles.modalStrong.Render("Delete "+name+"?"),
 			m.styles.empty.Render(display.Text(m.removeTarget.workspace.Path)),
 			"",
 			m.styles.errorText.Render("This permanently deletes all contents."),
 			m.styles.errorText.Render("Its running shells will be terminated."),
+			"",
+			m.styles.modalBody.Render("Type ")+m.styles.modalStrong.Render(name)+m.styles.modalBody.Render(" to confirm:"),
+			m.renderTextField(m.removeConfirm, fieldWidth),
 		))
 	}
 	if m.modal == closeTabModal {
@@ -331,7 +357,7 @@ func (m dashboard) renderModalBody(width, height int) []string {
 		m.styles.modalBody.Render(tagline),
 	}
 	if m.newerRelease != "" {
-		lines = append(lines, "", m.styles.navigationCurrent.Render("* "+display.Text(m.newerRelease)+" is available"))
+		lines = append(lines, "", m.styles.navigationCurrent.Render("↑ "+display.Text(m.newerRelease)+" is available"))
 	}
 	return modalBoxFit(m.styles, minimumModalWidth, modalWidth, "About", lines...)
 }
@@ -446,6 +472,9 @@ func (m dashboard) modalActions() []modalAction {
 		if m.removeTarget.isRoot {
 			return answerActions("forget root", "cancel")
 		}
+		if !m.removeConfirmed() {
+			return answerActions("type the name to delete", "cancel")
+		}
 		return answerActions("delete workspace", "cancel")
 	case closeTabModal:
 		return answerActions("close tab", "cancel")
@@ -466,6 +495,20 @@ func (m dashboard) modalActions() []modalAction {
 		return answerActions(m.input.kind.submit(), "cancel")
 	}
 	return nil
+}
+
+// removeConfirmed reports whether the removal dialog may proceed: always for
+// forgetting a root, which leaves the directory on disk, and for deleting a
+// workspace only once its name is typed or pasted. Both sides are compared in
+// NFC and as drawn, because macOS can store a name decomposed (NFD) while a
+// keyboard types it composed, and a name with control characters is shown
+// with replacements: either would make a matching name impossible to enter.
+func (m dashboard) removeConfirmed() bool {
+	if m.removeTarget.isRoot {
+		return true
+	}
+	comparable := func(value string) string { return norm.NFC.String(display.Text(value)) }
+	return comparable(m.removeConfirm) == comparable(m.removeTarget.workspace.Name)
 }
 
 // answerActions are a question modal's two buttons: Enter accepts and Esc

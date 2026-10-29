@@ -13,7 +13,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/opspresso/romty/internal/jsonfile"
-	"github.com/opspresso/romty/internal/sound"
 )
 
 const (
@@ -37,7 +36,11 @@ type Config struct {
 	// the cost of the drag selection scrollback otherwise offers.
 	ScrollbackMouse bool `json:"scrollback_mouse,omitempty"`
 	SoundOnDone     bool `json:"sound_on_done,omitempty"`
-	SoundOnWaiting  bool `json:"sound_on_waiting,omitempty"`
+	// MuteNotifications stops the desktop notifications romty asks the host
+	// terminal for when an agent finishes or starts waiting. They are on by
+	// default because they reach the device the user is on.
+	MuteNotifications bool `json:"mute_notifications,omitempty"`
+	SoundOnWaiting    bool `json:"sound_on_waiting,omitempty"`
 	// GitDiffView is the diff layout, "inline" or "split".
 	GitDiffView string `json:"git_diff_view,omitempty"`
 	// LastWorkspacePath and LastTabID are the terminal romty reopens on start.
@@ -175,7 +178,7 @@ type configRow struct {
 func configRows() []configRow {
 	return []configRow{
 		{
-			name:  "Left pane",
+			name:  "Workspace pane width",
 			value: func(m dashboard) string { return strconv.Itoa(m.paneWidth()) },
 			hint:  "←/→",
 		},
@@ -194,6 +197,13 @@ func configRows() []configRow {
 			action: dashboard.toggleScrollbackMouse,
 		},
 		{
+			name:   "Notifications",
+			value:  func(m dashboard) string { return onOff(!m.config.MuteNotifications) },
+			hint:   "n",
+			keys:   []string{"n"},
+			action: dashboard.toggleNotifications,
+		},
+		{
 			name:   "Sound on done",
 			value:  func(m dashboard) string { return onOff(m.config.SoundOnDone) },
 			hint:   "d",
@@ -206,12 +216,6 @@ func configRows() []configRow {
 			hint:   "b",
 			keys:   []string{"b"},
 			action: dashboard.toggleSoundOnWaiting,
-		},
-		{
-			name:   "Test sound",
-			hint:   "s",
-			keys:   []string{"s"},
-			action: func(m dashboard) (tea.Model, tea.Cmd) { return m, soundAlert(sound.Done) },
 		},
 	}
 }

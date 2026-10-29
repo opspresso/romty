@@ -326,6 +326,10 @@ func (m dashboard) handleFileViewKey(message tea.KeyPressMsg) (tea.Model, tea.Cm
 		return m, m.loadChangedFiles()
 	case "esc":
 		return m.toggleFileView()
+	case "f":
+		// f opens the file view from the workspace pane, so it closes it
+		// too: without the Kitty keyboard protocol Ctrl+Shift+F cannot.
+		return m.toggleFileView()
 	case "f6":
 		if m.fileView.mode == allFilesView {
 			return m, nil

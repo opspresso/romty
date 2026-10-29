@@ -94,10 +94,11 @@ func (m dashboard) openWorkspaceActionsAt(target navItem, x, y int) (tea.Model, 
 	return m, nil
 }
 
-// needsSessionChoice reports whether selecting item asks which session to
-// open: a readable workspace with no running terminal.
+// needsSessionChoice reports a workspace whose Enter has a real choice to
+// make: it has no running terminal and has closed sessions to reopen. With
+// nothing to reopen the only answer is a new session, so Enter starts one.
 func (m dashboard) needsSessionChoice(item navItem) bool {
-	return item.failure == "" && len(runningTabs(item.tabs)) == 0
+	return item.failure == "" && len(runningTabs(item.tabs)) == 0 && len(item.closed) > 0
 }
 
 // activateWorkspace is Enter on the workspace tree: it opens the selected

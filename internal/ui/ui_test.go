@@ -229,11 +229,23 @@ func (f *fakeBackend) RenameTab(tabID, name string) (model.Snapshot, error) {
 	return f.snapshot, nil
 }
 
-// chooseNewSession selects the highlighted workspace, which has no running
-// terminal, and picks New session from the choice it asks.
+// chooseNewSession opens the highlighted workspace, which has no running
+// terminal. Without closed sessions Enter starts a new one at once; with them
+// it asks first, and New session is the choice's first row.
 func chooseNewSession(t *testing.T, value *dashboard) tea.Cmd {
 	t.Helper()
-	if command := send(value, key(tea.KeyEnter, "")); command != nil {
+	item, ok := value.navigationItem()
+	if !ok {
+		t.Fatal("no workspace under the cursor")
+	}
+	command := send(value, key(tea.KeyEnter, ""))
+	if len(item.closed) == 0 {
+		if value.modal != noModal {
+			t.Fatalf("a workspace with nothing to reopen opened modal %v", value.modal)
+		}
+		return command
+	}
+	if command != nil {
 		t.Fatalf("selecting a workspace without a terminal ran %T before a choice", command())
 	}
 	if value.modal != workspaceActionsModal || !value.palette.sessionChoice {
@@ -803,7 +815,8 @@ func TestDashboardSupportsIMEIndependentShortcuts(t *testing.T) {
 		t.Fatalf("F4 result = (quit %v, command %v, terminal %v), want global quit", value.result.Quit, command, value.terminal)
 	}
 
-	value = newDashboard(backend, model.Snapshot{})
+	// A tree with a root: before the first root the rail names F2 alone.
+	value = newDashboard(backend, projectsSnapshot(nil))
 	value.width = 120
 	rendered := value.render()
 	for _, status := range []string{"F1", "F2", "F3", "F4", "F5", "F6"} {
@@ -864,6 +877,7 @@ func TestDashboardMouseWheelScrollsTheWorkspaceWithoutMovingItsCursor(t *testing
 	value := newDashboard(&fakeBackend{}, model.Snapshot{Roots: []model.RootView{{
 		Root: projectsRoot, Directories: directories,
 	}}})
+	value.gitStates = repositoryStates(directories)
 	value.width, value.height = 120, 10
 	value.focus = terminalPane
 	before := ansi.Strip(strings.Join(value.renderNavigation(value.dimensions().leftWidth, value.dimensions().bodyHeight), "\n"))
@@ -1908,7 +1922,9 @@ func TestDashboardKeepsConfigControlsCompact(t *testing.T) {
 			continue
 		}
 		drawn := lines[index]
-		at := lipgloss.Width(drawn[:strings.Index(drawn, text)])
+		// Search after the name: "on" is also inside "Notifications".
+		after := strings.Index(drawn, row.name) + len(row.name)
+		at := lipgloss.Width(drawn[:after+strings.Index(drawn[after:], text)])
 		if column < 0 {
 			column = at
 		} else if at != column {
@@ -1919,7 +1935,7 @@ func TestDashboardKeepsConfigControlsCompact(t *testing.T) {
 	// Keys stay subordinate to the settings while sharing their row, so every
 	// control still fits on the shortest supported screen.
 	rendered := strings.Join(value.renderModal(72, 22), "\n")
-	if !strings.Contains(rendered, value.styles.empty.Render("s")) {
+	if !strings.Contains(rendered, value.styles.empty.Render("d")) {
 		t.Fatalf("the key hint is not muted:\n%s", rendered)
 	}
 
@@ -1956,16 +1972,23 @@ func TestDashboardConfiguresAndTestsSoundAlerts(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, model.Snapshot{})
 	send(&value, key(tea.KeyF3, ""))
 
+	// Turning a sound on plays it once, so the user hears it without a
+	// separate test control.
 	saveDone := send(&value, key('d', "d"))
 	saveWaiting := send(&value, key('b', "b"))
 	if !value.config.SoundOnDone || !value.config.SoundOnWaiting || saveDone == nil || saveWaiting == nil {
 		t.Fatalf("sound toggles = (done %v, waiting %v, saves %v/%v)",
 			value.config.SoundOnDone, value.config.SoundOnWaiting, saveDone, saveWaiting)
 	}
-
-	soundCommand := send(&value, key('s', "s"))
-	if played := commandMessage[soundPlayedMsg](t, soundCommand); played.kind != sound.Done {
-		t.Fatalf("test sound = %q, want done", played.kind)
+	if played := commandMessage[soundPlayedMsg](t, saveDone); played.kind != sound.Done {
+		t.Fatalf("enabling the done sound played %q", played.kind)
+	}
+	if played := commandMessage[soundPlayedMsg](t, saveWaiting); played.kind != sound.Waiting {
+		t.Fatalf("enabling the waiting sound played %q", played.kind)
+	}
+	// Turning it off plays nothing.
+	if _, ok := playedSound(send(&value, key('d', "d"))); ok {
+		t.Fatal("disabling the done sound played it")
 	}
 }
 
@@ -1980,9 +2003,9 @@ func TestDashboardClicksConfigControls(t *testing.T) {
 		t.Fatalf("mouse passthrough click = (enabled %v, save %v, cursor %d)",
 			value.config.MousePassthrough, save, value.configIndex)
 	}
-	soundCommand := send(&value, tea.MouseClickMsg{X: left + 2, Y: top + 6, Button: tea.MouseLeft})
+	soundCommand := send(&value, tea.MouseClickMsg{X: left + 2, Y: top + 5, Button: tea.MouseLeft})
 	if played := commandMessage[soundPlayedMsg](t, soundCommand); played.kind != sound.Done {
-		t.Fatalf("test sound click = %q, want done", played.kind)
+		t.Fatalf("done sound click = %q, want done", played.kind)
 	}
 }
 
@@ -2973,6 +2996,16 @@ func TestDashboardDeletesTheSelectedWorkspace(t *testing.T) {
 		t.Fatalf("workspace confirmation does not describe the deletion:\n%s", body)
 	}
 
+	// Enter does nothing until the name is typed, and a wrong name is not it.
+	if command := send(&value, key(tea.KeyEnter, "")); command != nil || value.modal != removeSelectionModal {
+		t.Fatalf("Enter before the name = (command %v, modal %v), want the dialog kept", command, value.modal)
+	}
+	typeText(&value, "alph")
+	if command := send(&value, key(tea.KeyEnter, "")); command != nil {
+		t.Fatal("Enter with a partial name deleted the workspace")
+	}
+	typeText(&value, "a")
+
 	command = send(&value, key(tea.KeyEnter, ""))
 	if command == nil || value.modal != noModal {
 		t.Fatalf("Enter = (command %v, modal %v), want the deletion", command, value.modal)
@@ -3025,6 +3058,7 @@ func TestDashboardDeletesTheWorkspaceTheConfirmationNamed(t *testing.T) {
 		t.Fatalf("the cursor drifted to root %q; the test needs it on root-2 to prove anything", item.root.ID)
 	}
 
+	typeText(&value, "alpha")
 	command := send(&value, key(tea.KeyEnter, ""))
 	if command == nil {
 		t.Fatal("Enter produced no removal command")
@@ -4129,9 +4163,10 @@ func TestOpenTabMarkersUseAgentColorsAndPhaseShapes(t *testing.T) {
 	base := value.styles.navigationSelected
 	markers := openTabMarkers(value.styles, base, tabs, 6)
 	claude := base.Foreground(value.styles.agentClaude.GetForeground()).Render("○")
-	codex := base.Foreground(value.styles.agentCodex.GetForeground()).Render("▲")
-	approval := base.Foreground(value.styles.agentClaude.GetForeground()).Render("■")
-	failure := base.Foreground(value.styles.agentCodex.GetForeground()).Render("★")
+	// An agent that needs the user is drawn in reverse, still in its color.
+	codex := base.Foreground(value.styles.agentCodex.GetForeground()).Reverse(true).Bold(true).Render("▲")
+	approval := base.Foreground(value.styles.agentClaude.GetForeground()).Reverse(true).Bold(true).Render("■")
+	failure := base.Foreground(value.styles.agentCodex.GetForeground()).Reverse(true).Bold(true).Render("★")
 	working := base.Foreground(value.styles.agentClaude.GetForeground()).Render("◑")
 	opencode := base.Foreground(value.styles.agentOpenCode.GetForeground()).Render("○")
 	node := base.Foreground(value.styles.agentNode.GetForeground()).Render("●")
@@ -4202,7 +4237,7 @@ func TestTabBarShowsEachRunningTabStatusMarker(t *testing.T) {
 	if plain := ansi.Strip(line); !strings.HasPrefix(plain, "  ■ one  ×    ◑ two  ×    three  ×    +  ") {
 		t.Fatalf("tab bar = %q, want the status marker before each running tab name", plain)
 	}
-	approval := value.styles.tabSelected.Foreground(value.styles.agentClaude.GetForeground()).Render("■")
+	approval := value.styles.tabSelected.Foreground(value.styles.agentClaude.GetForeground()).Reverse(true).Bold(true).Render("■")
 	working := value.styles.tab.Foreground(value.styles.agentCodex.GetForeground()).Render("◑")
 	if !strings.Contains(line, approval) || !strings.Contains(line, working) {
 		t.Fatalf("tab bar = %q, want markers in the agent color over the tab's own style", line)
@@ -4290,7 +4325,9 @@ func TestNavigationShowsGitStateOnSecondLine(t *testing.T) {
 	t.Fatalf("navigation does not contain workspace %q:\n%s", workspace.Name, navigation)
 }
 
-func TestNavigationUsesOneRootLineAndTwoWorkspaceLines(t *testing.T) {
+// A repository gets a second line for its Git state; a plain directory does
+// not, so the tree holds more workspaces on a short screen.
+func TestNavigationGivesOnlyRepositoriesASecondLine(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, projectsSnapshot([]model.WorkspaceView{
 		{Workspace: model.Workspace{ID: "workspace-1", RootID: "root-1", Name: "first", Path: "/projects/first"}},
 		{Workspace: model.Workspace{ID: "workspace-2", RootID: "root-1", Name: "last", Path: "/projects/last"}},
@@ -4299,8 +4336,8 @@ func TestNavigationUsesOneRootLineAndTwoWorkspaceLines(t *testing.T) {
 	value.selectedPath = "/projects/first"
 	value.gitStates = map[string]gitrepo.State{"/projects/first": {Branch: "main"}}
 	lines := value.renderNavigation(28, 20)
-	if len(lines) != 7 {
-		t.Fatalf("navigation lines = %d, want header, one root line, and two lines per workspace\n%s", len(lines), strings.Join(lines, "\n"))
+	if len(lines) != 6 {
+		t.Fatalf("navigation lines = %d, want header, the root, two lines for first and one for last\n%s", len(lines), strings.Join(lines, "\n"))
 	}
 	plain := make([]string, len(lines))
 	for index, line := range lines {
@@ -4309,8 +4346,8 @@ func TestNavigationUsesOneRootLineAndTwoWorkspaceLines(t *testing.T) {
 	if plain[2] != " ▾ projects" || plain[3] != "▎ - first" || plain[4] != "▎   (main)" {
 		t.Fatalf("root and workspace rows = %#v", plain[2:5])
 	}
-	if plain[6] != "" {
-		t.Fatalf("last workspace continuation = %q, want blank", plain[6])
+	if plain[5] != "  - last" {
+		t.Fatalf("plain directory row = %q, want one line", plain[5])
 	}
 }
 
@@ -4669,6 +4706,7 @@ func TestDashboardKeepsNavigationCursorVisible(t *testing.T) {
 		Root:        model.Root{ID: "root-1", Name: "nalbam", Path: "/projects"},
 		Directories: directories,
 	}}})
+	value.gitStates = repositoryStates(directories)
 	value.width = 120
 	value.height = 12
 	view := value.dimensions()
@@ -5215,13 +5253,20 @@ func TestDashboardAdjustsAndPersistsLeftPaneWidth(t *testing.T) {
 	if err != nil {
 		t.Fatalf("loadConfig() error = %v", err)
 	}
-	if loaded.LeftWidth != 29 || !configRowReads(ansi.Strip(value.render()), "Left pane", "29") {
+	if loaded.LeftWidth != 29 || !configRowReads(ansi.Strip(value.render()), "Workspace pane width", "29") {
 		t.Fatalf("persisted config = %#v\n%s", loaded, ansi.Strip(value.render()))
 	}
 
 	send(&value, key(tea.KeyEscape, ""))
 	if value.modal != noModal {
 		t.Fatalf("modal after Esc = %v, want none", value.modal)
+	}
+}
+
+// typeText presses one key for each character of text.
+func typeText(value *dashboard, text string) {
+	for _, character := range text {
+		send(value, key(character, string(character)))
 	}
 }
 

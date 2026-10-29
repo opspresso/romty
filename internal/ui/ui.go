@@ -210,6 +210,10 @@ type dashboard struct {
 	// removeTarget is the item the confirmation modal is asking about, held so
 	// the answer applies to the item the question named.
 	removeTarget navItem
+	// removeConfirm is the name typed into the Delete workspace dialog.
+	// Deleting removes the directory and everything in it, so the dialog
+	// accepts only after the workspace's name is typed exactly.
+	removeConfirm string
 	// closeTabTarget is the tab its confirmation is asking about, held for the
 	// same reason, with the position it was drawn at so the cursor can take
 	// the place of the tab that leaves.
@@ -230,7 +234,12 @@ type dashboard struct {
 	// terminalOpenedAt is when the open terminal attached, which is what tells
 	// a drop that continues a loop from one that starts a new incident.
 	terminalOpenedAt time.Time
-	scrollback       bool
+	// lastTabs is the tab last opened in each workspace, by workspace ID, so
+	// coming back to a workspace lands on the terminal the user left rather
+	// than on its first one. It is replaced, never written in place, because
+	// copies of the dashboard share the map.
+	lastTabs   map[string]string
+	scrollback bool
 	// altScroll is the host's alternate scroll as romty last set it, so the
 	// sequence is sent on the transitions and not on every message.
 	altScroll bool
@@ -240,6 +249,10 @@ type dashboard struct {
 	terminalFullWidth bool
 	scrollOffset      int
 	helpOffset        int
+	// helpQuery filters the Help reference; helpTyping is set while `/` has
+	// the keyboard typing into it.
+	helpQuery  string
+	helpTyping bool
 	// configIndex is the setting the Config modal's cursor is on, so it is
 	// walked and run the way every other list romty draws is.
 	configIndex int
@@ -569,6 +582,10 @@ func (m dashboard) update(message tea.Msg) (tea.Model, tea.Cmd) {
 		} else if m.modal == inputModal {
 			m.input.text += message.Content
 			m.input.err = ""
+		} else if m.modal == removeSelectionModal && !m.removeTarget.isRoot {
+			// Pasting the name is how a name that is hard to type, such as
+			// one with characters the keyboard lacks, is confirmed.
+			m.removeConfirm += message.Content
 		} else if m.modal != noModal {
 			return m, nil
 		} else if m.scrollback && m.search.typing {
@@ -625,14 +642,19 @@ func (m dashboard) update(message tea.Msg) (tea.Model, tea.Cmd) {
 		return m, readGit
 	case agentSnapshotMsg:
 		if message.err == nil {
-			kind, ring := m.soundForAgentTransitions(message.value)
-			ring = m.agentSoundReady && ring
+			// The first snapshot after startup is the state romty found, not
+			// a transition, so it stays silent.
+			var alerts []tea.Cmd
+			if m.agentSoundReady {
+				if kind, ring := m.soundForAgentTransitions(message.value); ring {
+					alerts = append(alerts, soundAlert(kind))
+				}
+				alerts = append(alerts, m.notifyAgentAlerts(m.agentAlerts(message.value)))
+			}
 			m.updateAgents(message.value)
 			m.heardAgents = maps.Clone(message.value)
 			m.agentSoundReady = true
-			if ring {
-				return m, tea.Batch(m.refreshAgents(), soundAlert(kind))
-			}
+			return m, tea.Batch(append(alerts, m.refreshAgents())...)
 		}
 		return m, m.refreshAgents()
 	case soundPlayedMsg:
@@ -648,7 +670,14 @@ func (m dashboard) update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case gitStatusMsg:
+		// A repository takes two rows and a plain directory one, so a Git
+		// read can change the tree's height under the cursor. A cursor that
+		// was on screen stays there; one the wheel scrolled away is left be.
+		_, cursorShown := m.cursorOnScreen()
 		m.gitStates = message.value
+		if cursorShown {
+			m.ensureNavigationVisible()
+		}
 		if message.fetchedAt.After(m.gitFetchedAt) {
 			m.gitFetchedAt = message.fetchedAt
 		}
@@ -850,6 +879,18 @@ func (m dashboard) handleKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.activateWorkspace()
 	case "space":
 		return m.toggleRoot()
+	// One letter for each Ctrl+Shift chord. A terminal without the Kitty
+	// keyboard protocol sends Ctrl+Shift+A as the same byte as Ctrl+A, so the
+	// chords cannot reach romty there. Ctrl+/ and then the letter works in
+	// every terminal, phone SSH clients included.
+	case "a":
+		return m.jumpToWaitingAgent()
+	case "t":
+		return m.newTab()
+	case "g":
+		return m.openGitActions()
+	case "f":
+		return m.toggleFileView()
 	}
 	return m, nil
 }
@@ -980,13 +1021,26 @@ func (m dashboard) toggleScrollbackMouse() (tea.Model, tea.Cmd) {
 	return m, m.saveConfig()
 }
 
+func (m dashboard) toggleNotifications() (tea.Model, tea.Cmd) {
+	m.config.MuteNotifications = !m.config.MuteNotifications
+	return m, m.saveConfig()
+}
+
+// Turning a sound on plays it, so the user hears what it will sound like
+// and that the host can play it at all.
 func (m dashboard) toggleSoundOnDone() (tea.Model, tea.Cmd) {
 	m.config.SoundOnDone = !m.config.SoundOnDone
+	if m.config.SoundOnDone {
+		return m, tea.Batch(m.saveConfig(), soundAlert(sound.Done))
+	}
 	return m, m.saveConfig()
 }
 
 func (m dashboard) toggleSoundOnWaiting() (tea.Model, tea.Cmd) {
 	m.config.SoundOnWaiting = !m.config.SoundOnWaiting
+	if m.config.SoundOnWaiting {
+		return m, tea.Batch(m.saveConfig(), soundAlert(sound.Waiting))
+	}
 	return m, m.saveConfig()
 }
 
@@ -1088,6 +1142,14 @@ func (m dashboard) handleOpenedTerminal(message terminalOpenedMsg) (tea.Model, t
 	)
 	m.terminal = terminal
 	m.terminalOpenedAt = now()
+	if tab, ok := m.openTab(); ok {
+		lastTabs := maps.Clone(m.lastTabs)
+		if lastTabs == nil {
+			lastTabs = make(map[string]string)
+		}
+		lastTabs[tab.WorkspaceID] = tab.ID
+		m.lastTabs = lastTabs
+	}
 	// The scrollback on screen belongs to the terminal that just went away, so
 	// a switch made from it lands on the new terminal's live screen.
 	m.stopScrollback()
@@ -1194,6 +1256,7 @@ func reattachBackoff(attempt int) time.Duration {
 // cursor, and the answer has to apply to the item the question named.
 func (m dashboard) confirmRemoveSelection(target navItem) (tea.Model, tea.Cmd) {
 	m.removeTarget = target
+	m.removeConfirm = ""
 	return m.openModal(removeSelectionModal)
 }
 

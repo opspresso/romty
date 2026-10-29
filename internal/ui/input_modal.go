@@ -202,7 +202,13 @@ func (m dashboard) renderInputModal(maximum int) []string {
 // its end. Text wider than the field loses its start, not its end, because the
 // end is where the user is typing.
 func (m dashboard) renderInputField(width int) string {
-	text := display.Text(m.input.text)
+	return m.renderTextField(m.input.text, width)
+}
+
+// renderTextField draws a one-line text field holding value, as the input
+// modal and the delete confirmation both show one.
+func (m dashboard) renderTextField(value string, width int) string {
+	text := display.Text(value)
 	room := max(width-1, 0)
 	if overflow := lipgloss.Width(text) - room; overflow > 0 {
 		text = ansi.TruncateLeft(text, overflow+1, "…")

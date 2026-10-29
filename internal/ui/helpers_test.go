@@ -36,3 +36,13 @@ var projectsRoot = model.Root{ID: "root-1", Name: "projects", Path: "/projects"}
 func projectsSnapshot(directories []model.WorkspaceView) model.Snapshot {
 	return model.Snapshot{Roots: []model.RootView{{Root: projectsRoot, Directories: directories}}}
 }
+
+// repositoryStates gives every directory a Git state, so each workspace takes
+// the two rows a repository does.
+func repositoryStates(directories []model.WorkspaceView) map[string]gitrepo.State {
+	states := make(map[string]gitrepo.State, len(directories))
+	for _, directory := range directories {
+		states[directory.Workspace.Path] = gitrepo.State{Branch: "main"}
+	}
+	return states
+}

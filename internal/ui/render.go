@@ -5,10 +5,13 @@ package ui
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
+	"github.com/rivo/uniseg"
 
 	"github.com/opspresso/romty/internal/display"
 	"github.com/opspresso/romty/internal/model"
@@ -58,6 +61,12 @@ func openTabMarker(styles *uiStyles, base lipgloss.Style, tab model.Tab, animati
 		marker = "■"
 	case phase == model.AgentPhaseError:
 		marker = "★"
+	}
+	if phase := tab.AgentPhase; phase.Waiting() || phase == model.AgentPhaseError {
+		// An agent that needs the user is drawn in reverse: the shape alone
+		// is the same weight as a busy agent's, and this is the state the
+		// tree exists to make visible.
+		style = style.Reverse(true).Bold(true)
 	}
 	return style.Render(marker)
 }
@@ -180,11 +189,18 @@ func (m dashboard) terminalSize() (uint16, uint16) {
 
 // windowTitle names romty and the machine so terminal tabs on different hosts
 // stay distinguishable.
+//
+// The count of agents waiting for the user follows, so a terminal tab that is
+// not in front still says that something needs an answer.
 func (m dashboard) windowTitle() string {
-	if m.hostname == "" {
-		return "romty"
+	title := "romty"
+	if m.hostname != "" {
+		title += " · " + display.Text(m.hostname)
 	}
-	return "romty · " + display.Text(m.hostname)
+	if summary := m.attention().summary(); summary != "" {
+		title += " · " + summary
+	}
+	return title
 }
 
 func (m dashboard) View() tea.View {
@@ -269,6 +285,20 @@ func mergePanes(left, right []string, leftWidth, rightWidth, height int, separat
 	return lines
 }
 
+// paneHeaderBadge is paneHeader with a badge at the right end of the rule. The
+// title gives way first, so the badge stays readable on a narrow pane.
+func (m dashboard) paneHeaderBadge(style lipgloss.Style, title, badge string, width int) string {
+	if badge == "" {
+		return m.paneHeader(style, title, width)
+	}
+	rendered := m.styles.attention.Render(" " + badge + " ")
+	room := width - lipgloss.Width(rendered) - 1
+	if room < 1 {
+		return truncate(rendered, width)
+	}
+	return m.paneHeader(style, title, room) + " " + rendered
+}
+
 // paneHeader is a pane's title chip and the rule that runs from it to the
 // pane's edge. Three panes drew it, and the rule's width is a subtraction each
 // of them had to get right against a title that may have been truncated.
@@ -309,8 +339,18 @@ func (m dashboard) renderStatus(width, bodyHeight int) []string {
 		status = m.renderActivityStatus("OPENING", "preparing terminal", width)
 	case m.tabClosePending != "":
 		status = m.renderActivityStatus("CLOSING", "terminating terminal", width)
+	case m.modal == helpModal && m.helpTyping:
+		status = truncate(
+			m.styles.promptLabel.Render(" FIND ")+" "+
+				m.styles.promptText.Render(display.Text(m.helpQuery))+
+				m.styles.dividerActive.Render("█"),
+			width,
+		)
 	case m.modal == helpModal:
-		shortcuts := []shortcut{{key: "Esc", description: "close"}}
+		shortcuts := []shortcut{{key: "/", description: "search"}, {key: "Esc", description: "close"}}
+		if m.helpQuery != "" {
+			shortcuts = []shortcut{{key: "/", description: "search"}, {key: "Esc", description: "clear search"}}
+		}
 		if m.maximumHelpOffset(bodyHeight) > 0 {
 			shortcuts = append([]shortcut{{key: "↑/↓/Wheel", description: "scroll"}}, shortcuts...)
 		}
@@ -422,18 +462,38 @@ func (m dashboard) renderStatus(width, bodyHeight int) []string {
 		)
 	default:
 		contextShortcuts := []shortcut{
+			{key: "Enter", description: "open"},
 			{key: "↑/↓", description: "workspace"},
 			{key: "←/→", description: "tabs"},
-			{key: "Enter", description: "open"},
 			{key: "Space", description: "fold"},
 			{key: "Tab", description: "terminal"},
 		}
 		if m.focus == terminalPane {
 			// F7 is in the status row below; the rail names the chord the
 			// row has no room for.
-			contextShortcuts = []shortcut{{key: "Ctrl+/", description: "navigation"}}
+			contextShortcuts = []shortcut{{key: "Ctrl+/", description: "tree"}}
 		}
-		rail = renderShortcutRailNote(m.styles, width, m.agentStatusNote(), contextShortcuts...)
+		waiting := m.attention()
+		if waiting.input+waiting.approval > 0 {
+			// The way to the agent that is waiting comes first while one is,
+			// and only then: a shortcut for nothing would be noise.
+			jump := shortcut{key: "a", description: "waiting agent"}
+			if m.focus == terminalPane {
+				jump.key = "Ctrl+/ a"
+			}
+			contextShortcuts = append([]shortcut{jump}, contextShortcuts...)
+		}
+		if summary := waiting.summary(); summary != "" && m.navigationHidden() {
+			// The narrow layout hides the tree and its badge, so the count
+			// leads the rail. It is a rail entry rather than the note, which
+			// gives way first on a phone-width screen.
+			contextShortcuts = append([]shortcut{{key: summary, description: "need you"}}, contextShortcuts...)
+		}
+		if len(m.state.Roots) == 0 && m.terminal == nil {
+			// Before the first root nothing but adding one does anything.
+			contextShortcuts = []shortcut{{key: "F2", description: "add a root directory"}}
+		}
+		rail = renderShortcutRailNote(m.styles, width, m.railNote(), contextShortcuts...)
 		status = renderShortcuts(m.styles, width,
 			shortcut{key: "F1", description: "help"},
 			shortcut{key: "F2", description: "add root"},
@@ -476,16 +536,18 @@ func (m dashboard) renderNavigation(width, height int) []string {
 	}
 	title := " romty "
 	if m.newerRelease != "" {
-		title = " romty* "
+		// An arrow says "newer version" where an asterisk said nothing a
+		// user could guess; About names the version.
+		title = " romty ↑ "
 	}
 	if m.hostname != "" {
 		title += "· " + display.Text(m.hostname) + " "
 	}
-	lines := []string{m.paneHeader(titleStyle, title, width), ""}
+	lines := []string{m.paneHeaderBadge(titleStyle, title, m.attention().summary(), width), ""}
 	items := m.navigationItems()
 	// A collapsed root stands in for the open workspace it hides.
 	hiddenCurrent := ""
-	if workspaceIndex(items, m.selectedPath) < 0 {
+	if m.selectedPath != "" && workspaceIndex(items, m.selectedPath) < 0 {
 		if item, ok := m.workspaceItem(m.selectedPath); ok {
 			hiddenCurrent = item.root.Path
 		}
@@ -532,15 +594,13 @@ func navigationWindow(items []navItem, offset, available int) (int, int) {
 }
 
 // navigationRows is the height of an item in the tree. A root takes one row,
-// plus the blank row that sets it apart from the item above.
+// plus the blank row that sets it apart from the item above. A workspace takes
+// one row, plus one for its Git state when it is a repository.
 func navigationRows(item navItem) int {
-	if item.isRoot {
-		if item.separator {
-			return 2
-		}
-		return 1
+	if item.isRoot && item.separator || !item.isRoot && item.hasGit {
+		return 2
 	}
-	return 2
+	return 1
 }
 
 func (m dashboard) renderNavigationItem(item navItem, index int, isCurrent bool, width int) []string {
@@ -595,6 +655,9 @@ func (m dashboard) renderNavigationItem(item navItem, index int, isCurrent bool,
 		}
 		return []string{nameLine}
 	}
+	if !item.hasGit {
+		return []string{nameLine}
+	}
 	return []string{nameLine, m.renderNavigationGit(item, indicator, style, width)}
 }
 
@@ -613,7 +676,24 @@ func (m dashboard) renderTerminal(width int) []string {
 		return lines
 	}
 	if m.terminal != nil {
+		if label := m.tabPreviewLabel(); label != "" && len(lines) > 1 {
+			// The tab row shows the cursor's workspace while the terminal
+			// below stays the open one; the label says whose tabs they are.
+			labelled := m.styles.empty.Render(" " + label + " ")
+			lines[1] = truncate(lines[1], max(width-lipgloss.Width(labelled), 0)) + labelled
+		}
 		return append(lines, m.terminal.renderViewport(m.scrollOffset)...)
+	}
+	if len(m.state.Roots) == 0 {
+		return append(lines,
+			"",
+			m.styles.modalStrong.Render("  Add a directory to start"),
+			"",
+			"  "+m.styles.shortcutKey.Render(" F2 ")+" "+m.styles.modalBody.Render("pick a directory, such as ~/projects"),
+			"",
+			m.styles.empty.Render("  romty lists it as a root and each directory in it as a workspace."),
+			m.styles.empty.Render("  Each workspace keeps its own terminals, even after romty closes."),
+		)
 	}
 	if _, ok := m.navigationItem(); m.focus == leftPane && !ok {
 		return append(lines, m.styles.empty.Render("  Select a root or workspace"))
@@ -621,7 +701,24 @@ func (m dashboard) renderTerminal(width int) []string {
 	if len(tabs) == 0 {
 		return append(lines, m.styles.empty.Render("  Select + and press Enter to create a terminal"))
 	}
-	return append(lines, m.styles.empty.Render("  Select a tab and press Enter"))
+	if m.tabIndex < len(tabs) {
+		return append(lines, m.styles.empty.Render("  Press Enter to open "+display.Text(tabs[m.tabIndex].Name)))
+	}
+	return append(lines, m.styles.empty.Render("  Press Enter to open a new tab"))
+}
+
+// tabPreviewLabel names the workspace whose tabs the tab row shows when that
+// is not the workspace of the open terminal, which happens while the cursor in
+// the tree is on another workspace. It is empty otherwise.
+func (m dashboard) tabPreviewLabel() string {
+	if m.focus != leftPane || m.scrollback {
+		return ""
+	}
+	item, ok := m.navigationItem()
+	if !ok || item.workspace.Path == m.selectedPath {
+		return ""
+	}
+	return "tabs of " + display.Text(item.workspace.Name) + " · Enter opens"
 }
 
 // newTabLabel is the slot after the last tab that opens a new one.
@@ -646,7 +743,65 @@ func tabLabelWidth(tab model.Tab) int {
 	return width
 }
 
+// fitTabNames shortens tab names until every tab and the + slot fit in width,
+// so a crowded row still shows each tab and the way to open another one. The
+// other tabs give way before the active one, whose name says what is on
+// screen. The names are for drawing and hit-testing only; the tabs themselves
+// keep their names. When even one-character names do not fit, the row is cut
+// at its end.
+func fitTabNames(tabs []model.Tab, active, width int) []model.Tab {
+	rowWidth := func(tabs []model.Tab) int {
+		total := lipgloss.Width(newTabLabel)
+		for _, tab := range tabs {
+			total += tabLabelWidth(tab) + 1
+		}
+		return total
+	}
+	if rowWidth(tabs) <= width {
+		return tabs
+	}
+	longest := 0
+	for _, tab := range tabs {
+		longest = max(longest, lipgloss.Width(display.Text(tab.Name)))
+	}
+	fitted := slices.Clone(tabs)
+	shrink := func(includeActive bool) bool {
+		for limit := longest - 1; limit >= 1; limit-- {
+			for index, tab := range tabs {
+				if index != active || includeActive {
+					fitted[index].Name = shortenName(display.Text(tab.Name), limit)
+				}
+			}
+			if rowWidth(fitted) <= width {
+				return true
+			}
+		}
+		return false
+	}
+	if !shrink(false) {
+		shrink(true)
+	}
+	return fitted
+}
+
+// shortenName cuts name to limit columns, ending in an ellipsis. At one column
+// it keeps the first character, which tells tabs apart where "…" would not;
+// the row width is measured on the result, so a wide one is counted as it is.
+func shortenName(name string, limit int) string {
+	if lipgloss.Width(name) <= limit {
+		return name
+	}
+	if limit <= 1 {
+		// The first grapheme whatever its width: a wide character such as
+		// Korean is two columns, and cutting to one would leave nothing.
+		first, _, _, _ := uniseg.FirstGraphemeClusterInString(name, -1)
+		return first
+	}
+	return ansi.Truncate(name, limit, "…")
+}
+
 func renderTabBarWithHover(styles *uiStyles, tabs []model.Tab, active, hover, closeHover, animationFrame, width int) []string {
+	tabs = fitTabNames(tabs, active, width)
 	var tabsLine strings.Builder
 	var railLine strings.Builder
 	for index := 0; index <= len(tabs); index++ {
@@ -692,14 +847,32 @@ func renderTabBarWithHover(styles *uiStyles, tabs []model.Tab, active, hover, cl
 	return []string{truncate(tabsLine.String(), width), truncate(railLine.String(), width)}
 }
 
+// renderShortcuts draws the shortcuts that fit in width, in order, and drops
+// the rest whole: a shortcut cut in the middle names neither its key nor what
+// it does. Callers list the shortcuts most worth knowing first.
 func renderShortcuts(styles *uiStyles, width int, values ...shortcut) string {
-	segments := make([]string, 0, len(values))
-	for _, value := range values {
-		segments = append(segments,
-			styles.shortcutKey.Render(" "+value.key+" ")+" "+styles.shortcutDescription.Render(value.description),
-		)
+	var line strings.Builder
+	used := 0
+	for index, value := range values {
+		segment := styles.shortcutKey.Render(" "+value.key+" ") + " " + styles.shortcutDescription.Render(value.description)
+		gap := 0
+		if index > 0 {
+			gap = 2
+		}
+		segmentWidth := lipgloss.Width(segment)
+		if used+gap+segmentWidth > width {
+			if index == 0 {
+				return truncate(segment, width)
+			}
+			break
+		}
+		if gap > 0 {
+			line.WriteString("  ")
+		}
+		line.WriteString(segment)
+		used += gap + segmentWidth
 	}
-	return truncate(strings.Join(segments, "  "), width)
+	return line.String()
 }
 
 func renderShortcutRail(styles *uiStyles, width int, values ...shortcut) string {

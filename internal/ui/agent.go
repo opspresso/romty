@@ -10,7 +10,9 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 
+	"github.com/opspresso/romty/internal/display"
 	"github.com/opspresso/romty/internal/model"
 	"github.com/opspresso/romty/internal/sound"
 )
@@ -51,32 +53,144 @@ func (m *dashboard) updateAgents(statuses map[string]model.AgentStatus) {
 	m.agentAnimationActive = m.hasAnimatedAgent()
 }
 
-func (m dashboard) soundForAgentTransitions(statuses map[string]model.AgentStatus) (sound.Kind, bool) {
-	changed := func(tabID string) (sound.Kind, bool) {
-		status, ok := statuses[tabID]
+// agentAlert is an agent transition worth telling the user about: a turn that
+// finished or failed, or an agent that started waiting for an answer.
+type agentAlert struct {
+	kind  sound.Kind
+	tab   model.Tab
+	agent model.Agent
+	phase model.AgentPhase
+}
+
+// agentAlerts lists the transitions between the statuses romty last heard and
+// statuses, in the order the tree draws their tabs. It does not read the
+// settings: each channel that reports an alert decides for itself whether it
+// is switched on.
+func (m dashboard) agentAlerts(statuses map[string]model.AgentStatus) []agentAlert {
+	var alerts []agentAlert
+	for tab := range m.state.Tabs() {
+		status, ok := statuses[tab.ID]
 		if !ok || !status.Agent.ReportsPhases() {
-			return "", false
+			continue
 		}
-		heard := m.heardAgents[tabID]
+		heard := m.heardAgents[tab.ID]
 		changedTurn := status.TurnID != "" && heard.TurnID != "" && status.TurnID != heard.TurnID
-		if m.config.SoundOnDone && !status.Estimated && (heard.Phase != status.Phase || changedTurn) &&
+		switch {
+		case !status.Estimated && (heard.Phase != status.Phase || changedTurn) &&
 			status.Agent == heard.Agent &&
 			(heard.SessionID == "" || status.SessionID == heard.SessionID) &&
 			heard.Phase != model.AgentPhaseUnknown && heard.Phase != "" &&
-			(status.Phase == model.AgentPhaseCompleted || status.Phase == model.AgentPhaseError) {
-			return sound.Done, true
+			(status.Phase == model.AgentPhaseCompleted || status.Phase == model.AgentPhaseError):
+			alerts = append(alerts, agentAlert{kind: sound.Done, tab: *tab, agent: status.Agent, phase: status.Phase})
+		case !heard.Phase.Waiting() && status.Phase.Waiting():
+			alerts = append(alerts, agentAlert{kind: sound.Waiting, tab: *tab, agent: status.Agent, phase: status.Phase})
 		}
-		if m.config.SoundOnWaiting && !heard.Phase.Waiting() && status.Phase.Waiting() {
-			return sound.Waiting, true
-		}
-		return "", false
 	}
-	for tab := range m.state.Tabs() {
-		if kind, ok := changed(tab.ID); ok {
-			return kind, true
+	return alerts
+}
+
+// soundForAgentTransitions is the sound the transitions to statuses play: the
+// first alert whose sound is switched on.
+func (m dashboard) soundForAgentTransitions(statuses map[string]model.AgentStatus) (sound.Kind, bool) {
+	for _, alert := range m.agentAlerts(statuses) {
+		if alert.kind == sound.Done && m.config.SoundOnDone || alert.kind == sound.Waiting && m.config.SoundOnWaiting {
+			return alert.kind, true
 		}
 	}
 	return "", false
+}
+
+// notifyAgentAlerts asks the terminal romty is drawn in to show a desktop
+// notification (OSC 9) for the first alert. The sequence travels to the
+// terminal on the user's own device, which is what makes it reach a user
+// who connects over SSH: the sound alerts play on the host instead. A
+// terminal that does not support OSC 9 ignores it.
+func (m dashboard) notifyAgentAlerts(alerts []agentAlert) tea.Cmd {
+	if m.config.MuteNotifications || len(alerts) == 0 {
+		return nil
+	}
+	text := m.agentAlertText(alerts[0])
+	if more := len(alerts) - 1; more > 0 {
+		text += fmt.Sprintf(" (+%d more)", more)
+	}
+	return tea.Raw(ansi.Notify(text))
+}
+
+// agentAlertText names the agent, what it needs, and where it runs, so the
+// notification can be acted on without opening romty first.
+func (m dashboard) agentAlertText(alert agentAlert) string {
+	label := agentPhaseLabels[alert.phase]
+	// The agent comes from the new status: the tab still carries the last
+	// one, which is empty for an agent whose first report is the alert.
+	if name := agentDisplayNames[alert.agent]; name != "" {
+		label = name + ": " + label
+	}
+	if place := m.tabPlace(alert.tab); place != "" {
+		label += " · " + place
+	}
+	return "romty " + display.Text(label)
+}
+
+// agentDisplayNames are the agents' product names, as a notification and the
+// rail write them.
+var agentDisplayNames = map[model.Agent]string{
+	model.AgentClaude:   "Claude Code",
+	model.AgentCodex:    "Codex",
+	model.AgentOpenCode: "OpenCode",
+	model.AgentKiro:     "Kiro",
+	model.AgentNode:     "Node.js",
+}
+
+// tabPlace is the workspace a tab runs in and the tab's name, as
+// "workspace / tab".
+func (m dashboard) tabPlace(tab model.Tab) string {
+	for _, item := range m.workspaceItems() {
+		for _, candidate := range item.tabs {
+			if candidate.ID == tab.ID {
+				return item.workspace.Name + " / " + tab.Name
+			}
+		}
+	}
+	return tab.Name
+}
+
+// attention counts the running agents that need the user: waiting for an
+// answer, waiting for an approval, or failed.
+type attention struct {
+	input, approval, failed int
+}
+
+func (m dashboard) attention() attention {
+	var result attention
+	for tab := range m.state.Tabs() {
+		if !tab.Running {
+			continue
+		}
+		switch tab.AgentPhase {
+		case model.AgentPhaseWaitingInput:
+			result.input++
+		case model.AgentPhaseWaitingApproval:
+			result.approval++
+		case model.AgentPhaseError:
+			result.failed++
+		}
+	}
+	return result
+}
+
+// summary is the count of each kind of attention in the marker the tree draws
+// for it, such as "▲2 ■1", and empty when nothing needs the user.
+func (a attention) summary() string {
+	parts := make([]string, 0, 3)
+	for _, part := range []struct {
+		marker string
+		count  int
+	}{{"▲", a.input}, {"■", a.approval}, {"★", a.failed}} {
+		if part.count > 0 {
+			parts = append(parts, fmt.Sprintf("%s%d", part.marker, part.count))
+		}
+	}
+	return strings.Join(parts, " ")
 }
 
 func (m dashboard) hasAnimatedAgent() bool {
@@ -211,6 +325,41 @@ func (m dashboard) agentStatusNote() string {
 		return label + "  " + ledger
 	}
 	return label
+}
+
+// railNote is the note in the shortcut rail: the open terminal's agent, or in
+// the tree the tabs of the workspace under the cursor, whose markers are what
+// the user is reading there.
+func (m dashboard) railNote() string {
+	if m.focus == leftPane && !m.scrollback {
+		return m.cursorTabsNote()
+	}
+	return m.agentStatusNote()
+}
+
+// cursorTabsNote names each running tab of the workspace under the cursor and
+// what runs in it, such as "1: Claude Code · Working  server: Node.js", so the
+// markers on the row can be read without learning them first.
+func (m dashboard) cursorTabsNote() string {
+	tabs := m.navigationTabs()
+	parts := make([]string, 0, len(tabs))
+	for _, tab := range tabs {
+		parts = append(parts, display.Text(tab.Name)+": "+tabActivity(tab))
+	}
+	return strings.Join(parts, "  ")
+}
+
+// tabActivity is what runs in a tab, in words: the agent and its phase, the
+// Node.js service, or a plain shell.
+func tabActivity(tab model.Tab) string {
+	switch {
+	case tab.Agent == "":
+		return "shell"
+	case tab.Agent == model.AgentNode:
+		return agentDisplayNames[tab.Agent]
+	default:
+		return agentDisplayNames[tab.Agent] + " · " + agentPhaseLabels[tab.AgentPhase]
+	}
 }
 
 // formatTokens abbreviates a count so it keeps its width as it grows, the way
