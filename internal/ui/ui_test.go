@@ -2995,6 +2995,16 @@ func TestDashboardDeletesTheSelectedWorkspace(t *testing.T) {
 		t.Fatalf("workspace confirmation does not describe the deletion:\n%s", body)
 	}
 
+	// Enter does nothing until the name is typed, and a wrong name is not it.
+	if command := send(&value, key(tea.KeyEnter, "")); command != nil || value.modal != removeSelectionModal {
+		t.Fatalf("Enter before the name = (command %v, modal %v), want the dialog kept", command, value.modal)
+	}
+	typeText(&value, "alph")
+	if command := send(&value, key(tea.KeyEnter, "")); command != nil {
+		t.Fatal("Enter with a partial name deleted the workspace")
+	}
+	typeText(&value, "a")
+
 	command = send(&value, key(tea.KeyEnter, ""))
 	if command == nil || value.modal != noModal {
 		t.Fatalf("Enter = (command %v, modal %v), want the deletion", command, value.modal)
@@ -3047,6 +3057,7 @@ func TestDashboardDeletesTheWorkspaceTheConfirmationNamed(t *testing.T) {
 		t.Fatalf("the cursor drifted to root %q; the test needs it on root-2 to prove anything", item.root.ID)
 	}
 
+	typeText(&value, "alpha")
 	command := send(&value, key(tea.KeyEnter, ""))
 	if command == nil {
 		t.Fatal("Enter produced no removal command")
@@ -5245,6 +5256,13 @@ func TestDashboardAdjustsAndPersistsLeftPaneWidth(t *testing.T) {
 	send(&value, key(tea.KeyEscape, ""))
 	if value.modal != noModal {
 		t.Fatalf("modal after Esc = %v, want none", value.modal)
+	}
+}
+
+// typeText presses one key for each character of text.
+func typeText(value *dashboard, text string) {
+	for _, character := range text {
+		send(value, key(character, string(character)))
 	}
 }
 

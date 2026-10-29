@@ -210,6 +210,10 @@ type dashboard struct {
 	// removeTarget is the item the confirmation modal is asking about, held so
 	// the answer applies to the item the question named.
 	removeTarget navItem
+	// removeConfirm is the name typed into the Delete workspace dialog.
+	// Deleting removes the directory and everything in it, so the dialog
+	// accepts only after the workspace's name is typed exactly.
+	removeConfirm string
 	// closeTabTarget is the tab its confirmation is asking about, held for the
 	// same reason, with the position it was drawn at so the cursor can take
 	// the place of the tab that leaves.
@@ -1237,6 +1241,7 @@ func reattachBackoff(attempt int) time.Duration {
 // cursor, and the answer has to apply to the item the question named.
 func (m dashboard) confirmRemoveSelection(target navItem) (tea.Model, tea.Cmd) {
 	m.removeTarget = target
+	m.removeConfirm = ""
 	return m.openModal(removeSelectionModal)
 }
 

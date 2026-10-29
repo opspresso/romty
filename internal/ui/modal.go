@@ -96,8 +96,14 @@ func (m dashboard) handleModalKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 		}
 	case removeSelectionModal:
 		if message.String() == "enter" {
+			if !m.removeConfirmed() {
+				return m, nil
+			}
 			m.modal = noModal
 			return m, m.removeSelection()
+		}
+		if !m.removeTarget.isRoot {
+			m.removeConfirm = editText(m.removeConfirm, message)
 		}
 	case shutdownModal:
 		if message.String() == "enter" {
@@ -273,12 +279,18 @@ func (m dashboard) renderModalBody(width, height int) []string {
 		}
 		// What is about to be deleted comes first, its path under it as
 		// context, and the consequences below the break.
+		// The field is last, where the eye ends after reading what it costs.
+		name := display.Text(m.removeTarget.workspace.Name)
+		fieldWidth := max(min(inputModalWidth, modalWidth)-6, lipgloss.Width(name)+2)
 		return m.withModalActions(modalBoxFit(m.styles, minimumModalWidth, modalWidth, "Delete workspace",
-			m.styles.modalStrong.Render("Delete "+display.Text(m.removeTarget.workspace.Name)+"?"),
+			m.styles.modalStrong.Render("Delete "+name+"?"),
 			m.styles.empty.Render(display.Text(m.removeTarget.workspace.Path)),
 			"",
 			m.styles.errorText.Render("This permanently deletes all contents."),
 			m.styles.errorText.Render("Its running shells will be terminated."),
+			"",
+			m.styles.modalBody.Render("Type ")+m.styles.modalStrong.Render(name)+m.styles.modalBody.Render(" to confirm:"),
+			m.renderTextField(m.removeConfirm, fieldWidth),
 		))
 	}
 	if m.modal == closeTabModal {
@@ -446,6 +458,9 @@ func (m dashboard) modalActions() []modalAction {
 		if m.removeTarget.isRoot {
 			return answerActions("forget root", "cancel")
 		}
+		if !m.removeConfirmed() {
+			return answerActions("type the name to delete", "cancel")
+		}
 		return answerActions("delete workspace", "cancel")
 	case closeTabModal:
 		return answerActions("close tab", "cancel")
@@ -470,6 +485,13 @@ func (m dashboard) modalActions() []modalAction {
 
 // answerActions are a question modal's two buttons: Enter accepts and Esc
 // declines, each named for what it does.
+// removeConfirmed reports whether the removal dialog may proceed: always for
+// forgetting a root, which leaves the directory on disk, and for deleting a
+// workspace only once its name is typed exactly.
+func (m dashboard) removeConfirmed() bool {
+	return m.removeTarget.isRoot || m.removeConfirm == m.removeTarget.workspace.Name
+}
+
 func answerActions(accept, decline string) []modalAction {
 	return []modalAction{
 		{shortcut: shortcut{key: "Enter", description: accept}, code: tea.KeyEnter},
