@@ -49,7 +49,13 @@ func nextEvent(stream model.EventStream) tea.Cmd {
 // daemon that predates it. A daemon that is not there is noted, and the
 // dashboard tries again.
 func (m dashboard) handleSubscribed(message subscribedMsg) (tea.Model, tea.Cmd) {
+	refused := new(*model.RefusedError)
 	switch {
+	case message.err == nil && (m.events != nil || m.polling):
+		// Two subscribes raced, for example F5 and the retry timer; the
+		// dashboard keeps the stream it has.
+		_ = message.stream.Close()
+		return m, nil
 	case message.err == nil:
 		m.events = message.stream
 		if m.daemonDown {
@@ -57,11 +63,16 @@ func (m dashboard) handleSubscribed(message subscribedMsg) (tea.Model, tea.Cmd) 
 			m.clearError(daemonError)
 		}
 		return m, nextEvent(message.stream)
-	case errors.Is(message.err, model.ErrNeedsNewerDaemon):
+	case errors.Is(message.err, model.ErrNeedsNewerDaemon), errors.As(message.err, refused):
+		// A daemon that predates the stream, or one that will not take
+		// another subscriber, is polled instead.
 		if m.polling {
 			return m, nil
 		}
 		m.polling = true
+		if *refused != nil {
+			m.setNotice(settingError, "polling the daemon: "+(*refused).Message)
+		}
 		return m, tea.Batch(m.refreshAgents(), m.initialGitStatus())
 	default:
 		m.noteDaemonError(message.err)
@@ -73,7 +84,8 @@ func (m dashboard) handleSubscribed(message subscribedMsg) (tea.Model, tea.Cmd) 
 // agent report and Git read take, then waits for the next.
 func (m dashboard) handleEvent(message eventMsg) (tea.Model, tea.Cmd) {
 	if message.stream != m.events {
-		// A stream this dashboard replaced.
+		// A stream this dashboard no longer reads.
+		_ = message.stream.Close()
 		return m, nil
 	}
 	if message.err != nil {

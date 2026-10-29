@@ -74,7 +74,7 @@ Without an identifier, the agent chooses its most recent session. Unconsumed sna
 
 ### After a crash
 
-`romty stop` is not the only way a daemon ends: it can crash, be killed, or lose power with the machine. Every five minutes the daemon therefore saves the session of each tab that runs an agent into `checkpoint/`, the same way a stop does. The next daemon moves those checkpoints into `resume/` and offers them like a stop's snapshots; a stop's newer snapshot of the same tab is kept instead. A tab that closes, or whose shell ends, drops its checkpoint. Plain shells are not checkpointed.
+`romty stop` is not the only way a daemon ends: it can crash, be killed, or lose power with the machine. Every five minutes the daemon therefore saves the session of each tab that runs an agent into `checkpoint/`, the same way a stop does; a tab that printed nothing and kept its agent session since its last checkpoint is not written again. The next daemon moves those checkpoints into `resume/` and offers them like a stop's snapshots; a stop's newer snapshot of the same tab is kept instead. A tab that closes, or whose shell ends, drops its checkpoint. Plain shells are not checkpointed.
 
 ### Saved output and privacy
 
@@ -82,7 +82,8 @@ A saved session holds the tab's recent terminal output, up to 8 MiB, which can i
 
 - On macOS the daemon excludes the runtime directory from Time Machine with `tmutil addexclusion` when it starts. On Linux, exclude the runtime directory (`~/.config/romty` by default) in your backup tool.
 - Set `"save_output": "off"` in `config.json` to save no output. A reopened or resumed session then starts empty, still with its agent's resume command typed at the prompt.
-- Set `output_retention_days` to keep saved sessions for less than the default seven days.
+- Set `output_retention_days` (1 to 30) to keep saved sessions for a number of days other than the default seven.
+- A `config.json` romty cannot read saves no output; a field it cannot read falls back on its own, and `save_output` then falls back to `off`.
 
 ## Data and configuration
 
@@ -92,8 +93,9 @@ romty stores data in a `romty` directory under the user configuration directory:
 |---|---|
 | `state.json` | Roots, workspaces, and terminal tab metadata |
 | `config.json` | TUI settings such as the last workspace and tab, workspace pane width, mouse passthrough, and diff layout |
-| `resume/` | Output and agent session of each tab that was running at `romty stop`; unconsumed snapshots are discarded after seven days |
-| `closed/` | Output and agent session of the last three tabs closed in each workspace, for reopening; entries are discarded after seven days |
+| `resume/` | Output and agent session of each tab that was running at `romty stop`; unconsumed snapshots are discarded after `output_retention_days` (seven by default) |
+| `closed/` | Output and agent session of the last three tabs closed in each workspace, for reopening; entries are discarded after `output_retention_days` |
+| `checkpoint/` | The latest session of each running agent tab, so a crash leaves sessions to resume; the next daemon moves them into `resume/` |
 | `daemon.sock` | Local client-daemon Unix socket |
 | `daemon.sock.lock` | Lock held by the running daemon |
 | `daemon.log` | Detached daemon output and failures; archived before daemon startup after reaching 3 MiB |

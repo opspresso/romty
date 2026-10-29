@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"io"
 	"maps"
 	"net"
 	"reflect"
@@ -35,7 +36,6 @@ type subscriptions struct {
 	bells    map[string]time.Time
 	statuses map[string]model.AgentStatus
 	git      map[string]model.GitState
-	gitAt    time.Time
 	// refresh asks the publisher to read Git now; true also fetches.
 	refresh chan bool
 }
@@ -90,6 +90,15 @@ func (s *Server) handleSubscribe(connection net.Conn, request protocol.Request) 
 	if err := replyFor(connection, request, protocol.Response{}); err != nil {
 		return
 	}
+	// A subscriber sends nothing after its request, so a read returns only
+	// when it goes. Without this a TUI that quit or lost its SSH session
+	// would hold its slot until the next write failed, which on a quiet
+	// daemon may be never.
+	gone := make(chan struct{})
+	go func() {
+		_, _ = io.Copy(io.Discard, connection)
+		close(gone)
+	}()
 	snapshot := s.snapshot()
 	first := model.Event{Snapshot: &snapshot, AgentStatuses: s.agentStatusesSnapshot(), GitStates: git}
 	if err := writeEvent(connection, first); err != nil {
@@ -106,6 +115,8 @@ func (s *Server) handleSubscribe(connection net.Conn, request protocol.Request) 
 				return
 			}
 		case <-value.done:
+			return
+		case <-gone:
 			return
 		case <-s.stop:
 			return
@@ -134,11 +145,30 @@ func (s *Server) broadcast(event model.Event) {
 	}
 }
 
-// publish runs while the daemon does, sending subscribers what changed. With
-// no subscriber it does nothing, so a daemon nobody watches reads no Git
-// state and builds no snapshots.
+// publish runs while the daemon does, sending subscribers what changed in
+// the tree and the agent statuses. Git is read on a loop of its own, because a
+// fetch can take many seconds and must not hold back an agent's change. With
+// no subscriber neither loop does anything.
 func (s *Server) publish() {
 	ticker := time.NewTicker(publishInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-s.stop:
+			return
+		case <-ticker.C:
+		}
+		if s.subs.count() == 0 {
+			continue
+		}
+		s.publishOnce()
+	}
+}
+
+// publishGit reads Git state for the subscribers on its own schedule, and at
+// once when one asks.
+func (s *Server) publishGit() {
+	ticker := time.NewTicker(gitPollInterval)
 	defer ticker.Stop()
 	for {
 		force, fetch := false, false
@@ -152,11 +182,19 @@ func (s *Server) publish() {
 		if s.subs.count() == 0 {
 			continue
 		}
-		s.publishOnce(force, fetch)
+		fetch = fetch || s.git.fetchDue()
+		git := s.git.poll(s.workspacePaths(), s.printedSince, force, fetch)
+		s.subs.mu.Lock()
+		changed := force || !maps.Equal(git, s.subs.git)
+		s.subs.git = git
+		s.subs.mu.Unlock()
+		if changed {
+			s.broadcast(model.Event{GitStates: git})
+		}
 	}
 }
 
-func (s *Server) publishOnce(force, fetch bool) {
+func (s *Server) publishOnce() {
 	var event model.Event
 	s.mu.Lock()
 	revision := s.revision
@@ -168,7 +206,6 @@ func (s *Server) publishOnce(force, fetch bool) {
 
 	s.subs.mu.Lock()
 	treeChanged := revision != s.subs.revision || !maps.Equal(bells, s.subs.bells)
-	gitDue := force || time.Since(s.subs.gitAt) >= gitPollInterval
 	s.subs.mu.Unlock()
 
 	if treeChanged {
@@ -176,11 +213,6 @@ func (s *Server) publishOnce(force, fetch bool) {
 		event.Snapshot = &snapshot
 	}
 	statuses := s.agentStatusesSnapshot()
-	var git map[string]model.GitState
-	if gitDue {
-		fetch = fetch || s.git.fetchDue()
-		git = s.git.poll(s.workspacePaths(), s.printedSince, force, fetch)
-	}
 
 	s.subs.mu.Lock()
 	if treeChanged {
@@ -190,15 +222,8 @@ func (s *Server) publishOnce(force, fetch bool) {
 		s.subs.statuses = statuses
 		event.AgentStatuses = statuses
 	}
-	if gitDue {
-		s.subs.gitAt = time.Now()
-		if !maps.Equal(git, s.subs.git) || force {
-			s.subs.git = git
-			event.GitStates = git
-		}
-	}
 	s.subs.mu.Unlock()
-	if event.Snapshot != nil || event.AgentStatuses != nil || event.GitStates != nil {
+	if event.Snapshot != nil || event.AgentStatuses != nil {
 		s.broadcast(event)
 	}
 }

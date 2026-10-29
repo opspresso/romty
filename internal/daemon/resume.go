@@ -193,13 +193,14 @@ func (s *resumeStore) listLocked(now time.Time) map[string][]storedSnapshot {
 		return nil
 	}
 	result := make(map[string][]storedSnapshot)
+	keep := s.keep()
 	for _, entry := range entries {
 		id, found := strings.CutSuffix(entry.Name(), ".json")
 		if !found || !storedID.MatchString(id) {
 			continue
 		}
 		meta, err := jsonfile.Read[resumeSnapshot](s.metaPath(id))
-		if err != nil || meta.WorkspaceID == "" || now.Sub(meta.SavedAt) > s.keep() {
+		if err != nil || meta.WorkspaceID == "" || now.Sub(meta.SavedAt) > keep {
 			continue
 		}
 		result[meta.WorkspaceID] = append(result[meta.WorkspaceID], storedSnapshot{id: id, meta: meta})
@@ -260,9 +261,10 @@ func (s *resumeStore) discardStale(now time.Time) {
 	if err != nil {
 		return
 	}
+	keep := s.keep()
 	for _, entry := range entries {
 		info, err := entry.Info()
-		if err != nil || now.Sub(info.ModTime()) <= s.keep() {
+		if err != nil || now.Sub(info.ModTime()) <= keep {
 			continue
 		}
 		_ = os.Remove(filepath.Join(s.directory, entry.Name()))

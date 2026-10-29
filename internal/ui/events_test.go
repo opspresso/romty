@@ -2,6 +2,7 @@ package ui
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/opspresso/romty/internal/gitrepo"
@@ -83,5 +84,35 @@ func TestAnOldDaemonIsPolled(t *testing.T) {
 	}
 	if send(&value, subscribedMsg{err: errors.New("x")}); value.daemonDown {
 		t.Fatal("an ordinary error was taken for a stopped daemon")
+	}
+}
+
+// A second subscribe that wins a race is closed, a retry while subscribed
+// does nothing, and an event from a stream no longer read closes it.
+func TestDuplicateSubscriptionsAreClosed(t *testing.T) {
+	first := &fakeStream{events: make(chan model.Event)}
+	second := &fakeStream{events: make(chan model.Event)}
+	value := newDashboard(&fakeBackend{}, model.Snapshot{})
+	send(&value, subscribedMsg{stream: first})
+	send(&value, subscribedMsg{stream: second})
+	if value.events != first || !second.closed {
+		t.Fatalf("after two subscribes = (kept first %v, second closed %v)", value.events == first, second.closed)
+	}
+	if command := send(&value, resubscribeMsg{}); command != nil {
+		t.Fatal("a retry subscribed again while subscribed")
+	}
+	stale := &fakeStream{events: make(chan model.Event)}
+	send(&value, eventMsg{stream: stale})
+	if !stale.closed {
+		t.Fatal("an event from a stale stream did not close it")
+	}
+}
+
+// A daemon that refuses another subscriber is polled, and the dashboard says so.
+func TestARefusedSubscriptionPolls(t *testing.T) {
+	value := newDashboard(&fakeBackend{}, model.Snapshot{})
+	command := send(&value, subscribedMsg{err: &model.RefusedError{Message: "too many subscriptions"}})
+	if command == nil || !value.polling || !strings.Contains(value.errorMessage, "too many subscriptions") {
+		t.Fatalf("refused subscription = (polling %v, message %q)", value.polling, value.errorMessage)
 	}
 }

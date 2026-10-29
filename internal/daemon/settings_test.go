@@ -123,3 +123,52 @@ func TestPeerUIDIsTheConnectingUser(t *testing.T) {
 		t.Fatalf("peerUID() = (%d, %v), want %d", uid, err, os.Geteuid())
 	}
 }
+
+// An agent tab that printed nothing since its checkpoint is not written
+// again, and one that printed is.
+func TestCheckpointSkipsQuietTabs(t *testing.T) {
+	directory := t.TempDir()
+	value := &session{lastOutputAt: time.Now().Add(-time.Hour)}
+	server := &Server{
+		logger:        testutil.QuietLogger(),
+		checkpoint:    &resumeStore{directory: filepath.Join(directory, "checkpoint")},
+		value:         model.State{Tabs: []model.Tab{{ID: "a1", WorkspaceID: "w"}}},
+		sessions:      map[string]*session{"a1": value},
+		agentStatuses: map[string]agentRuntime{"a1": {AgentStatus: model.AgentStatus{Agent: model.AgentClaude}}},
+	}
+	server.checkpointAgents()
+	meta := filepath.Join(directory, "checkpoint", "a1.json")
+	first, err := os.Stat(meta)
+	if err != nil {
+		t.Fatal("the first checkpoint was not written")
+	}
+	time.Sleep(20 * time.Millisecond)
+	server.checkpointAgents()
+	if again, _ := os.Stat(meta); !again.ModTime().Equal(first.ModTime()) {
+		t.Fatal("a quiet tab was checkpointed again")
+	}
+	value.lastOutputAt = time.Now().Add(time.Second)
+	server.checkpointAgents()
+	if again, _ := os.Stat(meta); again.ModTime().Equal(first.ModTime()) {
+		t.Fatal("a tab that printed was not checkpointed again")
+	}
+}
+
+// One mistyped field keeps the others, and an unreadable file does not turn
+// on saving output.
+func TestSettingsFailClosed(t *testing.T) {
+	directory := t.TempDir()
+	server := &Server{configPath: filepath.Join(directory, "config.json"), logger: testutil.QuietLogger()}
+	if err := os.WriteFile(server.configPath, []byte(`{"save_output":"off","output_retention_days":"3"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := server.settings(); got.SaveOutput != "off" || got.OutputRetentionDays != 0 {
+		t.Fatalf("settings with one bad field = %+v, want save_output kept", got)
+	}
+	if err := os.WriteFile(server.configPath, []byte(`{not json`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := server.settings(); got.SaveOutput != "off" || !got.AllowSleep {
+		t.Fatalf("unreadable settings = %+v, want output off and sleep allowed", got)
+	}
+}

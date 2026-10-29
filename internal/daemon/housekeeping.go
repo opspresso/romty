@@ -74,23 +74,55 @@ func (s *Server) housekeepOnce() {
 // a stop does, into the checkpoint store. Only agent tabs: they are the ones
 // with a session to resume, and a plain shell's output is not worth writing
 // every few minutes.
+//
+// A tab is written again only when it printed since its last checkpoint or
+// its agent session changed, so an idle agent costs no disk writes. A tab
+// that closed or ended while its checkpoint was being written has the file
+// removed again, so a closed session never comes back after a crash.
 func (s *Server) checkpointAgents() {
 	s.mu.Lock()
 	saves := make([]resumeSave, 0)
 	now := time.Now()
+	if s.checkpointed == nil {
+		s.checkpointed = make(map[string]checkpointMark)
+	}
 	for _, tab := range s.value.Tabs {
 		value, running := s.sessions[tab.ID]
 		if !running || s.agentStatuses[tab.ID].Agent == "" {
 			continue
 		}
-		saves = append(saves, s.resumeSaveLocked(tab, value, now))
+		save := s.resumeSaveLocked(tab, value, now)
+		last, seen := s.checkpointed[tab.ID]
+		if seen && !value.lastOutput().After(last.at) && last.agent == save.meta.Agent &&
+			last.session == save.meta.AgentSessionID {
+			continue
+		}
+		saves = append(saves, save)
 	}
 	s.mu.Unlock()
 	for _, save := range saves {
 		if err := s.checkpoint.save(save.id, save.meta, save.recording()); err != nil {
 			s.logger.Printf("checkpoint tab %s: %v", save.id, err)
+			continue
+		}
+		s.mu.Lock()
+		_, running := s.sessions[save.id]
+		if running {
+			s.checkpointed[save.id] = checkpointMark{at: now, agent: save.meta.Agent, session: save.meta.AgentSessionID}
+		}
+		s.mu.Unlock()
+		if !running {
+			s.checkpoint.remove(save.id)
 		}
 	}
+}
+
+// checkpointMark is what a tab's last checkpoint saved, so an unchanged tab
+// is not written again.
+type checkpointMark struct {
+	at      time.Time
+	agent   model.Agent
+	session string
 }
 
 // enforceRecordingBudget trims the recordings of the quietest tabs to

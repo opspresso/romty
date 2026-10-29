@@ -26,10 +26,10 @@ func (m *dashboard) terminalEffects() tea.Cmd {
 	if bell {
 		commands = append(commands, tea.Raw("\a"))
 	}
-	if !m.config.BlockClipboard {
-		for _, text := range copies {
-			commands = append(commands, tea.SetClipboard(text))
-		}
+	if !m.config.BlockClipboard && len(copies) > 0 {
+		// The clipboard holds one value, and commands in a batch run in no
+		// set order, so only the last copy is sent.
+		commands = append(commands, tea.SetClipboard(copies[len(copies)-1]))
 	}
 	return tea.Batch(commands...)
 }

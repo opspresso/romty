@@ -72,6 +72,8 @@ type Server struct {
 	// resume. The next daemon moves them into resume.
 	checkpoint     *resumeStore
 	lastCheckpoint time.Time
+	// checkpointed is what each tab's last checkpoint saved, under s.mu.
+	checkpointed map[string]checkpointMark
 
 	mu            sync.Mutex
 	value         model.State
@@ -212,6 +214,7 @@ func (s *Server) Serve(ctx context.Context) error {
 	defer listener.Close()
 	go s.housekeep()
 	go s.publish()
+	go s.publishGit()
 	// tmutil can take seconds, so the exclusion is made once the socket is
 	// up rather than before.
 	go func() {
@@ -407,6 +410,7 @@ func (s *Server) sessionExited(tabID string) {
 	if removed {
 		s.revision++
 	}
+	delete(s.checkpointed, tabID)
 	if !s.stopping {
 		// A shell that ended has nothing to resume.
 		s.checkpoint.remove(tabID)

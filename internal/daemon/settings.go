@@ -22,11 +22,12 @@ type settings struct {
 	OutputRetentionDays int `json:"output_retention_days"`
 }
 
-// settings reads config.json. A missing file is the defaults. A file that
-// cannot be read or parsed is logged and treated as the defaults too, except
-// that keeping awake is then off: the daemon does not hold a machine awake
-// on a setting it could not read.
+// settings reads config.json. A missing file is the defaults. Each field is
+// read on its own, so one mistyped value does not discard the others. What
+// cannot be read errs on the side of privacy and the machine: output is not
+// saved and the machine is not held awake.
 func (s *Server) settings() settings {
+	unreadable := settings{AllowSleep: true, SaveOutput: "off"}
 	if s.configPath == "" {
 		return settings{AllowSleep: true}
 	}
@@ -34,14 +35,28 @@ func (s *Server) settings() settings {
 	if errors.Is(err, os.ErrNotExist) {
 		return settings{}
 	}
-	var value settings
+	var fields map[string]json.RawMessage
 	if err == nil {
-		err = json.Unmarshal(data, &value)
+		err = json.Unmarshal(data, &fields)
 	}
 	if err != nil {
 		s.logger.Printf("read config: %v", err)
-		return settings{AllowSleep: true}
+		return unreadable
 	}
+	var value settings
+	read := func(name string, target any, fallback func()) {
+		raw, ok := fields[name]
+		if !ok {
+			return
+		}
+		if err := json.Unmarshal(raw, target); err != nil {
+			s.logger.Printf("read config %s: %v", name, err)
+			fallback()
+		}
+	}
+	read("allow_sleep", &value.AllowSleep, func() { value.AllowSleep = true })
+	read("save_output", &value.SaveOutput, func() { value.SaveOutput = "off" })
+	read("output_retention_days", &value.OutputRetentionDays, func() { value.OutputRetentionDays = 0 })
 	return value
 }
 

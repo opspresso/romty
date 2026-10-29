@@ -561,6 +561,9 @@ func (m dashboard) update(message tea.Msg) (tea.Model, tea.Cmd) {
 	case eventMsg:
 		return m.handleEvent(message)
 	case resubscribeMsg:
+		if m.events != nil || m.polling {
+			return m, nil
+		}
 		return m, m.subscribe()
 	case daemonRestartedMsg:
 		return m.handleDaemonRestarted(message)
