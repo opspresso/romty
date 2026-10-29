@@ -163,20 +163,20 @@ func TestNotificationNamesAnAgentFromItsFirstReport(t *testing.T) {
 	}
 }
 
-// The keep-awake mark is a chip of its own beside the attention badge, so it
+// The keep-awake mark has its own colour beside the attention badge, so it
 // stands out from the muted title and survives a long hostname.
-func TestKeepAwakeMarkIsAChipBesideTheBadge(t *testing.T) {
+func TestKeepAwakeMarkIsColouredBesideTheBadge(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, attentionSnapshot(
 		model.AgentPhaseWorking, model.AgentPhaseWaitingInput))
 	value.hostname = "a-very-long-build-host-name"
 
 	raw := value.renderNavigation(40, 10)[0]
-	if !strings.Contains(raw, value.styles.awake.Render(" ☕ ")) {
-		t.Fatalf("tree title %q lacks the styled awake chip", raw)
+	if !strings.Contains(raw, value.styles.awake.Render("☕")) {
+		t.Fatalf("tree title %q lacks the coloured awake mark", raw)
 	}
 	header := strings.TrimRight(ansi.Strip(raw), " ")
-	if !strings.HasSuffix(header, "☕   ▲1") {
-		t.Fatalf("tree title = %q, want the awake chip before the badge", header)
+	if !strings.HasSuffix(header, "☕  ▲1") {
+		t.Fatalf("tree title = %q, want the awake mark before the badge", header)
 	}
 
 	value.config.AllowSleep = true
