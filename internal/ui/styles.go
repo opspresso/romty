@@ -16,6 +16,8 @@ type uiStyles struct {
 	agentKiro           lipgloss.Style
 	agentNode           lipgloss.Style
 	agentPlain          lipgloss.Style
+	// attention is the chip that counts the agents waiting for the user.
+	attention lipgloss.Style
 	gitBranch           lipgloss.Style
 	gitStatus           lipgloss.Style
 	gitConflict         lipgloss.Style
@@ -67,6 +69,7 @@ func newUIStyles(hasDarkBackground bool) *uiStyles {
 	hoverSurface := lightDark(lipgloss.Color("#E0F2FE"), lipgloss.Color("#243247"))
 	errorColor := lightDark(lipgloss.Color("#BE123C"), lipgloss.Color("#FB7185"))
 	errorText := lightDark(lipgloss.Color("#FFFFFF"), lipgloss.Color("#0F172A"))
+	attentionColor := lightDark(lipgloss.Color("#B45309"), lipgloss.Color("#FBBF24"))
 	addedColor := lightDark(lipgloss.Color("#15803D"), lipgloss.Color("#86EFAC"))
 	addedBackground := lightDark(lipgloss.Color("#DAFBE1"), lipgloss.Color("#12261E"))
 	removedBackground := lightDark(lipgloss.Color("#FFEBE9"), lipgloss.Color("#301B1F"))
@@ -91,6 +94,9 @@ func newUIStyles(hasDarkBackground bool) *uiStyles {
 		agentKiro:           lipgloss.NewStyle().Foreground(lightDark(lipgloss.Color("#BE185D"), lipgloss.Color("#F472B6"))),
 		agentNode:           lipgloss.NewStyle().Foreground(lightDark(lipgloss.Color("#3F7D20"), lipgloss.Color("#8CCF6B"))),
 		agentPlain:          lipgloss.NewStyle().Foreground(text),
+		// Amber, apart from the error red, because waiting is a request and
+		// not a failure.
+		attention: lipgloss.NewStyle().Foreground(errorText).Background(attentionColor).Bold(true),
 		gitBranch:           lipgloss.NewStyle().Foreground(muted),
 		gitStatus:           lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B")),
 		gitConflict:         lipgloss.NewStyle().Foreground(errorColor),

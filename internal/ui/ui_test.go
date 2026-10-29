@@ -1908,7 +1908,9 @@ func TestDashboardKeepsConfigControlsCompact(t *testing.T) {
 			continue
 		}
 		drawn := lines[index]
-		at := lipgloss.Width(drawn[:strings.Index(drawn, text)])
+		// Search after the name: "on" is also inside "Notifications".
+		after := strings.Index(drawn, row.name) + len(row.name)
+		at := lipgloss.Width(drawn[:after+strings.Index(drawn[after:], text)])
 		if column < 0 {
 			column = at
 		} else if at != column {
@@ -1919,7 +1921,7 @@ func TestDashboardKeepsConfigControlsCompact(t *testing.T) {
 	// Keys stay subordinate to the settings while sharing their row, so every
 	// control still fits on the shortest supported screen.
 	rendered := strings.Join(value.renderModal(72, 22), "\n")
-	if !strings.Contains(rendered, value.styles.empty.Render("s")) {
+	if !strings.Contains(rendered, value.styles.empty.Render("d")) {
 		t.Fatalf("the key hint is not muted:\n%s", rendered)
 	}
 
@@ -1956,16 +1958,23 @@ func TestDashboardConfiguresAndTestsSoundAlerts(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, model.Snapshot{})
 	send(&value, key(tea.KeyF3, ""))
 
+	// Turning a sound on plays it once, so the user hears it without a
+	// separate test control.
 	saveDone := send(&value, key('d', "d"))
 	saveWaiting := send(&value, key('b', "b"))
 	if !value.config.SoundOnDone || !value.config.SoundOnWaiting || saveDone == nil || saveWaiting == nil {
 		t.Fatalf("sound toggles = (done %v, waiting %v, saves %v/%v)",
 			value.config.SoundOnDone, value.config.SoundOnWaiting, saveDone, saveWaiting)
 	}
-
-	soundCommand := send(&value, key('s', "s"))
-	if played := commandMessage[soundPlayedMsg](t, soundCommand); played.kind != sound.Done {
-		t.Fatalf("test sound = %q, want done", played.kind)
+	if played := commandMessage[soundPlayedMsg](t, saveDone); played.kind != sound.Done {
+		t.Fatalf("enabling the done sound played %q", played.kind)
+	}
+	if played := commandMessage[soundPlayedMsg](t, saveWaiting); played.kind != sound.Waiting {
+		t.Fatalf("enabling the waiting sound played %q", played.kind)
+	}
+	// Turning it off plays nothing.
+	if _, ok := playedSound(send(&value, key('d', "d"))); ok {
+		t.Fatal("disabling the done sound played it")
 	}
 }
 
@@ -1980,9 +1989,9 @@ func TestDashboardClicksConfigControls(t *testing.T) {
 		t.Fatalf("mouse passthrough click = (enabled %v, save %v, cursor %d)",
 			value.config.MousePassthrough, save, value.configIndex)
 	}
-	soundCommand := send(&value, tea.MouseClickMsg{X: left + 2, Y: top + 6, Button: tea.MouseLeft})
+	soundCommand := send(&value, tea.MouseClickMsg{X: left + 2, Y: top + 5, Button: tea.MouseLeft})
 	if played := commandMessage[soundPlayedMsg](t, soundCommand); played.kind != sound.Done {
-		t.Fatalf("test sound click = %q, want done", played.kind)
+		t.Fatalf("done sound click = %q, want done", played.kind)
 	}
 }
 
@@ -4129,9 +4138,10 @@ func TestOpenTabMarkersUseAgentColorsAndPhaseShapes(t *testing.T) {
 	base := value.styles.navigationSelected
 	markers := openTabMarkers(value.styles, base, tabs, 6)
 	claude := base.Foreground(value.styles.agentClaude.GetForeground()).Render("○")
-	codex := base.Foreground(value.styles.agentCodex.GetForeground()).Render("▲")
-	approval := base.Foreground(value.styles.agentClaude.GetForeground()).Render("■")
-	failure := base.Foreground(value.styles.agentCodex.GetForeground()).Render("★")
+	// An agent that needs the user is drawn in reverse, still in its color.
+	codex := base.Foreground(value.styles.agentCodex.GetForeground()).Reverse(true).Bold(true).Render("▲")
+	approval := base.Foreground(value.styles.agentClaude.GetForeground()).Reverse(true).Bold(true).Render("■")
+	failure := base.Foreground(value.styles.agentCodex.GetForeground()).Reverse(true).Bold(true).Render("★")
 	working := base.Foreground(value.styles.agentClaude.GetForeground()).Render("◑")
 	opencode := base.Foreground(value.styles.agentOpenCode.GetForeground()).Render("○")
 	node := base.Foreground(value.styles.agentNode.GetForeground()).Render("●")
@@ -4202,7 +4212,7 @@ func TestTabBarShowsEachRunningTabStatusMarker(t *testing.T) {
 	if plain := ansi.Strip(line); !strings.HasPrefix(plain, "  ■ one  ×    ◑ two  ×    three  ×    +  ") {
 		t.Fatalf("tab bar = %q, want the status marker before each running tab name", plain)
 	}
-	approval := value.styles.tabSelected.Foreground(value.styles.agentClaude.GetForeground()).Render("■")
+	approval := value.styles.tabSelected.Foreground(value.styles.agentClaude.GetForeground()).Reverse(true).Bold(true).Render("■")
 	working := value.styles.tab.Foreground(value.styles.agentCodex.GetForeground()).Render("◑")
 	if !strings.Contains(line, approval) || !strings.Contains(line, working) {
 		t.Fatalf("tab bar = %q, want markers in the agent color over the tab's own style", line)

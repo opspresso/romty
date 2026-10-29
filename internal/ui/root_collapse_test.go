@@ -45,7 +45,7 @@ func runSave(t *testing.T, command tea.Cmd) {
 	if command == nil {
 		t.Fatal("no command, want the config saved")
 	}
-	for _, message := range flattenMessages(command) {
+	for _, message := range commandMessages(command) {
 		if saved, ok := message.(configSavedMsg); ok {
 			if saved.err != nil {
 				t.Fatalf("save error = %v", saved.err)
@@ -54,23 +54,6 @@ func runSave(t *testing.T, command tea.Cmd) {
 		}
 	}
 	t.Fatal("command did not save the config")
-}
-
-// flattenMessages runs a command and the commands of any batch it returns.
-func flattenMessages(command tea.Cmd) []tea.Msg {
-	if command == nil {
-		return nil
-	}
-	message := command()
-	batch, ok := message.(tea.BatchMsg)
-	if !ok {
-		return []tea.Msg{message}
-	}
-	var result []tea.Msg
-	for _, inner := range batch {
-		result = append(result, flattenMessages(inner)...)
-	}
-	return result
 }
 
 func TestSpaceCollapsesAndExpandsTheRootUnderTheCursor(t *testing.T) {

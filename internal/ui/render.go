@@ -59,6 +59,12 @@ func openTabMarker(styles *uiStyles, base lipgloss.Style, tab model.Tab, animati
 	case phase == model.AgentPhaseError:
 		marker = "★"
 	}
+	if phase := tab.AgentPhase; phase.Waiting() || phase == model.AgentPhaseError {
+		// An agent that needs the user is drawn in reverse: the shape alone
+		// is the same weight as a busy agent's, and this is the state the
+		// tree exists to make visible.
+		style = style.Reverse(true).Bold(true)
+	}
 	return style.Render(marker)
 }
 
@@ -180,11 +186,18 @@ func (m dashboard) terminalSize() (uint16, uint16) {
 
 // windowTitle names romty and the machine so terminal tabs on different hosts
 // stay distinguishable.
+//
+// The count of agents waiting for the user follows, so a terminal tab that is
+// not in front still says that something needs an answer.
 func (m dashboard) windowTitle() string {
-	if m.hostname == "" {
-		return "romty"
+	title := "romty"
+	if m.hostname != "" {
+		title += " · " + display.Text(m.hostname)
 	}
-	return "romty · " + display.Text(m.hostname)
+	if summary := m.attention().summary(); summary != "" {
+		title += " · " + summary
+	}
+	return title
 }
 
 func (m dashboard) View() tea.View {
@@ -272,6 +285,20 @@ func mergePanes(left, right []string, leftWidth, rightWidth, height int, separat
 // paneHeader is a pane's title chip and the rule that runs from it to the
 // pane's edge. Three panes drew it, and the rule's width is a subtraction each
 // of them had to get right against a title that may have been truncated.
+// paneHeaderBadge is paneHeader with a badge at the right end of the rule. The
+// title gives way first, so the badge stays readable on a narrow pane.
+func (m dashboard) paneHeaderBadge(style lipgloss.Style, title, badge string, width int) string {
+	if badge == "" {
+		return m.paneHeader(style, title, width)
+	}
+	rendered := m.styles.attention.Render(" " + badge + " ")
+	room := width - lipgloss.Width(rendered) - 1
+	if room < 1 {
+		return truncate(rendered, width)
+	}
+	return m.paneHeader(style, title, room) + " " + rendered
+}
+
 func (m dashboard) paneHeader(style lipgloss.Style, title string, width int) string {
 	rendered := style.Render(truncate(title, width))
 	return rendered + m.styles.tabRail.Render(
@@ -433,7 +460,7 @@ func (m dashboard) renderStatus(width, bodyHeight int) []string {
 			// row has no room for.
 			contextShortcuts = []shortcut{{key: "Ctrl+/", description: "navigation"}}
 		}
-		rail = renderShortcutRailNote(m.styles, width, m.agentStatusNote(), contextShortcuts...)
+		rail = renderShortcutRailNote(m.styles, width, m.railNote(), contextShortcuts...)
 		status = renderShortcuts(m.styles, width,
 			shortcut{key: "F1", description: "help"},
 			shortcut{key: "F2", description: "add root"},
@@ -481,7 +508,7 @@ func (m dashboard) renderNavigation(width, height int) []string {
 	if m.hostname != "" {
 		title += "· " + display.Text(m.hostname) + " "
 	}
-	lines := []string{m.paneHeader(titleStyle, title, width), ""}
+	lines := []string{m.paneHeaderBadge(titleStyle, title, m.attention().summary(), width), ""}
 	items := m.navigationItems()
 	// A collapsed root stands in for the open workspace it hides.
 	hiddenCurrent := ""

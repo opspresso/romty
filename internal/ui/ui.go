@@ -625,14 +625,19 @@ func (m dashboard) update(message tea.Msg) (tea.Model, tea.Cmd) {
 		return m, readGit
 	case agentSnapshotMsg:
 		if message.err == nil {
-			kind, ring := m.soundForAgentTransitions(message.value)
-			ring = m.agentSoundReady && ring
+			// The first snapshot after startup is the state romty found, not
+			// a transition, so it stays silent.
+			var alerts []tea.Cmd
+			if m.agentSoundReady {
+				if kind, ring := m.soundForAgentTransitions(message.value); ring {
+					alerts = append(alerts, soundAlert(kind))
+				}
+				alerts = append(alerts, m.notifyAgentAlerts(m.agentAlerts(message.value)))
+			}
 			m.updateAgents(message.value)
 			m.heardAgents = maps.Clone(message.value)
 			m.agentSoundReady = true
-			if ring {
-				return m, tea.Batch(m.refreshAgents(), soundAlert(kind))
-			}
+			return m, tea.Batch(append(alerts, m.refreshAgents())...)
 		}
 		return m, m.refreshAgents()
 	case soundPlayedMsg:
@@ -980,13 +985,26 @@ func (m dashboard) toggleScrollbackMouse() (tea.Model, tea.Cmd) {
 	return m, m.saveConfig()
 }
 
+func (m dashboard) toggleNotifications() (tea.Model, tea.Cmd) {
+	m.config.MuteNotifications = !m.config.MuteNotifications
+	return m, m.saveConfig()
+}
+
+// Turning a sound on plays it, so the user hears what it will sound like
+// and that the host can play it at all.
 func (m dashboard) toggleSoundOnDone() (tea.Model, tea.Cmd) {
 	m.config.SoundOnDone = !m.config.SoundOnDone
+	if m.config.SoundOnDone {
+		return m, tea.Batch(m.saveConfig(), soundAlert(sound.Done))
+	}
 	return m, m.saveConfig()
 }
 
 func (m dashboard) toggleSoundOnWaiting() (tea.Model, tea.Cmd) {
 	m.config.SoundOnWaiting = !m.config.SoundOnWaiting
+	if m.config.SoundOnWaiting {
+		return m, tea.Batch(m.saveConfig(), soundAlert(sound.Waiting))
+	}
 	return m, m.saveConfig()
 }
 
