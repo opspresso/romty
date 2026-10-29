@@ -461,7 +461,8 @@ func TestClientSelectsTheHighestProtocolSharedWithAFutureDaemon(t *testing.T) {
 
 	selected := make(chan int, 1)
 	go func() {
-		if err := answerNegotiation(listener, 8, 5); err != nil {
+		// One revision past this client's, whatever this client's is.
+		if err := answerNegotiation(listener, protocol.Version+1, 5); err != nil {
 			return
 		}
 		connection, request, err := acceptRequest(listener)
