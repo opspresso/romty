@@ -779,10 +779,40 @@ const newTabLabel = "  +  "
 // after the leading gap for its status marker, which is drawn in its own
 // color, so the text here only reserves the width the hit test also measures.
 func tabLabel(tab model.Tab) (prefix, rest string) {
+	name := tabDisplayName(tab)
 	if tab.Running {
-		return "  ", " " + display.Text(tab.Name) + "  × "
+		return "  ", " " + name + "  × "
 	}
-	return "", "  " + display.Text(tab.Name) + "  × "
+	return "", "  " + name + "  × "
+}
+
+// tabDisplayName is the name the tab row shows. A tab still called by the
+// number romty gave it also names the program detected in it, such as
+// "1 claude", so tabs are told apart without renaming each one. A name the
+// user chose is shown as it is.
+func tabDisplayName(tab model.Tab) string {
+	name := display.Text(tab.Name)
+	program := agentCommandNames[tab.Agent]
+	if program == "" || !isDefaultTabName(tab.Name) {
+		return name
+	}
+	return name + " " + program
+}
+
+// isDefaultTabName reports a name made of digits alone, which is the shape of
+// the names the daemon gives new tabs.
+func isDefaultTabName(name string) bool {
+	return name != "" && strings.Trim(name, "0123456789") == ""
+}
+
+// agentCommandNames are the commands that start each detected program, the
+// way a user types them.
+var agentCommandNames = map[model.Agent]string{
+	model.AgentClaude:   "claude",
+	model.AgentCodex:    "codex",
+	model.AgentOpenCode: "opencode",
+	model.AgentKiro:     "kiro",
+	model.AgentNode:     "node",
 }
 
 func tabLabelWidth(tab model.Tab) int {
@@ -808,19 +838,25 @@ func fitTabNames(tabs []model.Tab, active, width int) []model.Tab {
 		}
 		return total
 	}
+	// Fit the names as shown, program and all. tabDisplayName adds nothing
+	// to a name that is no longer a bare number, so it is not added twice.
+	tabs = slices.Clone(tabs)
+	for index := range tabs {
+		tabs[index].Name = tabDisplayName(tabs[index])
+	}
 	if rowWidth(tabs) <= width {
 		return tabs
 	}
 	longest := 0
 	for _, tab := range tabs {
-		longest = max(longest, lipgloss.Width(display.Text(tab.Name)))
+		longest = max(longest, lipgloss.Width(tab.Name))
 	}
 	fitted := slices.Clone(tabs)
 	shrink := func(includeActive bool) bool {
 		for limit := longest - 1; limit >= 1; limit-- {
 			for index, tab := range tabs {
 				if index != active || includeActive {
-					fitted[index].Name = shortenName(display.Text(tab.Name), limit)
+					fitted[index].Name = shortenName(tab.Name, limit)
 				}
 			}
 			if rowWidth(fitted) <= width {

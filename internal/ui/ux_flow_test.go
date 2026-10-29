@@ -390,3 +390,32 @@ func TestRenameFieldStatesTheLengthRule(t *testing.T) {
 		t.Fatalf("rename field lacks the rule:\n%s", screen)
 	}
 }
+
+// A tab still called by its number names the program in it; a name the user
+// chose is left alone, and the rename field starts from the stored name.
+func TestDefaultTabNamesShowTheirProgram(t *testing.T) {
+	styles := newUIStyles(true)
+	tabs := []model.Tab{
+		{ID: "a", Name: "1", Running: true, Agent: model.AgentClaude},
+		{ID: "b", Name: "server", Running: true, Agent: model.AgentNode},
+		{ID: "c", Name: "3", Running: true},
+	}
+	row := ansi.Strip(renderTabBarWithHover(styles, tabs, 0, -1, -1, 0, 100)[0])
+	for _, want := range []string{"1 claude", "server", "3  ×"} {
+		if !strings.Contains(row, want) {
+			t.Fatalf("tab row = %q, want %q", row, want)
+		}
+	}
+	if strings.Contains(row, "server node") {
+		t.Fatalf("a chosen name was changed: %q", row)
+	}
+	at := len([]rune(row[:strings.Index(row, "server")]))
+	if hit, ok := tabHitAtX(tabs, 0, at, 100); !ok || hit.index != 1 {
+		t.Fatalf("click on server = (%+v, %v), want tab 1", hit, ok)
+	}
+	value := newDashboard(&fakeBackend{}, projectsSnapshot(nil))
+	updated, _ := value.startRenameTab(tabs[0])
+	if updated.(dashboard).input.text != "1" {
+		t.Fatalf("rename starts from %q, want the stored name", updated.(dashboard).input.text)
+	}
+}
