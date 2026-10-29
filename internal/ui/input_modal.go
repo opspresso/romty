@@ -16,7 +16,6 @@ import (
 
 	"github.com/opspresso/romty/internal/display"
 	"github.com/opspresso/romty/internal/model"
-	"github.com/opspresso/romty/internal/protocol"
 )
 
 // inputKind names what the input modal is asking for.
@@ -133,7 +132,7 @@ func (m dashboard) handleInputResult(message inputResultMsg) (tea.Model, tea.Cmd
 		m.input.err = message.err.Error()
 		// The modal already says what was asked, so a refusal shows the
 		// daemon's reason alone.
-		if refused, ok := errors.AsType[*protocol.RefusedError](message.err); ok {
+		if refused, ok := errors.AsType[*model.RefusedError](message.err); ok {
 			m.input.err = refused.Message
 		}
 		return m, nil

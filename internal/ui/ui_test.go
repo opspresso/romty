@@ -21,7 +21,6 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/opspresso/romty/internal/agenthooks"
-	"github.com/opspresso/romty/internal/client"
 	"github.com/opspresso/romty/internal/gitrepo"
 	"github.com/opspresso/romty/internal/model"
 	"github.com/opspresso/romty/internal/sound"
@@ -50,7 +49,7 @@ type fakeBackend struct {
 	renamedTabName         string
 	movedTabID             string
 	movedOffset            int
-	daemonInfo             client.DaemonInfo
+	daemonInfo             model.DaemonInfo
 	addedPath              string
 	removedRootID          string
 	removedWorkspaceRootID string
@@ -227,7 +226,7 @@ func (f *fakeBackend) MoveTab(tabID string, offset int) (model.Snapshot, error) 
 	return f.snapshot, nil
 }
 
-func (f *fakeBackend) DaemonInfo() (client.DaemonInfo, error) {
+func (f *fakeBackend) DaemonInfo() (model.DaemonInfo, error) {
 	return f.daemonInfo, f.failure("DaemonInfo")
 }
 

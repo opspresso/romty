@@ -249,7 +249,7 @@ func printStatus(output io.Writer, runtime paths.Paths, theme commandTheme) erro
 	summary := summarizeSnapshot(snapshot)
 	daemonBuild := theme.good(info.Version)
 	if info.Version != version.String() {
-		daemonBuild = theme.warning(client.DaemonBuildLabel(info.Version))
+		daemonBuild = theme.warning(version.DaemonLabel(info.Version))
 	}
 	fields := []struct {
 		label string
@@ -271,7 +271,7 @@ func printStatus(output io.Writer, runtime paths.Paths, theme commandTheme) erro
 		}
 	}
 	if info.Version != version.String() {
-		return printField(output, theme, "next", client.DaemonRestartAdvice)
+		return printField(output, theme, "next", version.DaemonRestartAdvice)
 	}
 	return nil
 }

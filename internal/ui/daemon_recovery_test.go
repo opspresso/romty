@@ -13,8 +13,9 @@ import (
 	"github.com/opspresso/romty/internal/model"
 )
 
-// gone is the error a request gets when nothing listens on the socket.
-var gone = fmt.Errorf("dial unix /x/daemon.sock: %w", syscall.ECONNREFUSED)
+// gone is the error a request gets from the client when nothing listens on
+// the socket.
+var gone = fmt.Errorf("connect to daemon: %w: %w", model.ErrDaemonUnavailable, syscall.ECONNREFUSED)
 
 // When the daemon stops under the TUI, the screen names the way back instead
 // of the socket error, and F5 starts it again.

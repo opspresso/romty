@@ -286,35 +286,13 @@ func (c *Client) MoveTab(tabID string, offset int) (model.Snapshot, error) {
 	return c.snapshotCall(protocol.Request{Action: protocol.ActionMoveTab, TabID: tabID, Offset: offset})
 }
 
-// DaemonInfo is what the running daemon says about itself.
-type DaemonInfo struct {
-	// Version is the daemon's build, or empty for a daemon that predates
-	// reporting it, which is older than every client that asks.
-	Version        string
-	RecordingBytes int64
-}
-
-// DaemonRestartAdvice is how a daemon older than its client is brought up to
-// date. romty stop saves each tab's output and agent session, and the next
-// romty offers them back.
-const DaemonRestartAdvice = "run romty stop and then romty to update the daemon; sessions are saved"
-
-// DaemonBuildLabel names a daemon build for a person: its version, or the
-// fact that it predates reporting one.
-func DaemonBuildLabel(build string) string {
-	if build == "" {
-		return "older than v0.48.0"
-	}
-	return build
-}
-
 // DaemonInfo asks the running daemon for its build and memory use.
-func (c *Client) DaemonInfo() (DaemonInfo, error) {
+func (c *Client) DaemonInfo() (model.DaemonInfo, error) {
 	response, err := c.probeProtocol()
 	if err != nil {
-		return DaemonInfo{}, err
+		return model.DaemonInfo{}, err
 	}
-	return DaemonInfo{Version: response.DaemonVersion, RecordingBytes: response.RecordingBytes}, nil
+	return model.DaemonInfo{Version: response.DaemonVersion, RecordingBytes: response.RecordingBytes}, nil
 }
 
 // Resize reports this client's terminal size for a tab. The daemon applies
@@ -402,7 +380,16 @@ func daemonLockHeld(socket string) (bool, error) {
 // Unavailable reports whether err means the daemon socket could not be reached,
 // which is what a request returns when no daemon is running.
 func Unavailable(err error) bool {
-	return errors.Is(err, syscall.ENOENT) || errors.Is(err, syscall.ECONNREFUSED)
+	return errors.Is(err, model.ErrDaemonUnavailable) || errors.Is(err, syscall.ENOENT) || errors.Is(err, syscall.ECONNREFUSED)
+}
+
+// connectError reports a failed dial, marking the one that means nothing
+// listens with model.ErrDaemonUnavailable for callers outside this package.
+func connectError(err error) error {
+	if errors.Is(err, syscall.ENOENT) || errors.Is(err, syscall.ECONNREFUSED) {
+		return fmt.Errorf("connect to daemon: %w: %w", model.ErrDaemonUnavailable, err)
+	}
+	return fmt.Errorf("connect to daemon: %w", err)
 }
 
 // OpenAttach hands back the attach stream without interpreting the replay
@@ -425,7 +412,7 @@ func (c *Client) openAttach(tabID string) (net.Conn, *bufio.Reader, protocol.Res
 	}
 	connection, err := net.DialTimeout("unix", c.socket, dialTimeout)
 	if err != nil {
-		return nil, nil, protocol.Response{}, fmt.Errorf("connect to daemon: %w", err)
+		return nil, nil, protocol.Response{}, connectError(err)
 	}
 	// Bound the handshake alone. A daemon that accepts the connection and then
 	// says nothing — stopped, wedged, or another program holding the socket
@@ -542,7 +529,7 @@ func (c *Client) callRaw(request protocol.Request, version int, capabilities []s
 	}
 	connection, err := net.DialTimeout("unix", c.socket, dialTimeout)
 	if err != nil {
-		return protocol.Response{}, fmt.Errorf("connect to daemon: %w", err)
+		return protocol.Response{}, connectError(err)
 	}
 	defer connection.Close()
 	timeout := handshakeTimeout

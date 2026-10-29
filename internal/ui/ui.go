@@ -19,7 +19,6 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/opspresso/romty/internal/agenthooks"
-	"github.com/opspresso/romty/internal/client"
 	"github.com/opspresso/romty/internal/display"
 	"github.com/opspresso/romty/internal/gitrepo"
 	"github.com/opspresso/romty/internal/model"
@@ -82,7 +81,7 @@ type Backend interface {
 	CloseTab(tabID string) (model.Snapshot, error)
 	RenameTab(tabID, name string) (model.Snapshot, error)
 	MoveTab(tabID string, offset int) (model.Snapshot, error)
-	DaemonInfo() (client.DaemonInfo, error)
+	DaemonInfo() (model.DaemonInfo, error)
 	OpenTerminal(tabID string) (io.ReadWriteCloser, []byte, error)
 	Resize(tabID string, columns, rows uint16) error
 	Shutdown() error
@@ -1415,7 +1414,7 @@ type daemonRestartedMsg struct {
 
 // daemonInfoMsg is the running daemon's report on itself.
 type daemonInfoMsg struct {
-	info client.DaemonInfo
+	info model.DaemonInfo
 	err  error
 }
 
@@ -1444,8 +1443,8 @@ func (m dashboard) handleDaemonInfo(message daemonInfoMsg) (tea.Model, tea.Cmd) 
 
 // daemonUpdateNote says which daemon runs and how to bring it up to date.
 func (m dashboard) daemonUpdateNote() string {
-	return "the daemon is " + client.DaemonBuildLabel(m.daemonBuild) + ", this romty is " + version.String() +
-		"; " + client.DaemonRestartAdvice
+	return "the daemon is " + version.DaemonLabel(m.daemonBuild) + ", this romty is " + version.String() +
+		"; " + version.DaemonRestartAdvice
 }
 
 // keepingAwake reports what the daemon does with the machine: it holds it
@@ -1467,7 +1466,7 @@ func (m dashboard) keepingAwake() bool {
 // puts the dashboard in the stopped state: one message that names the way
 // back, in place of the socket error each request would otherwise show.
 func (m *dashboard) noteDaemonError(err error) bool {
-	if err == nil || !client.Unavailable(err) {
+	if !errors.Is(err, model.ErrDaemonUnavailable) {
 		return false
 	}
 	m.daemonDown = true
