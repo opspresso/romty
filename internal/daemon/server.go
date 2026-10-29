@@ -67,6 +67,11 @@ type Server struct {
 	resume *resumeStore
 	// closed keeps the snapshots of tabs the user closed, for reopening.
 	closed *resumeStore
+	// checkpoint keeps the latest snapshot of each running agent tab, so a
+	// daemon that crashes, is killed, or loses power still leaves sessions to
+	// resume. The next daemon moves them into resume.
+	checkpoint     *resumeStore
+	lastCheckpoint time.Time
 
 	mu            sync.Mutex
 	value         model.State
@@ -118,7 +123,7 @@ func New(socket, statePath, shell string) (*Server, error) {
 	if shell == "" {
 		shell = "/bin/sh"
 	}
-	return &Server{
+	server := &Server{
 		socket: socket,
 		store:  store,
 		shell:  shell,
@@ -126,6 +131,7 @@ func New(socket, statePath, shell string) (*Server, error) {
 		// caller that could already build a daemon keeps being able to.
 		resume:        &resumeStore{directory: filepath.Join(filepath.Dir(statePath), "resume")},
 		closed:        &resumeStore{directory: filepath.Join(filepath.Dir(statePath), "closed")},
+		checkpoint:    &resumeStore{directory: filepath.Join(filepath.Dir(statePath), "checkpoint")},
 		logger:        log.New(os.Stderr, "romty: ", log.LstdFlags),
 		value:         value,
 		sessions:      make(map[string]*session),
@@ -137,7 +143,10 @@ func New(socket, statePath, shell string) (*Server, error) {
 		transcripts:   transcript.NewReader(),
 		codex:         codexstate.NewReader(),
 		awake:         &awakeHold{},
-	}, nil
+	}
+	server.resume.retention = server.retention
+	server.closed.retention = server.retention
+	return server, nil
 }
 
 // SetLogger redirects the daemon's diagnostics. Tests use it to stay quiet.
@@ -182,6 +191,7 @@ func (s *Server) Serve(ctx context.Context) error {
 	if err := s.removeStaleTabs(); err != nil {
 		return err
 	}
+	s.resume.promote(s.checkpoint)
 	s.resume.discardStale(time.Now())
 	s.closed.discardStale(time.Now())
 	if err := prepareSocket(s.socket); err != nil {
@@ -195,6 +205,13 @@ func (s *Server) Serve(ctx context.Context) error {
 	defer s.shutdown()
 	defer listener.Close()
 	go s.housekeep()
+	// tmutil can take seconds, so the exclusion is made once the socket is
+	// up rather than before.
+	go func() {
+		if err := excludeFromBackup(directory); err != nil {
+			s.logger.Printf("exclude %s from backups: %v", directory, err)
+		}
+	}()
 	s.logger.Printf("listening on %s", s.socket)
 	defer s.logger.Printf("stopped")
 
@@ -261,6 +278,8 @@ func (s *Server) shutdown() {
 			s.logger.Printf("save session for tab %s: %v", value.id, err)
 		}
 	}
+	// The stop saved every tab, so the checkpoints are older copies.
+	_ = os.RemoveAll(s.checkpoint.directory)
 	closeSessions(slices.Collect(maps.Values(sessions)))
 }
 
@@ -312,7 +331,14 @@ func (s *Server) resumeSaveLocked(tab model.Tab, value *session, now time.Time) 
 			AgentSessionID: runtime.SessionID,
 			SavedAt:        now,
 		},
-		recording: value.snapshotRecording,
+		// Read when the snapshot is written, outside the server lock, and
+		// empty when config.json says not to save output.
+		recording: func() []byte {
+			if s.settings().SaveOutput == "off" {
+				return nil
+			}
+			return value.snapshotRecording()
+		},
 	}
 }
 
@@ -374,6 +400,10 @@ func (s *Server) sessionExited(tabID string) {
 	if removed {
 		s.revision++
 	}
+	if !s.stopping {
+		// A shell that ended has nothing to resume.
+		s.checkpoint.remove(tabID)
+	}
 	if s.stopping {
 		// These shells exited because the daemon killed them, and it is
 		// leaving. Saving once per tab here writes a file the process may not
@@ -403,6 +433,7 @@ func (s *Server) closeTab(tabID string) protocol.Response {
 		return protocol.Response{Error: errNoSession}
 	}
 	s.saveClosed(tabID, value)
+	s.checkpoint.remove(tabID)
 	value.close()
 	return s.snapshotResponse()
 }

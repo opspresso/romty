@@ -19,3 +19,10 @@ func awakeCommand(int) *exec.Cmd {
 func redirect(from, to int) error {
 	return unix.Dup3(from, to, 0)
 }
+
+// excludeFromBackup does nothing on Linux, which has no backup exclusion
+// every backup tool honours. The documentation says which directory to
+// exclude.
+var excludeFromBackup = func(string) error {
+	return nil
+}

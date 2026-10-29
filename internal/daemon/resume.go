@@ -31,11 +31,13 @@ import (
 	"github.com/opspresso/romty/internal/model"
 )
 
-// resumeRetention is how long an unconsumed snapshot is kept. A workspace the
-// user has not reopened in this long is not one they are resuming into, and
-// replaying weeks-old output as if it just happened would mislead more than
-// it helps.
-const resumeRetention = 7 * 24 * time.Hour
+// defaultRetention is how long an unconsumed snapshot is kept unless
+// config.json sets output_retention_days. A workspace the user has not
+// reopened in this long is not one they are resuming into, and replaying
+// weeks-old output as if it just happened would mislead more than it helps.
+// Saved output can hold whatever a terminal printed, secrets included, so it
+// is not kept longer than it is useful.
+const defaultRetention = 7 * 24 * time.Hour
 
 // resumeMarker separates the restored output from the fresh shell that
 // follows it, so old output is not mistaken for something that just ran.
@@ -53,6 +55,8 @@ var errClosedSessionNotFound = errors.New("closed session not found")
 
 type resumeStore struct {
 	directory string
+	// retention is how long a snapshot is kept; nil keeps defaultRetention.
+	retention func() time.Duration
 	// mu makes take consume atomically: two tabs created together in one
 	// workspace must restore two different snapshots, not the same one twice.
 	mu sync.Mutex
@@ -65,6 +69,41 @@ type resumeSnapshot struct {
 	Agent          model.Agent `json:"agent,omitempty"`
 	AgentSessionID string      `json:"agent_session_id,omitempty"`
 	SavedAt        time.Time   `json:"saved_at"`
+}
+
+func (s *resumeStore) keep() time.Duration {
+	if s.retention == nil {
+		return defaultRetention
+	}
+	return s.retention()
+}
+
+// promote moves every snapshot in from into this store, unless this store
+// already holds one for the same tab, which is newer. A crash leaves the
+// checkpoints of the daemon that crashed; the next daemon offers them the way
+// it offers a stop's snapshots. from is emptied either way.
+func (s *resumeStore) promote(from *resumeStore) {
+	entries, err := os.ReadDir(from.directory)
+	if err != nil {
+		return
+	}
+	if err := os.MkdirAll(s.directory, 0o700); err != nil {
+		return
+	}
+	for _, entry := range entries {
+		id, found := strings.CutSuffix(entry.Name(), ".json")
+		if !found || !storedID.MatchString(id) {
+			continue
+		}
+		if _, err := os.Stat(s.metaPath(id)); err == nil {
+			continue
+		}
+		// The recording first, so the metadata that makes the snapshot
+		// visible never names a missing recording.
+		_ = os.Rename(from.recordingPath(id), s.recordingPath(id))
+		_ = os.Rename(from.metaPath(id), s.metaPath(id))
+	}
+	_ = os.RemoveAll(from.directory)
 }
 
 func (s *resumeStore) metaPath(id string) string {
@@ -160,7 +199,7 @@ func (s *resumeStore) listLocked(now time.Time) map[string][]storedSnapshot {
 			continue
 		}
 		meta, err := jsonfile.Read[resumeSnapshot](s.metaPath(id))
-		if err != nil || meta.WorkspaceID == "" || now.Sub(meta.SavedAt) > resumeRetention {
+		if err != nil || meta.WorkspaceID == "" || now.Sub(meta.SavedAt) > s.keep() {
 			continue
 		}
 		result[meta.WorkspaceID] = append(result[meta.WorkspaceID], storedSnapshot{id: id, meta: meta})
@@ -223,7 +262,7 @@ func (s *resumeStore) discardStale(now time.Time) {
 	}
 	for _, entry := range entries {
 		info, err := entry.Info()
-		if err != nil || now.Sub(info.ModTime()) <= resumeRetention {
+		if err != nil || now.Sub(info.ModTime()) <= s.keep() {
 			continue
 		}
 		_ = os.Remove(filepath.Join(s.directory, entry.Name()))

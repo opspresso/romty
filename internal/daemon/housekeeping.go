@@ -1,8 +1,6 @@
 package daemon
 
 import (
-	"encoding/json"
-	"errors"
 	"os"
 	"os/exec"
 	"slices"
@@ -55,14 +53,44 @@ func (s *Server) housekeep() {
 	}
 }
 
+// checkpointInterval is how often the agent tabs' sessions are checkpointed.
+var checkpointInterval = 5 * time.Minute
+
 func (s *Server) housekeepOnce() {
 	s.enforceRecordingBudget()
+	if time.Since(s.lastCheckpoint) >= checkpointInterval {
+		s.lastCheckpoint = time.Now()
+		s.checkpointAgents()
+	}
 	if s.logPath != "" {
 		if err := rotateDaemonLog(s.logPath); err != nil {
 			s.logger.Printf("rotate daemon log: %v", err)
 		}
 	}
 	s.updateAwake()
+}
+
+// checkpointAgents saves the session of every tab running an agent, the way
+// a stop does, into the checkpoint store. Only agent tabs: they are the ones
+// with a session to resume, and a plain shell's output is not worth writing
+// every few minutes.
+func (s *Server) checkpointAgents() {
+	s.mu.Lock()
+	saves := make([]resumeSave, 0)
+	now := time.Now()
+	for _, tab := range s.value.Tabs {
+		value, running := s.sessions[tab.ID]
+		if !running || s.agentStatuses[tab.ID].Agent == "" {
+			continue
+		}
+		saves = append(saves, s.resumeSaveLocked(tab, value, now))
+	}
+	s.mu.Unlock()
+	for _, save := range saves {
+		if err := s.checkpoint.save(save.id, save.meta, save.recording()); err != nil {
+			s.logger.Printf("checkpoint tab %s: %v", save.id, err)
+		}
+	}
 }
 
 // enforceRecordingBudget trims the recordings of the quietest tabs to
@@ -160,25 +188,7 @@ func (s *Server) updateAwakeFrom(statuses map[string]model.AgentStatus) {
 }
 
 func (s *Server) sleepAllowed() bool {
-	if s.configPath == "" {
-		return true
-	}
-	data, err := os.ReadFile(s.configPath)
-	if errors.Is(err, os.ErrNotExist) {
-		return false
-	}
-	if err != nil {
-		s.logger.Printf("read config for allow_sleep: %v", err)
-		return true
-	}
-	var settings struct {
-		AllowSleep bool `json:"allow_sleep"`
-	}
-	if err := json.Unmarshal(data, &settings); err != nil {
-		s.logger.Printf("read config for allow_sleep: %v", err)
-		return true
-	}
-	return settings.AllowSleep
+	return s.settings().AllowSleep
 }
 
 func (h *awakeHold) hold(s *Server) {

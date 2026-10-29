@@ -82,7 +82,7 @@ func TestResumeStoreDiscardsStaleSnapshots(t *testing.T) {
 	}, []byte("output")); err != nil {
 		t.Fatalf("save() again error = %v", err)
 	}
-	store.discardStale(time.Now().Add(resumeRetention + time.Hour))
+	store.discardStale(time.Now().Add(defaultRetention + time.Hour))
 	if _, _, ok := store.take("workspace-1"); ok {
 		t.Fatal("discardStale kept a snapshot past its retention")
 	}
@@ -101,7 +101,7 @@ func TestResumeStoreTakeSkipsAnExpiredSnapshot(t *testing.T) {
 	store := &resumeStore{directory: t.TempDir()}
 	if err := store.save("01", resumeSnapshot{
 		Format: 1, WorkspaceID: "workspace-1", TabName: "1",
-		SavedAt: time.Now().Add(-resumeRetention - time.Hour),
+		SavedAt: time.Now().Add(-defaultRetention - time.Hour),
 	}, []byte("output")); err != nil {
 		t.Fatalf("save() error = %v", err)
 	}
