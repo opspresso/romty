@@ -5,6 +5,7 @@ package ui
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -717,7 +718,40 @@ func tabLabelWidth(tab model.Tab) int {
 	return width
 }
 
+// fitTabNames shortens the longest tab names until every tab and the + slot
+// fit in width, so a crowded row still shows each tab and the way to open
+// another one. The names are for drawing and hit-testing only; the tabs
+// themselves keep their names. When even one-character names do not fit, the
+// row is cut at its end as before.
+func fitTabNames(tabs []model.Tab, width int) []model.Tab {
+	rowWidth := func(tabs []model.Tab) int {
+		total := lipgloss.Width(newTabLabel)
+		for _, tab := range tabs {
+			total += tabLabelWidth(tab) + 1
+		}
+		return total
+	}
+	if rowWidth(tabs) <= width {
+		return tabs
+	}
+	longest := 0
+	for _, tab := range tabs {
+		longest = max(longest, lipgloss.Width(display.Text(tab.Name)))
+	}
+	fitted := slices.Clone(tabs)
+	for limit := longest - 1; limit >= 1; limit-- {
+		for index, tab := range tabs {
+			fitted[index].Name = truncate(display.Text(tab.Name), limit)
+		}
+		if rowWidth(fitted) <= width {
+			return fitted
+		}
+	}
+	return fitted
+}
+
 func renderTabBarWithHover(styles *uiStyles, tabs []model.Tab, active, hover, closeHover, animationFrame, width int) []string {
+	tabs = fitTabNames(tabs, width)
 	var tabsLine strings.Builder
 	var railLine strings.Builder
 	for index := 0; index <= len(tabs); index++ {

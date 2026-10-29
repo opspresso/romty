@@ -139,3 +139,30 @@ func TestTabRowNamesTheWorkspaceItPreviews(t *testing.T) {
 		t.Fatalf("preview is not labelled:\n%s", ansi.Strip(value.render()))
 	}
 }
+
+// A crowded tab row shortens the longest names so every tab and the + slot
+// stay on screen, and a click lands on the tab drawn under it.
+func TestCrowdedTabRowKeepsEveryTabAndTheNewTabSlot(t *testing.T) {
+	styles := newUIStyles(true)
+	tabs := []model.Tab{
+		{ID: "a", Name: "claude-refactoring", Running: true},
+		{ID: "b", Name: "server", Running: true},
+		{ID: "c", Name: "tests-watch-mode", Running: true},
+	}
+	row := ansi.Strip(renderTabBarWithHover(styles, tabs, 0, -1, -1, 0, 50)[0])
+	if !strings.HasSuffix(strings.TrimRight(row, " "), "+") || !strings.Contains(row, "server") {
+		t.Fatalf("crowded row = %q, want every tab and the + slot", row)
+	}
+	if tabs[0].Name != "claude-refactoring" {
+		t.Fatal("fitting the row renamed the tab itself")
+	}
+	// Columns, not bytes: × before it is two bytes wide.
+	at := len([]rune(row[:strings.Index(row, "server")]))
+	if hit, ok := tabHitAtX(tabs, at, 50); !ok || hit.index != 1 {
+		t.Fatalf("click on server = (%+v, %v), want tab 1", hit, ok)
+	}
+	plus := strings.LastIndex(row, "+")
+	if hit, ok := tabHitAtX(tabs, len([]rune(row[:plus])), 50); !ok || hit.index != len(tabs) {
+		t.Fatalf("click on + = (%+v, %v), want the new-tab slot", hit, ok)
+	}
+}
