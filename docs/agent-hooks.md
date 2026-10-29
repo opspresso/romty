@@ -15,7 +15,7 @@ Terminal output and silence do not establish Codex or Claude Code completion. Wi
 
 ## Install or update
 
-When the TUI starts, romty looks for `claude`, `claude-code`, `codex`, `opencode`, and `kiro-cli` on `PATH`. If a detected agent has missing or outdated romty hooks, the TUI opens a confirmation dialog:
+When the TUI starts, romty looks for `claude`, `claude-code`, `codex`, `opencode`, and `kiro-cli` on `PATH`. If a detected agent has missing or outdated romty hooks, the TUI opens a confirmation dialog. On a first run with no root yet, the dialog waits until the first root is added and no other dialog is open:
 
 - Press `Enter` to install or update every listed provider.
 - Press `Esc` to leave the files unchanged for that run. The status rail then shows `Status unavailable · run romty hooks` for a skipped provider's agent until romty restarts or the agent reports an event.

@@ -395,7 +395,7 @@
             <div class="key-row"><span class="caps"><kbd>F2</kbd></span><span>Add a root</span></div>
             <div class="key-row"><span class="caps"><kbd>F3</kbd><kbd>,</kbd></span><span>Open Config</span></div>
             <div class="key-row"><span class="caps"><kbd>F4</kbd><kbd>Ctrl+C</kbd></span><span>Close the TUI and leave sessions running</span></div>
-            <div class="key-row"><span class="caps"><kbd>F5</kbd></span><span>Refresh workspaces and Git state, or reload file view</span></div>
+            <div class="key-row"><span class="caps"><kbd>F5</kbd></span><span>Refresh workspaces and Git state, reload file view, or start a stopped daemon</span></div>
             <div class="key-row"><span class="caps"><kbd>F6</kbd><kbd>Ctrl+Shift+\</kbd></span><span>Enter or leave scrollback</span></div>
             <div class="key-row"><span class="caps"><kbd>F7</kbd><kbd>Ctrl+/</kbd></span><span>Toggle pane focus</span></div>
           </div>
@@ -409,6 +409,8 @@
             <div class="key-row"><span class="caps"><kbd>i</kbd></span><span>Open About</span></div>
             <div class="key-row"><span class="caps"><kbd>Tab</kbd></span><span>Focus the terminal</span></div>
             <div class="key-row"><span class="caps"><kbd>Space</kbd></span><span>Collapse or expand the selected root</span></div>
+            <div class="key-row"><span class="caps"><kbd>/</kbd></span><span>Find a workspace by name</span></div>
+            <div class="key-row"><span class="caps"><kbd>&lt;</kbd><kbd>&gt;</kbd></span><span>Move the tab under the tab cursor</span></div>
             <div class="key-row"><span class="caps"><kbd>a</kbd><kbd>t</kbd><kbd>g</kbd><kbd>f</kbd></span><span>The Switch actions below, for terminals that cannot send Ctrl+Shift+letter</span></div>
           </div>
         </section>
@@ -420,6 +422,7 @@
             <div class="key-row"><span class="caps"><kbd>Ctrl+Shift+G</kbd><kbd>g</kbd></span><span>Open Git actions for the contextual workspace</span></div>
             <div class="key-row"><span class="caps"><kbd>Ctrl+Shift+F</kbd><kbd>f</kbd></span><span>Toggle changed files and Git diff</span></div>
             <div class="key-row"><span class="caps"><kbd>Ctrl+Shift+←/→</kbd></span><span>Switch terminal tab</span></div>
+            <div class="key-row"><span class="caps"><kbd>Ctrl+Shift+PgUp/PgDn</kbd></span><span>Move the selected tab</span></div>
             <div class="key-row"><span class="caps"><kbd>Ctrl+Shift+↑/↓</kbd></span><span>Switch to a workspace with a running terminal</span></div>
             <div class="key-row"><span class="caps"><kbd>Ctrl+Shift+A</kbd><kbd>a</kbd></span><span>Open the next terminal whose agent is waiting</span></div>
           </div>
@@ -452,14 +455,16 @@
           <div class="keys">
             <div class="key-row"><span class="caps"><kbd>Enter</kbd></span><span>Open, run, return, submit, confirm, or toggle a setting in the workspace, picker, Config, Git views, and input modals</span></div>
             <div class="key-row"><span class="caps"><kbd>Esc</kbd></span><span>Close a modal or file view, cancel an input modal, or leave scrollback</span></div>
-            <div class="key-row"><span class="caps"><kbd>/</kbd></span><span>Find in scrollback, or type a path in the root picker</span></div>
+            <div class="key-row"><span class="caps"><kbd>/</kbd></span><span>Find in scrollback, search Help, or type a path in the root picker</span></div>
             <div class="key-row"><span class="caps"><kbd>n/N</kbd></span><span>Move to the next or previous scrollback match</span></div>
             <div class="key-row"><span class="caps"><kbd>Backspace</kbd></span><span>Erase the last typed character</span></div>
             <div class="key-row"><span class="caps"><kbd>←/→</kbd><kbd>[/]</kbd></span><span>Resize the workspace pane in Config</span></div>
             <div class="key-row"><span class="caps"><kbd>p</kbd></span><span>Toggle mouse passthrough in Config</span></div>
             <div class="key-row"><span class="caps"><kbd>m</kbd></span><span>Toggle the scrollback mouse in Config</span></div>
-            <div class="key-row"><span class="caps"><kbd>d</kbd><kbd>b</kbd></span><span>Toggle the done and waiting sounds in Config</span></div>
-            <div class="key-row"><span class="caps"><kbd>s</kbd></span><span>Play the done sound in Config</span></div>
+            <div class="key-row"><span class="caps"><kbd>d</kbd><kbd>b</kbd></span><span>Toggle the done and waiting sounds in Config; turning one on plays it</span></div>
+            <div class="key-row"><span class="caps"><kbd>n</kbd></span><span>Toggle desktop notifications in Config</span></div>
+            <div class="key-row"><span class="caps"><kbd>w</kbd></span><span>Toggle keeping the machine awake while agents work in Config</span></div>
+            <div class="key-row"><span class="caps"><kbd>c</kbd></span><span>Toggle programs copying to the clipboard (OSC 52) in Config</span></div>
           </div>
         </section>
       </div>
