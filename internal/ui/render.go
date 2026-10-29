@@ -329,6 +329,16 @@ func (m dashboard) renderStatus(width, bodyHeight int) []string {
 	rail := m.styles.tabRail.Render(strings.Repeat("─", width))
 	var status string
 	switch {
+	case m.daemonRestarting:
+		status = m.renderActivityStatus("STARTING", "romty daemon", width)
+	case m.daemonDown:
+		// Every other failure while the daemon is gone is a consequence of
+		// it, so the way back stays on screen whatever else was reported.
+		message := daemonStoppedMessage
+		if m.errorFrom == daemonError && m.errorMessage != "" {
+			message = m.errorMessage
+		}
+		status = truncate(m.styles.errorLabel.Render(" DAEMON ")+" "+m.styles.errorText.Render(display.Text(message)), width)
 	case m.errorMessage != "":
 		label, text, title := m.styles.errorLabel, m.styles.errorText, " ERROR "
 		if m.noticeMessage {
@@ -511,7 +521,7 @@ func (m dashboard) renderStatus(width, bodyHeight int) []string {
 			shortcut{key: "F2", description: "add root"},
 			shortcut{key: "F3", description: "config"},
 			shortcut{key: "F4", description: "quit"},
-			shortcut{key: "F5", description: "refresh"},
+			shortcut{key: "F5", description: m.refreshLabel()},
 			shortcut{key: "F6", description: "scrollback"},
 			shortcut{key: "F7", description: "focus"},
 		)
@@ -696,6 +706,17 @@ func (m dashboard) renderTerminal(width int) []string {
 		}
 		return append(lines, m.terminal.renderViewport(m.scrollOffset)...)
 	}
+	if m.daemonDown {
+		return append(lines,
+			"",
+			m.styles.modalStrong.Render("  The romty daemon stopped"),
+			"",
+			m.styles.modalBody.Render("  Its terminals have ended. A romty stop saved them, and Enter"),
+			m.styles.modalBody.Render("  on a workspace offers to reopen them once the daemon runs."),
+			"",
+			"  "+m.styles.shortcutKey.Render(" F5 ")+" "+m.styles.modalBody.Render("start the daemon again"),
+		)
+	}
 	if len(m.state.Roots) == 0 {
 		return append(lines,
 			"",
@@ -723,6 +744,14 @@ func (m dashboard) renderTerminal(width int) []string {
 		return append(lines, m.styles.empty.Render("  Press Enter to open "+display.Text(tabs[m.tabIndex].Name)))
 	}
 	return append(lines, m.styles.empty.Render("  Press Enter to open a new tab"))
+}
+
+// refreshLabel is what F5 does now: start a daemon that stopped, or refresh.
+func (m dashboard) refreshLabel() string {
+	if m.daemonDown && m.restartDaemon != nil {
+		return "restart daemon"
+	}
+	return "refresh"
 }
 
 // tabPreviewLabel names the workspace whose tabs the tab row shows when that

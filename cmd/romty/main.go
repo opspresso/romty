@@ -96,7 +96,8 @@ func runCommandWithInput(arguments []string, output io.Writer, input io.Reader) 
 	if err != nil {
 		return err
 	}
-	_, err = ui.Run(backend, snapshot, runtime.Config, agenthooks.Detect())
+	restart := func() error { return client.EnsureDaemon(runtime, executable) }
+	_, err = ui.Run(backend, snapshot, runtime.Config, agenthooks.Detect(), restart)
 	return err
 }
 
