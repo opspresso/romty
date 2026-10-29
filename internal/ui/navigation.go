@@ -98,6 +98,14 @@ func (m *dashboard) clampNavigationOffset() {
 	m.navOffset = start
 }
 
+// cursorOnScreen reports the cursor's index and whether its item is inside
+// the viewport.
+func (m dashboard) cursorOnScreen() (int, bool) {
+	items := m.navigationItems()
+	start, end := navigationWindow(items, m.navOffset, m.navigationCapacity())
+	return m.navIndex, m.navIndex >= start && m.navIndex < end
+}
+
 // ensureNavigationVisible moves the viewport by the least number of complete
 // items needed to keep the keyboard cursor on screen. Moving inside the window
 // leaves it still; crossing an edge scrolls only that edge into view.

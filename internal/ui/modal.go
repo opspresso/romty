@@ -14,6 +14,7 @@ import (
 	"github.com/opspresso/romty/internal/display"
 	"github.com/opspresso/romty/internal/model"
 	"github.com/opspresso/romty/internal/version"
+	"golang.org/x/text/unicode/norm"
 )
 
 type modalAction struct {
@@ -496,15 +497,22 @@ func (m dashboard) modalActions() []modalAction {
 	return nil
 }
 
-// answerActions are a question modal's two buttons: Enter accepts and Esc
-// declines, each named for what it does.
 // removeConfirmed reports whether the removal dialog may proceed: always for
 // forgetting a root, which leaves the directory on disk, and for deleting a
-// workspace only once its name is typed exactly.
+// workspace only once its name is typed or pasted. Both sides are compared in
+// NFC and as drawn, because macOS can store a name decomposed (NFD) while a
+// keyboard types it composed, and a name with control characters is shown
+// with replacements: either would make a matching name impossible to enter.
 func (m dashboard) removeConfirmed() bool {
-	return m.removeTarget.isRoot || m.removeConfirm == m.removeTarget.workspace.Name
+	if m.removeTarget.isRoot {
+		return true
+	}
+	comparable := func(value string) string { return norm.NFC.String(display.Text(value)) }
+	return comparable(m.removeConfirm) == comparable(m.removeTarget.workspace.Name)
 }
 
+// answerActions are a question modal's two buttons: Enter accepts and Esc
+// declines, each named for what it does.
 func answerActions(accept, decline string) []modalAction {
 	return []modalAction{
 		{shortcut: shortcut{key: "Enter", description: accept}, code: tea.KeyEnter},

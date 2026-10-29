@@ -582,6 +582,10 @@ func (m dashboard) update(message tea.Msg) (tea.Model, tea.Cmd) {
 		} else if m.modal == inputModal {
 			m.input.text += message.Content
 			m.input.err = ""
+		} else if m.modal == removeSelectionModal && !m.removeTarget.isRoot {
+			// Pasting the name is how a name that is hard to type, such as
+			// one with characters the keyboard lacks, is confirmed.
+			m.removeConfirm += message.Content
 		} else if m.modal != noModal {
 			return m, nil
 		} else if m.scrollback && m.search.typing {
@@ -666,7 +670,14 @@ func (m dashboard) update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case gitStatusMsg:
+		// A repository takes two rows and a plain directory one, so a Git
+		// read can change the tree's height under the cursor. A cursor that
+		// was on screen stays there; one the wheel scrolled away is left be.
+		_, cursorShown := m.cursorOnScreen()
 		m.gitStates = message.value
+		if cursorShown {
+			m.ensureNavigationVisible()
+		}
 		if message.fetchedAt.After(m.gitFetchedAt) {
 			m.gitFetchedAt = message.fetchedAt
 		}

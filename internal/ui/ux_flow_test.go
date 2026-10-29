@@ -237,3 +237,80 @@ func TestCrowdedTabRowKeepsTheActiveNameLongest(t *testing.T) {
 		t.Fatalf("one-column name = %q, want its first character", got)
 	}
 }
+
+// A name stored decomposed, as macOS can store Korean, is confirmed by typing
+// it composed, and a pasted name confirms as well.
+func TestDeleteConfirmationAcceptsTheNameInAnyNormalForm(t *testing.T) {
+	decomposed := "\u1112\u1161\u11ab" // 한 in NFD
+	workspace := model.Workspace{ID: "w", RootID: projectsRoot.ID, Name: decomposed, Path: "/projects/" + decomposed}
+	value := newDashboard(&fakeBackend{}, projectsSnapshot([]model.WorkspaceView{{Workspace: workspace}}))
+	value.setNavigation(1)
+	updated, _ := value.confirmRemoveSelection(cursorItem(t, value))
+	value = updated.(dashboard)
+
+	send(&value, key('한', "한"))
+	if !value.removeConfirmed() {
+		t.Fatal("the composed name does not confirm a decomposed one")
+	}
+
+	value.removeConfirm = ""
+	send(&value, tea.PasteMsg{Content: decomposed})
+	if command := send(&value, key(tea.KeyEnter, "")); command == nil {
+		t.Fatal("a pasted name did not confirm the deletion")
+	}
+}
+
+// A wide first character survives the one-column cut, so Korean tab names
+// do not turn blank on a crowded row.
+func TestOneColumnTabNameKeepsAWideFirstCharacter(t *testing.T) {
+	if got := shortenName("한국어탭", 1); got != "한" {
+		t.Fatalf("one-column name = %q, want 한", got)
+	}
+	tabs := []model.Tab{{ID: "a", Name: "한국어탭", Running: true}, {ID: "b", Name: "서버", Running: true}}
+	for _, tab := range fitTabNames(tabs, 0, 26) {
+		if tab.Name == "" {
+			t.Fatalf("fitted tabs = %+v, want no blank name", fitTabNames(tabs, 0, 26))
+		}
+	}
+}
+
+// f closes the file view it opened, for terminals that cannot send the chord.
+func TestFileViewClosesWithF(t *testing.T) {
+	snapshot, workspace := alphaWorkspaceSnapshot(nil)
+	value := newDashboard(&fakeBackend{}, snapshot)
+	value.gitStates = map[string]gitrepo.State{workspace.Path: {Branch: "main"}}
+	value.focus = leftPane
+	value.setNavigation(1)
+	send(&value, key('f', "f"))
+	if !value.fileView.active {
+		t.Fatal("f did not open the file view")
+	}
+	send(&value, key('f', "f"))
+	if value.fileView.active {
+		t.Fatal("f did not close the file view")
+	}
+}
+
+// A Git read that turns one-row workspaces into two-row repositories keeps a
+// cursor that was on screen there.
+func TestGitStateKeepsTheCursorOnScreen(t *testing.T) {
+	directories := make([]model.WorkspaceView, 0, 12)
+	for index := range 12 {
+		name := string(rune('a'+index)) + "-workspace"
+		directories = append(directories, model.WorkspaceView{Workspace: model.Workspace{
+			ID: name, RootID: projectsRoot.ID, Name: name, Path: "/projects/" + name}})
+	}
+	value := newDashboard(&fakeBackend{}, projectsSnapshot(directories))
+	value.width, value.height = 120, 18
+	value.focus = leftPane
+	for range 10 {
+		value.moveNavigation(1)
+	}
+	if _, shown := value.cursorOnScreen(); !shown {
+		t.Fatal("the cursor starts off screen; the test needs it shown")
+	}
+	send(&value, gitStatusMsg{value: repositoryStates(directories)})
+	if _, shown := value.cursorOnScreen(); !shown {
+		t.Fatalf("the cursor left the screen after the Git read (offset %d)", value.navOffset)
+	}
+}

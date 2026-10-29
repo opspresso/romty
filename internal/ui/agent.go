@@ -58,6 +58,7 @@ func (m *dashboard) updateAgents(statuses map[string]model.AgentStatus) {
 type agentAlert struct {
 	kind  sound.Kind
 	tab   model.Tab
+	agent model.Agent
 	phase model.AgentPhase
 }
 
@@ -80,9 +81,9 @@ func (m dashboard) agentAlerts(statuses map[string]model.AgentStatus) []agentAle
 			(heard.SessionID == "" || status.SessionID == heard.SessionID) &&
 			heard.Phase != model.AgentPhaseUnknown && heard.Phase != "" &&
 			(status.Phase == model.AgentPhaseCompleted || status.Phase == model.AgentPhaseError):
-			alerts = append(alerts, agentAlert{kind: sound.Done, tab: *tab, phase: status.Phase})
+			alerts = append(alerts, agentAlert{kind: sound.Done, tab: *tab, agent: status.Agent, phase: status.Phase})
 		case !heard.Phase.Waiting() && status.Phase.Waiting():
-			alerts = append(alerts, agentAlert{kind: sound.Waiting, tab: *tab, phase: status.Phase})
+			alerts = append(alerts, agentAlert{kind: sound.Waiting, tab: *tab, agent: status.Agent, phase: status.Phase})
 		}
 	}
 	return alerts
@@ -119,7 +120,9 @@ func (m dashboard) notifyAgentAlerts(alerts []agentAlert) tea.Cmd {
 // notification can be acted on without opening romty first.
 func (m dashboard) agentAlertText(alert agentAlert) string {
 	label := agentPhaseLabels[alert.phase]
-	if name := agentDisplayNames[alert.tab.Agent]; name != "" {
+	// The agent comes from the new status: the tab still carries the last
+	// one, which is empty for an agent whose first report is the alert.
+	if name := agentDisplayNames[alert.agent]; name != "" {
 		label = name + ": " + label
 	}
 	if place := m.tabPlace(alert.tab); place != "" {
@@ -324,28 +327,14 @@ func (m dashboard) agentStatusNote() string {
 	return label
 }
 
-// railNote is the note in the shortcut rail. When the narrow layout hides the
-// tree, the tree's attention badge is hidden with it, so the note carries the
-// count instead.
+// railNote is the note in the shortcut rail: the open terminal's agent, or in
+// the tree the tabs of the workspace under the cursor, whose markers are what
+// the user is reading there.
 func (m dashboard) railNote() string {
-	note := m.agentStatusNote()
 	if m.focus == leftPane && !m.scrollback {
-		// In the tree the markers on the cursor's row are what the user is
-		// reading, so the rail spells them out.
-		note = m.cursorTabsNote()
+		return m.cursorTabsNote()
 	}
-	if !m.navigationHidden() {
-		return note
-	}
-	summary := m.attention().summary()
-	switch {
-	case summary == "":
-		return note
-	case note == "":
-		return summary + " waiting"
-	default:
-		return summary + " waiting · " + note
-	}
+	return m.agentStatusNote()
 }
 
 // cursorTabsNote names each running tab of the workspace under the cursor and

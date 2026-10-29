@@ -38,7 +38,7 @@ If a marker stays `●`, see [Status stays unavailable](agent-hooks.md#status-st
 
 ### Agents that need you
 
-An agent that waits for input (`▲`) or approval (`■`), or that failed (`★`), is drawn in reverse so it stands out from busy agents. Their count is shown in an amber badge at the right end of the workspace pane title and in the window title. When the narrow layout hides the workspace pane, the shortcut rail shows the count instead, for example `▲1 waiting`.
+An agent that waits for input (`▲`) or approval (`■`), or that failed (`★`), is drawn in reverse so it stands out from busy agents. Their count is shown in an amber badge at the right end of the workspace pane title and in the window title. When the narrow layout hides the workspace pane, the shortcut rail starts with the count instead, for example `▲1 need you`.
 
 romty sends a desktop notification when an agent finishes, fails, or starts waiting, for example `romty Claude Code: Needs your answer · api / 1`. It uses the OSC 9 escape sequence, which travels to the terminal on your own device, so the notification also reaches you over SSH. iTerm2, WezTerm, Ghostty, kitty, and Windows Terminal show it; a terminal without OSC 9 support ignores it. Several transitions in one poll share one notification. The first agent poll after startup does not notify. Press `n` in Config, or set `mute_notifications` in `config.json`, to turn notifications off.
 
@@ -124,7 +124,7 @@ Both file views allow directory rows to take the cursor. Press `Enter` to toggle
 |---|---|
 | `Ctrl`+`Shift`+`T`, or `t` in the workspace pane | Create and open a terminal tab |
 | `Ctrl`+`Shift`+`G`, or `g` in the workspace pane | Open Git actions for the contextual workspace |
-| `Ctrl`+`Shift`+`F`, or `f` in the workspace pane | Toggle changed files and Git diff |
+| `Ctrl`+`Shift`+`F`, or `f` in the workspace pane and file view | Toggle changed files and Git diff |
 | `Ctrl`+`Shift`+`←`/`→` | Switch terminal tab |
 | `Ctrl`+`Shift`+`↑`/`↓` | Switch to a workspace with a running terminal |
 | `Ctrl`+`Shift`+`A`, or `a` in the workspace pane | Open the next terminal whose agent is waiting |
@@ -243,7 +243,7 @@ The wheel then scrolls scrollback on any terminal that reports the mouse, at the
 
 ## Destructive actions and config
 
-`F8` opens a compact action menu beside the highlighted row; right-clicking a workspace or root opens the same menu at the pointer. The menu offers terminal creation, closing the selected tab, read-only access to all files, changed-file review, Git status/fetch/pull/push, and removal directly when they apply. Closing a tab asks before it terminates that shell. Deleting a workspace recursively removes all of its contents, so the confirmation accepts `Enter` only after you type the workspace's name exactly. Forgetting a root removes it only from romty and confirms with `Enter`. Both removal actions terminate terminal sessions under the selected item.
+`F8` opens a compact action menu beside the highlighted row; right-clicking a workspace or root opens the same menu at the pointer. The menu offers terminal creation, closing the selected tab, read-only access to all files, changed-file review, Git status/fetch/pull/push, and removal directly when they apply. Closing a tab asks before it terminates that shell. Deleting a workspace recursively removes all of its contents, so the confirmation accepts `Enter` only after you type or paste the workspace's name. The comparison ignores Unicode normalization, so a name that macOS stores decomposed still matches what you type. Forgetting a root removes it only from romty and confirms with `Enter`. Both removal actions terminate terminal sessions under the selected item.
 
 `F9` asks before stopping the daemon because this terminates every running shell. Once confirmed, shutdown cannot be cancelled.
 

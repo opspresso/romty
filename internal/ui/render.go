@@ -11,6 +11,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/rivo/uniseg"
 
 	"github.com/opspresso/romty/internal/display"
 	"github.com/opspresso/romty/internal/model"
@@ -284,9 +285,6 @@ func mergePanes(left, right []string, leftWidth, rightWidth, height int, separat
 	return lines
 }
 
-// paneHeader is a pane's title chip and the rule that runs from it to the
-// pane's edge. Three panes drew it, and the rule's width is a subtraction each
-// of them had to get right against a title that may have been truncated.
 // paneHeaderBadge is paneHeader with a badge at the right end of the rule. The
 // title gives way first, so the badge stays readable on a narrow pane.
 func (m dashboard) paneHeaderBadge(style lipgloss.Style, title, badge string, width int) string {
@@ -301,6 +299,9 @@ func (m dashboard) paneHeaderBadge(style lipgloss.Style, title, badge string, wi
 	return m.paneHeader(style, title, room) + " " + rendered
 }
 
+// paneHeader is a pane's title chip and the rule that runs from it to the
+// pane's edge. Three panes drew it, and the rule's width is a subtraction each
+// of them had to get right against a title that may have been truncated.
 func (m dashboard) paneHeader(style lipgloss.Style, title string, width int) string {
 	rendered := style.Render(truncate(title, width))
 	return rendered + m.styles.tabRail.Render(
@@ -472,7 +473,8 @@ func (m dashboard) renderStatus(width, bodyHeight int) []string {
 			// row has no room for.
 			contextShortcuts = []shortcut{{key: "Ctrl+/", description: "tree"}}
 		}
-		if waiting := m.attention(); waiting.input+waiting.approval > 0 {
+		waiting := m.attention()
+		if waiting.input+waiting.approval > 0 {
 			// The way to the agent that is waiting comes first while one is,
 			// and only then: a shortcut for nothing would be noise.
 			jump := shortcut{key: "a", description: "waiting agent"}
@@ -480,6 +482,12 @@ func (m dashboard) renderStatus(width, bodyHeight int) []string {
 				jump.key = "Ctrl+/ a"
 			}
 			contextShortcuts = append([]shortcut{jump}, contextShortcuts...)
+		}
+		if summary := waiting.summary(); summary != "" && m.navigationHidden() {
+			// The narrow layout hides the tree and its badge, so the count
+			// leads the rail. It is a rail entry rather than the note, which
+			// gives way first on a phone-width screen.
+			contextShortcuts = append([]shortcut{{key: summary, description: "need you"}}, contextShortcuts...)
 		}
 		if len(m.state.Roots) == 0 && m.terminal == nil {
 			// Before the first root nothing but adding one does anything.
@@ -777,13 +785,17 @@ func fitTabNames(tabs []model.Tab, active, width int) []model.Tab {
 }
 
 // shortenName cuts name to limit columns, ending in an ellipsis. At one column
-// it keeps the first character, which tells tabs apart where "…" would not.
+// it keeps the first character, which tells tabs apart where "…" would not;
+// the row width is measured on the result, so a wide one is counted as it is.
 func shortenName(name string, limit int) string {
 	if lipgloss.Width(name) <= limit {
 		return name
 	}
 	if limit <= 1 {
-		return ansi.Truncate(name, 1, "")
+		// The first grapheme whatever its width: a wide character such as
+		// Korean is two columns, and cutting to one would leave nothing.
+		first, _, _, _ := uniseg.FirstGraphemeClusterInString(name, -1)
+		return first
 	}
 	return ansi.Truncate(name, limit, "…")
 }

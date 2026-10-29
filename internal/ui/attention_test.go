@@ -119,15 +119,46 @@ func TestAttentionIsCountedInTheTreeTitleWindowTitleAndRail(t *testing.T) {
 		t.Fatalf("narrow tree title = %q, want the badge kept", header)
 	}
 
-	value.width = 60
+	// The rail leads with the count while the narrow layout hides the tree,
+	// even at phone width where the note would give way.
+	value.width = 40
 	value.focus = terminalPane
 	value.terminal = newEmbeddedTerminal("tab-5", newMemoryStream(""), 30, 10)
 	t.Cleanup(func() { value.closeTerminal() })
-	if got := value.railNote(); !strings.HasPrefix(got, "▲2 ■1 ★1 waiting") {
-		t.Fatalf("rail note with the tree hidden = %q", got)
+	if rail := ansi.Strip(value.render()); !strings.Contains(rail, "▲2 ■1 ★1  need you") {
+		t.Fatalf("narrow rail lacks the count:\n%s", rail)
 	}
 	value.width = 120
-	if got := value.railNote(); strings.Contains(got, "waiting") {
-		t.Fatalf("rail note with the tree on screen = %q, want no count", got)
+	if rail := ansi.Strip(value.render()); strings.Contains(rail, "need you") {
+		t.Fatalf("rail repeats the count while the tree shows it:\n%s", rail)
+	}
+}
+
+// A failed agent alone still reaches the narrow rail, which offers no
+// waiting-agent shortcut for it.
+func TestNarrowRailCountsAFailureAlone(t *testing.T) {
+	value := newDashboard(&fakeBackend{}, attentionSnapshot(model.AgentPhaseError))
+	value.width, value.height = 40, 12
+	value.focus = terminalPane
+	value.terminal = newEmbeddedTerminal("tab-1", newMemoryStream(""), 30, 10)
+	t.Cleanup(func() { value.closeTerminal() })
+	if rail := ansi.Strip(value.render()); !strings.Contains(rail, "★1  need you") {
+		t.Fatalf("narrow rail lacks the failure:\n%s", rail)
+	}
+}
+
+// The notification names the agent from its new status, which is the only
+// place an agent whose first report is the alert is named.
+func TestNotificationNamesAnAgentFromItsFirstReport(t *testing.T) {
+	snapshot := attentionSnapshot(model.AgentPhaseWorking)
+	snapshot.Roots[0].Directories[0].Tabs[0].Agent = ""
+	snapshot.Roots[0].Directories[0].Tabs[0].AgentPhase = ""
+	value := newDashboard(&fakeBackend{}, snapshot)
+	value.agentSoundReady = true
+	got := notifications(send(&value, agentSnapshotMsg{value: map[string]model.AgentStatus{
+		"tab-1": {Agent: model.AgentClaude, Phase: model.AgentPhaseWaitingInput},
+	}}))
+	if len(got) != 1 || !strings.Contains(got[0], "Claude Code: Needs your answer") {
+		t.Fatalf("notifications = %q, want the agent named", got)
 	}
 }
