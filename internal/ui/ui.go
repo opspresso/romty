@@ -303,6 +303,11 @@ type dashboard struct {
 	treeQuery     string
 	// tabMovePending is set while a tab move waits for the daemon.
 	tabMovePending bool
+	// seenBells is when the user last had each tab open, and knownBells the
+	// last bell of each tab as the previous tree reported it. Both are
+	// replaced, never written in place, because dashboard copies share them.
+	seenBells  map[string]time.Time
+	knownBells map[string]time.Time
 	// events is the daemon's change stream while subscribed; polling is set
 	// instead for a daemon that predates the stream.
 	events  model.EventStream
@@ -692,6 +697,7 @@ func (m dashboard) update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.syncSelection()
 		m.ensureWorkspaceCursor()
 		m.clampTabIndex()
+		bells := m.noteBells()
 		// A refresh says the tree is current; it says nothing about a failed
 		// resize or a daemon that would not stop, so it clears tree errors
 		// only.
@@ -705,9 +711,9 @@ func (m dashboard) update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.terminalExited {
 			settled, command := m.settleAfterExit()
-			return settled, tea.Batch(command, readGit)
+			return settled, tea.Batch(command, readGit, bells)
 		}
-		return m, readGit
+		return m, tea.Batch(readGit, bells)
 	case agentSnapshotMsg:
 		if message.err == nil {
 			alerts := m.applyAgentStatuses(message.value)
@@ -1128,6 +1134,11 @@ func (m dashboard) toggleScrollbackMouse() (tea.Model, tea.Cmd) {
 	return m, m.saveConfig()
 }
 
+func (m dashboard) toggleClipboard() (tea.Model, tea.Cmd) {
+	m.config.BlockClipboard = !m.config.BlockClipboard
+	return m, m.saveConfig()
+}
+
 func (m dashboard) toggleKeepAwake() (tea.Model, tea.Cmd) {
 	m.config.AllowSleep = !m.config.AllowSleep
 	return m, m.saveConfig()
@@ -1258,6 +1269,7 @@ func (m dashboard) handleOpenedTerminal(message terminalOpenedMsg) (tea.Model, t
 	)
 	m.terminal = terminal
 	m.terminalOpenedAt = now()
+	m.markBellSeen(message.tabID)
 	if tab, ok := m.openTab(); ok {
 		lastTabs := maps.Clone(m.lastTabs)
 		if lastTabs == nil {
@@ -1298,6 +1310,11 @@ func (m dashboard) handleTerminalOutput(message terminalOutputMsg) (tea.Model, t
 			// Hold the viewport on the same content as new output pushes
 			// older lines into the scrollback.
 			m.scrollTerminal(m.terminal.scrollbackLen() - before)
+		}
+		if effects := m.terminalEffects(); effects != nil {
+			if message.err == nil {
+				return m, tea.Batch(effects, m.terminal.read())
+			}
 		}
 	}
 	if message.err != nil {

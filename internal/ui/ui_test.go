@@ -2034,7 +2034,9 @@ func TestDashboardClicksConfigControls(t *testing.T) {
 		t.Fatalf("mouse passthrough click = (enabled %v, save %v, cursor %d)",
 			value.config.MousePassthrough, save, value.configIndex)
 	}
-	soundCommand := send(&value, tea.MouseClickMsg{X: left + 2, Y: top + 6, Button: tea.MouseLeft})
+	// The row is found by name, so adding a setting does not move the click.
+	done := slices.IndexFunc(configRows(), func(row configRow) bool { return row.name == "Sound on done" })
+	soundCommand := send(&value, tea.MouseClickMsg{X: left + 2, Y: top + configContentOffset(value.dimensions().bodyHeight) + done, Button: tea.MouseLeft})
 	if played := commandMessage[soundPlayedMsg](t, soundCommand); played.kind != sound.Done {
 		t.Fatalf("done sound click = %q, want done", played.kind)
 	}

@@ -41,6 +41,10 @@ type Config struct {
 	// default because they reach the device the user is on.
 	MuteNotifications bool `json:"mute_notifications,omitempty"`
 	SoundOnWaiting    bool `json:"sound_on_waiting,omitempty"`
+	// BlockClipboard stops programs in a tab from copying to the host's
+	// clipboard with OSC 52. Copying is allowed by default: it is how vim,
+	// tmux and agents copy over SSH. Reading the clipboard is never allowed.
+	BlockClipboard bool `json:"block_clipboard,omitempty"`
 	// AllowSleep lets the machine sleep while an agent works. The daemon
 	// reads it: by default it holds the machine awake while any agent is
 	// busy, because a sleeping machine stops the agent and drops SSH.
@@ -213,6 +217,13 @@ func configRows() []configRow {
 			hint:   "w",
 			keys:   []string{"w"},
 			action: dashboard.toggleKeepAwake,
+		},
+		{
+			name:   "Programs may copy (OSC 52)",
+			value:  func(m dashboard) string { return onOff(!m.config.BlockClipboard) },
+			hint:   "c",
+			keys:   []string{"c"},
+			action: dashboard.toggleClipboard,
 		},
 		{
 			name:   "Sound on done",

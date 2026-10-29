@@ -681,6 +681,13 @@ func (m dashboard) renderNavigationItem(item navItem, index int, isCurrent bool,
 	}
 	markers := openTabMarkers(m.styles, style, item.tabs, m.agentAnimationFrame) +
 		openTabMarkers(m.styles, style, item.hiddenTabs, m.agentAnimationFrame)
+	for _, tab := range append(slices.Clone(item.tabs), item.hiddenTabs...) {
+		if tab.Running && m.unseenBell(tab) {
+			// A bell nobody has heard yet, in the attention colour.
+			markers += m.styles.attention.Render("!")
+			break
+		}
+	}
 	var nameLine string
 	if markers != "" {
 		available := width - lipgloss.Width(markers) - 2

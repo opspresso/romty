@@ -161,7 +161,7 @@ func (m dashboard) tabPlace(tab model.Tab) string {
 // attention counts the running agents that need the user: waiting for an
 // answer, waiting for an approval, or failed.
 type attention struct {
-	input, approval, failed int
+	input, approval, failed, bells int
 }
 
 func (m dashboard) attention() attention {
@@ -178,6 +178,9 @@ func (m dashboard) attention() attention {
 		case model.AgentPhaseError:
 			result.failed++
 		}
+		if m.unseenBell(*tab) {
+			result.bells++
+		}
 	}
 	return result
 }
@@ -189,7 +192,7 @@ func (a attention) summary() string {
 	for _, part := range []struct {
 		marker string
 		count  int
-	}{{"▲", a.input}, {"■", a.approval}, {"★", a.failed}} {
+	}{{"▲", a.input}, {"■", a.approval}, {"★", a.failed}, {"!", a.bells}} {
 		if part.count > 0 {
 			parts = append(parts, fmt.Sprintf("%s%d", part.marker, part.count))
 		}

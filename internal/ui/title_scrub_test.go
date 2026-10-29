@@ -47,7 +47,7 @@ func TestTitleScrubberRemovesTitleSequences(t *testing.T) {
 			want:  "before\x1b]21;value\aafter",
 		},
 		{
-			name:  "a hyperlink",
+			name: "a hyperlink",
 			// The fields are handed to the emulator swapped; see scrub.
 			value: "\x1b]8;;https://romty.dev\x1b\\romty\x1b]8;;\x1b\\",
 			want:  "\x1b]8;https://romty.dev;\x1b\\romty\x1b]8;;\x1b\\",
