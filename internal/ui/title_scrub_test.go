@@ -48,8 +48,9 @@ func TestTitleScrubberRemovesTitleSequences(t *testing.T) {
 		},
 		{
 			name:  "a hyperlink",
+			// The fields are handed to the emulator swapped; see scrub.
 			value: "\x1b]8;;https://romty.dev\x1b\\romty\x1b]8;;\x1b\\",
-			want:  "\x1b]8;;https://romty.dev\x1b\\romty\x1b]8;;\x1b\\",
+			want:  "\x1b]8;https://romty.dev;\x1b\\romty\x1b]8;;\x1b\\",
 		},
 		{
 			name:  "a clipboard write",
@@ -125,6 +126,25 @@ func TestGuestTitleNeverRendersAsText(t *testing.T) {
 		}
 		if !strings.Contains(rendered, "after") {
 			t.Fatalf("cut at %d: text after the title is gone: %q", cut, rendered)
+		}
+	}
+}
+
+// A hyperlink the guest prints reaches the host terminal in the standard
+// order, OSC 8 ; params ; URI, even when it arrives in pieces.
+func TestHyperlinksReachTheHostIntact(t *testing.T) {
+	for _, chunks := range [][]string{
+		{"\x1b]8;;https://romty.dev\x1b\\romty\x1b]8;;\x1b\\ site\r\n"},
+		{"\x1b]8;id=1;https://ro", "mty.dev\aromty\x1b]8;;\a site\r\n"},
+	} {
+		terminal := newEmbeddedTerminal("x", newMemoryStream(""), 40, 4)
+		for _, chunk := range chunks {
+			terminal.writeOutput([]byte(chunk))
+		}
+		row := terminal.renderViewport(0)[0]
+		terminal.close()
+		if !strings.Contains(row, "8;id=1;https://romty.dev") && !strings.Contains(row, "8;;https://romty.dev") {
+			t.Fatalf("rendered link = %q, want OSC 8 ; params ; URI", row)
 		}
 	}
 }

@@ -61,9 +61,9 @@ type session struct {
 	// no longer in history's tail. Replayed history does not renew activity.
 	lastOutputAt time.Time
 	// bells finds the bells in the output, and bellAt is the last one.
-	bells        bellScanner
-	bellAt       time.Time
-	codexHome    string
+	bells     bellScanner
+	bellAt    time.Time
+	codexHome string
 	// modes survives the recording being trimmed, so a mode the guest set
 	// long ago is still restored to a reattaching client.
 	guest      *guestTracker
