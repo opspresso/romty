@@ -111,29 +111,30 @@ func (m dashboard) jumpToWaitingAgent() (tea.Model, tea.Cmd) {
 		m.focusTerminal()
 		return m, nil
 	}
-	m.setNavigation(next.navIndex)
+	save := m.revealWorkspace(next.path)
 	m.tabIndex = next.tabIndex
-	return m, m.selectWorkspace()
+	return m, tea.Batch(save, m.selectWorkspace())
 }
 
 // waitingAgentStop addresses one waiting terminal the way the tree addresses
 // it, so opening it is the same move the cursor and Enter would make.
 type waitingAgentStop struct {
-	navIndex int
+	path     string
 	tabIndex int
 	tabID    string
 }
 
 // waitingAgentStops lists the waiting terminals in the order the tree draws
 // them, so repeated presses walk the screen rather than a map order that
-// changes between snapshots.
+// changes between snapshots. A collapsed root does not hide its waiting
+// terminals from the walk.
 func (m dashboard) waitingAgentStops() []waitingAgentStop {
 	stops := make([]waitingAgentStop, 0)
-	for navIndex, item := range m.navigationItems() {
+	for _, item := range m.workspaceItems() {
 		for tabIndex, tab := range runningTabs(item.tabs) {
 			if tab.AgentPhase.Waiting() {
 				stops = append(stops, waitingAgentStop{
-					navIndex: navIndex, tabIndex: tabIndex, tabID: tab.ID,
+					path: item.workspace.Path, tabIndex: tabIndex, tabID: tab.ID,
 				})
 			}
 		}

@@ -425,6 +425,7 @@ func (m dashboard) renderStatus(width, bodyHeight int) []string {
 			{key: "↑/↓", description: "workspace"},
 			{key: "←/→", description: "tabs"},
 			{key: "Enter", description: "open"},
+			{key: "Space", description: "fold"},
 			{key: "Tab", description: "terminal"},
 		}
 		if m.focus == terminalPane {
@@ -482,10 +483,19 @@ func (m dashboard) renderNavigation(width, height int) []string {
 	}
 	lines := []string{m.paneHeader(titleStyle, title, width), ""}
 	items := m.navigationItems()
+	// A collapsed root stands in for the open workspace it hides.
+	hiddenCurrent := ""
+	if workspaceIndex(items, m.selectedPath) < 0 {
+		if item, ok := m.workspaceItem(m.selectedPath); ok {
+			hiddenCurrent = item.root.Path
+		}
+	}
 	available := max(height-len(lines), 0)
 	start, end := navigationWindow(items, m.navOffset, available)
 	for index := start; index < end; index++ {
-		itemLines := m.renderNavigationItem(items[index], index, width)
+		item := items[index]
+		current := item.workspace.Path == m.selectedPath || item.isRoot && item.workspace.Path == hiddenCurrent
+		itemLines := m.renderNavigationItem(item, index, current, width)
 		remaining := max(height-len(lines), 0)
 		lines = append(lines, itemLines[:min(len(itemLines), remaining)]...)
 	}
@@ -533,8 +543,7 @@ func navigationRows(item navItem) int {
 	return 2
 }
 
-func (m dashboard) renderNavigationItem(item navItem, index, width int) []string {
-	isCurrent := item.workspace.Path == m.selectedPath
+func (m dashboard) renderNavigationItem(item navItem, index int, isCurrent bool, width int) []string {
 	isSelected := m.focus == leftPane && index == m.navIndex
 	indicator := " "
 	if isCurrent {
@@ -547,7 +556,11 @@ func (m dashboard) renderNavigationItem(item navItem, index, width int) []string
 	name := indicator + " " + branch + " " + display.Text(item.workspace.Name)
 	style := m.styles.navigationItem
 	if item.isRoot {
-		name = indicator + "▾ " + display.Text(item.root.Name)
+		arrow := "▾ "
+		if item.collapsed {
+			arrow = "▸ "
+		}
+		name = indicator + arrow + display.Text(item.root.Name)
 		style = m.styles.navigationRoot
 		if item.failure != "" {
 			name = indicator + "✗ " + display.Text(item.root.Name)
@@ -562,7 +575,8 @@ func (m dashboard) renderNavigationItem(item navItem, index, width int) []string
 	} else if m.hover.kind == hoverNavigation && m.hover.index == index {
 		style = m.styles.hovered(style)
 	}
-	markers := openTabMarkers(m.styles, style, item.tabs, m.agentAnimationFrame)
+	markers := openTabMarkers(m.styles, style, item.tabs, m.agentAnimationFrame) +
+		openTabMarkers(m.styles, style, item.hiddenTabs, m.agentAnimationFrame)
 	var nameLine string
 	if markers != "" {
 		available := width - lipgloss.Width(markers) - 2

@@ -104,6 +104,7 @@ Both file views allow directory rows to take the cursor. Press `Enter` to toggle
 | `F9` | Stop the daemon and running shells after confirmation |
 | `i` | Open About |
 | `Tab` | Focus the terminal |
+| `Space` | Collapse or expand the selected root, or collapse the root of the selected workspace |
 
 ### Switch
 
@@ -191,6 +192,14 @@ Longer operations such as opening a terminal, reading a directory, running a Git
 Modal content is pointer-aware as well. Click a directory in the root picker to open it, click a Git action to run it, and use the wheel over a completed Git result to read longer output. Config rows toggle when clicked and the row clicked becomes the one the cursor is on; use the wheel over the pane-width row for one-column adjustments.
 
 romty discovers direct child directories only and skips names that start with `.`. Press `F5` after a command adds or removes a child. An unreadable root is marked `✗` and listed without workspaces; other roots remain usable.
+
+### Collapsed roots
+
+Press `Space` in the workspace pane, or click the `▾` arrow of a root, to collapse the root. A collapsed root shows `▸` and hides its workspaces. Press `Space` on it or click `▸` to expand it again. Clicking the root name still opens the root. romty saves the collapsed roots to `collapsed_roots` in `config.json`, so they stay collapsed after a restart.
+
+- The root row shows the markers of the running tabs in its hidden workspaces.
+- When the open terminal belongs to a hidden workspace, the root row shows the current-workspace mark. `Ctrl`+`/`, `F7`, and the terminal restored at startup put the cursor on the root and keep it collapsed.
+- `Ctrl`+`Shift`+`↑`/`↓` and `Ctrl`+`Shift`+`A` can open a hidden workspace. They expand its root first, so the cursor lands on that workspace.
 
 ## Scrollback and mouse
 

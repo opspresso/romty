@@ -21,6 +21,12 @@ type navItem struct {
 	hasGit    bool
 	isRoot    bool
 	separator bool
+	// collapsed is set on a root whose workspaces the tree hides, and on each
+	// of those workspaces.
+	collapsed bool
+	// hiddenTabs are the running tabs of a collapsed root's workspaces, so the
+	// root row still shows what is running under it.
+	hiddenTabs []model.Tab
 	// failure is set on a root romty could not read, so the tree can say why
 	// it is empty instead of looking as though the root has no directories.
 	failure string
@@ -192,7 +198,7 @@ func (m dashboard) switchWorkspace(delta int) (tea.Model, tea.Cmd) {
 		// land behind it.
 		return m, nil
 	}
-	items := m.navigationItems()
+	items := m.workspaceItems()
 	// Anchored on the workspace that is open rather than on the cursor, so the
 	// chord walks one cycle from either pane and every press lands somewhere
 	// new. Anchoring on the cursor would make the key do nothing whenever it
@@ -200,17 +206,68 @@ func (m dashboard) switchWorkspace(delta int) (tea.Model, tea.Cmd) {
 	// when nothing is open for the walk to start from.
 	anchor := workspaceIndex(items, m.selectedPath)
 	if anchor < 0 {
-		anchor = m.navIndex
+		anchor = workspaceIndex(items, m.cursorPath)
 	}
 	next, ok := nextOccupiedWorkspace(items, anchor, delta)
 	if !ok {
 		return m, nil
 	}
-	m.setNavigation(next)
+	save := m.revealWorkspace(items[next].workspace.Path)
 	// The first terminal of the workspace being moved to. Which of its tabs to
 	// land on is what Left and Right are for.
 	m.tabIndex = 0
-	return m, m.selectWorkspace()
+	return m, tea.Batch(save, m.selectWorkspace())
+}
+
+// revealWorkspace expands the collapsed root that hides the workspace at path
+// and puts the cursor on it. A move that opens a workspace has to land on its
+// row, and Enter would otherwise open the root in its place. It returns the
+// save of the changed config, or nil when no root had to open.
+func (m *dashboard) revealWorkspace(path string) tea.Cmd {
+	var save tea.Cmd
+	all := m.workspaceItems()
+	if index := workspaceIndex(all, path); index >= 0 && all[index].collapsed && !all[index].isRoot {
+		m.setRootCollapsed(all[index].root.Path, false)
+		save = m.saveConfig()
+	}
+	if index := workspaceIndex(m.navigationItems(), path); index >= 0 {
+		m.setNavigation(index)
+	}
+	return save
+}
+
+// toggleRoot collapses or expands the root under the cursor. On a workspace
+// it collapses the workspace's root, and the cursor moves up to the root row
+// so it stays on something the tree still draws.
+func (m dashboard) toggleRoot() (tea.Model, tea.Cmd) {
+	item, ok := m.navigationItem()
+	if !ok {
+		return m, nil
+	}
+	m.setRootCollapsed(item.root.Path, !(item.isRoot && item.collapsed))
+	if index := workspaceIndex(m.navigationItems(), item.root.Path); index >= 0 {
+		m.setNavigation(index)
+		m.syncTabCursor(runningTabs(m.navigationItems()[index].tabs))
+	}
+	return m, m.saveConfig()
+}
+
+// setRootCollapsed records whether the root at path is collapsed. Roots that
+// are no longer in the tree are dropped from the list at the same time, so a
+// forgotten root does not stay in the config.
+func (m *dashboard) setRootCollapsed(path string, collapsed bool) {
+	roots := slices.DeleteFunc(slices.Clone(m.config.CollapsedRoots), func(root string) bool {
+		return root == path || !slices.ContainsFunc(m.state.Roots, func(view model.RootView) bool {
+			return view.Root.Path == root
+		})
+	})
+	if collapsed {
+		roots = append(roots, path)
+	}
+	if len(roots) == 0 {
+		roots = nil
+	}
+	m.config.CollapsedRoots = roots
 }
 
 // nextOccupiedWorkspace is the workspace with a terminal running that lies one
@@ -343,11 +400,37 @@ func (m *dashboard) focusTerminal() {
 
 func (m *dashboard) focusNavigation() {
 	m.focus = leftPane
-	items := m.navigationItems()
-	if index := workspaceIndex(items, m.selectedPath); index >= 0 {
-		m.setNavigation(index)
-		m.syncTabCursor(runningTabs(items[index].tabs))
+	if item, ok := m.placeCursor(m.selectedPath); ok {
+		m.syncTabCursor(runningTabs(item.tabs))
 	}
+}
+
+// placeCursor puts the cursor on the workspace at path, or on the row of the
+// collapsed root that hides it, and reports the row it landed on. Showing
+// where a workspace is does not expand its root; opening it from a jump does.
+func (m *dashboard) placeCursor(path string) (navItem, bool) {
+	items := m.navigationItems()
+	index := workspaceIndex(items, path)
+	if index < 0 {
+		if item, ok := m.workspaceItem(path); ok {
+			index = workspaceIndex(items, item.root.Path)
+		}
+	}
+	if index < 0 {
+		return navItem{}, false
+	}
+	m.setNavigation(index)
+	return items[index], true
+}
+
+// workspaceItem is the workspace at path anywhere in the tree, whether or not
+// a collapsed root hides it.
+func (m dashboard) workspaceItem(path string) (navItem, bool) {
+	items := m.workspaceItems()
+	if index := workspaceIndex(items, path); index >= 0 {
+		return items[index], true
+	}
+	return navItem{}, false
 }
 
 func (m *dashboard) syncTabCursor(tabs []model.Tab) {
@@ -387,14 +470,13 @@ func (m *dashboard) restoreSelection() {
 	if tabID == "" {
 		return
 	}
-	items := m.navigationItems()
-	navIndex := workspaceIndex(items, path)
-	if navIndex < 0 {
+	item, ok := m.workspaceItem(path)
+	if !ok {
 		return
 	}
-	for tabIndex, tab := range runningTabs(items[navIndex].tabs) {
+	for tabIndex, tab := range runningTabs(item.tabs) {
 		if tab.ID == tabID {
-			m.setNavigation(navIndex)
+			m.placeCursor(path)
 			m.tabIndex = tabIndex
 			m.selectedWorkspaceID = tab.WorkspaceID
 			m.selectedPath = path
@@ -405,9 +487,8 @@ func (m *dashboard) restoreSelection() {
 }
 
 func (m *dashboard) rememberSelection(tabID string) bool {
-	items := m.navigationItems()
-	index := workspaceIndex(items, m.selectedPath)
-	if index < 0 || !slices.ContainsFunc(runningTabs(items[index].tabs), func(tab model.Tab) bool { return tab.ID == tabID }) {
+	item, ok := m.workspaceItem(m.selectedPath)
+	if !ok || !slices.ContainsFunc(runningTabs(item.tabs), func(tab model.Tab) bool { return tab.ID == tabID }) {
 		return false
 	}
 	changed := m.config.LastWorkspacePath != m.selectedPath || m.config.LastTabID != tabID
@@ -415,8 +496,23 @@ func (m *dashboard) rememberSelection(tabID string) bool {
 	return changed
 }
 
+// navigationItems is the tree as it is drawn: every root, and the workspaces
+// of the roots that are not collapsed. The cursor, the viewport and the mouse
+// all count rows in it.
 func (m dashboard) navigationItems() []navItem {
+	return slices.DeleteFunc(m.workspaceItems(), func(item navItem) bool {
+		return item.collapsed && !item.isRoot
+	})
+}
+
+// workspaceItems is the whole tree, the workspaces of collapsed roots
+// included. Finding the open workspace, and the moves that open one the tree
+// may be hiding, read it rather than what is on screen.
+func (m dashboard) workspaceItems() []navItem {
 	result := make([]navItem, 0)
+	// last is the item drawn above the next one, which is not the item
+	// appended last when a collapsed root hides its workspaces.
+	var last *navItem
 	for _, root := range m.state.Roots {
 		// A root is only a workspace once it holds a terminal, so a snapshot
 		// names its identifier nowhere else. Its own tabs carry it, and
@@ -425,7 +521,8 @@ func (m dashboard) navigationItems() []navItem {
 		if len(root.Tabs) > 0 {
 			rootWorkspaceID = root.Tabs[0].WorkspaceID
 		}
-		result = append(result, navItem{
+		collapsed := slices.Contains(m.config.CollapsedRoots, root.Root.Path)
+		rootItem := navItem{
 			root: root.Root,
 			workspace: model.Workspace{
 				ID:     rootWorkspaceID,
@@ -433,25 +530,38 @@ func (m dashboard) navigationItems() []navItem {
 				Name:   root.Root.Name,
 				Path:   root.Root.Path,
 			},
-			tabs:   root.Tabs,
-			closed: root.Closed,
-			isRoot: true,
+			tabs:      root.Tabs,
+			closed:    root.Closed,
+			isRoot:    true,
+			collapsed: collapsed,
 			// One blank row sets a root apart from what is above it. A
 			// workspace without Git already ends in a blank row, so a root
 			// after one adds none, and the gap stays one row either way.
-			separator: len(result) > 0 && !endsBlank(result[len(result)-1]),
+			separator: last != nil && !endsBlank(*last),
 			failure:   root.Error,
-		})
+		}
+		if collapsed {
+			for _, directory := range root.Directories {
+				rootItem.hiddenTabs = append(rootItem.hiddenTabs, runningTabs(directory.Tabs)...)
+			}
+		}
+		result = append(result, rootItem)
+		last = &rootItem
 		for _, directory := range root.Directories {
 			directoryGit, directoryHasGit := m.gitStates[directory.Workspace.Path]
-			result = append(result, navItem{
+			item := navItem{
 				root:      root.Root,
 				workspace: directory.Workspace,
 				tabs:      directory.Tabs,
 				closed:    directory.Closed,
 				git:       directoryGit,
 				hasGit:    directoryHasGit,
-			})
+				collapsed: collapsed,
+			}
+			result = append(result, item)
+			if !collapsed {
+				last = &item
+			}
 		}
 	}
 	return result
