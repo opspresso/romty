@@ -191,6 +191,16 @@ func fieldLine(theme commandTheme, label, value string) string {
 	return theme.label(padded) + " " + value + "\n"
 }
 
+// printStoppedDaemon reports a stopped daemon and the command that starts it,
+// so the report is not a dead end. These commands never start it themselves:
+// they are read-only.
+func printStoppedDaemon(output io.Writer, theme commandTheme) error {
+	if err := printField(output, theme, "daemon", theme.warning("stopped")); err != nil {
+		return err
+	}
+	return printField(output, theme, "next", "run romty to start it")
+}
+
 func printField(output io.Writer, theme commandTheme, label, value string) error {
 	_, err := io.WriteString(output, fieldLine(theme, label, value))
 	return err
@@ -217,7 +227,7 @@ func printStatus(output io.Writer, runtime paths.Paths, theme commandTheme) erro
 	backend := client.New(runtime.Socket)
 	daemonProtocol, err := backend.ProtocolVersion()
 	if client.Unavailable(err) {
-		return printField(output, theme, "daemon", theme.warning("stopped"))
+		return printStoppedDaemon(output, theme)
 	}
 	if err != nil {
 		return fmt.Errorf("inspect daemon: %w", err)
@@ -276,13 +286,16 @@ func summarizeSnapshot(snapshot model.Snapshot) snapshotSummary {
 func printList(output io.Writer, runtime paths.Paths, theme commandTheme) error {
 	snapshot, err := client.New(runtime.Socket).Snapshot()
 	if client.Unavailable(err) {
-		return printField(output, theme, "daemon", theme.warning("stopped"))
+		return printStoppedDaemon(output, theme)
 	}
 	if err != nil {
 		return fmt.Errorf("list daemon state: %w", err)
 	}
 	if len(snapshot.Roots) == 0 {
-		return printField(output, theme, "roots", theme.warning("none"))
+		if err := printField(output, theme, "roots", theme.warning("none")); err != nil {
+			return err
+		}
+		return printField(output, theme, "next", "run romty and press F2 to add one")
 	}
 	for _, root := range snapshot.Roots {
 		if err := printField(output, theme, "root", fmt.Sprintf("%q  %q", root.Root.Name, root.Root.Path)); err != nil {
