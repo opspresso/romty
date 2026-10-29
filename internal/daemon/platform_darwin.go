@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"fmt"
+	"net"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -28,4 +29,23 @@ var excludeFromBackup = func(directory string) error {
 		return fmt.Errorf("%w: %s", err, strings.TrimSpace(string(output)))
 	}
 	return nil
+}
+
+// peerUID is the user ID of the process at the other end of a unix socket.
+func peerUID(connection *net.UnixConn) (int, error) {
+	raw, err := connection.SyscallConn()
+	if err != nil {
+		return -1, err
+	}
+	uid, credErr := -1, error(nil)
+	if err := raw.Control(func(fd uintptr) {
+		var cred *unix.Xucred
+		cred, credErr = unix.GetsockoptXucred(int(fd), unix.SOL_LOCAL, unix.LOCAL_PEERCRED)
+		if credErr == nil {
+			uid = int(cred.Uid)
+		}
+	}); err != nil {
+		return -1, err
+	}
+	return uid, credErr
 }

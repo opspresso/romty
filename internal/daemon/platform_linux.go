@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"net"
 	"os/exec"
 	"syscall"
 
@@ -25,4 +26,23 @@ func redirect(from, to int) error {
 // exclude.
 var excludeFromBackup = func(string) error {
 	return nil
+}
+
+// peerUID is the user ID of the process at the other end of a unix socket.
+func peerUID(connection *net.UnixConn) (int, error) {
+	raw, err := connection.SyscallConn()
+	if err != nil {
+		return -1, err
+	}
+	uid, credErr := -1, error(nil)
+	if err := raw.Control(func(fd uintptr) {
+		var cred *unix.Ucred
+		cred, credErr = unix.GetsockoptUcred(int(fd), unix.SOL_SOCKET, unix.SO_PEERCRED)
+		if credErr == nil {
+			uid = int(cred.Uid)
+		}
+	}); err != nil {
+		return -1, err
+	}
+	return uid, credErr
 }

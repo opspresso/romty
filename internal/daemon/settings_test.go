@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"net"
 	"os"
 	"path/filepath"
 	"testing"
@@ -96,5 +97,29 @@ func TestCheckpointAgentsSavesAgentTabsOnly(t *testing.T) {
 	}
 	if _, _, err := server.checkpoint.read("w", "b2"); err == nil {
 		t.Fatal("a plain shell was checkpointed")
+	}
+}
+
+// The daemon reads the user ID of whoever connects: its own user here.
+func TestPeerUIDIsTheConnectingUser(t *testing.T) {
+	socket := filepath.Join(testutil.ShortTempDir(t), "p.sock")
+	listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: socket, Net: "unix"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	go func() {
+		if connection, err := net.Dial("unix", socket); err == nil {
+			defer connection.Close()
+			time.Sleep(100 * time.Millisecond)
+		}
+	}()
+	connection, err := listener.AcceptUnix()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer connection.Close()
+	if uid, err := peerUID(connection); err != nil || uid != os.Geteuid() {
+		t.Fatalf("peerUID() = (%d, %v), want %d", uid, err, os.Geteuid())
 	}
 }
