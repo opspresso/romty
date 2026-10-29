@@ -212,32 +212,50 @@ func (m dashboard) workspaceActionChoices() []workspaceActionChoice {
 }
 
 // sessionChoices offers a new session first, then the closed sessions newest
-// first.
+// first under the REOPEN heading, numbered from 1.
 func sessionChoices(target navItem, now time.Time) []workspaceActionChoice {
 	choices := []workspaceActionChoice{{action: workspaceNewTabAction, label: "New session", key: "n"}}
-	for _, closed := range target.closed {
+	for index, closed := range target.closed {
+		key := ""
+		if index < 9 {
+			key = fmt.Sprint(index + 1)
+		}
 		choices = append(choices, workspaceActionChoice{
 			action: workspaceReopenAction, label: closedSessionLabel(closed, now),
-			group: workspaceClosedGroup, closedID: closed.ID,
+			group: workspaceClosedGroup, closedID: closed.ID, key: key,
 		})
 	}
 	return choices
 }
 
 // closedSessionLabel names a closed session by its tab, its agent, and when
-// it closed: the time alone today, the date as well before that.
+// it closed.
 func closedSessionLabel(closed model.ClosedSession, now time.Time) string {
-	parts := []string{"Reopen " + closed.Name}
-	if closed.Agent != "" {
+	// The REOPEN heading above says what choosing it does.
+	parts := []string{closed.Name}
+	if name := agentDisplayNames[closed.Agent]; name != "" {
+		parts = append(parts, name)
+	} else if closed.Agent != "" {
 		parts = append(parts, string(closed.Agent))
 	}
-	at := closed.ClosedAt.Local()
-	layout := "01-02 15:04"
-	if year, month, day := at.Date(); now.Local().Year() == year && now.Local().Month() == month && now.Local().Day() == day {
-		layout = "15:04"
-	}
-	parts = append(parts, at.Format(layout))
+	parts = append(parts, closedAge(closed.ClosedAt, now))
 	return strings.Join(parts, " · ")
+}
+
+// closedAge is how long ago a session closed, in the unit that reads at a
+// glance: minutes and hours within a day, then the date.
+func closedAge(at, now time.Time) string {
+	age := now.Sub(at)
+	switch {
+	case age < time.Minute:
+		return "just now"
+	case age < time.Hour:
+		return fmt.Sprintf("%dm ago", int(age/time.Minute))
+	case age < 24*time.Hour:
+		return fmt.Sprintf("%dh ago", int(age/time.Hour))
+	default:
+		return at.Local().Format("01-02 15:04")
+	}
 }
 
 // workspaceActionRows lays the choices out under their section headings. The

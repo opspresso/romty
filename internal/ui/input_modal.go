@@ -5,8 +5,10 @@ package ui
 
 import (
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
+	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -192,6 +194,10 @@ func (m dashboard) renderInputModal(maximum int) []string {
 		}
 	case m.input.kind == rootPathInput && m.input.base != "":
 		lines = append(lines, truncate(m.styles.empty.Render("Relative to "+display.Text(m.input.base)), contentWidth))
+	case m.input.kind == tabNameInput:
+		// The rule is shown before it is broken, not only in the refusal.
+		lines = append(lines, m.styles.empty.Render(fmt.Sprintf("1 to %d characters · %d now",
+			model.MaxTabNameLength, utf8.RuneCountInString(strings.TrimSpace(m.input.text)))))
 	default:
 		lines = append(lines, "")
 	}

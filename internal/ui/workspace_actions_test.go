@@ -328,14 +328,14 @@ func TestSelectingAnIdleWorkspaceOffersItsClosedSessions(t *testing.T) {
 		t.Fatalf("session choice has no title:\n%s", rendered)
 	}
 	newSession := strings.Index(rendered, "New session")
-	newest := strings.Index(rendered, "Reopen 2 · claude · 10-15 09:30")
-	older := strings.Index(rendered, "Reopen 1 · 10-15 08:30")
+	newest := strings.Index(rendered, "2 · Claude Code · 10-15 09:30")
+	older := strings.Index(rendered, "1 · 10-15 08:30")
 	if newSession < 0 || newest < newSession || older < newest || strings.Contains(rendered, "Delete workspace") {
 		t.Fatalf("session choice:\n%s", rendered)
 	}
 
-	// The title takes the first row and a divider follows New session, so
-	// the newest closed session is three rows down.
+	// The title takes the first row and the REOPEN heading follows New
+	// session, so the newest closed session is three rows down.
 	command := send(&value, tea.MouseClickMsg{X: left + 2, Y: top + 3, Button: tea.MouseLeft})
 	if command == nil || value.modal != noModal {
 		t.Fatalf("reopen = (command %v, modal %v)", command, value.modal)
@@ -347,14 +347,19 @@ func TestSelectingAnIdleWorkspaceOffersItsClosedSessions(t *testing.T) {
 	}
 }
 
-func TestClosedSessionLabelShowsTheDateOnlyBeforeToday(t *testing.T) {
+func TestClosedSessionLabelNamesTheAgentAndTheAge(t *testing.T) {
 	now := time.Date(2026, 10, 16, 14, 0, 0, 0, time.Local)
-	today := model.ClosedSession{Name: "1", Agent: model.AgentCodex, ClosedAt: now.Add(-time.Hour)}
-	if got := closedSessionLabel(today, now); got != "Reopen 1 · codex · 13:00" {
-		t.Fatalf("today label = %q", got)
-	}
-	earlier := model.ClosedSession{Name: "3", ClosedAt: now.AddDate(0, 0, -1)}
-	if got := closedSessionLabel(earlier, now); got != "Reopen 3 · 10-15 14:00" {
-		t.Fatalf("earlier label = %q", got)
+	for _, probe := range []struct {
+		closed model.ClosedSession
+		want   string
+	}{
+		{model.ClosedSession{Name: "1", Agent: model.AgentCodex, ClosedAt: now.Add(-20 * time.Second)}, "1 · Codex · just now"},
+		{model.ClosedSession{Name: "1", Agent: model.AgentClaude, ClosedAt: now.Add(-5 * time.Minute)}, "1 · Claude Code · 5m ago"},
+		{model.ClosedSession{Name: "2", ClosedAt: now.Add(-3 * time.Hour)}, "2 · 3h ago"},
+		{model.ClosedSession{Name: "3", ClosedAt: now.AddDate(0, 0, -1).Add(-time.Minute)}, "3 · 10-15 13:59"},
+	} {
+		if got := closedSessionLabel(probe.closed, now); got != probe.want {
+			t.Fatalf("label = %q, want %q", got, probe.want)
+		}
 	}
 }

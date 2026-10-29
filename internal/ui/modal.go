@@ -358,7 +358,7 @@ func (m dashboard) renderModalBody(width, height int) []string {
 			}
 			lines = append(lines, m.styles.modalBody.Render(status.Provider.DisplayName()+": "+action))
 			if status.Provider == agenthooks.ProviderCodex && status.State != agenthooks.StateInvalid {
-				lines = append(lines, m.styles.empty.Render("Codex tab matching uses the thread-id title item."))
+				lines = append(lines, m.styles.empty.Render("Codex: its terminal title will carry the thread id, which matches it to its tab."))
 			}
 		}
 		lines = append(lines, "", m.styles.empty.Render("Existing settings and other hooks are preserved."))

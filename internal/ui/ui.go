@@ -280,6 +280,8 @@ type dashboard struct {
 	restartDaemon    func() error
 	daemonDown       bool
 	daemonRestarting bool
+	// hooksDeferred holds the agent hook offer until the first root exists.
+	hooksDeferred bool
 	// branches is the branch picker while it is open.
 	branches branchPicker
 	// config holds every persisted setting. It is the document as loaded,
@@ -649,6 +651,10 @@ func (m dashboard) update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.syncSelection()
 		m.ensureWorkspaceCursor()
 		m.clampTabIndex()
+		if m.hooksDeferred && len(m.state.Roots) > 0 && m.modal == noModal {
+			m.hooksDeferred = false
+			m.modal = hookInstallModal
+		}
 		// A refresh says the tree is current; it says nothing about a failed
 		// resize or a daemon that would not stop, so it clears tree errors
 		// only.
@@ -979,6 +985,13 @@ func (m *dashboard) clearAnyError() {
 func (m *dashboard) offerAgentHooks(statuses []agenthooks.Status) {
 	m.hookStatuses = statuses
 	if len(agenthooks.Pending(statuses)) > 0 {
+		if len(m.state.Roots) == 0 {
+			// On a first run the screen explains how to add a root. Asking
+			// about agent hooks before there is anywhere to run an agent
+			// would put a question in front of that answer.
+			m.hooksDeferred = true
+			return
+		}
 		m.modal = hookInstallModal
 		return
 	}

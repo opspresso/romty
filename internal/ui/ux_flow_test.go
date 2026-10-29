@@ -8,6 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/opspresso/romty/internal/agenthooks"
 	"github.com/opspresso/romty/internal/gitrepo"
 	"github.com/opspresso/romty/internal/model"
 )
@@ -362,5 +363,30 @@ func TestGitResultOffersTheNextStep(t *testing.T) {
 	}
 	if gitFailureHint("Everything up-to-date") != "" {
 		t.Fatal("a success was given a failure hint")
+	}
+}
+
+// On a first run the hook offer waits for the first root, so it does not
+// stand in front of the explanation of how to add one.
+func TestHookOfferWaitsForTheFirstRoot(t *testing.T) {
+	value := newDashboard(&fakeBackend{}, model.Snapshot{})
+	value.offerAgentHooks([]agenthooks.Status{{Provider: agenthooks.ProviderClaude, State: agenthooks.StateMissing}})
+	if value.modal != noModal || !value.hooksDeferred {
+		t.Fatalf("first-run hook offer = (modal %v, deferred %v), want it held", value.modal, value.hooksDeferred)
+	}
+	send(&value, snapshotMsg{value: projectsSnapshot(nil)})
+	if value.modal != hookInstallModal || value.hooksDeferred {
+		t.Fatalf("after the first root = (modal %v, deferred %v), want the offer", value.modal, value.hooksDeferred)
+	}
+}
+
+// The rename field states the length rule and the current count before a
+// refusal has to.
+func TestRenameFieldStatesTheLengthRule(t *testing.T) {
+	value := newDashboard(&fakeBackend{}, projectsSnapshot(nil))
+	value.width, value.height = 110, 14
+	updated, _ := value.startRenameTab(model.Tab{ID: "tab-1", Name: "server"})
+	if screen := ansi.Strip(updated.(dashboard).render()); !strings.Contains(screen, "1 to 32 characters · 6 now") {
+		t.Fatalf("rename field lacks the rule:\n%s", screen)
 	}
 }

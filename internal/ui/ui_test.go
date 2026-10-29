@@ -1127,7 +1127,7 @@ func TestDashboardConfirmsAgentHookInstallation(t *testing.T) {
 		{Provider: agenthooks.ProviderClaude, State: agenthooks.StateMissing, Path: "/home/me/.claude/settings.json"},
 		{Provider: agenthooks.ProviderCodex, State: agenthooks.StateOutdated, Path: "/home/me/.codex/hooks.json"},
 	}
-	value := newDashboard(&fakeBackend{}, model.Snapshot{})
+	value := newDashboard(&fakeBackend{}, projectsSnapshot(nil))
 	value.offerAgentHooks(statuses)
 	if value.modal != hookInstallModal {
 		t.Fatalf("hook check modal = %v, want confirmation", value.modal)
@@ -1169,7 +1169,7 @@ func TestDashboardConfirmsAgentHookInstallation(t *testing.T) {
 }
 
 func TestDashboardCanSkipAgentHookInstallation(t *testing.T) {
-	value := newDashboard(&fakeBackend{}, model.Snapshot{})
+	value := newDashboard(&fakeBackend{}, projectsSnapshot(nil))
 	value.offerAgentHooks([]agenthooks.Status{{
 		Provider: agenthooks.ProviderClaude,
 		State:    agenthooks.StateMissing,
@@ -1211,7 +1211,7 @@ func TestStatusRailExplainsSkippedAgentHooks(t *testing.T) {
 
 func TestDashboardCanQuitDuringAgentHookInstallation(t *testing.T) {
 	for _, pending := range []bool{false, true} {
-		value := newDashboard(&fakeBackend{}, model.Snapshot{})
+		value := newDashboard(&fakeBackend{}, projectsSnapshot(nil))
 		value.offerAgentHooks([]agenthooks.Status{{
 			Provider: agenthooks.ProviderClaude,
 			State:    agenthooks.StateMissing,
@@ -1226,7 +1226,7 @@ func TestDashboardCanQuitDuringAgentHookInstallation(t *testing.T) {
 }
 
 func TestDashboardDoesNotPromptForCurrentAgentHooks(t *testing.T) {
-	value := newDashboard(&fakeBackend{}, model.Snapshot{})
+	value := newDashboard(&fakeBackend{}, projectsSnapshot(nil))
 	value.offerAgentHooks([]agenthooks.Status{
 		{Provider: agenthooks.ProviderClaude, State: agenthooks.StateCurrent},
 		{Provider: agenthooks.ProviderCodex, State: agenthooks.StateUnavailable},
@@ -1237,7 +1237,7 @@ func TestDashboardDoesNotPromptForCurrentAgentHooks(t *testing.T) {
 }
 
 func TestDashboardReportsInvalidAgentHookSettings(t *testing.T) {
-	value := newDashboard(&fakeBackend{}, model.Snapshot{})
+	value := newDashboard(&fakeBackend{}, projectsSnapshot(nil))
 	value.offerAgentHooks([]agenthooks.Status{{
 		Provider: agenthooks.ProviderClaude,
 		State:    agenthooks.StateInvalid,
