@@ -292,6 +292,10 @@ type dashboard struct {
 	// lastAlertTab is the waiting agent the last notification named, which
 	// a is first to open.
 	lastAlertTab string
+	// treeFiltering is set while / has the keyboard in the workspace pane,
+	// and treeQuery narrows the tree to the workspaces that match it.
+	treeFiltering bool
+	treeQuery     string
 	// hooksDeferred holds the agent hook offer until the first root exists.
 	hooksDeferred bool
 	// branches is the branch picker while it is open, and branchRequest
@@ -919,6 +923,9 @@ func (m dashboard) handleKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if isFocusToggle(message.String()) {
 		return m.toggleFocus()
 	}
+	if m.treeFiltering && m.focus == leftPane {
+		return m.handleTreeFilterKey(message)
+	}
 	if m.focus == terminalPane {
 		if m.terminal != nil {
 			m.terminal.sendKey(message)
@@ -953,6 +960,8 @@ func (m dashboard) handleKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.activateWorkspace()
 	case "space":
 		return m.toggleRoot()
+	case "/":
+		m.treeFiltering = true
 	// One letter for each Ctrl+Shift chord. A terminal without the Kitty
 	// keyboard protocol sends Ctrl+Shift+A as the same byte as Ctrl+A, so the
 	// chords cannot reach romty there. Ctrl+/ and then the letter works in

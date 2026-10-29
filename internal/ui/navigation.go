@@ -5,6 +5,7 @@ package ui
 
 import (
 	"slices"
+	"strings"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -512,9 +513,102 @@ func (m *dashboard) rememberSelection(tabID string) bool {
 // of the roots that are not collapsed. The cursor, the viewport and the mouse
 // all count rows in it.
 func (m dashboard) navigationItems() []navItem {
+	if m.treeQuery != "" {
+		return m.filteredItems()
+	}
 	return slices.DeleteFunc(m.workspaceItems(), func(item navItem) bool {
 		return item.collapsed && !item.isRoot
 	})
+}
+
+// filteredItems is the tree narrowed to the workspaces whose name contains
+// the filter, ignoring case, under their roots. A collapsed root does not
+// hide a match: finding a workspace is the reason to filter. A root whose own
+// name matches is kept even when none of its workspaces do.
+func (m dashboard) filteredItems() []navItem {
+	query := strings.ToLower(m.treeQuery)
+	matches := func(item navItem) bool {
+		return strings.Contains(strings.ToLower(item.workspace.Name), query)
+	}
+	result := make([]navItem, 0)
+	all := m.workspaceItems()
+	for index := 0; index < len(all); {
+		root := all[index]
+		end := index + 1
+		for end < len(all) && !all[end].isRoot {
+			end++
+		}
+		children := make([]navItem, 0)
+		for _, child := range all[index+1 : end] {
+			if matches(child) {
+				child.collapsed = false
+				children = append(children, child)
+			}
+		}
+		if len(children) > 0 || matches(root) {
+			root.separator = len(result) > 0
+			result = append(result, root)
+			result = append(result, children...)
+		}
+		index = end
+	}
+	return result
+}
+
+// handleTreeFilterKey edits the tree filter while / has the keyboard. The
+// arrows walk what matches, Enter opens it and ends the filter, and Esc ends
+// the filter where the cursor is.
+func (m dashboard) handleTreeFilterKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	switch message.String() {
+	case "esc":
+		m.endTreeFilter()
+	case "up":
+		m.moveNavigation(-1)
+	case "down":
+		m.moveNavigation(1)
+	case "enter":
+		item, ok := m.navigationItem()
+		m.endTreeFilter()
+		if !ok {
+			return m, nil
+		}
+		save := m.revealWorkspace(item.workspace.Path)
+		updated, command := m.activateWorkspace()
+		return updated, tea.Batch(save, command)
+	default:
+		query := editText(m.treeQuery, message)
+		if query == m.treeQuery {
+			return m, nil
+		}
+		m.treeQuery = query
+		m.navOffset = 0
+		m.cursorToFirstMatch()
+	}
+	return m, nil
+}
+
+// cursorToFirstMatch puts the cursor on the first workspace the filter keeps,
+// or on the first row when only roots match.
+func (m *dashboard) cursorToFirstMatch() {
+	items := m.navigationItems()
+	index := slices.IndexFunc(items, func(item navItem) bool { return !item.isRoot })
+	if index < 0 {
+		index = 0
+	}
+	if len(items) > 0 {
+		m.setNavigation(index)
+		m.syncTabCursor(runningTabs(items[index].tabs))
+	}
+}
+
+// endTreeFilter shows the whole tree again with the cursor where it was.
+func (m *dashboard) endTreeFilter() {
+	path := m.cursorPath
+	m.treeFiltering, m.treeQuery = false, ""
+	if path != "" {
+		m.placeCursor(path)
+	}
+	m.ensureWorkspaceCursor()
 }
 
 // workspaceItems is the whole tree, the workspaces of collapsed roots

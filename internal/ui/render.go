@@ -462,6 +462,15 @@ func (m dashboard) renderStatus(width, bodyHeight int) []string {
 			shortcut{key: "Esc", description: "close"},
 		)
 		status = renderShortcuts(m.styles, width, shortcuts...)
+	case m.treeFiltering && m.focus == leftPane:
+		status = truncate(
+			m.styles.promptLabel.Render(" FIND ")+" "+
+				m.styles.promptText.Render(display.Text(m.treeQuery))+
+				m.styles.dividerActive.Render("█")+"  "+
+				renderShortcuts(m.styles, width, shortcut{key: "↑/↓", description: "select"},
+					shortcut{key: "Enter", description: "open"}, shortcut{key: "Esc", description: "clear"}),
+			width,
+		)
 	case m.scrollback && m.search.typing:
 		status = truncate(
 			m.styles.promptLabel.Render(" FIND ")+" "+
@@ -594,7 +603,9 @@ func (m dashboard) renderNavigation(width, height int) []string {
 		remaining := max(height-len(lines), 0)
 		lines = append(lines, itemLines[:min(len(itemLines), remaining)]...)
 	}
-	if len(items) == 0 {
+	if len(items) == 0 && m.treeQuery != "" {
+		lines = append(lines, m.styles.empty.Render("  No workspace matches"))
+	} else if len(items) == 0 {
 		lines = append(lines,
 			m.styles.empty.Render("  No roots"),
 			m.styles.empty.Render("  Press F2 to add one"),

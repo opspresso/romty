@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -540,5 +541,44 @@ func TestErrorsStayVisibleWhileTheDaemonIsDown(t *testing.T) {
 	screen := ansi.Strip(value.render())
 	if !strings.Contains(screen, notAGitRepository) || !strings.Contains(screen, "daemon stopped · F5 starts it") {
 		t.Fatalf("screen hides one of the two:\n%s", screen)
+	}
+}
+
+// / narrows the tree to the workspaces that match, collapsed roots included;
+// Enter opens the match and Esc brings the whole tree back.
+func TestTreeFilterFindsAWorkspaceAnywhere(t *testing.T) {
+	value := newDashboardWithConfig(&fakeBackend{}, collapseSnapshot(), "", Config{CollapsedRoots: []string{projectsRoot.Path}})
+	value.width, value.height = 110, 16
+	value.focus = leftPane
+	send(&value, key('/', "/"))
+	typeText(&value, "BRA")
+	if got := navigationText(value); len(got) != 2 || got[1] != "- bravo" {
+		t.Fatalf("filtered tree = %q, want projects and bravo", got)
+	}
+	if value.cursorPath != collapseBravo.Path {
+		t.Fatalf("cursor = %q, want the first match", value.cursorPath)
+	}
+	if screen := ansi.Strip(value.render()); !strings.Contains(screen, " FIND  BRA") {
+		t.Fatalf("rail does not show the filter:\n%s", screen)
+	}
+	typeText(&value, "zz")
+	if screen := ansi.Strip(value.render()); !strings.Contains(screen, "No workspace matches") {
+		t.Fatalf("an empty filter result is not explained:\n%s", screen)
+	}
+	send(&value, key(tea.KeyBackspace, ""))
+	send(&value, key(tea.KeyBackspace, ""))
+	command := send(&value, key(tea.KeyEnter, ""))
+	if value.treeFiltering || value.treeQuery != "" || command == nil {
+		t.Fatal("Enter did not open the match and end the filter")
+	}
+	if value.cursorPath != collapseBravo.Path || slices.Contains(value.config.CollapsedRoots, projectsRoot.Path) {
+		t.Fatalf("after Enter = (cursor %q, collapsed %q), want bravo shown", value.cursorPath, value.config.CollapsedRoots)
+	}
+
+	send(&value, key('/', "/"))
+	typeText(&value, "arch")
+	send(&value, key(tea.KeyEscape, ""))
+	if value.treeFiltering || len(navigationText(value)) < 4 {
+		t.Fatalf("Esc left the tree filtered: %q", navigationText(value))
 	}
 }
