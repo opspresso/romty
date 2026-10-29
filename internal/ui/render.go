@@ -285,13 +285,19 @@ func mergePanes(left, right []string, leftWidth, rightWidth, height int, separat
 	return lines
 }
 
-// paneHeaderBadge is paneHeader with a badge at the right end of the rule. The
-// title gives way first, so the badge stays readable on a narrow pane.
-func (m dashboard) paneHeaderBadge(style lipgloss.Style, title, badge string, width int) string {
-	if badge == "" {
+// paneHeaderChips is paneHeader with rendered chips at the right end of the
+// rule, in order. The title gives way first, so the chips stay readable on a
+// narrow pane; when the chips alone do not fit, the leading ones go, so the
+// last chip is the one that matters most.
+func (m dashboard) paneHeaderChips(style lipgloss.Style, title string, width int, chips ...string) string {
+	if len(chips) == 0 {
 		return m.paneHeader(style, title, width)
 	}
-	rendered := m.styles.attention.Render(" " + badge + " ")
+	rendered := strings.Join(chips, " ")
+	for len(chips) > 1 && lipgloss.Width(rendered)+1 >= width {
+		chips = chips[1:]
+		rendered = strings.Join(chips, " ")
+	}
 	room := width - lipgloss.Width(rendered) - 1
 	if room < 1 {
 		return truncate(rendered, width)
@@ -582,10 +588,15 @@ func (m dashboard) renderNavigation(width, height int) []string {
 	if m.hostname != "" {
 		title += "· " + display.Text(m.hostname) + " "
 	}
+	var chips []string
 	if m.keepingAwake() {
-		title += "☕ "
+		// A chip of its own: in the title's colour the mark was too faint to see.
+		chips = append(chips, m.styles.awake.Render(" ☕ "))
 	}
-	lines := []string{m.paneHeaderBadge(titleStyle, title, m.attention().summary(), width), ""}
+	if summary := m.attention().summary(); summary != "" {
+		chips = append(chips, m.styles.attention.Render(" "+summary+" "))
+	}
+	lines := []string{m.paneHeaderChips(titleStyle, title, width, chips...), ""}
 	items := m.navigationItems()
 	// A collapsed root stands in for the open workspace it hides.
 	hiddenCurrent := ""

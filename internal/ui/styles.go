@@ -17,7 +17,9 @@ type uiStyles struct {
 	agentNode          lipgloss.Style
 	agentPlain         lipgloss.Style
 	// attention is the chip that counts the agents waiting for the user.
-	attention           lipgloss.Style
+	attention lipgloss.Style
+	// awake is the chip that says romty holds the machine awake.
+	awake               lipgloss.Style
 	gitBranch           lipgloss.Style
 	gitStatus           lipgloss.Style
 	gitConflict         lipgloss.Style
@@ -70,6 +72,9 @@ func newUIStyles(hasDarkBackground bool) *uiStyles {
 	errorColor := lightDark(lipgloss.Color("#BE123C"), lipgloss.Color("#FB7185"))
 	errorText := lightDark(lipgloss.Color("#FFFFFF"), lipgloss.Color("#0F172A"))
 	attentionColor := lightDark(lipgloss.Color("#B45309"), lipgloss.Color("#FBBF24"))
+	// Orange, warmer than the attention amber beside it, so the two chips
+	// are told apart at a glance.
+	awakeColor := lightDark(lipgloss.Color("#C2410C"), lipgloss.Color("#FB923C"))
 	addedColor := lightDark(lipgloss.Color("#15803D"), lipgloss.Color("#86EFAC"))
 	addedBackground := lightDark(lipgloss.Color("#DAFBE1"), lipgloss.Color("#12261E"))
 	removedBackground := lightDark(lipgloss.Color("#FFEBE9"), lipgloss.Color("#301B1F"))
@@ -97,6 +102,7 @@ func newUIStyles(hasDarkBackground bool) *uiStyles {
 		// Amber, apart from the error red, because waiting is a request and
 		// not a failure.
 		attention:           lipgloss.NewStyle().Foreground(errorText).Background(attentionColor).Bold(true),
+		awake:               lipgloss.NewStyle().Foreground(errorText).Background(awakeColor).Bold(true),
 		gitBranch:           lipgloss.NewStyle().Foreground(muted),
 		gitStatus:           lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B")),
 		gitConflict:         lipgloss.NewStyle().Foreground(errorColor),
