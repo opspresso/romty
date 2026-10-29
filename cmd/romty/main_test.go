@@ -225,10 +225,17 @@ func TestStatusAndListDescribeTheRunningDaemon(t *testing.T) {
 	assertContains(t, "status", output.String(),
 		"daemon:     running",
 		fmt.Sprintf("protocol:   %d", protocol.Version),
+		// The daemon is this build, so its build matches and no update is due.
+		"build:      "+version.String(),
+		"recordings: ",
 		"roots:      1",
 		"workspaces: 1",
 		"sessions:   1 (claude: 0, codex: 0, opencode: 0, kiro: 0, shell: 1)",
 	)
+
+	if strings.Contains(output.String(), "next:") {
+		t.Fatalf("status asks to update a daemon of the same build:\n%s", output.String())
+	}
 
 	output.Reset()
 	if err := runCommand([]string{"list"}, &output); err != nil {

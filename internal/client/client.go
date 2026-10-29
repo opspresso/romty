@@ -294,6 +294,20 @@ type DaemonInfo struct {
 	RecordingBytes int64
 }
 
+// DaemonRestartAdvice is how a daemon older than its client is brought up to
+// date. romty stop saves each tab's output and agent session, and the next
+// romty offers them back.
+const DaemonRestartAdvice = "run romty stop and then romty to update the daemon; sessions are saved"
+
+// DaemonBuildLabel names a daemon build for a person: its version, or the
+// fact that it predates reporting one.
+func DaemonBuildLabel(build string) string {
+	if build == "" {
+		return "older than v0.48.0"
+	}
+	return build
+}
+
 // DaemonInfo asks the running daemon for its build and memory use.
 func (c *Client) DaemonInfo() (DaemonInfo, error) {
 	response, err := c.probeProtocol()
