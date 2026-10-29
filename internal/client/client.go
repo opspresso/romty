@@ -241,7 +241,7 @@ func (c *Client) CreateTab(workspaceID string, columns, rows uint16) (model.Tab,
 		WorkspaceID: workspaceID,
 		Columns:     columns,
 		Rows:        rows,
-		Environment: os.Environ(),
+		Environment: c.environment(),
 		Shell:       os.Getenv("SHELL"),
 	}, tabOf, "tab")
 }
@@ -257,7 +257,7 @@ func (c *Client) ReopenTab(workspaceID, closedID string, columns, rows uint16) (
 		TabID:       closedID,
 		Columns:     columns,
 		Rows:        rows,
-		Environment: os.Environ(),
+		Environment: c.environment(),
 		Shell:       os.Getenv("SHELL"),
 	}, tabOf, "tab")
 }
@@ -276,6 +276,31 @@ func (c *Client) RenameTab(tabID, name string) (model.Snapshot, error) {
 		return model.Snapshot{}, err
 	}
 	return c.snapshotCall(protocol.Request{Action: protocol.ActionRenameTab, TabID: tabID, Name: name})
+}
+
+// MoveTab moves a tab offset places among its workspace's tabs.
+func (c *Client) MoveTab(tabID string, offset int) (model.Snapshot, error) {
+	if err := c.require(protocol.CapabilityMoveTab, "moving tabs"); err != nil {
+		return model.Snapshot{}, err
+	}
+	return c.snapshotCall(protocol.Request{Action: protocol.ActionMoveTab, TabID: tabID, Offset: offset})
+}
+
+// DaemonInfo is what the running daemon says about itself.
+type DaemonInfo struct {
+	// Version is the daemon's build, or empty for a daemon that predates
+	// reporting it, which is older than every client that asks.
+	Version        string
+	RecordingBytes int64
+}
+
+// DaemonInfo asks the running daemon for its build and memory use.
+func (c *Client) DaemonInfo() (DaemonInfo, error) {
+	response, err := c.probeProtocol()
+	if err != nil {
+		return DaemonInfo{}, err
+	}
+	return DaemonInfo{Version: response.DaemonVersion, RecordingBytes: response.RecordingBytes}, nil
 }
 
 // Resize reports this client's terminal size for a tab. The daemon applies

@@ -91,6 +91,9 @@ func runCommandWithInput(arguments []string, output io.Writer, input io.Reader) 
 	if err := client.EnsureDaemon(runtime, executable); err != nil {
 		return err
 	}
+	// Point the shared agent link at this login's agent now, so tabs started
+	// in an earlier login reach it at once rather than at the next new tab.
+	client.LinkSSHAgent(runtime.Directory, os.Environ())
 	backend := client.New(runtime.Socket)
 	snapshot, err := backend.Snapshot()
 	if err != nil {
