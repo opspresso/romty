@@ -119,7 +119,7 @@ Both file views allow directory rows to take the cursor. Press `Enter` to toggle
 | `F2` | Add a root |
 | `F3` or `,` | Open Config |
 | `F4` or `Ctrl+C` | Close the TUI and leave sessions running |
-| `F5` | Refresh workspaces and Git state, or reload file view |
+| `F5` | Refresh workspaces and Git state, reload file view, or start a stopped daemon |
 | `F6` or `Ctrl`+`Shift`+`\` | Enter or leave scrollback |
 | `F7` or `Ctrl`+`/` | Toggle pane focus |
 
@@ -132,6 +132,8 @@ Both file views allow directory rows to take the cursor. Press `Enter` to toggle
 | `i` | Open About |
 | `Tab` | Focus the terminal |
 | `Space` | Collapse or expand the selected root, or collapse the root of the selected workspace |
+| `/` | Find a workspace by name |
+| `<`/`>` | Move the tab under the tab cursor left or right |
 
 ### Switch
 
@@ -141,6 +143,7 @@ Both file views allow directory rows to take the cursor. Press `Enter` to toggle
 | `Ctrl`+`Shift`+`G`, or `g` in the workspace pane | Open Git actions for the contextual workspace |
 | `Ctrl`+`Shift`+`F`, or `f` in the workspace pane and file view | Toggle changed files and Git diff |
 | `Ctrl`+`Shift`+`←`/`→` | Switch terminal tab |
+| `Ctrl`+`Shift`+`PgUp`/`PgDn` | Move the selected tab left or right |
 | `Ctrl`+`Shift`+`↑`/`↓` | Switch to a workspace with a running terminal |
 | `Ctrl`+`Shift`+`A`, or `a` in the workspace pane | Open the next terminal whose agent is waiting |
 
@@ -179,6 +182,8 @@ Both file views allow directory rows to take the cursor. Press `Enter` to toggle
 | `m` | Toggle the scrollback mouse in Config |
 | `d`/`b` | Toggle the done and waiting sounds in Config |
 | `n` | Toggle desktop notifications in Config |
+| `w` | Toggle keeping the machine awake while agents work in Config |
+| `c` | Toggle programs copying to the clipboard (OSC 52) in Config |
 
 ## Roots, workspaces, and tabs
 
@@ -290,6 +295,33 @@ An action appears only when it applies. Closing a tab asks before it terminates 
 `F9` asks before stopping the daemon because this terminates every running shell. Once confirmed, shutdown cannot be cancelled.
 
 The last opened workspace and terminal tab, workspace pane width, collapsed roots, and inline or split diff layout are saved automatically in `config.json`. Reopening romty reconnects to that tab when it is still running; a removed workspace or stopped tab falls back to the workspace list. The pane width is constrained to 18 through 40 columns and may shrink further when the terminal is narrow.
+
+### Settings
+
+Config (`F3`) shows the settings you change by hand. romty saves them, and the state it remembers between runs, in `config.json` in the runtime directory. The daemon reads three keys from the same file each time it needs them, so a change takes effect without a restart.
+
+| Config row | Key | `config.json` field | Default |
+|---|---|---|---|
+| Workspace pane width | `←`/`→`, `[`/`]` | `left_width` | `0`, sized from the screen; 18 to 40 when set |
+| Mouse passthrough | `p` | `mouse_passthrough` | off |
+| Scrollback mouse | `m` | `scrollback_mouse` | off |
+| Notifications | `n` | `mute_notifications` (true turns them off) | on |
+| Keep awake while agents work | `w` | `allow_sleep` (true turns it off; read by the daemon) | on |
+| Programs may copy (OSC 52) | `c` | `block_clipboard` (true turns it off) | on |
+| Sound on done | `d` | `sound_on_done` | off |
+| Sound on waiting | `b` | `sound_on_waiting` | off |
+
+These fields have no Config row:
+
+| `config.json` field | Meaning | Default |
+|---|---|---|
+| `save_output` | `"off"` saves no terminal output with stopped, closed and checkpointed sessions; read by the daemon | output is saved |
+| `output_retention_days` | Days that saved sessions are kept, 1 to 30; read by the daemon | 7 |
+| `git_diff_view` | `"inline"` or `"split"`, set with `F6` in the changed-file view | inline |
+| `collapsed_roots` | Paths of the roots collapsed in the tree, set with `Space` | none |
+| `last_workspace_path`, `last_tab_id` | The terminal reopened when romty starts | set automatically |
+
+romty keeps fields it does not know and writes them back unchanged.
 
 Config lists each setting as a name, its value, and the key that runs it. Walk the list with `↑`/`↓` and run the row under the cursor with `Enter`; each row's own key still works from anywhere in the modal.
 

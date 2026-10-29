@@ -105,8 +105,10 @@ func helpReference() []helpEntry {
 		{description: "Adjust pane width", keys: []string{"←/→", "[/]"}},
 		{description: "Toggle mouse passthrough", keys: []string{"p"}},
 		{description: "Toggle scrollback mouse", keys: []string{"m"}},
-		{description: "Toggle agent sounds", keys: []string{"d", "b"}},
-		{description: "Test the done sound", keys: []string{"s"}},
+		{description: "Toggle notifications", keys: []string{"n"}},
+		{description: "Toggle keeping the machine awake", keys: []string{"w"}},
+		{description: "Toggle programs copying (OSC 52)", keys: []string{"c"}},
+		{description: "Toggle and hear agent sounds", keys: []string{"d", "b"}},
 	}
 }
 

@@ -92,13 +92,14 @@ romty stores data in a `romty` directory under the user configuration directory:
 | File | Purpose |
 |---|---|
 | `state.json` | Roots, workspaces, and terminal tab metadata |
-| `config.json` | TUI settings such as the last workspace and tab, workspace pane width, mouse passthrough, and diff layout |
+| `config.json` | Settings written by the TUI and read by both the TUI and the daemon; see [Settings](interface.md#settings) |
 | `resume/` | Output and agent session of each tab that was running at `romty stop`; unconsumed snapshots are discarded after `output_retention_days` (seven by default) |
 | `closed/` | Output and agent session of the last three tabs closed in each workspace, for reopening; entries are discarded after `output_retention_days` |
 | `checkpoint/` | The latest session of each running agent tab, so a crash leaves sessions to resume; the next daemon moves them into `resume/` |
 | `daemon.sock` | Local client-daemon Unix socket |
 | `daemon.sock.lock` | Lock held by the running daemon |
-| `daemon.log` | Detached daemon output and failures; archived before daemon startup after reaching 3 MiB |
+| `ssh-agent.sock` | Link to the SSH agent of the client that connected last; a tab created by a client that has `SSH_AUTH_SOCK` gets this path instead; see [SSH agent forwarding](#ssh-agent-forwarding) |
+| `daemon.log` | Detached daemon output and failures; archived at 3 MiB, at daemon start and while the daemon runs |
 | `daemon.log.1` | Previous daemon log, with one archive retained |
 
 Set `ROMTY_HOME` to use an isolated location:
@@ -124,16 +125,21 @@ Use `romty doctor` to check permissions, file formats, the shell, and daemon com
 ## Architecture
 
 ```text
-romty TUI
-   ├─ workspace tree
-   └─ terminal tabs and VT renderer
-            │
-       Unix socket
+romty TUI (one per terminal or SSH login)
+   ├─ workspace tree, tab row, modals
+   └─ embedded terminal (VT emulator)
+            │  requests, terminal attach, and a change stream
+       Unix socket (owner only, peer UID checked)
             │
        romty daemon
-            ├─ state store
-            └─ PTY sessions
-                 └─ shell process
+            ├─ state store (state.json)
+            ├─ PTY sessions ── shell ── agent and other processes
+            ├─ agent status scans, shared by every TUI
+            ├─ Git poller, shared by every TUI
+            ├─ publisher: sends tree, agent and Git changes to subscribers
+            └─ housekeeping: checkpoints, recording budget, log rotation, keep-awake
 ```
+
+A TUI asks the daemon for a snapshot and opens a terminal by attaching to its PTY session. It also subscribes to the daemon, which then sends the tree, the agent statuses and the Git states when they change, so a TUI does not poll and the daemon reads each of them once for every TUI. A TUI connected to a daemon from before v0.49.0 polls it instead.
 
 The client and daemon negotiate a supported protocol revision and independent capabilities. An older compatible peer keeps the features it understands. If no ordinary protocol overlaps, shutdown remains available and the error recommends `romty stop` before restarting with the new binary.
