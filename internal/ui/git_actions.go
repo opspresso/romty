@@ -291,15 +291,15 @@ func (m dashboard) renderGitActionsModal(maximum, height int) []string {
 var gitFailureHints = []struct {
 	marker, hint string
 }{
-	{"Not possible to fast-forward", "the branches have diverged. Press t to open a terminal and merge or rebase."},
-	{"has no upstream branch", "the branch has no remote yet. Press t and run git push -u origin HEAD."},
-	{"no tracking information", "the branch tracks no remote branch. Press t and run git branch --set-upstream-to."},
-	{"would be overwritten", "local changes are in the way. Commit or stash them first; press t for a terminal."},
-	{"Permission denied (publickey)", "Git could not sign in. Press t and run the command in a terminal to authenticate."},
-	{"Authentication failed", "Git could not sign in. Press t and run the command in a terminal to authenticate."},
-	{"could not read Username", "Git needs credentials. Press t and run the command in a terminal to sign in."},
-	{"rejected", "the remote has commits you do not have. Pull first, then push."},
-	{"timed out", "the remote did not answer. Check the network and try again."},
+	{"Not possible to fast-forward", "branches diverged; press t, then merge or rebase"},
+	{"has no upstream branch", "no remote branch yet; press t, run git push -u origin HEAD"},
+	{"no tracking information", "no upstream; press t, run git branch --set-upstream-to"},
+	{"would be overwritten", "local changes are in the way; commit or stash them first"},
+	{"Permission denied (publickey)", "sign-in failed; press t and run it in a terminal"},
+	{"Authentication failed", "sign-in failed; press t and run it in a terminal"},
+	{"could not read Username", "credentials needed; press t and run it in a terminal"},
+	{"rejected", "the remote has newer commits; pull, then push"},
+	{"timed out", "the remote did not answer; check the network and retry"},
 }
 
 // gitFailureHint is the next step for a failure, or empty when romty has none.

@@ -403,7 +403,7 @@ func (m dashboard) renderStatus(width, bodyHeight int) []string {
 			shortcut{key: "s/u/p/P/b", description: "run by letter"},
 			shortcut{key: "Esc", description: "cancel"},
 		)
-	case m.modal == branchModal:
+	case m.modal == branchModal && m.branches.confirming == nil:
 		escape := shortcut{key: "Esc", description: "close"}
 		if m.branches.query != "" {
 			escape.description = "clear filter"

@@ -83,6 +83,11 @@ func (m dashboard) handleBranchList(message branchListMsg) (tea.Model, tea.Cmd) 
 	if message.err != nil {
 		m.branches.err = message.err.Error()
 	}
+	if len(message.branches) > 1 && message.branches[0].Current {
+		// The current branch is listed first for orientation; the cursor
+		// starts on the branch most likely wanted next.
+		m.branches.index = 1
+	}
 	return m, nil
 }
 
@@ -207,6 +212,9 @@ func (m dashboard) renderBranchModal(maximum, height int) []string {
 		))
 	}
 	field := m.renderTextField(m.branches.query, 40)
+	if m.branches.query == "" {
+		field = m.styles.inputField.Render(" ") + m.styles.empty.Render(" type to filter or to name a new branch")
+	}
 	lines := []string{target, field, ""}
 	switch {
 	case m.branches.loading:

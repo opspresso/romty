@@ -136,6 +136,11 @@ func TestBranchPickerAsksWhileAnAgentRuns(t *testing.T) {
 func TestBranchPickerEscClearsThenCloses(t *testing.T) {
 	value, _ := branchDashboard(t, nil)
 	openPicker(t, &value)
+	// The cursor starts on the branch after the current one.
+	if value.branches.index != 1 {
+		t.Fatalf("cursor starts at %d, want the first branch that is not current", value.branches.index)
+	}
+	send(&value, key(tea.KeyUp, ""))
 	if command := send(&value, key(tea.KeyEnter, "")); command != nil || value.modal != branchModal {
 		t.Fatal("Enter on the current branch did something")
 	}

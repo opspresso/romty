@@ -349,7 +349,7 @@ func TestGitResultOffersTheNextStep(t *testing.T) {
 	value.gitRun.action, value.gitRun.complete = gitPullAction, true
 	value.gitRun.err = "fatal: Not possible to fast-forward, aborting."
 	screen := ansi.Strip(value.render())
-	if !strings.Contains(screen, "Next: the branches have diverged. Press t to open a terminal") || !strings.Contains(screen, "t  terminal") {
+	if !strings.Contains(screen, "Next: branches diverged; press t, then merge or rebase") || !strings.Contains(screen, "t  terminal") {
 		t.Fatalf("failed pull lacks its next step:\n%s", screen)
 	}
 
