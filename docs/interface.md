@@ -52,13 +52,26 @@ Git metadata is rendered as `(branch*) ↑N ↓N`. `*` means the worktree has tr
 
 romty refreshes local Git state every 10 seconds. It fetches remote-tracking refs in the background at startup and every 5 minutes. `F5` refreshes local state immediately and starts another background fetch; fetches never prompt for credentials and time out without blocking the interface.
 
-Press `Ctrl`+`Shift`+`G` to open Git actions for a workspace. From the workspace pane it targets the row under the cursor; from the terminal pane or scrollback it targets the open terminal workspace. The menu provides `Status`, `Fetch`, `Pull`, and `Push`.
+Press `g` in the workspace pane, or `Ctrl`+`Shift`+`G` in either pane, to open Git actions for a workspace. From the workspace pane it targets the row under the cursor; from the terminal pane or scrollback it targets the open terminal workspace. The menu provides `Status` (`s`), `Fetch` (`u`), `Pull` (`p`), `Push` (`P`), and `Switch branch` (`b`). The letters run an action directly. The `GIT` section of the workspace actions (`F8`) is the same list.
 
 - `Pull` uses `--ff-only` so it never creates a merge commit.
 - Commands run without interactive credential prompts, and their output or error remains in a scrollable result modal.
 - Captured Git output is limited to 8 MiB; exceeding it stops the command and reports an error.
 - The output is coloured: porcelain status letters take the same green, amber, and red the file view gives them, and a diffstat's `+` and `-` are split into additions and removals.
-- Press `Enter` from a result to return to the action menu, or click `×` in its title bar to close it.
+- A common failure adds a `Next:` line that says what to do, for example when a pull cannot fast-forward or a branch has no upstream.
+- From a result, press `t` to open a terminal in the workspace or `f` to open its changed files. Press `Enter` to return to the action menu, or click `×` in its title bar to close it.
+
+### Switching branches
+
+`Switch branch` opens a list of the current branch, the other local branches with the most recent commit first, and then the remote branches that have no local branch of the same name.
+
+1. Type to filter the list. `↑`/`↓` move the cursor, because letters go to the filter.
+2. Press `Enter` to switch to the branch under the cursor. A remote branch is checked out as a new local branch that tracks it.
+3. When the typed name matches no branch, the list ends with `+ Create branch <name>`, which creates the branch at the current commit and switches to it.
+
+`Esc` clears the filter, and a second `Esc` closes the list. The result opens in the Git result view, and the workspace tree shows the new branch.
+
+The workspace's terminals share its directory, so a switch changes the files under every program running there. When an agent or a Node.js service runs in the workspace, romty names it and asks before it switches. Git refuses a switch that would overwrite uncommitted changes; the result then says to commit or stash them first.
 
 ## File views
 
@@ -169,14 +182,14 @@ Both file views allow directory rows to take the cursor. Press `Enter` to toggle
 
 `F2` opens a picker on the home directory. The first row is the open directory itself, shown as `.`, so `Enter` always adds the highlighted row. Files and dot-directories are omitted; `/` opens the `Root path` modal for a typed or pasted path. An absolute path or a path that starts with `~` is used as typed; any other path is relative to the directory the picker shows. `Esc` in the modal returns to the picker. Directory reads run in the background so a slow mount does not block the TUI or its terminals.
 
-Tabs have a wider click target and an `×` at the right edge. Clicking the label opens the tab; clicking `×` asks for confirmation, then terminates its shell and removes it. Double-clicking the label opens the `Rename tab` modal with the current name. Edit it and press `Enter` to rename the tab, or press `Esc` to keep the old name. An empty or rejected name keeps the modal open and shows the reason inside it. A name is 1 to 32 characters after surrounding spaces are removed and cannot contain control characters. Renaming keeps the shell running, and the daemon saves the new name. The `+` key is not a shortcut. Select the wider `+` tab with `←`/`→` and press `Enter`, or use `Ctrl`+`Shift`+`T`. From the workspace pane the shortcut uses the workspace under the cursor; from the terminal pane or scrollback it uses the open terminal workspace. The switch shortcuts wrap at both ends.
+Tabs have a wider click target and an `×` at the right edge. Clicking the label opens the tab; clicking `×` asks for confirmation, then terminates its shell and removes it. Double-clicking the label opens the `Rename tab` modal with the current name. Edit it and press `Enter` to rename the tab, or press `Esc` to keep the old name. An empty or rejected name keeps the modal open and shows the reason inside it. A name is 1 to 32 characters after surrounding spaces are removed and cannot contain control characters; the modal shows the rule and the current count under the field. A tab keeps the number romty gave it until you rename it, and while it does, the tab row adds the detected program, for example `1 claude` or `2 node`. Renaming keeps the shell running, and the daemon saves the new name. The `+` key is not a shortcut. Select the wider `+` tab with `←`/`→` and press `Enter`, or use `Ctrl`+`Shift`+`T`. From the workspace pane the shortcut uses the workspace under the cursor; from the terminal pane or scrollback it uses the open terminal workspace. The switch shortcuts wrap at both ends.
 
 ### Opening a workspace without a terminal
 
 Selecting a root or workspace that has no running terminal, with `Enter` or a click, starts a new terminal at once when the workspace has no closed sessions. When it has closed sessions, a menu titled `Open a session in <workspace>` opens in the middle of the terminal pane instead, and the pane shows nothing else until you choose:
 
 - `New session` starts a new terminal tab.
-- `Reopen <tab> · <agent> · <time>` reopens one of the workspace's last three closed sessions, newest first. The agent is shown when one was running at close. The time shows the date as well when the session closed before today.
+- Under the `REOPEN` heading, `<tab> · <agent> · <age>` reopens one of the workspace's last three closed sessions, newest first. The agent is shown when one was running at close. The age reads `just now`, minutes, or hours within a day, and the date after that. Number keys `1` to `3` reopen a session directly.
 
 Use `↑`/`↓` and `Enter`, or click a choice. Press `Esc` or click outside the menu to cancel. A reopened tab replays the closed tab's output behind a `── reopened from a closed tab ──` marker and takes back its name when no running tab uses it. When an agent was running at close, its resume command is typed at the prompt, as after `romty stop`; see [Stopping and resuming](runtime.md#stopping-and-resuming). A reopened session leaves the list.
 
@@ -217,7 +230,7 @@ Press `Space` in the workspace pane, or click the `▾` arrow of a root, to coll
 
 ## Scrollback and mouse
 
-romty keeps 10,000 scrollback lines for each terminal. Scrollback fills the width so native terminal selection copies output without the workspace tree. New output does not move a historical view. `Shift`+`PgUp`/`PgDn` and the mouse wheel continue browsing history; other terminal input, including paste, returns to the live screen and is forwarded without dropping the first input.
+romty keeps 10,000 scrollback lines for each terminal. The status bar says where the view is: `newest`, `oldest`, or how many lines up. `Esc` leaves scrollback. Scrollback fills the width so native terminal selection copies output without the workspace tree. New output does not move a historical view. `Shift`+`PgUp`/`PgDn` and the mouse wheel continue browsing history; other terminal input, including paste, returns to the live screen and is forwarded without dropping the first input.
 
 Press `/` in scrollback to find text in the retained output. Typed and pasted text edits the search query. The query is applied when `Enter` confirms it, matching without regard to case and ignoring the colours around a phrase. The view moves to the newest match first, and `n` and `N` walk towards older and newer matches, wrapping at both ends. The status bar carries the query and the position among the matches. Leaving scrollback forgets the search.
 
@@ -241,9 +254,24 @@ Scrollback normally reads the wheel as the arrow keys the terminal's alternate s
 
 The wheel then scrolls scrollback on any terminal that reports the mouse, at the cost of the plain click-drag selection scrollback otherwise offers; the bypass modifier still selects.
 
+## When the daemon stops
+
+The daemon runs the terminals. If it stops while romty is open, for example after `romty stop` in another terminal or a crash, every terminal ends with it. The status bar then shows `DAEMON romty daemon stopped; press F5 to start it again`, and the terminal pane explains what happened.
+
+Press `F5` to start the daemon again. romty reloads the workspace tree from it. Sessions that a `romty stop` saved are offered when you press `Enter` on their workspace; see [Stopping and resuming](runtime.md#stopping-and-resuming). If the daemon does not start, the status bar shows the reason. When romty in another terminal starts the daemon first, this romty notices within a few seconds.
+
 ## Destructive actions and config
 
-`F8` opens a compact action menu beside the highlighted row; right-clicking a workspace or root opens the same menu at the pointer. The menu offers terminal creation, closing the selected tab, read-only access to all files, changed-file review, Git status/fetch/pull/push, and removal directly when they apply. Closing a tab asks before it terminates that shell. Deleting a workspace recursively removes all of its contents, so the confirmation accepts `Enter` only after you type or paste the workspace's name. The comparison ignores Unicode normalization, so a name that macOS stores decomposed still matches what you type. Forgetting a root removes it only from romty and confirms with `Enter`. Both removal actions terminate terminal sessions under the selected item.
+`F8` opens a compact action menu beside the highlighted row; right-clicking a workspace or root opens the same menu at the pointer. The menu groups its actions under headings, and each action shows the letter that runs it:
+
+| Section | Actions |
+|---|---|
+| `TERMINAL` | `Open terminal` (`o`), `New tab` (`n`), `Close tab` (`x`) |
+| `FILES` | `All files` (`a`), `File changes` (`f`) |
+| `GIT` | `Status` (`s`), `Fetch` (`u`), `Pull` (`p`), `Push` (`P`), `Switch branch` (`b`) |
+| after a rule | `Delete workspace` or `Forget root` (`d`) |
+
+An action appears only when it applies. Closing a tab asks before it terminates that shell. Deleting a workspace recursively removes all of its contents, so the confirmation accepts `Enter` only after you type or paste the workspace's name. The comparison ignores Unicode normalization, so a name that macOS stores decomposed still matches what you type. Forgetting a root removes it only from romty and confirms with `Enter`. Both removal actions terminate terminal sessions under the selected item.
 
 `F9` asks before stopping the daemon because this terminates every running shell. Once confirmed, shutdown cannot be cancelled.
 

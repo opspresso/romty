@@ -60,7 +60,7 @@ func helpReference() []helpEntry {
 		{description: "Add root", keys: []string{"F2"}},
 		{description: "Config", keys: []string{"F3", ","}},
 		{description: "Quit", keys: []string{"F4", "Ctrl+C"}},
-		{description: "Refresh workspaces/files", keys: []string{"F5"}},
+		{description: "Refresh, or restart a stopped daemon", keys: []string{"F5"}},
 		{description: "Toggle scrollback", keys: []string{"F6", "Ctrl+Shift+\\"}},
 		{description: "Toggle pane focus", keys: []string{"F7", "Ctrl+/"}},
 		{section: "WORKSPACE", note: "workspace pane only"},

@@ -19,6 +19,7 @@ laptop -> Tailscale -> SSH -> always-on machine -> romty -> AI coding agent
 ## Features
 
 - Organize roots and their direct child directories as a workspace tree.
+- Run Git status, fetch, pull, and push, and switch or create branches, from each workspace.
 - Keep multiple terminal tabs alive independently of the TUI.
 - Restore up to 8 MiB of recent output, and browse and search 10,000 lines of scrollback.
 - Open full-width scrollback for native terminal selection and copying, with light or dark colors.
