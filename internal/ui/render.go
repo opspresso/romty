@@ -539,7 +539,7 @@ func (m dashboard) renderNavigation(width, height int) []string {
 	items := m.navigationItems()
 	// A collapsed root stands in for the open workspace it hides.
 	hiddenCurrent := ""
-	if workspaceIndex(items, m.selectedPath) < 0 {
+	if m.selectedPath != "" && workspaceIndex(items, m.selectedPath) < 0 {
 		if item, ok := m.workspaceItem(m.selectedPath); ok {
 			hiddenCurrent = item.root.Path
 		}
