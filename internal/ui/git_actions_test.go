@@ -189,6 +189,8 @@ func TestDashboardClicksAndScrollsGitActions(t *testing.T) {
 	value.gitRun.pending = false
 	value.gitRun.complete = true
 	value.gitRun.output = strings.Join([]string{"one", "two", "three", "four", "five", "six", "seven"}, "\n")
+	// The result box has its own size, so the pointer is placed in it.
+	left, top = value.modalGeometry(value.width, value.dimensions().bodyHeight).contentOrigin()
 	send(&value, tea.MouseWheelMsg{X: left + 2, Y: top + 3, Button: tea.MouseWheelDown})
 	if value.gitRun.offset == 0 {
 		t.Fatal("Git result wheel did not scroll")
@@ -284,12 +286,12 @@ func TestDashboardHighlightsTheSelectedGitAction(t *testing.T) {
 	// drawn.
 	width := lipgloss.Width(lines[0]) - 6
 	selected := value.styles.navigationSelected.Render(
-		pad("▌ "+pad("Fetch", gitActionLabelWidth)+"Update remote refs", width))
+		pad("▌ u  "+pad("Fetch", gitActionLabelWidth)+"Update remote refs", width))
 	if !strings.Contains(rendered, selected) {
 		t.Fatalf("the selected Git action does not carry the picker's bar:\n%s", rendered)
 	}
 	unselected := value.styles.modalBody.Render(
-		pad("  "+pad("Status", gitActionLabelWidth)+"Show changed files", width))
+		pad("  s  "+pad("Status", gitActionLabelWidth)+"Show changed files", width))
 	if !strings.Contains(rendered, unselected) {
 		t.Fatalf("an unselected Git action is not drawn as a plain row:\n%s", rendered)
 	}

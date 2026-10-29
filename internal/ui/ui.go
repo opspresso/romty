@@ -19,6 +19,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/opspresso/romty/internal/agenthooks"
+	"github.com/opspresso/romty/internal/client"
 	"github.com/opspresso/romty/internal/display"
 	"github.com/opspresso/romty/internal/gitrepo"
 	"github.com/opspresso/romty/internal/model"
@@ -114,7 +115,13 @@ const (
 	// gitError is about an explicit Git action and is cleared only by another
 	// Git action, not by a workspace or terminal refresh.
 	gitError
+	// daemonError says the daemon is gone. It stands until the daemon
+	// answers again, whatever else fails in the meantime.
+	daemonError
 )
+
+// daemonStoppedMessage is what the status bar says while the daemon is gone.
+const daemonStoppedMessage = "romty daemon stopped; press F5 to start it again"
 
 type modal int
 
@@ -131,6 +138,7 @@ const (
 	shutdownModal
 	hookInstallModal
 	inputModal
+	branchModal
 )
 
 // doubleClickInterval is the longest gap between two clicks on one tab that
@@ -160,6 +168,7 @@ const (
 	hoverGitAction
 	hoverGitResult
 	hoverConfigRow
+	hoverBranchRow
 )
 
 type dashboard struct {
@@ -265,6 +274,18 @@ type dashboard struct {
 	// renders from it and the keys move it.
 	browse  browser
 	palette workspacePalette
+	// restartDaemon starts the daemon again after it stopped under the TUI,
+	// the way starting romty does. daemonDown is set while it is gone, and
+	// daemonRestarting while F5 is starting it.
+	restartDaemon    func() error
+	daemonDown       bool
+	daemonRestarting bool
+	// hooksDeferred holds the agent hook offer until the first root exists.
+	hooksDeferred bool
+	// branches is the branch picker while it is open, and branchRequest
+	// numbers its branch reads.
+	branches      branchPicker
+	branchRequest uint64
 	// config holds every persisted setting. It is the document as loaded,
 	// so saving keeps the fields this build does not know.
 	config           Config
@@ -379,12 +400,15 @@ type reopenTerminalMsg struct {
 var installHookProviders = agenthooks.Install
 var playSound = sound.Play
 
-func Run(backend Backend, initial model.Snapshot, configPath string, hookStatuses []agenthooks.Status) (Result, error) {
+// Run runs the dashboard. restartDaemon starts the daemon again when it stops
+// while the dashboard is open; nil leaves F5 a refresh.
+func Run(backend Backend, initial model.Snapshot, configPath string, hookStatuses []agenthooks.Status, restartDaemon func() error) (Result, error) {
 	config, err := loadConfig(configPath)
 	if err != nil {
 		return Result{}, fmt.Errorf("load UI config: %w", err)
 	}
 	value := newDashboardWithConfig(backend, initial, configPath, config)
+	value.restartDaemon = restartDaemon
 	value.offerAgentHooks(hookStatuses)
 	program := tea.NewProgram(value)
 	final, err := program.Run()
@@ -479,7 +503,19 @@ func (m dashboard) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	value, command = value.syncAgentAnimation(command)
 	value, command = value.syncTerminalSize(command)
+	value.offerDeferredHooks()
 	return value.syncAltScroll(command)
+}
+
+// offerDeferredHooks shows the agent hook offer a first run held back, once
+// there is a root and nothing else is being asked. Checked after every
+// message, so a root added from anywhere and a modal closed by any key both
+// let it through.
+func (m *dashboard) offerDeferredHooks() {
+	if m.hooksDeferred && len(m.state.Roots) > 0 && m.modal == noModal && !m.fileView.active {
+		m.hooksDeferred = false
+		m.modal = hookInstallModal
+	}
 }
 
 // syncTerminalSize reports the width the narrow layout just gave or took back.
@@ -582,6 +618,9 @@ func (m dashboard) update(message tea.Msg) (tea.Model, tea.Cmd) {
 		} else if m.modal == inputModal {
 			m.input.text += message.Content
 			m.input.err = ""
+		} else if m.modal == branchModal && m.branches.confirming == nil {
+			m.branches.query += message.Content
+			m.branches.index, m.branches.offset = m.firstBranchChoice(), 0
 		} else if m.modal == removeSelectionModal && !m.removeTarget.isRoot {
 			// Pasting the name is how a name that is hard to type, such as
 			// one with characters the keyboard lacks, is confirmed.
@@ -606,7 +645,9 @@ func (m dashboard) update(message tea.Msg) (tea.Model, tea.Cmd) {
 			if order < m.snapshotApplied {
 				return m, nil
 			}
-			m.setError(treeError, message.err.Error())
+			if !m.noteDaemonError(message.err) {
+				m.setError(treeError, message.err.Error())
+			}
 			if m.terminalExited {
 				// The snapshot that would have picked a sibling tab never
 				// arrived. Settle on the workspace pane now: leaving the move
@@ -654,9 +695,19 @@ func (m dashboard) update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.updateAgents(message.value)
 			m.heardAgents = maps.Clone(message.value)
 			m.agentSoundReady = true
+			if m.daemonDown {
+				// Something else, such as romty in another terminal, started
+				// the daemon again. Its tree is the one to show.
+				m.daemonDown = false
+				m.clearError(daemonError)
+				alerts = append(alerts, m.refresh())
+			}
 			return m, tea.Batch(append(alerts, m.refreshAgents())...)
 		}
+		m.noteDaemonError(message.err)
 		return m, m.refreshAgents()
+	case daemonRestartedMsg:
+		return m.handleDaemonRestarted(message)
 	case soundPlayedMsg:
 		return m, nil
 	case releaseCheckedMsg:
@@ -685,6 +736,8 @@ func (m dashboard) update(message tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.refreshGitStatus()
 		}
 		return m, nil
+	case branchListMsg:
+		return m.handleBranchList(message)
 	case gitActionMsg:
 		return m.handleGitActionResult(message)
 	case fileListMsg:
@@ -942,6 +995,13 @@ func (m *dashboard) clearAnyError() {
 func (m *dashboard) offerAgentHooks(statuses []agenthooks.Status) {
 	m.hookStatuses = statuses
 	if len(agenthooks.Pending(statuses)) > 0 {
+		if len(m.state.Roots) == 0 {
+			// On a first run the screen explains how to add a root. Asking
+			// about agent hooks before there is anywhere to run an agent
+			// would put a question in front of that answer.
+			m.hooksDeferred = true
+			return
+		}
 		m.modal = hookInstallModal
 		return
 	}
@@ -1102,7 +1162,9 @@ func (m dashboard) handleCreatedTab(message tabMsg) (tea.Model, tea.Cmd) {
 	}
 	m.tabPending = false
 	if message.err != nil {
-		m.setError(terminalError, message.err.Error())
+		if !m.noteDaemonError(message.err) {
+			m.setError(terminalError, message.err.Error())
+		}
 		return m, nil
 	}
 	m.applySnapshot(message.order, message.snapshot)
@@ -1131,7 +1193,9 @@ func (m dashboard) handleOpenedTerminal(message terminalOpenedMsg) (tea.Model, t
 	}
 	m.restorePending = false
 	if message.err != nil {
-		m.setError(terminalError, message.err.Error())
+		if !m.noteDaemonError(message.err) {
+			m.setError(terminalError, message.err.Error())
+		}
 		m.focus = leftPane
 		return m, nil
 	}
@@ -1205,6 +1269,12 @@ func (m dashboard) handleTerminalOutput(message terminalOutputMsg) (tea.Model, t
 // reattaches to it.
 func (m dashboard) settleAfterExit() (tea.Model, tea.Cmd) {
 	m.terminalExited = false
+	if m.daemonDown {
+		// The terminal ended because the daemon did; reattaching would fail
+		// until F5 starts it again.
+		m.focusNavigation()
+		return m, nil
+	}
 	if m.focus != terminalPane {
 		return m, nil
 	}
@@ -1279,8 +1349,47 @@ func (m *dashboard) refresh() tea.Cmd {
 }
 
 func (m dashboard) refreshAll() (tea.Model, tea.Cmd) {
+	if m.daemonDown && m.restartDaemon != nil {
+		if m.daemonRestarting {
+			return m, nil
+		}
+		m.daemonRestarting = true
+		restart := m.restartDaemon
+		return m, func() tea.Msg { return daemonRestartedMsg{err: restart()} }
+	}
 	tree := m.refresh()
 	return m, tea.Batch(tree, m.readGitStatus(false, false), m.readGitStatus(true, false))
+}
+
+// daemonRestartedMsg is the answer to F5 starting a daemon that stopped.
+type daemonRestartedMsg struct {
+	err error
+}
+
+// noteDaemonError reports whether err says the daemon is gone, and if so
+// puts the dashboard in the stopped state: one message that names the way
+// back, in place of the socket error each request would otherwise show.
+func (m *dashboard) noteDaemonError(err error) bool {
+	if err == nil || !client.Unavailable(err) {
+		return false
+	}
+	m.daemonDown = true
+	m.setError(daemonError, daemonStoppedMessage)
+	return true
+}
+
+// handleDaemonRestarted reloads everything from the new daemon. The shells
+// that ran in the old one have ended; a stop saved them as closed sessions,
+// which Enter on their workspace offers to reopen.
+func (m dashboard) handleDaemonRestarted(message daemonRestartedMsg) (tea.Model, tea.Cmd) {
+	m.daemonRestarting = false
+	if message.err != nil {
+		m.setError(daemonError, "romty daemon did not start: "+message.err.Error())
+		return m, nil
+	}
+	m.daemonDown = false
+	m.setNotice(daemonError, "romty daemon started again; Enter on a workspace reopens its saved sessions")
+	return m.refreshAll()
 }
 
 // requestPending reports a request a modal is waiting on: a daemon shutdown, a

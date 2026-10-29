@@ -38,6 +38,10 @@ func (m dashboard) openModal(value modal) (tea.Model, tea.Cmd) {
 }
 
 func (m dashboard) handleModalKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if m.modal == branchModal {
+		// The picker types into its filter, so Esc first clears it.
+		return m.handleBranchKey(message)
+	}
 	if m.modal == helpModal && m.helpTyping {
 		return m.handleHelpSearchKey(message)
 	}
@@ -88,6 +92,10 @@ func (m dashboard) handleModalKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 				return m.scrollGitAction(-len(m.gitActionResultLines()))
 			case "end", "G":
 				return m.scrollGitAction(len(m.gitActionResultLines()))
+			case "t":
+				return m.openGitResultTerminal()
+			case "f":
+				return m.openGitResultFiles()
 			}
 			return m, nil
 		}
@@ -98,6 +106,13 @@ func (m dashboard) handleModalKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 			m.gitRun.index = (m.gitRun.index + 1) % len(gitActionChoices)
 		case "enter":
 			return m.startGitAction()
+		default:
+			for index, action := range gitActionChoices {
+				if gitActionKeys[action] == message.String() {
+					m.gitRun.index = index
+					return m.startGitAction()
+				}
+			}
 		}
 		return m, nil
 	case closeTabModal:
@@ -281,6 +296,9 @@ func (m dashboard) renderModalBody(width, height int) []string {
 		// gets the wider ceiling to grow into.
 		return m.renderGitActionsModal(wide, height)
 	}
+	if m.modal == branchModal {
+		return m.renderBranchModal(wide, height)
+	}
 	if m.modal == removeSelectionModal {
 		if m.removeTarget.isRoot {
 			return m.withModalActions(modalBoxFit(m.styles, minimumModalWidth, modalWidth, "Forget root",
@@ -340,7 +358,7 @@ func (m dashboard) renderModalBody(width, height int) []string {
 			}
 			lines = append(lines, m.styles.modalBody.Render(status.Provider.DisplayName()+": "+action))
 			if status.Provider == agenthooks.ProviderCodex && status.State != agenthooks.StateInvalid {
-				lines = append(lines, m.styles.empty.Render("Codex tab matching uses the thread-id title item."))
+				lines = append(lines, m.styles.empty.Render("Codex: its terminal title will carry the thread id, which matches it to its tab."))
 			}
 		}
 		lines = append(lines, "", m.styles.empty.Render("Existing settings and other hooks are preserved."))
@@ -478,6 +496,10 @@ func (m dashboard) modalActions() []modalAction {
 		return answerActions("delete workspace", "cancel")
 	case closeTabModal:
 		return answerActions("close tab", "cancel")
+	case branchModal:
+		if m.branches.confirming != nil {
+			return answerActions("switch", "back")
+		}
 	case shutdownModal:
 		if m.shutdownPending {
 			return nil

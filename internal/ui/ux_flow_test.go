@@ -1,12 +1,14 @@
 package ui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/opspresso/romty/internal/agenthooks"
 	"github.com/opspresso/romty/internal/gitrepo"
 	"github.com/opspresso/romty/internal/model"
 )
@@ -312,5 +314,147 @@ func TestGitStateKeepsTheCursorOnScreen(t *testing.T) {
 	send(&value, gitStatusMsg{value: repositoryStates(directories)})
 	if _, shown := value.cursorOnScreen(); !shown {
 		t.Fatalf("the cursor left the screen after the Git read (offset %d)", value.navOffset)
+	}
+}
+
+// Scrollback says where the view is in words, at either end and between.
+func TestScrollbackPositionReadsAsWords(t *testing.T) {
+	value := scrolledDashboard(t, 200)
+	total := value.terminal.scrollbackLen()
+	for _, probe := range []struct {
+		offset int
+		want   string
+	}{
+		{0, fmt.Sprintf("newest · %d lines above", total)},
+		{10, fmt.Sprintf("10 of %d lines up", total)},
+		{total, fmt.Sprintf("oldest · %d lines", total)},
+	} {
+		value.scrollOffset = probe.offset
+		if got := value.scrollbackPosition(); got != probe.want {
+			t.Fatalf("position at %d = %q, want %q", probe.offset, got, probe.want)
+		}
+	}
+}
+
+// A failed Git command says what to do next, and the result leads to a
+// terminal or the changed files in one key.
+func TestGitResultOffersTheNextStep(t *testing.T) {
+	snapshot, workspace := alphaWorkspaceSnapshot(nil)
+	value := newDashboard(&fakeBackend{}, snapshot)
+	value.width, value.height = 110, 24
+	value.gitStates = map[string]gitrepo.State{workspace.Path: {Branch: "main"}}
+	value.focus = leftPane
+	value.setNavigation(1)
+	send(&value, key('g', "g"))
+	value.gitRun.action, value.gitRun.complete = gitPullAction, true
+	value.gitRun.err = "fatal: Not possible to fast-forward, aborting."
+	screen := ansi.Strip(value.render())
+	if !strings.Contains(screen, "Next: branches diverged; press t, then merge or rebase") || !strings.Contains(screen, "t  terminal") {
+		t.Fatalf("failed pull lacks its next step:\n%s", screen)
+	}
+
+	opened := value
+	if _, command := opened.Update(key('t', "t")); command == nil {
+		t.Fatal("t did not open a terminal")
+	}
+	files, _ := value.Update(key('f', "f"))
+	if !files.(dashboard).fileView.active || files.(dashboard).modal != noModal {
+		t.Fatal("f did not open the changed files")
+	}
+	if gitFailureHint("Everything up-to-date") != "" {
+		t.Fatal("a success was given a failure hint")
+	}
+}
+
+// On a first run the hook offer waits for the first root, so it does not
+// stand in front of the explanation of how to add one.
+func TestHookOfferWaitsForTheFirstRoot(t *testing.T) {
+	value := newDashboard(&fakeBackend{}, model.Snapshot{})
+	value.offerAgentHooks([]agenthooks.Status{{Provider: agenthooks.ProviderClaude, State: agenthooks.StateMissing}})
+	if value.modal != noModal || !value.hooksDeferred {
+		t.Fatalf("first-run hook offer = (modal %v, deferred %v), want it held", value.modal, value.hooksDeferred)
+	}
+	send(&value, snapshotMsg{value: projectsSnapshot(nil)})
+	if value.modal != hookInstallModal || value.hooksDeferred {
+		t.Fatalf("after the first root = (modal %v, deferred %v), want the offer", value.modal, value.hooksDeferred)
+	}
+}
+
+// The rename field states the length rule and the current count before a
+// refusal has to.
+func TestRenameFieldStatesTheLengthRule(t *testing.T) {
+	value := newDashboard(&fakeBackend{}, projectsSnapshot(nil))
+	value.width, value.height = 110, 14
+	updated, _ := value.startRenameTab(model.Tab{ID: "tab-1", Name: "server"})
+	if screen := ansi.Strip(updated.(dashboard).render()); !strings.Contains(screen, "1 to 32 characters · 6 now") {
+		t.Fatalf("rename field lacks the rule:\n%s", screen)
+	}
+}
+
+// A tab still called by its number names the program in it; a name the user
+// chose is left alone, and the rename field starts from the stored name.
+func TestDefaultTabNamesShowTheirProgram(t *testing.T) {
+	styles := newUIStyles(true)
+	tabs := []model.Tab{
+		{ID: "a", Name: "1", Running: true, Agent: model.AgentClaude},
+		{ID: "b", Name: "server", Running: true, Agent: model.AgentNode},
+		{ID: "c", Name: "3", Running: true},
+	}
+	row := ansi.Strip(renderTabBarWithHover(styles, tabs, 0, -1, -1, 0, 100)[0])
+	for _, want := range []string{"1 claude", "server", "3  ×"} {
+		if !strings.Contains(row, want) {
+			t.Fatalf("tab row = %q, want %q", row, want)
+		}
+	}
+	if strings.Contains(row, "server node") {
+		t.Fatalf("a chosen name was changed: %q", row)
+	}
+	at := len([]rune(row[:strings.Index(row, "server")]))
+	if hit, ok := tabHitAtX(tabs, 0, at, 100); !ok || hit.index != 1 {
+		t.Fatalf("click on server = (%+v, %v), want tab 1", hit, ok)
+	}
+	value := newDashboard(&fakeBackend{}, projectsSnapshot(nil))
+	updated, _ := value.startRenameTab(tabs[0])
+	if updated.(dashboard).input.text != "1" {
+		t.Fatalf("rename starts from %q, want the stored name", updated.(dashboard).input.text)
+	}
+}
+
+// Shortening a numbered tab to one column keeps it there: the program name
+// is added once, before fitting, so eight agent tabs fit 90 columns. Adding it
+// again after fitting widened the same row to 141.
+func TestFittedNumberedTabsDoNotGrowBack(t *testing.T) {
+	tabs := make([]model.Tab, 8)
+	for index := range tabs {
+		tabs[index] = model.Tab{ID: fmt.Sprint(index), Name: fmt.Sprint(index + 1), Running: true, Agent: model.AgentClaude}
+	}
+	row := ansi.Strip(renderTabBarWithHover(newUIStyles(true), tabs, 0, -1, -1, 0, 90)[0])
+	if width := len([]rune(strings.TrimRight(row, " "))); width > 90 || !strings.HasSuffix(strings.TrimRight(row, " "), "+") {
+		t.Fatalf("eight agent tabs = %q (%d columns), want them and + within 90", row, width)
+	}
+}
+
+// Server-side refusals and slow local commands get hints that fit them.
+func TestGitHintsMatchTheirCause(t *testing.T) {
+	if hint := gitFailureHint(" ! [remote rejected] main -> main (protected branch hook declined)"); !strings.Contains(hint, "protection") {
+		t.Fatalf("remote rejection hint = %q", hint)
+	}
+	if hint := gitFailureHint("switch timed out after 2m0s"); strings.Contains(hint, "remote") || strings.Contains(hint, "network") {
+		t.Fatalf("local timeout hint = %q", hint)
+	}
+}
+
+// A held hook offer is shown when a modal open at the first root closes.
+func TestHeldHookOfferWaitsForTheModalToClose(t *testing.T) {
+	value := newDashboard(&fakeBackend{}, model.Snapshot{})
+	value.offerAgentHooks([]agenthooks.Status{{Provider: agenthooks.ProviderClaude, State: agenthooks.StateMissing}})
+	send(&value, key(tea.KeyF1, ""))
+	send(&value, snapshotMsg{value: projectsSnapshot(nil)})
+	if value.modal != helpModal {
+		t.Fatalf("the offer replaced the open Help (modal %v)", value.modal)
+	}
+	send(&value, key(tea.KeyEscape, ""))
+	if value.modal != hookInstallModal {
+		t.Fatalf("after Help closed modal = %v, want the hook offer", value.modal)
 	}
 }

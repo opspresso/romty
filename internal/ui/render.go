@@ -329,6 +329,16 @@ func (m dashboard) renderStatus(width, bodyHeight int) []string {
 	rail := m.styles.tabRail.Render(strings.Repeat("─", width))
 	var status string
 	switch {
+	case m.daemonRestarting:
+		status = m.renderActivityStatus("STARTING", "romty daemon", width)
+	case m.daemonDown:
+		// Every other failure while the daemon is gone is a consequence of
+		// it, so the way back stays on screen whatever else was reported.
+		message := daemonStoppedMessage
+		if m.errorFrom == daemonError && m.errorMessage != "" {
+			message = m.errorMessage
+		}
+		status = truncate(m.styles.errorLabel.Render(" DAEMON ")+" "+m.styles.errorText.Render(display.Text(message)), width)
 	case m.errorMessage != "":
 		label, text, title := m.styles.errorLabel, m.styles.errorText, " ERROR "
 		if m.noticeMessage {
@@ -377,6 +387,8 @@ func (m dashboard) renderStatus(width, bodyHeight int) []string {
 		status = m.renderActivityStatus("RUNNING", m.gitRun.action.String()+" in "+display.Text(m.gitRun.target.Name), width)
 	case m.modal == gitActionsModal && m.gitRun.complete:
 		shortcuts := []shortcut{
+			{key: "t", description: "terminal"},
+			{key: "f", description: "file changes"},
 			{key: "Enter", description: "actions"},
 			{key: "Esc", description: "close"},
 		}
@@ -388,7 +400,19 @@ func (m dashboard) renderStatus(width, bodyHeight int) []string {
 		status = renderShortcuts(m.styles, width,
 			shortcut{key: "↑/↓", description: "select"},
 			shortcut{key: "Enter", description: "run"},
+			shortcut{key: "s/u/p/P/b", description: "run by letter"},
 			shortcut{key: "Esc", description: "cancel"},
+		)
+	case m.modal == branchModal && m.branches.confirming == nil:
+		escape := shortcut{key: "Esc", description: "close"}
+		if m.branches.query != "" {
+			escape.description = "clear filter"
+		}
+		status = renderShortcuts(m.styles, width,
+			shortcut{key: "type", description: "filter or name a new branch"},
+			shortcut{key: "↑/↓", description: "select"},
+			shortcut{key: "Enter", description: "switch"},
+			escape,
 		)
 	case m.modal == shutdownModal && m.shutdownPending:
 		// The request is already out; no key can take it back.
@@ -453,7 +477,9 @@ func (m dashboard) renderStatus(width, bodyHeight int) []string {
 			position += fmt.Sprintf("  %s %d/%d", display.Text(m.search.query),
 				len(m.search.matches)-m.search.index, len(m.search.matches))
 		}
-		shortcuts = append(shortcuts, shortcut{key: "Ctrl+Shift+\\", description: "exit"})
+		// Esc leaves in every terminal; the chord does not reach romty in a
+		// terminal without the Kitty keyboard protocol.
+		shortcuts = append(shortcuts, shortcut{key: "Esc", description: "exit"})
 		status = truncate(
 			m.styles.promptLabel.Render(" SCROLLBACK ")+" "+
 				m.styles.shortcutDescription.Render(position)+"  "+
@@ -499,7 +525,7 @@ func (m dashboard) renderStatus(width, bodyHeight int) []string {
 			shortcut{key: "F2", description: "add root"},
 			shortcut{key: "F3", description: "config"},
 			shortcut{key: "F4", description: "quit"},
-			shortcut{key: "F5", description: "refresh"},
+			shortcut{key: "F5", description: m.refreshLabel()},
 			shortcut{key: "F6", description: "scrollback"},
 			shortcut{key: "F7", description: "focus"},
 		)
@@ -684,6 +710,17 @@ func (m dashboard) renderTerminal(width int) []string {
 		}
 		return append(lines, m.terminal.renderViewport(m.scrollOffset)...)
 	}
+	if m.daemonDown {
+		return append(lines,
+			"",
+			m.styles.modalStrong.Render("  The romty daemon stopped"),
+			"",
+			m.styles.modalBody.Render("  Its terminals have ended. A romty stop saved them, and Enter"),
+			m.styles.modalBody.Render("  on a workspace offers to reopen them once the daemon runs."),
+			"",
+			"  "+m.styles.shortcutKey.Render(" F5 ")+" "+m.styles.modalBody.Render("start the daemon again"),
+		)
+	}
 	if len(m.state.Roots) == 0 {
 		return append(lines,
 			"",
@@ -699,12 +736,26 @@ func (m dashboard) renderTerminal(width int) []string {
 		return append(lines, m.styles.empty.Render("  Select a root or workspace"))
 	}
 	if len(tabs) == 0 {
-		return append(lines, m.styles.empty.Render("  Select + and press Enter to create a terminal"))
+		// Say what Enter does here: start a terminal, or ask which session to
+		// open when there are closed ones to reopen.
+		hint := "  Press Enter to open a terminal here"
+		if item, ok := m.navigationItem(); ok && m.needsSessionChoice(item) {
+			hint = "  Press Enter to open or reopen a session"
+		}
+		return append(lines, m.styles.empty.Render(hint))
 	}
 	if m.tabIndex < len(tabs) {
 		return append(lines, m.styles.empty.Render("  Press Enter to open "+display.Text(tabs[m.tabIndex].Name)))
 	}
 	return append(lines, m.styles.empty.Render("  Press Enter to open a new tab"))
+}
+
+// refreshLabel is what F5 does now: start a daemon that stopped, or refresh.
+func (m dashboard) refreshLabel() string {
+	if m.daemonDown && m.restartDaemon != nil {
+		return "restart daemon"
+	}
+	return "refresh"
 }
 
 // tabPreviewLabel names the workspace whose tabs the tab row shows when that
@@ -727,11 +778,45 @@ const newTabLabel = "  +  "
 // tabLabel is a tab's text in the tab bar. A running tab leaves one cell
 // after the leading gap for its status marker, which is drawn in its own
 // color, so the text here only reserves the width the hit test also measures.
+//
+// The name is used as given. fitTabNames turns a tab's stored name into the
+// name shown, once; every path that draws or measures a tab row goes through
+// it, so a shortened name is never widened again here.
 func tabLabel(tab model.Tab) (prefix, rest string) {
+	name := display.Text(tab.Name)
 	if tab.Running {
-		return "  ", " " + display.Text(tab.Name) + "  × "
+		return "  ", " " + name + "  × "
 	}
-	return "", "  " + display.Text(tab.Name) + "  × "
+	return "", "  " + name + "  × "
+}
+
+// tabDisplayName is the name the tab row shows. A tab still called by the
+// number romty gave it also names the program detected in it, such as
+// "1 claude", so tabs are told apart without renaming each one. A name the
+// user chose is shown as it is.
+func tabDisplayName(tab model.Tab) string {
+	name := display.Text(tab.Name)
+	program := agentCommandNames[tab.Agent]
+	if program == "" || !isDefaultTabName(tab.Name) {
+		return name
+	}
+	return name + " " + program
+}
+
+// isDefaultTabName reports a name made of digits alone, which is the shape of
+// the names the daemon gives new tabs.
+func isDefaultTabName(name string) bool {
+	return name != "" && strings.Trim(name, "0123456789") == ""
+}
+
+// agentCommandNames are the commands that start each detected program, the
+// way a user types them.
+var agentCommandNames = map[model.Agent]string{
+	model.AgentClaude:   "claude",
+	model.AgentCodex:    "codex",
+	model.AgentOpenCode: "opencode",
+	model.AgentKiro:     "kiro",
+	model.AgentNode:     "node",
 }
 
 func tabLabelWidth(tab model.Tab) int {
@@ -757,19 +842,24 @@ func fitTabNames(tabs []model.Tab, active, width int) []model.Tab {
 		}
 		return total
 	}
+	// Fit the names as shown, program and all.
+	tabs = slices.Clone(tabs)
+	for index := range tabs {
+		tabs[index].Name = tabDisplayName(tabs[index])
+	}
 	if rowWidth(tabs) <= width {
 		return tabs
 	}
 	longest := 0
 	for _, tab := range tabs {
-		longest = max(longest, lipgloss.Width(display.Text(tab.Name)))
+		longest = max(longest, lipgloss.Width(tab.Name))
 	}
 	fitted := slices.Clone(tabs)
 	shrink := func(includeActive bool) bool {
 		for limit := longest - 1; limit >= 1; limit-- {
 			for index, tab := range tabs {
 				if index != active || includeActive {
-					fitted[index].Name = shortenName(display.Text(tab.Name), limit)
+					fitted[index].Name = shortenName(tab.Name, limit)
 				}
 			}
 			if rowWidth(fitted) <= width {

@@ -1127,7 +1127,7 @@ func TestDashboardConfirmsAgentHookInstallation(t *testing.T) {
 		{Provider: agenthooks.ProviderClaude, State: agenthooks.StateMissing, Path: "/home/me/.claude/settings.json"},
 		{Provider: agenthooks.ProviderCodex, State: agenthooks.StateOutdated, Path: "/home/me/.codex/hooks.json"},
 	}
-	value := newDashboard(&fakeBackend{}, model.Snapshot{})
+	value := newDashboard(&fakeBackend{}, projectsSnapshot(nil))
 	value.offerAgentHooks(statuses)
 	if value.modal != hookInstallModal {
 		t.Fatalf("hook check modal = %v, want confirmation", value.modal)
@@ -1169,7 +1169,7 @@ func TestDashboardConfirmsAgentHookInstallation(t *testing.T) {
 }
 
 func TestDashboardCanSkipAgentHookInstallation(t *testing.T) {
-	value := newDashboard(&fakeBackend{}, model.Snapshot{})
+	value := newDashboard(&fakeBackend{}, projectsSnapshot(nil))
 	value.offerAgentHooks([]agenthooks.Status{{
 		Provider: agenthooks.ProviderClaude,
 		State:    agenthooks.StateMissing,
@@ -1211,7 +1211,7 @@ func TestStatusRailExplainsSkippedAgentHooks(t *testing.T) {
 
 func TestDashboardCanQuitDuringAgentHookInstallation(t *testing.T) {
 	for _, pending := range []bool{false, true} {
-		value := newDashboard(&fakeBackend{}, model.Snapshot{})
+		value := newDashboard(&fakeBackend{}, projectsSnapshot(nil))
 		value.offerAgentHooks([]agenthooks.Status{{
 			Provider: agenthooks.ProviderClaude,
 			State:    agenthooks.StateMissing,
@@ -1226,7 +1226,7 @@ func TestDashboardCanQuitDuringAgentHookInstallation(t *testing.T) {
 }
 
 func TestDashboardDoesNotPromptForCurrentAgentHooks(t *testing.T) {
-	value := newDashboard(&fakeBackend{}, model.Snapshot{})
+	value := newDashboard(&fakeBackend{}, projectsSnapshot(nil))
 	value.offerAgentHooks([]agenthooks.Status{
 		{Provider: agenthooks.ProviderClaude, State: agenthooks.StateCurrent},
 		{Provider: agenthooks.ProviderCodex, State: agenthooks.StateUnavailable},
@@ -1237,7 +1237,7 @@ func TestDashboardDoesNotPromptForCurrentAgentHooks(t *testing.T) {
 }
 
 func TestDashboardReportsInvalidAgentHookSettings(t *testing.T) {
-	value := newDashboard(&fakeBackend{}, model.Snapshot{})
+	value := newDashboard(&fakeBackend{}, projectsSnapshot(nil))
 	value.offerAgentHooks([]agenthooks.Status{{
 		Provider: agenthooks.ProviderClaude,
 		State:    agenthooks.StateInvalid,
@@ -1396,8 +1396,8 @@ func TestDashboardScrollsTerminalHistory(t *testing.T) {
 		t.Fatalf("oldest visible row = %q, want the first retained line %q", oldest, retained)
 	}
 	if rendered := ansi.Strip(value.render()); !strings.Contains(rendered, "SCROLLBACK") ||
-		!strings.Contains(rendered, fmt.Sprintf("%d/%d", history, history)) ||
-		!strings.Contains(rendered, "Ctrl+Shift+\\") {
+		!strings.Contains(rendered, fmt.Sprintf("oldest · %d lines", history)) ||
+		!strings.Contains(rendered, "Esc  exit") {
 		t.Fatalf("status bar does not report the scrollback position:\n%s", rendered)
 	}
 	for range history/value.scrollbackPage() + 1 {
@@ -2552,7 +2552,7 @@ func TestDashboardReturnsToTheWorkspaceWhenTheLastTabExits(t *testing.T) {
 			value.focus, value.navIndex)
 	}
 	rendered := ansi.Strip(value.render())
-	if !strings.Contains(rendered, "Select + and press Enter") || value.View().Cursor != nil {
+	if !strings.Contains(rendered, "Press Enter to open a terminal here") || value.View().Cursor != nil {
 		t.Fatalf("the exited terminal is still on screen:\n%s", rendered)
 	}
 }

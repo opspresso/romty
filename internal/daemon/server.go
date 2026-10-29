@@ -412,10 +412,6 @@ func (s *Server) saveClosed(tabID string, value *session) {
 	s.closed.trim(save.meta.WorkspaceID, closedHistoryLimit, now)
 }
 
-// maxTabNameLength bounds a tab name in runes. The tab bar is one row shared by
-// every tab of a workspace, so a long name pushes its siblings off screen.
-const maxTabNameLength = 32
-
 // renameTab replaces a tab's display name. Only the name changes: the shell,
 // its recording, and its agent status stay attached to the tab ID.
 func (s *Server) renameTab(tabID, name string) protocol.Response {
@@ -460,8 +456,8 @@ func validateTabName(name string) error {
 	if name == "" {
 		return errors.New("tab name is required")
 	}
-	if utf8.RuneCountInString(name) > maxTabNameLength {
-		return fmt.Errorf("tab name must be at most %d characters", maxTabNameLength)
+	if utf8.RuneCountInString(name) > model.MaxTabNameLength {
+		return fmt.Errorf("tab name must be at most %d characters", model.MaxTabNameLength)
 	}
 	return nil
 }

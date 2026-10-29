@@ -21,13 +21,27 @@ const (
 	gitFetchAction  = gitrepo.ActionFetch
 	gitPullAction   = gitrepo.ActionPull
 	gitPushAction   = gitrepo.ActionPush
+	gitSwitchAction = gitrepo.ActionSwitch
 )
 
+// gitActionChoices is the one list of what Git can do in a workspace. The
+// Git menu and the Git section of the workspace actions both draw it.
 var gitActionChoices = [...]gitAction{
 	gitStatusAction,
 	gitFetchAction,
 	gitPullAction,
 	gitPushAction,
+	gitSwitchAction,
+}
+
+// gitActionKeys are the letters that run each Git action in both menus. They
+// avoid j, k, g and G, which move the cursor in every list.
+var gitActionKeys = map[gitAction]string{
+	gitStatusAction: "s",
+	gitFetchAction:  "u",
+	gitPullAction:   "p",
+	gitPushAction:   "P",
+	gitSwitchAction: "b",
 }
 
 // gitActionDescription is what the actions modal says beside an action's name.
@@ -41,6 +55,8 @@ func gitActionDescription(action gitAction) string {
 		return "Fast-forward only"
 	case gitPushAction:
 		return "Push current branch"
+	case gitSwitchAction:
+		return "Change the checked-out branch"
 	default:
 		return ""
 	}
@@ -96,6 +112,16 @@ func (m dashboard) startGitAction() (tea.Model, tea.Cmd) {
 	if m.gitRun.pending || m.gitRun.complete || m.gitRun.target.Path == "" {
 		return m, nil
 	}
+	if gitActionChoices[m.gitRun.index] == gitSwitchAction {
+		// A switch needs a branch, so it opens the picker rather than run.
+		target, ok := m.workspaceItem(m.gitRun.target.Path)
+		if !ok {
+			m.modal = noModal
+			m.setNotice(treeError, "selected workspace no longer exists")
+			return m, nil
+		}
+		return m.openBranchPicker(target)
+	}
 	m.gitRun.action = gitActionChoices[m.gitRun.index]
 	m.gitRun.pending = true
 	m.gitRun.output = ""
@@ -150,6 +176,9 @@ func (m dashboard) gitActionResultLines() []string {
 	}
 	if m.gitRun.err != "" {
 		lines = append(lines, "Error: "+display.Text(m.gitRun.err))
+		if hint := gitFailureHint(m.gitRun.output + "\n" + m.gitRun.err); hint != "" {
+			lines = append(lines, "", "Next: "+hint)
+		}
 	}
 	if len(lines) == 0 {
 		return []string{"Completed successfully."}
@@ -221,7 +250,7 @@ func (m dashboard) renderGitActionsModal(maximum, height int) []string {
 		labels := make([]string, len(gitActionChoices))
 		contentWidth := lipgloss.Width(target)
 		for index, action := range gitActionChoices {
-			labels[index] = pad(action.String(), gitActionLabelWidth) + gitActionDescription(action)
+			labels[index] = gitActionKeys[action] + "  " + pad(action.String(), gitActionLabelWidth) + gitActionDescription(action)
 			contentWidth = max(contentWidth, lipgloss.Width(labels[index])+2)
 		}
 		contentWidth = min(contentWidth, max(maximum-6, 0))
@@ -256,8 +285,63 @@ func (m dashboard) renderGitActionsModal(maximum, height int) []string {
 	return modalBoxFit(m.styles, minimumModalWidth, maximum, title, lines...)
 }
 
+// gitFailureHints map what git prints for the failures users meet most to
+// what to do next. git's own message says what went wrong; the hint says how
+// to go on from romty.
+var gitFailureHints = []struct {
+	marker, hint string
+}{
+	{"Not possible to fast-forward", "branches diverged; press t, then merge or rebase"},
+	{"has no upstream branch", "no remote branch yet; press t, run git push -u origin HEAD"},
+	{"no tracking information", "no upstream; press t, run git branch --set-upstream-to"},
+	{"would be overwritten", "local changes are in the way; commit or stash them first"},
+	{"Permission denied (publickey)", "sign-in failed; press t and run it in a terminal"},
+	{"Authentication failed", "sign-in failed; press t and run it in a terminal"},
+	{"could not read Username", "credentials needed; press t and run it in a terminal"},
+	{"[remote rejected]", "the remote refused it; check the branch's protection rules"},
+	{"non-fast-forward", "the remote has newer commits; pull, then push"},
+	{"fetch first", "the remote has newer commits; pull, then push"},
+	{"timed out", "it took too long; retry, or press t and run it in a terminal"},
+}
+
+// gitFailureHint is the next step for a failure, or empty when romty has none.
+func gitFailureHint(text string) string {
+	for _, known := range gitFailureHints {
+		if strings.Contains(text, known.marker) {
+			return known.hint
+		}
+	}
+	return ""
+}
+
+// openGitResultTerminal leaves the Git result for a terminal in its
+// workspace, where a failure is fixed by hand.
+func (m dashboard) openGitResultTerminal() (tea.Model, tea.Cmd) {
+	path := m.gitRun.target.Path
+	m.modal = noModal
+	m = m.resetGitActionResult()
+	save := m.revealWorkspace(path)
+	if _, ok := m.navigationItem(); !ok {
+		return m, save
+	}
+	m.syncTabCursor(m.navigationTabs())
+	return m, tea.Batch(save, m.selectWorkspace())
+}
+
+// openGitResultFiles leaves the Git result for the changed files of its
+// workspace, which is where a Status result points.
+func (m dashboard) openGitResultFiles() (tea.Model, tea.Cmd) {
+	target, ok := m.workspaceItem(m.gitRun.target.Path)
+	m.modal = noModal
+	m = m.resetGitActionResult()
+	if !ok {
+		return m, nil
+	}
+	return m.openChangedFilesView(target)
+}
+
 // gitActionLabelWidth is the column the action descriptions line up in.
-const gitActionLabelWidth = 8
+const gitActionLabelWidth = 15
 
 // renderGitOutputLine colours what git printed: a status line's two letters,
 // the branch header, and a diffstat's run of + and -, so the result can be
@@ -275,6 +359,8 @@ func (m dashboard) renderGitOutputLine(line string, hovered bool) string {
 	switch {
 	case strings.HasPrefix(line, "Error: "):
 		return paint(m.styles.errorText, line)
+	case strings.HasPrefix(line, "Next: "):
+		return paint(m.styles.navigationCurrent, line)
 	case strings.HasPrefix(line, "## "):
 		// The branch header `git status --branch` prints, with its divergence
 		// in brackets: `## main...origin/main [ahead 1]`.

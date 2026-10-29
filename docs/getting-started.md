@@ -67,7 +67,7 @@ See the [interface guide](interface.md) for the complete key map.
 | `romty list` | List roots, workspaces, and running terminal sessions |
 | `romty stop` | Stop the daemon and every running terminal session |
 
-`status`, `doctor`, and `list` are read-only. They do not start the daemon or create the runtime directory. A missing runtime directory, state file, or config file is valid before the first run. `doctor` returns an error for an invalid runtime, malformed JSON, unavailable shell, unsafe socket, or incompatible daemon protocol.
+`status`, `doctor`, and `list` are read-only. When the daemon is stopped, `status` and `list` add `next: run romty to start it`. They do not start the daemon or create the runtime directory. A missing runtime directory, state file, or config file is valid before the first run. `doctor` returns an error for an invalid runtime, malformed JSON, unavailable shell, unsafe socket, or incompatible daemon protocol.
 
 `--version` and `-v` are aliases for `version`; `--help` and `-h` are aliases for `help`. Command output uses color on a terminal, stays plain when redirected or piped, and honors `NO_COLOR`.
 

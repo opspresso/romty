@@ -17,6 +17,9 @@ const (
 	ActionFetch
 	ActionPull
 	ActionPush
+	// ActionSwitch changes the checked-out branch. It needs the branch, so
+	// it runs through Switch rather than Run.
+	ActionSwitch
 )
 
 // actionTimeout bounds one action. A fetch, pull or push over a slow link can
@@ -34,6 +37,8 @@ func (a Action) String() string {
 		return "Pull"
 	case ActionPush:
 		return "Push"
+	case ActionSwitch:
+		return "Switch branch"
 	default:
 		return "Git"
 	}

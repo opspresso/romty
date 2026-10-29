@@ -182,7 +182,7 @@ func TestStatusAndListDoNotStartAMissingDaemon(t *testing.T) {
 		if err := runCommand([]string{command}, &output); err != nil {
 			t.Fatalf("%s error = %v", command, err)
 		}
-		if got := output.String(); got != "daemon:     stopped\n" {
+		if got := output.String(); got != "daemon:     stopped\nnext:       run romty to start it\n" {
 			t.Fatalf("%s output = %q", command, got)
 		}
 	}

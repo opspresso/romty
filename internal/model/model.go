@@ -175,6 +175,11 @@ func (s *Snapshot) Tabs() iter.Seq[*Tab] {
 	}
 }
 
+// MaxTabNameLength bounds a tab name in runes. The tab bar is one row shared
+// by every tab of a workspace, so a long name pushes its siblings off screen.
+// The daemon enforces it and the rename field states it.
+const MaxTabNameLength = 32
+
 type RootView struct {
 	Root Root  `json:"root"`
 	Tabs []Tab `json:"tabs"`
