@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/opspresso/romty/internal/logfile"
+	"github.com/opspresso/romty/internal/model"
 )
 
 // housekeepingInterval is how often the daemon checks the work below. It
@@ -135,9 +136,16 @@ type awakeHold struct {
 // updateAwake holds the machine awake while any agent is busy, unless
 // config.json sets allow_sleep.
 func (s *Server) updateAwake() {
+	s.updateAwakeFrom(s.agentStatusesSnapshot())
+}
+
+// updateAwakeFrom holds or releases from statuses already scanned. Every
+// fresh status scan calls it, so the hold follows an agent within a TUI poll
+// rather than within a housekeeping round.
+func (s *Server) updateAwakeFrom(statuses map[string]model.AgentStatus) {
 	busy := false
 	if !s.sleepAllowed() {
-		for _, status := range s.agentStatusesSnapshot() {
+		for _, status := range statuses {
 			if status.Phase.Busy() {
 				busy = true
 				break
@@ -187,7 +195,24 @@ func (h *awakeHold) hold(s *Server) {
 		return
 	}
 	h.command = command
-	go func() { _ = command.Wait() }()
+	started := time.Now()
+	go func() {
+		err := command.Wait()
+		h.mu.Lock()
+		defer h.mu.Unlock()
+		if h.command != command {
+			// Released on purpose.
+			return
+		}
+		// The tool ended by itself, so nothing holds the machine awake. One
+		// that ends at once cannot hold here, for example without logind
+		// or D-Bus, and is not started again.
+		h.command = nil
+		if time.Since(started) < housekeepingInterval {
+			h.missing = true
+		}
+		s.logger.Printf("keep awake: %s ended: %v", command.Path, err)
+	}()
 }
 
 func (h *awakeHold) release() {

@@ -6,22 +6,19 @@ import (
 	"html"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
 
+	"github.com/opspresso/romty/internal/client"
 	"github.com/opspresso/romty/internal/paths"
+	"github.com/opspresso/romty/internal/service"
 )
 
-// serviceLabel names the launchd job and, with .service, the systemd unit.
-const serviceLabel = "dev.romty.daemon"
-
-// serviceRunner runs a system tool. It is a variable so tests do not touch
-// the machine's launchd or systemd.
-var serviceRunner = func(name string, arguments ...string) ([]byte, error) {
-	return exec.Command(name, arguments...).CombinedOutput()
+// serviceRunner runs a system tool; tests replace service.Run.
+func serviceRunner(name string, arguments ...string) ([]byte, error) {
+	return service.Run(name, arguments...)
 }
 
 // runService installs, removes, or reports the user service that starts the
@@ -46,8 +43,11 @@ func runService(arguments []string, output io.Writer, theme commandTheme) error 
 	if resolved, err := filepath.EvalSymlinks(executable); err == nil {
 		executable = resolved
 	}
-	definition := serviceDefinition{
-		executable: executable, log: runtimePaths.Log, romtyHome: os.Getenv("ROMTY_HOME"),
+	definition := serviceDefinition{executable: executable, log: runtimePaths.Log}
+	if os.Getenv("ROMTY_HOME") != "" {
+		// Resolved, so the service finds the same directory whatever its
+		// working directory is.
+		definition.romtyHome = runtimePaths.Directory
 	}
 	platform, err := servicePlatformFor(runtime.GOOS, home)
 	if err != nil {
@@ -55,7 +55,16 @@ func runService(arguments []string, output io.Writer, theme commandTheme) error 
 	}
 	switch action {
 	case "install":
-		return platform.install(definition, output, theme)
+		// A daemon already running started outside the service and keeps
+		// running outside it until it restarts.
+		running := client.New(runtimePaths.Socket).Ping() == nil
+		if err := platform.install(definition, output, theme); err != nil {
+			return err
+		}
+		if running {
+			return printField(output, theme, "next", "run romty stop and then romty to move the running daemon into the service")
+		}
+		return nil
 	case "uninstall":
 		return platform.uninstall(output, theme)
 	case "status":
@@ -81,14 +90,14 @@ type servicePlatform interface {
 }
 
 func servicePlatformFor(goos, home string) (servicePlatform, error) {
-	switch goos {
-	case "darwin":
-		return launchdService{path: filepath.Join(home, "Library", "LaunchAgents", serviceLabel+".plist")}, nil
-	case "linux":
-		return systemdService{path: filepath.Join(home, ".config", "systemd", "user", "romty.service")}, nil
-	default:
-		return nil, fmt.Errorf("romty service supports macOS and Linux, not %s", goos)
+	path, err := service.File(goos, home)
+	if err != nil {
+		return nil, err
 	}
+	if goos == "darwin" {
+		return launchdService{path: path}, nil
+	}
+	return systemdService{path: path}, nil
 }
 
 // launchdService is a LaunchAgent. It runs at login, not at boot: a macOS
@@ -109,7 +118,7 @@ func launchdPlist(definition serviceDefinition) string {
 <plist version="1.0">
 <dict>
 	<key>Label</key>
-	<string>` + serviceLabel + `</string>
+	<string>` + service.Label + `</string>
 	<key>ProgramArguments</key>
 	<array>
 		<string>` + html.EscapeString(definition.executable) + `</string>
@@ -131,7 +140,7 @@ func launchdPlist(definition serviceDefinition) string {
 }
 
 func (s launchdService) domain() string {
-	return "gui/" + strconv.Itoa(os.Getuid())
+	return service.LaunchdDomain()
 }
 
 func (s launchdService) install(definition serviceDefinition, output io.Writer, theme commandTheme) error {
@@ -139,7 +148,7 @@ func (s launchdService) install(definition serviceDefinition, output io.Writer, 
 		return err
 	}
 	// A job already loaded keeps its old definition until it is booted out.
-	_, _ = serviceRunner("launchctl", "bootout", s.domain()+"/"+serviceLabel)
+	_, _ = serviceRunner("launchctl", "bootout", s.domain()+"/"+service.Label)
 	if result, err := serviceRunner("launchctl", "bootstrap", s.domain(), s.path); err != nil {
 		return fmt.Errorf("load %s: %w: %s; it loads at the next login, or run launchctl bootstrap %s %s from a session logged in at the Mac",
 			s.path, err, strings.TrimSpace(string(result)), s.domain(), s.path)
@@ -151,7 +160,7 @@ func (s launchdService) install(definition serviceDefinition, output io.Writer, 
 }
 
 func (s launchdService) uninstall(output io.Writer, theme commandTheme) error {
-	_, _ = serviceRunner("launchctl", "bootout", s.domain()+"/"+serviceLabel)
+	_, _ = serviceRunner("launchctl", "bootout", s.domain()+"/"+service.Label)
 	if err := os.Remove(s.path); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("remove %s: %w", s.path, err)
 	}
@@ -167,23 +176,25 @@ func (s launchdService) status(output io.Writer, theme commandTheme) error {
 // before anyone logs in, needs lingering, which the user enables.
 type systemdService struct{ path string }
 
-// systemdUnit is the unit. KillMode mixed sends SIGTERM to the daemon alone,
-// which saves each tab's session and ends the shells itself, and only then
-// kills what is left in the unit.
+// systemdUnit is the unit. KillMode process sends SIGTERM to the daemon alone,
+// which saves each tab's session and ends each tab's processes itself; a
+// process a tab started in a session of its own, such as a tmux server, keeps
+// running, as it does when the daemon runs outside systemd.
+// StandardOutput=append needs systemd 240 or later.
 func systemdUnit(definition serviceDefinition) string {
 	environment := ""
 	if definition.romtyHome != "" {
-		environment = "Environment=" + strconv.Quote("ROMTY_HOME="+definition.romtyHome) + "\n"
+		environment = "Environment=" + strconv.Quote("ROMTY_HOME="+systemdEscape(definition.romtyHome)) + "\n"
 	}
 	return `[Unit]
 Description=romty terminal workspace daemon
 
 [Service]
 Type=simple
-ExecStart=` + strconv.Quote(definition.executable) + ` daemon
-` + environment + `StandardOutput=append:` + definition.log + `
-StandardError=append:` + definition.log + `
-KillMode=mixed
+ExecStart=` + strconv.Quote(strings.ReplaceAll(systemdEscape(definition.executable), "$", "$$")) + ` daemon
+` + environment + `StandardOutput=append:` + systemdEscape(definition.log) + `
+StandardError=append:` + systemdEscape(definition.log) + `
+KillMode=process
 TimeoutStopSec=20
 
 [Install]
@@ -191,11 +202,16 @@ WantedBy=default.target
 `
 }
 
+// systemdEscape keeps a % in a path from being read as a unit specifier.
+func systemdEscape(value string) string {
+	return strings.ReplaceAll(value, "%", "%%")
+}
+
 func (s systemdService) install(definition serviceDefinition, output io.Writer, theme commandTheme) error {
 	if err := writeServiceFile(s.path, systemdUnit(definition)); err != nil {
 		return err
 	}
-	for _, arguments := range [][]string{{"--user", "daemon-reload"}, {"--user", "enable", "romty.service"}} {
+	for _, arguments := range [][]string{{"--user", "daemon-reload"}, {"--user", "enable", "--now", service.Unit}} {
 		if result, err := serviceRunner("systemctl", arguments...); err != nil {
 			return fmt.Errorf("systemctl %s: %w: %s", strings.Join(arguments, " "), err, strings.TrimSpace(string(result)))
 		}
@@ -210,7 +226,7 @@ func (s systemdService) install(definition serviceDefinition, output io.Writer, 
 }
 
 func (s systemdService) uninstall(output io.Writer, theme commandTheme) error {
-	_, _ = serviceRunner("systemctl", "--user", "disable", "romty.service")
+	_, _ = serviceRunner("systemctl", "--user", "disable", service.Unit)
 	if err := os.Remove(s.path); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("remove %s: %w", s.path, err)
 	}

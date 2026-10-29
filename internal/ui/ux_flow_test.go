@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -583,8 +584,9 @@ func TestTreeFilterFindsAWorkspaceAnywhere(t *testing.T) {
 	}
 }
 
-// > moves the tab under the cursor right and the cursor follows it; the
-// new-tab slot does not move.
+// > moves the tab under the cursor. One move is out at a time, the cursor
+// follows the moved tab by its ID in the answer, and a failed move leaves the
+// cursor where it was. The new-tab slot does not move.
 func TestTreeMovesTheSelectedTab(t *testing.T) {
 	snapshot, _ := alphaWorkspaceSnapshot(openTabs(3))
 	backend := &fakeBackend{snapshot: snapshot}
@@ -593,15 +595,51 @@ func TestTreeMovesTheSelectedTab(t *testing.T) {
 	value.setNavigation(1)
 	value.tabIndex = 0
 	command := send(&value, key('>', ">"))
-	if command == nil || value.tabIndex != 1 {
-		t.Fatalf("> = (command %v, cursor %d), want a move and the cursor on 1", command, value.tabIndex)
+	if command == nil || !value.tabMovePending {
+		t.Fatal("> did not start a move")
 	}
-	command()
+	if again := send(&value, key('>', ">")); again != nil {
+		t.Fatal("a second move started before the first was answered")
+	}
+	message := command().(tabMovedMsg)
 	if backend.movedTabID != "tab-1" || backend.movedOffset != 1 {
 		t.Fatalf("moved = (%q, %d), want tab-1 right", backend.movedTabID, backend.movedOffset)
+	}
+	// The daemon's answer has tab-1 second.
+	tabs := message.snapshot.Roots[0].Directories[0].Tabs
+	tabs[0], tabs[1] = tabs[1], tabs[0]
+	message.snapshot.Revision++
+	send(&value, message)
+	if value.tabMovePending || value.tabIndex != 1 {
+		t.Fatalf("after the answer = (pending %v, cursor %d), want the cursor on tab-1 at 1", value.tabMovePending, value.tabIndex)
+	}
+
+	send(&value, tabMovedMsg{tabID: "tab-1", err: errors.New("daemon: moving tabs needs a newer daemon")})
+	if value.tabIndex != 1 || !strings.Contains(value.errorMessage, "newer daemon") {
+		t.Fatalf("failed move = (cursor %d, error %q)", value.tabIndex, value.errorMessage)
 	}
 	value.tabIndex = 3
 	if command := send(&value, key('>', ">")); command != nil {
 		t.Fatal("the new-tab slot moved")
+	}
+}
+
+// Ctrl+C quits from the tree filter, and Tab leaves the filter with the pane.
+func TestTreeFilterLetsCtrlCAndTabThrough(t *testing.T) {
+	value := newDashboard(&fakeBackend{}, collapseSnapshot())
+	value.focus = leftPane
+	value.terminal = newEmbeddedTerminal("tab-x", newMemoryStream(""), 40, 10)
+	t.Cleanup(func() { value.closeTerminal() })
+	send(&value, key('/', "/"))
+	typeText(&value, "al")
+	send(&value, key(tea.KeyTab, ""))
+	if value.treeFiltering || value.treeQuery != "" || value.focus != terminalPane {
+		t.Fatalf("Tab = (filtering %v, query %q, focus %v), want the filter ended and the terminal focused",
+			value.treeFiltering, value.treeQuery, value.focus)
+	}
+	value.focus = leftPane
+	send(&value, key('/', "/"))
+	if send(&value, tea.KeyPressMsg(tea.Key{Code: 'c', Mod: tea.ModCtrl})); !value.result.Quit {
+		t.Fatal("Ctrl+C did not quit from the filter")
 	}
 }

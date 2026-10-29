@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/opspresso/romty/internal/service"
 	"github.com/opspresso/romty/internal/testutil"
 )
 
@@ -19,9 +20,12 @@ func TestServiceDefinitionsRunTheDaemonIntoItsLog(t *testing.T) {
 			t.Fatalf("plist lacks %q:\n%s", want, plist)
 		}
 	}
-	unit := systemdUnit(definition)
+	unit := systemdUnit(serviceDefinition{executable: "/opt/romty & co/romty", log: "/h/.config/romty/daemon.log", romtyHome: "/h/r"})
+	if escaped := systemdUnit(serviceDefinition{executable: "/opt/100%/$romty", log: "/l%"}); !strings.Contains(escaped, `ExecStart="/opt/100%%/$$romty" daemon`) || !strings.Contains(escaped, "append:/l%%") {
+		t.Fatalf("unit does not escape %% and $:\n%s", escaped)
+	}
 	for _, want := range []string{`ExecStart="/opt/romty & co/romty" daemon`, `Environment="ROMTY_HOME=/h/r"`,
-		"StandardError=append:/h/.config/romty/daemon.log", "KillMode=mixed", "WantedBy=default.target"} {
+		"StandardError=append:/h/.config/romty/daemon.log", "KillMode=process", "WantedBy=default.target"} {
 		if !strings.Contains(unit, want) {
 			t.Fatalf("unit lacks %q:\n%s", want, unit)
 		}
@@ -35,7 +39,7 @@ func TestServiceInstallUninstallAndStatus(t *testing.T) {
 		t.Run(goos, func(t *testing.T) {
 			home := t.TempDir()
 			var ran []string
-			testutil.Set(t, &serviceRunner, func(name string, arguments ...string) ([]byte, error) {
+			testutil.Set(t, &service.Run, func(name string, arguments ...string) ([]byte, error) {
 				ran = append(ran, name+" "+strings.Join(arguments, " "))
 				return []byte("no\n"), nil
 			})
@@ -54,7 +58,7 @@ func TestServiceInstallUninstallAndStatus(t *testing.T) {
 			}
 			loads := strings.Join(ran, "\n")
 			if goos == "darwin" && !strings.Contains(loads, "launchctl bootstrap gui/") ||
-				goos == "linux" && !strings.Contains(loads, "systemctl --user enable romty.service") {
+				goos == "linux" && !strings.Contains(loads, "systemctl --user enable --now romty.service") {
 				t.Fatalf("install ran:\n%s", loads)
 			}
 			if goos == "linux" && !strings.Contains(output.String(), "next:       run loginctl enable-linger") {

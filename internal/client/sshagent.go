@@ -35,10 +35,12 @@ func LinkSSHAgent(directory string, environment []string) []string {
 	if index < 0 || current == "" {
 		return environment
 	}
-	// A shell inside a romty tab already names the link.
-	if current != link {
-		if info, err := os.Stat(current); err == nil && info.Mode()&os.ModeSocket != 0 {
-			replaceLink(link, current)
+	// The link points at the agent socket itself, never at another link: a
+	// shell profile that links its own SSH_AUTH_SOCK, the way many do, would
+	// otherwise point back at this link and close a loop no agent is in.
+	if target, err := filepath.EvalSymlinks(current); err == nil && target != link {
+		if info, err := os.Stat(target); err == nil && info.Mode()&os.ModeSocket != 0 {
+			replaceLink(link, target)
 		}
 	}
 	result := append([]string(nil), environment...)

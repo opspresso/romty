@@ -608,6 +608,12 @@ func (s *session) applySize(columns, rows uint16) error {
 }
 
 func (s *session) close() {
+	s.closeWith(nil)
+}
+
+// closeWith closes the session, ending its processes with the process list
+// given, or with one read now when it is nil.
+func (s *session) closeWith(processes []process) {
 	s.mu.Lock()
 	alreadyClosed := s.closed
 	if !alreadyClosed {
@@ -618,17 +624,8 @@ func (s *session) close() {
 	process := s.command.Process
 	s.mu.Unlock()
 	if !alreadyClosed && process != nil {
-		// The shell leads its own terminal session (pty.Start sets Setsid), so
-		// its PID is the session to end.
-		reaped := false
-		if exitDone != nil {
-			select {
-			case <-exitDone:
-				reaped = true
-			default:
-			}
-		}
-		_ = terminateSession(process.Pid, reaped)
+		// The shell leads its own terminal session (pty.Start sets Setsid).
+		terminateSession(process, processes)
 	}
 	// The daemon's socket and lock are its shutdown acknowledgement. Do not
 	// release them while this shell is still being reaped or its clients are

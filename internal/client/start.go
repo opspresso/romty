@@ -4,11 +4,13 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	goruntime "runtime"
 	"syscall"
 	"time"
 
 	"github.com/opspresso/romty/internal/logfile"
 	"github.com/opspresso/romty/internal/paths"
+	"github.com/opspresso/romty/internal/service"
 )
 
 var daemonStartTimeout = 3 * time.Second
@@ -34,8 +36,20 @@ func EnsureDaemon(runtime paths.Paths, executable string) error {
 		return err
 	}
 	if !held {
-		if err := startDaemon(runtime, executable); err != nil {
+		// The login service starts the daemon when one is installed, so the
+		// daemon is the service's rather than a child of this login.
+		home, homeErr := os.UserHomeDir()
+		installed, err := false, error(nil)
+		if homeErr == nil {
+			installed, err = service.Start(goruntime.GOOS, home)
+		}
+		if err != nil {
 			return err
+		}
+		if !installed {
+			if err := startDaemon(runtime, executable); err != nil {
+				return err
+			}
 		}
 	}
 	// A daemon with a missing socket repairs its own listener. Starting a

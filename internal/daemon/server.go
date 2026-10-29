@@ -566,6 +566,9 @@ func (s *Server) agentStatusesSnapshot() map[string]model.AgentStatus {
 	}
 	result := s.scanAgentStatuses()
 	s.statusCache, s.statusAt = result, time.Now()
+	if s.awake != nil {
+		s.updateAwakeFrom(result)
+	}
 	return maps.Clone(result)
 }
 

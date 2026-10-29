@@ -296,6 +296,8 @@ type dashboard struct {
 	// and treeQuery narrows the tree to the workspaces that match it.
 	treeFiltering bool
 	treeQuery     string
+	// tabMovePending is set while a tab move waits for the daemon.
+	tabMovePending bool
 	// hooksDeferred holds the agent hook offer until the first root exists.
 	hooksDeferred bool
 	// branches is the branch picker while it is open, and branchRequest
@@ -763,6 +765,8 @@ func (m dashboard) update(message tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case branchListMsg:
 		return m.handleBranchList(message)
+	case tabMovedMsg:
+		return m.handleTabMoved(message)
 	case gitActionMsg:
 		return m.handleGitActionResult(message)
 	case fileListMsg:

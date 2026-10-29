@@ -29,6 +29,11 @@ import (
 // $SHELL, and a developer's interactive shell loads dotfiles whose prompts,
 // wrappers and helper commands change what the tests read.
 func TestMain(m *testing.M) {
+	// A home of the tests' own, so no command finds and starts a login
+	// service installed on the machine running them.
+	if home, err := os.MkdirTemp("", "romty-cmd-home"); err == nil {
+		os.Setenv("HOME", home)
+	}
 	os.Setenv("SHELL", "/bin/sh")
 	os.Unsetenv("ENV")
 	if os.Getenv("ROMTY_TEST_PROCESS") == "1" {

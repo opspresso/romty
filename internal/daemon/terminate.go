@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"errors"
+	"os"
 	"sync"
 	"syscall"
 	"time"
@@ -22,62 +23,69 @@ var terminateGrace = 2 * time.Second
 // CPU. Each process gets SIGHUP, the signal a closed terminal sends; what is
 // still running after terminateGrace gets SIGKILL.
 //
-// reaped reports that the daemon already reaped the shell. Its PID may then
-// belong to an unrelated process, so only the other members are signalled:
-// the kernel does not reuse a PID while it is still a session ID, so a
-// process whose session is the shell's is one of the tab's.
+// The shell is signalled through its os.Process, which knows when the daemon
+// has reaped it and, on Linux, holds a pidfd: a shell that already exited is
+// never confused with a later process given its PID. The other members are
+// found by their session ID, which the kernel does not hand to a new process
+// while any process still has it, and each is checked again before SIGKILL.
+// A process the daemon may not signal, such as one run with sudo, cannot be
+// ended from here and is not waited for.
 //
-// It returns how many processes had to be killed.
-func terminateSession(leader int, reaped bool) int {
-	members := sessionMembers(leader, !reaped)
-	for _, pid := range members {
-		_ = unix.Kill(pid, syscall.SIGHUP)
-	}
+// processes is a process list to use, or nil to read one now.
+func terminateSession(shell *os.Process, processes []process) {
+	leader := shell.Pid
+	members := sessionMembers(leader, processes)
+	_ = shell.Signal(syscall.SIGHUP)
+	members = signalMembers(members, leader, syscall.SIGHUP)
 	deadline := time.Now().Add(terminateGrace)
 	for time.Now().Before(deadline) {
-		members = alive(members)
-		if len(members) == 0 {
-			return 0
+		members = signalMembers(members, leader, 0)
+		if len(members) == 0 && shell.Signal(syscall.Signal(0)) != nil {
+			return
 		}
 		time.Sleep(25 * time.Millisecond)
 	}
-	members = alive(members)
-	for _, pid := range members {
-		_ = unix.Kill(pid, syscall.SIGKILL)
-	}
-	return len(members)
+	_ = shell.Signal(syscall.SIGKILL)
+	signalMembers(members, leader, syscall.SIGKILL)
 }
 
-// sessionMembers lists the processes whose session the shell leads, the shell
-// included. The process list may be unreadable; the shell is then the only
-// member known, and it is still ended.
-func sessionMembers(leader int, includeLeader bool) []int {
-	members := make([]int, 0, 4)
-	if includeLeader {
-		members = append(members, leader)
-	}
-	output, err := listProcesses()
-	if err != nil {
-		return members
-	}
-	for _, value := range parseProcesses(output) {
-		if value.pid == leader || value.pid <= 1 {
-			continue
+// sessionMembers lists the processes, other than the shell, whose session the
+// shell leads. An unreadable process list leaves the shell as the only
+// process ended.
+func sessionMembers(leader int, processes []process) []int {
+	if processes == nil {
+		output, err := listProcesses()
+		if err != nil {
+			return nil
 		}
-		if sid, err := unix.Getsid(value.pid); err == nil && sid == leader {
+		processes = parseProcesses(output)
+	}
+	members := make([]int, 0, 4)
+	for _, value := range processes {
+		if value.pid != leader && value.pid > 1 && inSession(value.pid, leader) {
 			members = append(members, value.pid)
 		}
 	}
 	return members
 }
 
-// alive keeps the processes that still exist. A zombie still exists until its
-// parent reaps it, so the shell, which the daemon reaps, can count as alive
-// for a moment after it exited; the grace period covers that.
-func alive(pids []int) []int {
-	result := pids[:0:0]
-	for _, pid := range pids {
-		if err := unix.Kill(pid, 0); err == nil || errors.Is(err, syscall.EPERM) {
+func inSession(pid, leader int) bool {
+	sid, err := unix.Getsid(pid)
+	return err == nil && sid == leader
+}
+
+// signalMembers sends signal to the members still in the session and returns
+// them. Signal 0 only checks. A member that left, or that the daemon may not
+// signal, is dropped.
+func signalMembers(members []int, leader int, signal syscall.Signal) []int {
+	result := members[:0:0]
+	for _, pid := range members {
+		if !inSession(pid, leader) {
+			continue
+		}
+		if err := unix.Kill(pid, signal); err == nil {
+			result = append(result, pid)
+		} else if !errors.Is(err, syscall.ESRCH) && !errors.Is(err, syscall.EPERM) {
 			result = append(result, pid)
 		}
 	}
@@ -85,11 +93,16 @@ func alive(pids []int) []int {
 }
 
 // closeSessionsTogether closes sessions in parallel, so the grace periods of
-// many tabs overlap rather than add up when the daemon stops.
+// many tabs overlap rather than add up when the daemon stops. One process
+// list serves every tab.
 func closeSessionsTogether(sessions []*session) {
+	var processes []process
+	if output, err := listProcesses(); err == nil {
+		processes = parseProcesses(output)
+	}
 	var group sync.WaitGroup
 	for _, value := range sessions {
-		group.Go(value.close)
+		group.Go(func() { value.closeWith(processes) })
 	}
 	group.Wait()
 }

@@ -26,6 +26,10 @@ func TestLinkSSHAgentFollowsTheLatestLogin(t *testing.T) {
 	first, second := filepath.Join(directory, "a1"), filepath.Join(directory, "a2")
 	listenUnix(t, first)
 	listenUnix(t, second)
+	// The link names the resolved socket; the temporary directory may sit
+	// behind a link of its own, as /var does on macOS.
+	first, _ = filepath.EvalSymlinks(first)
+	second, _ = filepath.EvalSymlinks(second)
 	link := filepath.Join(directory, sshAgentLink)
 
 	environment := LinkSSHAgent(directory, []string{"HOME=/h", "SSH_AUTH_SOCK=" + first})
@@ -53,5 +57,36 @@ func TestLinkSSHAgentFollowsTheLatestLogin(t *testing.T) {
 	// No agent at all leaves the environment as it was.
 	if got := LinkSSHAgent(directory, []string{"HOME=/h"}); !slices.Equal(got, []string{"HOME=/h"}) {
 		t.Fatalf("environment without an agent = %q", got)
+	}
+}
+
+// A shell profile that links its own SSH_AUTH_SOCK and exports the link, as
+// many do, must not close a loop with romty's link.
+func TestLinkSSHAgentDoesNotLoopWithAProfileLink(t *testing.T) {
+	directory := testutil.ShortTempDir(t)
+	agent := filepath.Join(directory, "agent")
+	listenUnix(t, agent)
+	resolved, _ := filepath.EvalSymlinks(agent)
+	profile := filepath.Join(directory, "profile.sock")
+	link := filepath.Join(directory, sshAgentLink)
+
+	// The login links its agent and exports the profile link.
+	if err := os.Symlink(agent, profile); err != nil {
+		t.Fatal(err)
+	}
+	LinkSSHAgent(directory, []string{"SSH_AUTH_SOCK=" + profile})
+	// Inside a tab the profile runs again and points its link at romty's.
+	if err := os.Remove(profile); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(link, profile); err != nil {
+		t.Fatal(err)
+	}
+	LinkSSHAgent(directory, []string{"SSH_AUTH_SOCK=" + profile})
+	if target, _ := os.Readlink(link); target != resolved {
+		t.Fatalf("link -> %q, want the agent socket %q", target, resolved)
+	}
+	if _, err := os.Stat(link); err != nil {
+		t.Fatalf("the link does not reach the agent: %v", err)
 	}
 }
