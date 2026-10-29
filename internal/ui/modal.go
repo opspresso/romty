@@ -92,6 +92,10 @@ func (m dashboard) handleModalKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 				return m.scrollGitAction(-len(m.gitActionResultLines()))
 			case "end", "G":
 				return m.scrollGitAction(len(m.gitActionResultLines()))
+			case "t":
+				return m.openGitResultTerminal()
+			case "f":
+				return m.openGitResultFiles()
 			}
 			return m, nil
 		}

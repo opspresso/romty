@@ -176,6 +176,9 @@ func (m dashboard) gitActionResultLines() []string {
 	}
 	if m.gitRun.err != "" {
 		lines = append(lines, "Error: "+display.Text(m.gitRun.err))
+		if hint := gitFailureHint(m.gitRun.output + "\n" + m.gitRun.err); hint != "" {
+			lines = append(lines, "", "Next: "+hint)
+		}
 	}
 	if len(lines) == 0 {
 		return []string{"Completed successfully."}
@@ -282,6 +285,59 @@ func (m dashboard) renderGitActionsModal(maximum, height int) []string {
 	return modalBoxFit(m.styles, minimumModalWidth, maximum, title, lines...)
 }
 
+// gitFailureHints map what git prints for the failures users meet most to
+// what to do next. git's own message says what went wrong; the hint says how
+// to go on from romty.
+var gitFailureHints = []struct {
+	marker, hint string
+}{
+	{"Not possible to fast-forward", "the branches have diverged. Press t to open a terminal and merge or rebase."},
+	{"has no upstream branch", "the branch has no remote yet. Press t and run git push -u origin HEAD."},
+	{"no tracking information", "the branch tracks no remote branch. Press t and run git branch --set-upstream-to."},
+	{"would be overwritten", "local changes are in the way. Commit or stash them first; press t for a terminal."},
+	{"Permission denied (publickey)", "Git could not sign in. Press t and run the command in a terminal to authenticate."},
+	{"Authentication failed", "Git could not sign in. Press t and run the command in a terminal to authenticate."},
+	{"could not read Username", "Git needs credentials. Press t and run the command in a terminal to sign in."},
+	{"rejected", "the remote has commits you do not have. Pull first, then push."},
+	{"timed out", "the remote did not answer. Check the network and try again."},
+}
+
+// gitFailureHint is the next step for a failure, or empty when romty has none.
+func gitFailureHint(text string) string {
+	for _, known := range gitFailureHints {
+		if strings.Contains(text, known.marker) {
+			return known.hint
+		}
+	}
+	return ""
+}
+
+// openGitResultTerminal leaves the Git result for a terminal in its
+// workspace, where a failure is fixed by hand.
+func (m dashboard) openGitResultTerminal() (tea.Model, tea.Cmd) {
+	path := m.gitRun.target.Path
+	m.modal = noModal
+	m = m.resetGitActionResult()
+	save := m.revealWorkspace(path)
+	if _, ok := m.navigationItem(); !ok {
+		return m, save
+	}
+	m.syncTabCursor(m.navigationTabs())
+	return m, tea.Batch(save, m.selectWorkspace())
+}
+
+// openGitResultFiles leaves the Git result for the changed files of its
+// workspace, which is where a Status result points.
+func (m dashboard) openGitResultFiles() (tea.Model, tea.Cmd) {
+	target, ok := m.workspaceItem(m.gitRun.target.Path)
+	m.modal = noModal
+	m = m.resetGitActionResult()
+	if !ok {
+		return m, nil
+	}
+	return m.openChangedFilesView(target)
+}
+
 // gitActionLabelWidth is the column the action descriptions line up in.
 const gitActionLabelWidth = 15
 
@@ -301,6 +357,8 @@ func (m dashboard) renderGitOutputLine(line string, hovered bool) string {
 	switch {
 	case strings.HasPrefix(line, "Error: "):
 		return paint(m.styles.errorText, line)
+	case strings.HasPrefix(line, "Next: "):
+		return paint(m.styles.navigationCurrent, line)
 	case strings.HasPrefix(line, "## "):
 		// The branch header `git status --branch` prints, with its divergence
 		// in brackets: `## main...origin/main [ahead 1]`.

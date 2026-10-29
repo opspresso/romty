@@ -334,3 +334,33 @@ func TestScrollbackPositionReadsAsWords(t *testing.T) {
 		}
 	}
 }
+
+// A failed Git command says what to do next, and the result leads to a
+// terminal or the changed files in one key.
+func TestGitResultOffersTheNextStep(t *testing.T) {
+	snapshot, workspace := alphaWorkspaceSnapshot(nil)
+	value := newDashboard(&fakeBackend{}, snapshot)
+	value.width, value.height = 110, 24
+	value.gitStates = map[string]gitrepo.State{workspace.Path: {Branch: "main"}}
+	value.focus = leftPane
+	value.setNavigation(1)
+	send(&value, key('g', "g"))
+	value.gitRun.action, value.gitRun.complete = gitPullAction, true
+	value.gitRun.err = "fatal: Not possible to fast-forward, aborting."
+	screen := ansi.Strip(value.render())
+	if !strings.Contains(screen, "Next: the branches have diverged. Press t to open a terminal") || !strings.Contains(screen, "t  terminal") {
+		t.Fatalf("failed pull lacks its next step:\n%s", screen)
+	}
+
+	opened := value
+	if _, command := opened.Update(key('t', "t")); command == nil {
+		t.Fatal("t did not open a terminal")
+	}
+	files, _ := value.Update(key('f', "f"))
+	if !files.(dashboard).fileView.active || files.(dashboard).modal != noModal {
+		t.Fatal("f did not open the changed files")
+	}
+	if gitFailureHint("Everything up-to-date") != "" {
+		t.Fatal("a success was given a failure hint")
+	}
+}
