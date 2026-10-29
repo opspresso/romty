@@ -249,6 +249,10 @@ type dashboard struct {
 	terminalFullWidth bool
 	scrollOffset      int
 	helpOffset        int
+	// helpQuery filters the Help reference; helpTyping is set while `/` has
+	// the keyboard typing into it.
+	helpQuery  string
+	helpTyping bool
 	// configIndex is the setting the Config modal's cursor is on, so it is
 	// walked and run the way every other list romty draws is.
 	configIndex int

@@ -30,12 +30,22 @@ type modalActionHit struct {
 func (m dashboard) openModal(value modal) (tea.Model, tea.Cmd) {
 	m.modal = value
 	m.helpOffset = 0
+	m.helpQuery, m.helpTyping = "", false
 	m.configIndex = 0
 	m.clearAnyError()
 	return m, nil
 }
 
 func (m dashboard) handleModalKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if m.modal == helpModal && m.helpTyping {
+		return m.handleHelpSearchKey(message)
+	}
+	if message.String() == "esc" && m.modal == helpModal && m.helpQuery != "" {
+		// Esc clears a filter before it closes Help, so it steps back the
+		// way it came.
+		m.helpQuery, m.helpOffset = "", 0
+		return m, nil
+	}
 	if message.String() == "esc" {
 		if m.modal == hookInstallModal {
 			// The skipped agents keep an unavailable status for this run; the
@@ -118,6 +128,9 @@ func (m dashboard) handleModalKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 	case helpModal:
 		page := max(modalCapacity(m.dimensions().bodyHeight)-1, 1)
 		switch message.String() {
+		case "/":
+			m.helpTyping = true
+			return m, nil
 		case "up", "k":
 			return m.scrollHelp(-1)
 		case "down", "j":

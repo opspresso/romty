@@ -182,3 +182,41 @@ func TestTreeRailNamesWhatRunsInEachTab(t *testing.T) {
 		t.Fatalf("tree rail note = %q, want %q", got, want)
 	}
 }
+
+// `/` narrows Help to the shortcuts that match, keeping their section
+// headings; Esc clears the filter before it closes Help.
+func TestHelpSearchNarrowsTheReference(t *testing.T) {
+	value := newDashboard(&fakeBackend{}, model.Snapshot{})
+	value.width, value.height = 110, 30
+	send(&value, key(tea.KeyF1, ""))
+	send(&value, key('/', "/"))
+	typeText(&value, "WAIT")
+	if !strings.Contains(ansi.Strip(value.render()), " FIND  WAIT") {
+		t.Fatalf("the rail does not show the query:\n%s", ansi.Strip(value.render()))
+	}
+	send(&value, key(tea.KeyEnter, ""))
+
+	body := ansi.Strip(strings.Join(value.helpEntries(), "\n"))
+	if !strings.Contains(body, "SWITCH") || !strings.Contains(body, "Jump to a waiting agent") {
+		t.Fatalf("filtered Help lacks the match or its section:\n%s", body)
+	}
+	if strings.Contains(body, "Stop daemon") || strings.Contains(body, "GLOBAL") {
+		t.Fatalf("filtered Help kept entries that do not match:\n%s", body)
+	}
+
+	send(&value, key(tea.KeyEscape, ""))
+	if value.modal != helpModal || value.helpQuery != "" {
+		t.Fatalf("first Esc = (modal %v, query %q), want the filter cleared and Help open", value.modal, value.helpQuery)
+	}
+	send(&value, key(tea.KeyEscape, ""))
+	if value.modal != noModal {
+		t.Fatal("second Esc did not close Help")
+	}
+
+	send(&value, key(tea.KeyF1, ""))
+	send(&value, key('/', "/"))
+	typeText(&value, "zzz")
+	if body := ansi.Strip(strings.Join(value.helpEntries(), "\n")); !strings.Contains(body, "No shortcut matches zzz") {
+		t.Fatalf("an empty result does not say so:\n%s", body)
+	}
+}

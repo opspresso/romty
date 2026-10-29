@@ -337,8 +337,18 @@ func (m dashboard) renderStatus(width, bodyHeight int) []string {
 		status = m.renderActivityStatus("OPENING", "preparing terminal", width)
 	case m.tabClosePending != "":
 		status = m.renderActivityStatus("CLOSING", "terminating terminal", width)
+	case m.modal == helpModal && m.helpTyping:
+		status = truncate(
+			m.styles.promptLabel.Render(" FIND ")+" "+
+				m.styles.promptText.Render(display.Text(m.helpQuery))+
+				m.styles.dividerActive.Render("█"),
+			width,
+		)
 	case m.modal == helpModal:
-		shortcuts := []shortcut{{key: "Esc", description: "close"}}
+		shortcuts := []shortcut{{key: "/", description: "search"}, {key: "Esc", description: "close"}}
+		if m.helpQuery != "" {
+			shortcuts = []shortcut{{key: "/", description: "search"}, {key: "Esc", description: "clear search"}}
+		}
 		if m.maximumHelpOffset(bodyHeight) > 0 {
 			shortcuts = append([]shortcut{{key: "↑/↓/Wheel", description: "scroll"}}, shortcuts...)
 		}
