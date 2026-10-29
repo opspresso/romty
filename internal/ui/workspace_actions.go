@@ -611,3 +611,33 @@ func (m dashboard) workspaceActionIndexAtMouse(mouse tea.Mouse, width, height in
 	}
 	return row.choiceIndex, true
 }
+
+// addRoot adds the directory the picker names and leaves the daemon to
+// canonicalise and judge it.
+func (m *dashboard) addRoot(path string) tea.Cmd {
+	return m.snapshotCommand(func(backend Backend) (model.Snapshot, error) { return backend.AddRoot(path) })
+}
+
+// confirmRemoveSelection asks before a root is forgotten or a workspace
+// directory is deleted. The item is captured here rather than read again on
+// confirmation: a snapshot arriving while the modal is open can move the
+// cursor, and the answer has to apply to the item the question named.
+func (m dashboard) confirmRemoveSelection(target navItem) (tea.Model, tea.Cmd) {
+	m.removeTarget = target
+	m.removeConfirm = ""
+	return m.openModal(removeSelectionModal)
+}
+
+func (m *dashboard) removeSelection() tea.Cmd {
+	rootID := m.removeTarget.root.ID
+	if rootID == "" {
+		return nil
+	}
+	target := m.removeTarget
+	return m.snapshotCommand(func(backend Backend) (model.Snapshot, error) {
+		if target.isRoot {
+			return backend.RemoveRoot(rootID)
+		}
+		return backend.RemoveWorkspace(rootID, target.workspace.Path)
+	})
+}

@@ -56,3 +56,11 @@ func (m dashboard) workspacePaths() []string {
 type gitRefreshFailedMsg struct {
 	err error
 }
+
+// What the status bar says about a workspace that cannot answer the request
+// made of it. Each is raised from more than one place, and a sentence a user
+// reads twice should read the same both times.
+const (
+	notAGitRepository = "selected workspace is not a Git repository"
+	noRunningTerminal = "selected workspace has no running terminal"
+)

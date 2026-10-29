@@ -1012,3 +1012,71 @@ func renderShortcutRailNote(styles *uiStyles, width int, note string, values ...
 	}
 	return styles.tabRail.Render(strings.Repeat("─", fill)) + " " + shortcuts
 }
+
+func (m dashboard) renderNavigationGit(item navItem, indicator string, style lipgloss.Style, width int) string {
+	prefix := indicator + "   "
+	if !item.hasGit {
+		return style.Render(pad(prefix, width))
+	}
+
+	branch := display.Text(item.git.Branch)
+	if item.git.Detached {
+		revision := item.git.Revision
+		if len(revision) > 7 {
+			revision = revision[:7]
+		}
+		branch = "@" + revision
+	}
+	marker := ""
+	if item.git.Conflicted {
+		marker = "!"
+	} else if item.git.Dirty {
+		marker = "*"
+	}
+	sync := ""
+	if item.git.Ahead > 0 {
+		sync += fmt.Sprintf(" ↑%d", item.git.Ahead)
+	}
+	if item.git.Behind > 0 {
+		sync += fmt.Sprintf(" ↓%d", item.git.Behind)
+	}
+
+	available := max(width-lipgloss.Width(prefix)-lipgloss.Width(marker)-lipgloss.Width(sync)-2, 0)
+	branch = truncate(branch, available)
+	branchStyle := style.Foreground(m.styles.gitBranch.GetForeground())
+	statusStyle := style.Foreground(m.styles.gitStatus.GetForeground())
+	conflictStyle := style.Foreground(m.styles.gitConflict.GetForeground())
+	line := style.Render(prefix) + branchStyle.Render("("+branch)
+	if marker == "!" {
+		line += conflictStyle.Render(marker)
+	} else if marker != "" {
+		line += statusStyle.Render(marker)
+	}
+	line += branchStyle.Render(")") + statusStyle.Render(sync)
+	return line + style.Render(strings.Repeat(" ", max(width-lipgloss.Width(line), 0)))
+}
+
+func truncate(value string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	if lipgloss.Width(value) <= width {
+		return value
+	}
+	return ansi.Truncate(value, width, "…")
+}
+
+func onOff(value bool) string {
+	if value {
+		return "on"
+	}
+	return "off"
+}
+
+func pad(value string, width int) string {
+	missing := width - lipgloss.Width(value)
+	if missing <= 0 {
+		return value
+	}
+	return value + strings.Repeat(" ", missing)
+}

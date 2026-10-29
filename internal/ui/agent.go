@@ -6,6 +6,7 @@ package ui
 
 import (
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"time"
@@ -391,4 +392,29 @@ func formatTokens(count int) string {
 	default:
 		return fmt.Sprintf("%d", count)
 	}
+}
+
+// applyAgentStatuses takes in the agent statuses the daemon reported, polled
+// or pushed, and returns the alerts their transitions call for. The first
+// report after startup is the state romty found, not a transition, so it
+// stays silent.
+func (m *dashboard) applyAgentStatuses(value map[string]model.AgentStatus) []tea.Cmd {
+	var alerts []tea.Cmd
+	if m.agentSoundReady {
+		if kind, ring := m.soundForAgentTransitions(value); ring {
+			alerts = append(alerts, soundAlert(kind))
+		}
+		found := m.agentAlerts(value)
+		alerts = append(alerts, m.notifyAgentAlerts(found))
+		for _, alert := range found {
+			if alert.kind == sound.Waiting {
+				m.lastAlertTab = alert.tab.ID
+				break
+			}
+		}
+	}
+	m.updateAgents(value)
+	m.heardAgents = maps.Clone(value)
+	m.agentSoundReady = true
+	return alerts
 }
