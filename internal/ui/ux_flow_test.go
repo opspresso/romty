@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -312,5 +313,24 @@ func TestGitStateKeepsTheCursorOnScreen(t *testing.T) {
 	send(&value, gitStatusMsg{value: repositoryStates(directories)})
 	if _, shown := value.cursorOnScreen(); !shown {
 		t.Fatalf("the cursor left the screen after the Git read (offset %d)", value.navOffset)
+	}
+}
+
+// Scrollback says where the view is in words, at either end and between.
+func TestScrollbackPositionReadsAsWords(t *testing.T) {
+	value := scrolledDashboard(t, 200)
+	total := value.terminal.scrollbackLen()
+	for _, probe := range []struct {
+		offset int
+		want   string
+	}{
+		{0, fmt.Sprintf("newest · %d lines above", total)},
+		{10, fmt.Sprintf("10 of %d lines up", total)},
+		{total, fmt.Sprintf("oldest · %d lines", total)},
+	} {
+		value.scrollOffset = probe.offset
+		if got := value.scrollbackPosition(); got != probe.want {
+			t.Fatalf("position at %d = %q, want %q", probe.offset, got, probe.want)
+		}
 	}
 }

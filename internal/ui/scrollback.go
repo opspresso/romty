@@ -207,9 +207,19 @@ func (m dashboard) scrollbackPage() int {
 }
 
 // scrollbackPosition reports how far back the viewport sits in the history.
+// scrollbackPosition says where the view is in words: at the newest output,
+// at the oldest, or how many lines above the newest.
 func (m dashboard) scrollbackPosition() string {
-	if m.terminal == nil {
-		return "0/0"
+	if m.terminal == nil || m.terminal.scrollbackLen() == 0 {
+		return "no history"
 	}
-	return fmt.Sprintf("%d/%d", m.scrollOffset, m.terminal.scrollbackLen())
+	total := m.terminal.scrollbackLen()
+	switch {
+	case m.scrollOffset <= 0:
+		return fmt.Sprintf("newest · %d lines above", total)
+	case m.scrollOffset >= total:
+		return fmt.Sprintf("oldest · %d lines", total)
+	default:
+		return fmt.Sprintf("%d of %d lines up", m.scrollOffset, total)
+	}
 }

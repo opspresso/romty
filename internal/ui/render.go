@@ -475,7 +475,9 @@ func (m dashboard) renderStatus(width, bodyHeight int) []string {
 			position += fmt.Sprintf("  %s %d/%d", display.Text(m.search.query),
 				len(m.search.matches)-m.search.index, len(m.search.matches))
 		}
-		shortcuts = append(shortcuts, shortcut{key: "Ctrl+Shift+\\", description: "exit"})
+		// Esc leaves in every terminal; the chord does not reach romty in a
+		// terminal without the Kitty keyboard protocol.
+		shortcuts = append(shortcuts, shortcut{key: "Esc", description: "exit"})
 		status = truncate(
 			m.styles.promptLabel.Render(" SCROLLBACK ")+" "+
 				m.styles.shortcutDescription.Render(position)+"  "+

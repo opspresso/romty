@@ -1396,8 +1396,8 @@ func TestDashboardScrollsTerminalHistory(t *testing.T) {
 		t.Fatalf("oldest visible row = %q, want the first retained line %q", oldest, retained)
 	}
 	if rendered := ansi.Strip(value.render()); !strings.Contains(rendered, "SCROLLBACK") ||
-		!strings.Contains(rendered, fmt.Sprintf("%d/%d", history, history)) ||
-		!strings.Contains(rendered, "Ctrl+Shift+\\") {
+		!strings.Contains(rendered, fmt.Sprintf("oldest · %d lines", history)) ||
+		!strings.Contains(rendered, "Esc  exit") {
 		t.Fatalf("status bar does not report the scrollback position:\n%s", rendered)
 	}
 	for range history/value.scrollbackPage() + 1 {
