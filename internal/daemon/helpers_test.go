@@ -1,6 +1,9 @@
 package daemon
 
-import "net"
+import (
+	"net"
+	"time"
+)
 
 // Test conveniences over the production entry points.
 
@@ -15,4 +18,11 @@ func (s *session) attachReady(connection net.Conn, ready func(int) error) error 
 	return s.attachClientReady(connection, "", func(replayBytes int, _, _ uint16) error {
 		return ready(replayBytes)
 	})
+}
+
+// Tests scan agent statuses repeatedly as they change the processes behind
+// them, so they run without the status cache; cache_test.go turns it back on.
+func init() {
+	agentStatusCacheTTL = 0
+	terminateGrace = 200 * time.Millisecond
 }

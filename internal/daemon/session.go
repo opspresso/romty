@@ -559,6 +559,33 @@ func (s *session) resizeFor(clientID string, columns, rows uint16) error {
 	return s.applySize(columns, rows)
 }
 
+// recordingCapacity is the memory the session's recording holds.
+func (s *session) recordingCapacity() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.history.data)
+}
+
+// trimRecording keeps only the newest limit bytes of the recording and frees
+// the rest. The recording grows back if the tab prints again.
+func (s *session) trimRecording(limit int) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.history.data) <= limit {
+		return 0
+	}
+	before := len(s.history.data)
+	s.history.reshape(limit)
+	return before - len(s.history.data)
+}
+
+// lastOutput is when the session last printed.
+func (s *session) lastOutput() time.Time {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.lastOutputAt
+}
+
 func (s *session) applySize(columns, rows uint16) error {
 	if s.columns == columns && s.rows == rows {
 		return nil
@@ -591,7 +618,17 @@ func (s *session) close() {
 	process := s.command.Process
 	s.mu.Unlock()
 	if !alreadyClosed && process != nil {
-		_ = process.Kill()
+		// The shell leads its own terminal session (pty.Start sets Setsid), so
+		// its PID is the session to end.
+		reaped := false
+		if exitDone != nil {
+			select {
+			case <-exitDone:
+				reaped = true
+			default:
+			}
+		}
+		_ = terminateSession(process.Pid, reaped)
 	}
 	// The daemon's socket and lock are its shutdown acknowledgement. Do not
 	// release them while this shell is still being reaped or its clients are

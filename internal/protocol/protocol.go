@@ -18,7 +18,7 @@ import (
 // speak. Ping advertises the range so peers choose the highest overlap instead
 // of requiring the same build on both sides.
 const (
-	Version        = 8
+	Version        = 9
 	MinimumVersion = 1
 )
 
@@ -31,6 +31,7 @@ const (
 	CapabilityCloseTab         = "close_tab"
 	CapabilityRenameTab        = "rename_tab"
 	CapabilityReopenTab        = "reopen_tab"
+	CapabilityMoveTab          = "move_tab"
 )
 
 var capabilities = []struct {
@@ -45,6 +46,7 @@ var capabilities = []struct {
 	{name: CapabilityCloseTab, since: 6},
 	{name: CapabilityRenameTab, since: 7},
 	{name: CapabilityReopenTab, since: 8},
+	{name: CapabilityMoveTab, since: 9},
 }
 
 const (
@@ -61,6 +63,7 @@ const (
 	ActionCloseTab        = "close_tab"
 	ActionRenameTab       = "rename_tab"
 	ActionReopenTab       = "reopen_tab"
+	ActionMoveTab         = "move_tab"
 	ActionAttach          = "attach"
 	ActionResize          = "resize"
 	ActionShutdown        = "shutdown"
@@ -96,6 +99,9 @@ type Request struct {
 	TabID string `json:"tab_id,omitempty"`
 	// Name is the new tab name, sent with rename_tab.
 	Name string `json:"name,omitempty"`
+	// Offset is how many places move_tab moves a tab among its workspace's
+	// tabs: negative towards the first.
+	Offset int `json:"offset,omitempty"`
 	// ClientID connects an attachment to its out-of-band resize requests.
 	// Empty keeps the global-resize behavior of clients that predate the field.
 	ClientID string `json:"client_id,omitempty"`
@@ -198,6 +204,13 @@ type Response struct {
 	ReplayBytes   int    `json:"replay_bytes,omitempty"`
 	ReplayColumns uint16 `json:"replay_columns,omitempty"`
 	ReplayRows    uint16 `json:"replay_rows,omitempty"`
+	// DaemonVersion is the running daemon's build, sent with ping, so a
+	// client can tell the user that an upgrade has not reached the daemon
+	// yet. A daemon from before the field sends none.
+	DaemonVersion string `json:"daemon_version,omitempty"`
+	// RecordingBytes is what the daemon holds of every tab's recent output,
+	// sent with ping.
+	RecordingBytes int64 `json:"recording_bytes,omitempty"`
 }
 
 // RefusedError is a request the daemon answered with an error. Message is the

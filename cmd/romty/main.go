@@ -109,6 +109,8 @@ func runDaemon(runtime paths.Paths) error {
 	if err != nil {
 		return err
 	}
+	server.SetLogFile(runtime.Log)
+	server.SetConfigFile(runtime.Config)
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	if err := server.Serve(ctx); err != nil {
