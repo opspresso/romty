@@ -131,6 +131,7 @@ const (
 	shutdownModal
 	hookInstallModal
 	inputModal
+	branchModal
 )
 
 // doubleClickInterval is the longest gap between two clicks on one tab that
@@ -160,6 +161,7 @@ const (
 	hoverGitAction
 	hoverGitResult
 	hoverConfigRow
+	hoverBranchRow
 )
 
 type dashboard struct {
@@ -265,6 +267,8 @@ type dashboard struct {
 	// renders from it and the keys move it.
 	browse  browser
 	palette workspacePalette
+	// branches is the branch picker while it is open.
+	branches branchPicker
 	// config holds every persisted setting. It is the document as loaded,
 	// so saving keeps the fields this build does not know.
 	config           Config
@@ -582,6 +586,9 @@ func (m dashboard) update(message tea.Msg) (tea.Model, tea.Cmd) {
 		} else if m.modal == inputModal {
 			m.input.text += message.Content
 			m.input.err = ""
+		} else if m.modal == branchModal && m.branches.confirming == nil {
+			m.branches.query += message.Content
+			m.branches.index, m.branches.offset = 0, 0
 		} else if m.modal == removeSelectionModal && !m.removeTarget.isRoot {
 			// Pasting the name is how a name that is hard to type, such as
 			// one with characters the keyboard lacks, is confirmed.
@@ -685,6 +692,8 @@ func (m dashboard) update(message tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.refreshGitStatus()
 		}
 		return m, nil
+	case branchListMsg:
+		return m.handleBranchList(message)
 	case gitActionMsg:
 		return m.handleGitActionResult(message)
 	case fileListMsg:

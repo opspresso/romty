@@ -388,7 +388,19 @@ func (m dashboard) renderStatus(width, bodyHeight int) []string {
 		status = renderShortcuts(m.styles, width,
 			shortcut{key: "↑/↓", description: "select"},
 			shortcut{key: "Enter", description: "run"},
+			shortcut{key: "s/u/p/P/b", description: "run by letter"},
 			shortcut{key: "Esc", description: "cancel"},
+		)
+	case m.modal == branchModal:
+		escape := shortcut{key: "Esc", description: "close"}
+		if m.branches.query != "" {
+			escape.description = "clear filter"
+		}
+		status = renderShortcuts(m.styles, width,
+			shortcut{key: "type", description: "filter or name a new branch"},
+			shortcut{key: "↑/↓", description: "select"},
+			shortcut{key: "Enter", description: "switch"},
+			escape,
 		)
 	case m.modal == shutdownModal && m.shutdownPending:
 		// The request is already out; no key can take it back.
@@ -699,7 +711,13 @@ func (m dashboard) renderTerminal(width int) []string {
 		return append(lines, m.styles.empty.Render("  Select a root or workspace"))
 	}
 	if len(tabs) == 0 {
-		return append(lines, m.styles.empty.Render("  Select + and press Enter to create a terminal"))
+		// Say what Enter does here: start a terminal, or ask which session to
+		// open when there are closed ones to reopen.
+		hint := "  Press Enter to open a terminal here"
+		if item, ok := m.navigationItem(); ok && m.needsSessionChoice(item) {
+			hint = "  Press Enter to open or reopen a session"
+		}
+		return append(lines, m.styles.empty.Render(hint))
 	}
 	if m.tabIndex < len(tabs) {
 		return append(lines, m.styles.empty.Render("  Press Enter to open "+display.Text(tabs[m.tabIndex].Name)))

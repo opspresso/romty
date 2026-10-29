@@ -24,27 +24,42 @@ const (
 	workspaceReopenAction
 	workspaceAllFilesAction
 	workspaceFileChangesAction
-	workspaceGitStatusAction
-	workspaceGitFetchAction
-	workspaceGitPullAction
-	workspaceGitPushAction
+	// workspaceGitAction runs the Git action the choice names.
+	workspaceGitAction
 	workspaceRemoveAction
 )
 
+// workspaceActionGroup is a section of the palette. Each section but the
+// destructive one is introduced by its heading; the destructive one is set
+// apart by a rule, so removal never reads as one more Git command.
 type workspaceActionGroup int
 
 const (
 	workspaceTerminalGroup workspaceActionGroup = iota
 	workspaceClosedGroup
-	workspaceFileGitGroup
+	workspaceFilesGroup
+	workspaceGitGroup
 	workspaceDestructiveGroup
 )
+
+// workspaceActionHeadings are the section headings, in the uppercase the
+// Help sections use.
+var workspaceActionHeadings = map[workspaceActionGroup]string{
+	workspaceTerminalGroup: "TERMINAL",
+	workspaceClosedGroup:   "REOPEN",
+	workspaceFilesGroup:    "FILES",
+	workspaceGitGroup:      "GIT",
+}
 
 type workspaceActionChoice struct {
 	action      workspaceAction
 	label       string
 	group       workspaceActionGroup
 	destructive bool
+	// key is the letter that runs the choice while the palette is open.
+	key string
+	// git is the Git action a workspaceGitAction choice runs.
+	git gitAction
 	// closedID names the closed session a reopen action restores.
 	closedID string
 }
@@ -66,9 +81,17 @@ type workspacePalette struct {
 	anchorY int
 }
 
+// workspaceActionRow is one row of the palette: a choice, a section heading,
+// or the rule before the destructive section. Only a choice takes the cursor
+// or a click.
 type workspaceActionRow struct {
 	choiceIndex int
 	divider     bool
+	heading     string
+}
+
+func (r workspaceActionRow) isChoice() bool {
+	return !r.divider && r.heading == ""
 }
 
 func (m dashboard) openWorkspaceActions() (tea.Model, tea.Cmd) {
@@ -143,38 +166,43 @@ func (m dashboard) workspaceActionChoices() []workspaceActionChoice {
 	if m.palette.sessionChoice {
 		return sessionChoices(target, time.Now())
 	}
-	choices := make([]workspaceActionChoice, 0, 10)
+	choices := make([]workspaceActionChoice, 0, 12)
 	if target.failure == "" {
 		if len(runningTabs(target.tabs)) > 0 {
 			choices = append(choices, workspaceActionChoice{
-				action: workspaceOpenTerminalAction, label: "Open terminal",
+				action: workspaceOpenTerminalAction, label: "Open terminal", key: "o",
 			})
 		}
 		choices = append(choices, workspaceActionChoice{
-			action: workspaceNewTabAction, label: "New tab",
+			action: workspaceNewTabAction, label: "New tab", key: "n",
 		})
 		if m.tabIndex < len(runningTabs(target.tabs)) {
 			choices = append(choices, workspaceActionChoice{
-				action: workspaceCloseTabAction, label: "Close tab",
+				action: workspaceCloseTabAction, label: "Close tab", key: "x",
 			})
 		}
 		if !target.isRoot {
 			choices = append(choices, workspaceActionChoice{
-				action: workspaceAllFilesAction, label: "All files", group: workspaceFileGitGroup,
+				action: workspaceAllFilesAction, label: "All files", group: workspaceFilesGroup, key: "a",
 			})
 		}
 		if target.hasGit {
-			choices = append(choices,
-				workspaceActionChoice{action: workspaceFileChangesAction, label: "File changes", group: workspaceFileGitGroup},
-				workspaceActionChoice{action: workspaceGitStatusAction, label: "Git status", group: workspaceFileGitGroup},
-				workspaceActionChoice{action: workspaceGitFetchAction, label: "Git fetch", group: workspaceFileGitGroup},
-				workspaceActionChoice{action: workspaceGitPullAction, label: "Git pull", group: workspaceFileGitGroup},
-				workspaceActionChoice{action: workspaceGitPushAction, label: "Git push", group: workspaceFileGitGroup},
-			)
+			choices = append(choices, workspaceActionChoice{
+				action: workspaceFileChangesAction, label: "File changes", group: workspaceFilesGroup, key: "f",
+			})
+			// The Git section is the Git menu's own list, so the two never
+			// disagree about what Git can do here.
+			for _, action := range gitActionChoices {
+				choices = append(choices, workspaceActionChoice{
+					action: workspaceGitAction, label: action.String(), group: workspaceGitGroup,
+					key: gitActionKeys[action], git: action,
+				})
+			}
 		}
 	}
 	remove := workspaceActionChoice{
-		action: workspaceRemoveAction, label: "Delete workspace", group: workspaceDestructiveGroup, destructive: true,
+		action: workspaceRemoveAction, label: "Delete workspace", group: workspaceDestructiveGroup,
+		destructive: true, key: "d",
 	}
 	if target.isRoot {
 		remove.label = "Forget root"
@@ -186,7 +214,7 @@ func (m dashboard) workspaceActionChoices() []workspaceActionChoice {
 // sessionChoices offers a new session first, then the closed sessions newest
 // first.
 func sessionChoices(target navItem, now time.Time) []workspaceActionChoice {
-	choices := []workspaceActionChoice{{action: workspaceNewTabAction, label: "New session"}}
+	choices := []workspaceActionChoice{{action: workspaceNewTabAction, label: "New session", key: "n"}}
 	for _, closed := range target.closed {
 		choices = append(choices, workspaceActionChoice{
 			action: workspaceReopenAction, label: closedSessionLabel(closed, now),
@@ -212,12 +240,24 @@ func closedSessionLabel(closed model.ClosedSession, now time.Time) string {
 	return strings.Join(parts, " · ")
 }
 
+// workspaceActionRows lays the choices out under their section headings. The
+// session choice has a title of its own over its first section, so that
+// section is not given a second one.
 func (m dashboard) workspaceActionRows() []workspaceActionRow {
 	choices := m.workspaceActionChoices()
-	rows := make([]workspaceActionRow, 0, len(choices)+2)
+	rows := make([]workspaceActionRow, 0, len(choices)+6)
 	for index, choice := range choices {
-		if index > 0 && choice.group != choices[index-1].group {
-			rows = append(rows, workspaceActionRow{divider: true})
+		if index == 0 || choice.group != choices[index-1].group {
+			heading := workspaceActionHeadings[choice.group]
+			if m.palette.sessionChoice && choice.group == workspaceTerminalGroup {
+				heading = ""
+			}
+			switch {
+			case heading != "":
+				rows = append(rows, workspaceActionRow{heading: heading})
+			case index > 0:
+				rows = append(rows, workspaceActionRow{divider: true})
+			}
 		}
 		rows = append(rows, workspaceActionRow{choiceIndex: index})
 	}
@@ -256,13 +296,18 @@ func (m *dashboard) ensureWorkspaceActionVisible() {
 	rows := m.workspaceActionRows()
 	selectedRow := 0
 	for index, row := range rows {
-		if !row.divider && row.choiceIndex == m.palette.index {
+		if row.isChoice() && row.choiceIndex == m.palette.index {
 			selectedRow = index
 			break
 		}
 	}
+	// Scrolling up to a section's first choice brings its heading with it.
+	topRow := selectedRow
+	if topRow > 0 && !rows[topRow-1].isChoice() {
+		topRow--
+	}
 	maximum := max(len(rows)-capacity, 0)
-	m.palette.offset = min(selectedRow, min(max(m.palette.offset, 0), maximum))
+	m.palette.offset = min(topRow, min(max(m.palette.offset, 0), maximum))
 	if selectedRow >= m.palette.offset+capacity {
 		m.palette.offset = selectedRow - capacity + 1
 	}
@@ -291,6 +336,13 @@ func (m dashboard) handleWorkspaceActionKey(message tea.KeyPressMsg) (tea.Model,
 		m.ensureWorkspaceActionVisible()
 	case "enter":
 		return m.runWorkspaceAction(choices[m.palette.index])
+	default:
+		for index, choice := range choices {
+			if choice.key != "" && choice.key == message.String() {
+				m.palette.index = index
+				return m.runWorkspaceAction(choice)
+			}
+		}
 	}
 	return m, nil
 }
@@ -337,8 +389,8 @@ func (m dashboard) runWorkspaceAction(choice workspaceActionChoice) (tea.Model, 
 	case workspaceAllFilesAction:
 		m.modal = noModal
 		return m.openAllFilesView(target)
-	case workspaceGitStatusAction, workspaceGitFetchAction, workspaceGitPullAction, workspaceGitPushAction:
-		return m.startWorkspaceGitAction(action, target)
+	case workspaceGitAction:
+		return m.startWorkspaceGitAction(choice.git, target)
 	case workspaceRemoveAction:
 		return m.confirmRemoveSelection(target)
 	default:
@@ -359,25 +411,18 @@ func (m *dashboard) currentWorkspaceActionTarget() (navItem, bool) {
 	return navItem{}, false
 }
 
-// gitActionByWorkspaceAction names which Git operation each palette entry
-// starts, so the palette adds an entry without repeating the Git actions.
-var gitActionByWorkspaceAction = map[workspaceAction]gitAction{
-	workspaceGitStatusAction: gitStatusAction,
-	workspaceGitFetchAction:  gitFetchAction,
-	workspaceGitPullAction:   gitPullAction,
-	workspaceGitPushAction:   gitPushAction,
-}
-
-func (m dashboard) startWorkspaceGitAction(action workspaceAction, target navItem) (tea.Model, tea.Cmd) {
-	gitAction, ok := gitActionByWorkspaceAction[action]
-	if !ok || !target.hasGit {
+func (m dashboard) startWorkspaceGitAction(gitAction gitAction, target navItem) (tea.Model, tea.Cmd) {
+	if !target.hasGit {
 		m.modal = noModal
 		m.setError(gitError, notAGitRepository)
 		return m, nil
 	}
+	if gitAction == gitSwitchAction {
+		return m.openBranchPicker(target)
+	}
 	m.modal = gitActionsModal
 	m.gitRun = gitActionRun{
-		target: target.workspace, index: int(gitAction), action: gitAction, returnTo: workspaceActionsModal,
+		target: target.workspace, index: gitActionIndex(gitAction), action: gitAction, returnTo: workspaceActionsModal,
 	}
 	m.clearAnyError()
 	return m.startGitAction()
@@ -392,11 +437,12 @@ func (m dashboard) workspaceActionPopup(width, height int) (lines []string, x, y
 	offset, end := m.workspaceActionWindow(height)
 	labelWidth := 6
 	for _, row := range rows[offset:end] {
-		if !row.divider {
+		if row.isChoice() {
 			labelWidth = max(labelWidth, lipgloss.Width(choices[row.choiceIndex].label))
 		}
 	}
-	popupWidth := min(max(labelWidth+3, 12), max(width, 1))
+	// One column each side of the label, and the key after a two-column gap.
+	popupWidth := min(max(labelWidth+6, 14), max(width, 1))
 	innerWidth := max(popupWidth-2, 0)
 	lines = make([]string, 0, end-offset+2)
 	lines = append(lines, m.styles.modalBorder.Render("╭"+strings.Repeat("─", innerWidth)+"╮"))
@@ -407,25 +453,43 @@ func (m dashboard) workspaceActionPopup(width, height int) (lines []string, x, y
 				m.styles.modalBorder.Render("│"))
 			continue
 		}
-		choice := choices[row.choiceIndex]
-		style := m.styles.modalBody
-		if choice.destructive {
-			style = m.styles.errorText
+		if row.heading != "" {
+			lines = append(lines, m.styles.modalBorder.Render("│")+
+				m.styles.empty.Render(pad(truncate(" "+row.heading, innerWidth), innerWidth))+
+				m.styles.modalBorder.Render("│"))
+			continue
 		}
-		if row.choiceIndex == m.palette.index {
-			style = m.styles.navigationSelected
-		} else if m.hover.kind == hoverWorkspaceAction && m.hover.index == row.choiceIndex {
-			style = m.styles.hovered(style)
-		}
-		label := " " + choice.label
 		lines = append(lines, m.styles.modalBorder.Render("│")+
-			style.Render(pad(truncate(label, innerWidth), innerWidth))+
+			m.renderWorkspaceActionChoice(choices[row.choiceIndex], row.choiceIndex, innerWidth)+
 			m.styles.modalBorder.Render("│"))
 	}
 	lines = append(lines, m.styles.modalBorder.Render("╰"+strings.Repeat("─", innerWidth)+"╯"))
 	x = min(max(m.palette.anchorX, 0), max(width-popupWidth, 0))
 	y = min(max(m.palette.anchorY, 0), max(height-len(lines), 0))
 	return lines, x, y
+}
+
+// renderWorkspaceActionChoice draws one choice: its label, and its key at the
+// right edge in the muted tone the Config keys use.
+func (m dashboard) renderWorkspaceActionChoice(choice workspaceActionChoice, index, width int) string {
+	style := m.styles.modalBody
+	if choice.destructive {
+		style = m.styles.errorText
+	}
+	keyStyle := m.styles.empty
+	if index == m.palette.index {
+		style = m.styles.navigationSelected
+		keyStyle = style
+	} else if m.hover.kind == hoverWorkspaceAction && m.hover.index == index {
+		style = m.styles.hovered(style)
+		keyStyle = m.styles.hovered(keyStyle)
+	}
+	key := ""
+	if choice.key != "" {
+		key = choice.key + " "
+	}
+	labelWidth := max(width-lipgloss.Width(key), 0)
+	return style.Render(pad(truncate(" "+choice.label, labelWidth), labelWidth)) + keyStyle.Render(key)
 }
 
 // sessionChoicePanel draws the session choice in the middle of the terminal
@@ -440,8 +504,8 @@ func (m dashboard) sessionChoicePanel(height int) (lines []string, x, y int) {
 	title := " Open a session in " + display.Text(m.palette.target.workspace.Name)
 	labelWidth := lipgloss.Width(title)
 	for _, row := range rows[offset:end] {
-		if !row.divider {
-			labelWidth = max(labelWidth, lipgloss.Width(choices[row.choiceIndex].label)+1)
+		if row.isChoice() {
+			labelWidth = max(labelWidth, lipgloss.Width(choices[row.choiceIndex].label)+3)
 		}
 	}
 	panelWidth := min(labelWidth+4, max(view.rightWidth, 1))
@@ -453,14 +517,11 @@ func (m dashboard) sessionChoicePanel(height int) (lines []string, x, y int) {
 			lines = append(lines, " "+m.styles.divider.Render(strings.Repeat("─", innerWidth))+" ")
 			continue
 		}
-		style := m.styles.modalBody
-		if row.choiceIndex == m.palette.index {
-			style = m.styles.navigationSelected
-		} else if m.hover.kind == hoverWorkspaceAction && m.hover.index == row.choiceIndex {
-			style = m.styles.hovered(style)
+		if row.heading != "" {
+			lines = append(lines, " "+m.styles.empty.Render(pad(truncate(" "+row.heading, innerWidth), innerWidth))+" ")
+			continue
 		}
-		label := " " + choices[row.choiceIndex].label
-		lines = append(lines, " "+style.Render(pad(truncate(label, innerWidth), innerWidth))+" ")
+		lines = append(lines, " "+m.renderWorkspaceActionChoice(choices[row.choiceIndex], row.choiceIndex, innerWidth)+" ")
 	}
 	lines = append(lines, strings.Repeat(" ", panelWidth))
 	originX, originY := view.terminalOrigin()
@@ -527,7 +588,7 @@ func (m dashboard) workspaceActionIndexAtMouse(mouse tea.Mouse, width, height in
 		return 0, false
 	}
 	row := m.workspaceActionRows()[rowIndex]
-	if row.divider {
+	if !row.isChoice() {
 		return 0, false
 	}
 	return row.choiceIndex, true

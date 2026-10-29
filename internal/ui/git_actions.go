@@ -21,13 +21,27 @@ const (
 	gitFetchAction  = gitrepo.ActionFetch
 	gitPullAction   = gitrepo.ActionPull
 	gitPushAction   = gitrepo.ActionPush
+	gitSwitchAction = gitrepo.ActionSwitch
 )
 
+// gitActionChoices is the one list of what Git can do in a workspace. The
+// Git menu and the Git section of the workspace actions both draw it.
 var gitActionChoices = [...]gitAction{
 	gitStatusAction,
 	gitFetchAction,
 	gitPullAction,
 	gitPushAction,
+	gitSwitchAction,
+}
+
+// gitActionKeys are the letters that run each Git action in both menus. They
+// avoid j, k, g and G, which move the cursor in every list.
+var gitActionKeys = map[gitAction]string{
+	gitStatusAction: "s",
+	gitFetchAction:  "u",
+	gitPullAction:   "p",
+	gitPushAction:   "P",
+	gitSwitchAction: "b",
 }
 
 // gitActionDescription is what the actions modal says beside an action's name.
@@ -41,6 +55,8 @@ func gitActionDescription(action gitAction) string {
 		return "Fast-forward only"
 	case gitPushAction:
 		return "Push current branch"
+	case gitSwitchAction:
+		return "Change the checked-out branch"
 	default:
 		return ""
 	}
@@ -95,6 +111,16 @@ func (m dashboard) gitActionWorkspace() (navItem, bool) {
 func (m dashboard) startGitAction() (tea.Model, tea.Cmd) {
 	if m.gitRun.pending || m.gitRun.complete || m.gitRun.target.Path == "" {
 		return m, nil
+	}
+	if gitActionChoices[m.gitRun.index] == gitSwitchAction {
+		// A switch needs a branch, so it opens the picker rather than run.
+		target, ok := m.workspaceItem(m.gitRun.target.Path)
+		if !ok {
+			m.modal = noModal
+			m.setNotice(treeError, "selected workspace no longer exists")
+			return m, nil
+		}
+		return m.openBranchPicker(target)
 	}
 	m.gitRun.action = gitActionChoices[m.gitRun.index]
 	m.gitRun.pending = true
@@ -221,7 +247,7 @@ func (m dashboard) renderGitActionsModal(maximum, height int) []string {
 		labels := make([]string, len(gitActionChoices))
 		contentWidth := lipgloss.Width(target)
 		for index, action := range gitActionChoices {
-			labels[index] = pad(action.String(), gitActionLabelWidth) + gitActionDescription(action)
+			labels[index] = gitActionKeys[action] + "  " + pad(action.String(), gitActionLabelWidth) + gitActionDescription(action)
 			contentWidth = max(contentWidth, lipgloss.Width(labels[index])+2)
 		}
 		contentWidth = min(contentWidth, max(maximum-6, 0))
@@ -257,7 +283,7 @@ func (m dashboard) renderGitActionsModal(maximum, height int) []string {
 }
 
 // gitActionLabelWidth is the column the action descriptions line up in.
-const gitActionLabelWidth = 8
+const gitActionLabelWidth = 15
 
 // renderGitOutputLine colours what git printed: a status line's two letters,
 // the branch header, and a diffstat's run of + and -, so the result can be

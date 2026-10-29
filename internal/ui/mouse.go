@@ -134,6 +134,10 @@ func (m dashboard) handleModalMouse(message tea.MouseMsg) (tea.Model, tea.Cmd, b
 		if updated, command, handled := m.handleGitActionsMouse(message); handled {
 			return updated, command, true
 		}
+	case branchModal:
+		if updated, command, handled := m.handleBranchMouse(message); handled {
+			return updated, command, true
+		}
 	case configModal:
 		if updated, command, handled := m.handleConfigMouse(message); handled {
 			return updated, command, true
@@ -191,6 +195,10 @@ func (m dashboard) hoverTargetAt(mouse tea.Mouse) hoverTarget {
 		case configModal:
 			if index, ok := configIndexAtContentRow(row, height); ok {
 				return hoverTarget{kind: hoverConfigRow, index: index}
+			}
+		case branchModal:
+			if index, ok := m.branchIndexAtContentRow(row); ok {
+				return hoverTarget{kind: hoverBranchRow, index: index}
 			}
 		}
 		return hoverTarget{}

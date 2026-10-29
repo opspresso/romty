@@ -2552,7 +2552,7 @@ func TestDashboardReturnsToTheWorkspaceWhenTheLastTabExits(t *testing.T) {
 			value.focus, value.navIndex)
 	}
 	rendered := ansi.Strip(value.render())
-	if !strings.Contains(rendered, "Select + and press Enter") || value.View().Cursor != nil {
+	if !strings.Contains(rendered, "Press Enter to open a terminal here") || value.View().Cursor != nil {
 		t.Fatalf("the exited terminal is still on screen:\n%s", rendered)
 	}
 }

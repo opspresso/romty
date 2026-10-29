@@ -83,19 +83,21 @@ func TestWorkspaceActionsExposeEveryGitOperationDirectly(t *testing.T) {
 
 	popup, _, _ := value.workspaceActionPopup(100, 30)
 	plain := ansi.Strip(strings.Join(popup, "\n"))
-	for _, label := range []string{"All files", "File changes", "Git status", "Git fetch", "Git pull", "Git push", "Delete workspace"} {
+	for _, label := range []string{"FILES", "All files", "File changes", "GIT", "Status", "Fetch", "Pull", "Push", "Switch branch", "Delete workspace"} {
 		if !strings.Contains(plain, label) {
 			t.Fatalf("workspace actions do not contain %q:\n%s", label, plain)
 		}
 	}
+	// Sections are introduced by headings; only removal is set apart by a
+	// rule.
 	dividers := 0
 	for line := range strings.SplitSeq(plain, "\n") {
 		if strings.HasPrefix(strings.TrimSpace(line), "│─") {
 			dividers++
 		}
 	}
-	if dividers != 2 {
-		t.Fatalf("workspace action groups have no separators:\n%s", plain)
+	if dividers != 1 {
+		t.Fatalf("workspace actions have %d rules, want one before removal:\n%s", dividers, plain)
 	}
 }
 
@@ -104,7 +106,9 @@ func TestWorkspaceActionsRunAGitOperationAndReturnToThePalette(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, snapshot)
 	value.gitStates = map[string]gitrepo.State{workspace.Path: {Branch: "main"}}
 	value.setNavigation(1)
-	value, command := runWorkspaceAction(t, value, workspaceGitPullAction)
+	// The letter the palette shows beside Pull runs it.
+	send(&value, key(tea.KeyF8, ""))
+	command := send(&value, key('p', "p"))
 	if command == nil || value.modal != gitActionsModal || !value.gitRun.pending || value.gitRun.action != gitPullAction ||
 		value.gitRun.target.Path != workspace.Path {
 		t.Fatalf("Git pull = (command %v, modal %v, pending %v, action %v, target %q)",
@@ -217,12 +221,17 @@ func TestDashboardRightClickOpensActionsForThePointedWorkspace(t *testing.T) {
 	if left != 2 || top != 3 || len(popup) == 0 {
 		t.Fatalf("popup anchor = (%d, %d), want the click at (2, 3)", left, top)
 	}
+	// The first row is the TERMINAL heading, which takes no pointer.
 	send(&value, tea.MouseMotionMsg{X: left + 1, Y: top + 1})
+	if value.hover.kind == hoverWorkspaceAction {
+		t.Fatalf("heading hover = %#v, want none", value.hover)
+	}
+	send(&value, tea.MouseMotionMsg{X: left + 1, Y: top + 2})
 	if value.hover.kind != hoverWorkspaceAction || value.hover.index != 0 {
-		t.Fatalf("workspace action hover = %#v, want the first row", value.hover)
+		t.Fatalf("workspace action hover = %#v, want the first choice", value.hover)
 	}
 	command = send(&value, tea.MouseClickMsg{
-		X: left + 1, Y: top + 1, Button: tea.MouseLeft,
+		X: left + 1, Y: top + 2, Button: tea.MouseLeft,
 	})
 	if command == nil || value.modal != noModal {
 		t.Fatalf("first action click = (command %v, modal %v), want new tab", command, value.modal)
@@ -255,10 +264,10 @@ func TestWorkspaceActionsOverlayOnlyItsPopupRectangle(t *testing.T) {
 	send(&value, tea.MouseClickMsg{X: 2, Y: 3, Button: tea.MouseRight})
 
 	rendered := strings.Split(ansi.Strip(value.render()), "\n")
-	if !strings.Contains(rendered[0], "romty") || !strings.Contains(strings.Join(rendered, "\n"), "Select +") {
+	if !strings.Contains(rendered[0], "romty") || !strings.Contains(strings.Join(rendered, "\n"), "Press Enter to open a terminal here") {
 		t.Fatalf("context popup hid the dashboard behind it:\n%s", strings.Join(rendered, "\n"))
 	}
-	if !strings.Contains(rendered[3], "╭") || !strings.Contains(rendered[4], "New tab") {
+	if !strings.Contains(rendered[3], "╭") || !strings.Contains(rendered[4], "TERMINAL") || !strings.Contains(rendered[5], "New tab") {
 		t.Fatalf("context popup is not anchored at the click:\n%s", strings.Join(rendered, "\n"))
 	}
 	updated, _ := value.Update(tea.MouseClickMsg{X: 100, Y: 2, Button: tea.MouseLeft})
