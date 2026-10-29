@@ -207,7 +207,7 @@ func (m dashboard) hoverTargetAt(mouse tea.Mouse) hoverTarget {
 		return hoverTarget{}
 	}
 	if localX, ok := view.tabBarX(mouse); ok {
-		if hit, ok := tabHitAtX(m.visibleTabs(), localX, view.rightWidth); ok {
+		if hit, ok := tabHitAtX(m.visibleTabs(), m.tabIndex, localX, view.rightWidth); ok {
 			kind := hoverTab
 			if hit.close {
 				kind = hoverTabClose
@@ -328,7 +328,7 @@ func (m dashboard) handleDashboardMouse(message tea.MouseMsg) (tea.Model, tea.Cm
 	}
 	if localX, ok := view.tabBarX(mouse); ok {
 		tabs := m.visibleTabs()
-		hit, ok := tabHitAtX(tabs, localX, view.rightWidth)
+		hit, ok := tabHitAtX(tabs, m.tabIndex, localX, view.rightWidth)
 		if !ok {
 			return m, nil, true
 		}
@@ -398,10 +398,11 @@ type tabHit struct {
 	close bool
 }
 
-// tabHitAtX is the tab drawn at column x of a tab row width wide. It measures
-// the names as fitTabNames draws them, so a click lands on the tab under it.
-func tabHitAtX(tabs []model.Tab, x, width int) (tabHit, bool) {
-	tabs = fitTabNames(tabs, width)
+// tabHitAtX is the tab drawn at column x of a tab row width wide whose active
+// tab is active. It measures the names as fitTabNames draws them, so a click
+// lands on the tab under it.
+func tabHitAtX(tabs []model.Tab, active, x, width int) (tabHit, bool) {
+	tabs = fitTabNames(tabs, active, width)
 	position := 0
 	newTabWidth := lipgloss.Width(newTabLabel)
 	for index := 0; index <= len(tabs); index++ {

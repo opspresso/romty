@@ -99,7 +99,7 @@ func TestTabHitSeparatesTheLabelAndCloseButton(t *testing.T) {
 		{x: 10, index: 1},
 		{x: tabCloseLocalX(tabs, 1), index: 1, close: true},
 	} {
-		hit, ok := tabHitAtX(tabs, probe.x, 200)
+		hit, ok := tabHitAtX(tabs, 0, probe.x, 200)
 		if !ok || hit.index != probe.index || hit.close != probe.close {
 			t.Errorf("tabHitAtX(%d) = (%+v, %v), want index %d close=%v",
 				probe.x, hit, ok, probe.index, probe.close)

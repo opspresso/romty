@@ -182,7 +182,7 @@ Use `↑`/`↓` and `Enter`, or click a choice. Press `Esc` or click outside the
 
 Closing a tab from its `×` or from the workspace actions saves it to this list. A shell that exits on its own is not saved. `New tab`, `Ctrl`+`Shift`+`T`, and the `+` tab still create a tab directly.
 
-When you move the cursor to a workspace, the tab cursor goes to the tab you last opened there, so `Enter` returns to it. While the cursor is on a workspace other than the open one, the tab row shows that workspace's tabs above the open terminal, and the end of the row says `tabs of <workspace> · Enter opens`. When the tabs do not fit in the row, the longest names are shortened so every tab and the `+` tab stay visible.
+When you move the cursor to a workspace, the tab cursor goes to the tab you last opened there, so `Enter` returns to it. While the cursor is on a workspace other than the open one, the tab row shows that workspace's tabs above the open terminal, and the end of the row says `tabs of <workspace> · Enter opens`. When the tabs do not fit in the row, the names of the other tabs are shortened first and the active tab's name last, so every tab and the `+` tab stay visible. A row too narrow even for one-character names is cut at its end; `t` and `Ctrl`+`Shift`+`T` still open a new tab.
 
 Pane focus and scrollback toggles are reversible. In the terminal pane only Global and Switch shortcuts are captured. Other keyboard and paste input, including `F8`, `F9`, and ordinary `Ctrl` combinations, is forwarded to the PTY.
 

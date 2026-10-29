@@ -10,6 +10,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/opspresso/romty/internal/display"
 	"github.com/opspresso/romty/internal/model"
@@ -692,7 +693,10 @@ func (m dashboard) renderTerminal(width int) []string {
 	if len(tabs) == 0 {
 		return append(lines, m.styles.empty.Render("  Select + and press Enter to create a terminal"))
 	}
-	return append(lines, m.styles.empty.Render("  Select a tab and press Enter"))
+	if m.tabIndex < len(tabs) {
+		return append(lines, m.styles.empty.Render("  Press Enter to open "+display.Text(tabs[m.tabIndex].Name)))
+	}
+	return append(lines, m.styles.empty.Render("  Press Enter to open a new tab"))
 }
 
 // tabPreviewLabel names the workspace whose tabs the tab row shows when that
@@ -731,12 +735,13 @@ func tabLabelWidth(tab model.Tab) int {
 	return width
 }
 
-// fitTabNames shortens the longest tab names until every tab and the + slot
-// fit in width, so a crowded row still shows each tab and the way to open
-// another one. The names are for drawing and hit-testing only; the tabs
-// themselves keep their names. When even one-character names do not fit, the
-// row is cut at its end as before.
-func fitTabNames(tabs []model.Tab, width int) []model.Tab {
+// fitTabNames shortens tab names until every tab and the + slot fit in width,
+// so a crowded row still shows each tab and the way to open another one. The
+// other tabs give way before the active one, whose name says what is on
+// screen. The names are for drawing and hit-testing only; the tabs themselves
+// keep their names. When even one-character names do not fit, the row is cut
+// at its end.
+func fitTabNames(tabs []model.Tab, active, width int) []model.Tab {
 	rowWidth := func(tabs []model.Tab) int {
 		total := lipgloss.Width(newTabLabel)
 		for _, tab := range tabs {
@@ -752,19 +757,39 @@ func fitTabNames(tabs []model.Tab, width int) []model.Tab {
 		longest = max(longest, lipgloss.Width(display.Text(tab.Name)))
 	}
 	fitted := slices.Clone(tabs)
-	for limit := longest - 1; limit >= 1; limit-- {
-		for index, tab := range tabs {
-			fitted[index].Name = truncate(display.Text(tab.Name), limit)
+	shrink := func(includeActive bool) bool {
+		for limit := longest - 1; limit >= 1; limit-- {
+			for index, tab := range tabs {
+				if index != active || includeActive {
+					fitted[index].Name = shortenName(display.Text(tab.Name), limit)
+				}
+			}
+			if rowWidth(fitted) <= width {
+				return true
+			}
 		}
-		if rowWidth(fitted) <= width {
-			return fitted
-		}
+		return false
+	}
+	if !shrink(false) {
+		shrink(true)
 	}
 	return fitted
 }
 
+// shortenName cuts name to limit columns, ending in an ellipsis. At one column
+// it keeps the first character, which tells tabs apart where "…" would not.
+func shortenName(name string, limit int) string {
+	if lipgloss.Width(name) <= limit {
+		return name
+	}
+	if limit <= 1 {
+		return ansi.Truncate(name, 1, "")
+	}
+	return ansi.Truncate(name, limit, "…")
+}
+
 func renderTabBarWithHover(styles *uiStyles, tabs []model.Tab, active, hover, closeHover, animationFrame, width int) []string {
-	tabs = fitTabNames(tabs, width)
+	tabs = fitTabNames(tabs, active, width)
 	var tabsLine strings.Builder
 	var railLine strings.Builder
 	for index := 0; index <= len(tabs); index++ {

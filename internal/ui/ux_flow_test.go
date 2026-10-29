@@ -158,11 +158,11 @@ func TestCrowdedTabRowKeepsEveryTabAndTheNewTabSlot(t *testing.T) {
 	}
 	// Columns, not bytes: × before it is two bytes wide.
 	at := len([]rune(row[:strings.Index(row, "server")]))
-	if hit, ok := tabHitAtX(tabs, at, 50); !ok || hit.index != 1 {
+	if hit, ok := tabHitAtX(tabs, 0, at, 50); !ok || hit.index != 1 {
 		t.Fatalf("click on server = (%+v, %v), want tab 1", hit, ok)
 	}
 	plus := strings.LastIndex(row, "+")
-	if hit, ok := tabHitAtX(tabs, len([]rune(row[:plus])), 50); !ok || hit.index != len(tabs) {
+	if hit, ok := tabHitAtX(tabs, 0, len([]rune(row[:plus])), 50); !ok || hit.index != len(tabs) {
 		t.Fatalf("click on + = (%+v, %v), want the new-tab slot", hit, ok)
 	}
 }
@@ -218,5 +218,22 @@ func TestHelpSearchNarrowsTheReference(t *testing.T) {
 	typeText(&value, "zzz")
 	if body := ansi.Strip(strings.Join(value.helpEntries(), "\n")); !strings.Contains(body, "No shortcut matches zzz") {
 		t.Fatalf("an empty result does not say so:\n%s", body)
+	}
+}
+
+// The other tabs give way before the active one, and a one-column name keeps
+// its first character so the tabs stay distinguishable.
+func TestCrowdedTabRowKeepsTheActiveNameLongest(t *testing.T) {
+	tabs := []model.Tab{
+		{ID: "a", Name: "claude-refactor", Running: true},
+		{ID: "b", Name: "server", Running: true},
+		{ID: "c", Name: "tests-watch", Running: true},
+	}
+	fitted := fitTabNames(tabs, 1, 44)
+	if fitted[1].Name != "server" {
+		t.Fatalf("active name = %q, want it whole while others can shrink", fitted[1].Name)
+	}
+	if got := shortenName("server", 1); got != "s" {
+		t.Fatalf("one-column name = %q, want its first character", got)
 	}
 }
