@@ -273,91 +273,6 @@ func TestEnsureDaemonDoesNotFollowALogSymlink(t *testing.T) {
 	}
 }
 
-func TestOpenDaemonLogRotatesAtTheSizeLimit(t *testing.T) {
-	directory := testutil.ShortTempDir(t)
-	path := filepath.Join(directory, "daemon.log")
-	if err := os.WriteFile(path, []byte("full"), 0o600); err != nil {
-		t.Fatalf("WriteFile() error = %v", err)
-	}
-	testutil.Set(t, &maxDaemonLogBytes, 4)
-
-	file, err := openDaemonLog(path)
-	if err != nil {
-		t.Fatalf("openDaemonLog() error = %v", err)
-	}
-	if _, err := file.WriteString("new"); err != nil {
-		t.Fatalf("WriteString() error = %v", err)
-	}
-	if err := file.Close(); err != nil {
-		t.Fatalf("Close() error = %v", err)
-	}
-
-	archive, err := os.ReadFile(path + ".1")
-	if err != nil {
-		t.Fatalf("ReadFile() archive error = %v", err)
-	}
-	if string(archive) != "full" {
-		t.Fatalf("archive = %q, want %q", archive, "full")
-	}
-	current, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("ReadFile() current error = %v", err)
-	}
-	if string(current) != "new" {
-		t.Fatalf("current log = %q, want %q", current, "new")
-	}
-}
-
-func TestOpenDaemonLogKeepsOneArchive(t *testing.T) {
-	directory := testutil.ShortTempDir(t)
-	path := filepath.Join(directory, "daemon.log")
-	if err := os.WriteFile(path, []byte("current"), 0o600); err != nil {
-		t.Fatalf("WriteFile() current error = %v", err)
-	}
-	if err := os.WriteFile(path+".1", []byte("old"), 0o600); err != nil {
-		t.Fatalf("WriteFile() archive error = %v", err)
-	}
-	testutil.Set(t, &maxDaemonLogBytes, 1)
-
-	file, err := openDaemonLog(path)
-	if err != nil {
-		t.Fatalf("openDaemonLog() error = %v", err)
-	}
-	file.Close()
-
-	archive, err := os.ReadFile(path + ".1")
-	if err != nil {
-		t.Fatalf("ReadFile() archive error = %v", err)
-	}
-	if string(archive) != "current" {
-		t.Fatalf("archive = %q, want %q", archive, "current")
-	}
-}
-
-func TestOpenDaemonLogRejectsAHardLink(t *testing.T) {
-	directory := testutil.ShortTempDir(t)
-	target := filepath.Join(directory, "target")
-	if err := os.WriteFile(target, []byte("unchanged"), 0o600); err != nil {
-		t.Fatalf("WriteFile() error = %v", err)
-	}
-	path := filepath.Join(directory, "daemon.log")
-	if err := os.Link(target, path); err != nil {
-		t.Fatalf("Link() error = %v", err)
-	}
-
-	if file, err := openDaemonLog(path); err == nil {
-		file.Close()
-		t.Fatal("openDaemonLog() accepted a multiply linked file")
-	}
-	contents, err := os.ReadFile(target)
-	if err != nil {
-		t.Fatalf("ReadFile() error = %v", err)
-	}
-	if string(contents) != "unchanged" {
-		t.Fatalf("hard link target = %q, want unchanged", contents)
-	}
-}
-
 // runtimeFor points a romty home at an existing socket.
 func runtimeFor(socket string) paths.Paths {
 	directory := filepath.Dir(socket)
@@ -546,7 +461,8 @@ func TestClientSelectsTheHighestProtocolSharedWithAFutureDaemon(t *testing.T) {
 
 	selected := make(chan int, 1)
 	go func() {
-		if err := answerNegotiation(listener, 8, 5); err != nil {
+		// One revision past this client's, whatever this client's is.
+		if err := answerNegotiation(listener, protocol.Version+1, 5); err != nil {
 			return
 		}
 		connection, request, err := acceptRequest(listener)

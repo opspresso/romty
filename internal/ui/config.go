@@ -41,6 +41,10 @@ type Config struct {
 	// default because they reach the device the user is on.
 	MuteNotifications bool `json:"mute_notifications,omitempty"`
 	SoundOnWaiting    bool `json:"sound_on_waiting,omitempty"`
+	// AllowSleep lets the machine sleep while an agent works. The daemon
+	// reads it: by default it holds the machine awake while any agent is
+	// busy, because a sleeping machine stops the agent and drops SSH.
+	AllowSleep bool `json:"allow_sleep,omitempty"`
 	// GitDiffView is the diff layout, "inline" or "split".
 	GitDiffView string `json:"git_diff_view,omitempty"`
 	// LastWorkspacePath and LastTabID are the terminal romty reopens on start.
@@ -202,6 +206,13 @@ func configRows() []configRow {
 			hint:   "n",
 			keys:   []string{"n"},
 			action: dashboard.toggleNotifications,
+		},
+		{
+			name:   "Keep awake while agents work",
+			value:  func(m dashboard) string { return onOff(!m.config.AllowSleep) },
+			hint:   "w",
+			keys:   []string{"w"},
+			action: dashboard.toggleKeepAwake,
 		},
 		{
 			name:   "Sound on done",

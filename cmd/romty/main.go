@@ -36,6 +36,12 @@ func runCommandWithInput(arguments []string, output io.Writer, input io.Reader) 
 		runHookCommand(arguments[1], input)
 		return nil
 	}
+	if len(arguments) >= 1 && arguments[0] == "service" {
+		if len(arguments) > 2 {
+			return fmt.Errorf("usage: romty service [install|uninstall|status]")
+		}
+		return runService(arguments[1:], output, newCommandTheme(output))
+	}
 	if len(arguments) > 1 {
 		return fmt.Errorf("usage: romty <command>; run `romty help` for details")
 	}
@@ -91,6 +97,9 @@ func runCommandWithInput(arguments []string, output io.Writer, input io.Reader) 
 	if err := client.EnsureDaemon(runtime, executable); err != nil {
 		return err
 	}
+	// Point the shared agent link at this login's agent now, so tabs started
+	// in an earlier login reach it at once rather than at the next new tab.
+	client.LinkSSHAgent(runtime.Directory, os.Environ())
 	backend := client.New(runtime.Socket)
 	snapshot, err := backend.Snapshot()
 	if err != nil {
@@ -109,6 +118,8 @@ func runDaemon(runtime paths.Paths) error {
 	if err != nil {
 		return err
 	}
+	server.SetLogFile(runtime.Log)
+	server.SetConfigFile(runtime.Config)
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	if err := server.Serve(ctx); err != nil {

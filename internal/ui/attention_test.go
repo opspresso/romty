@@ -49,7 +49,7 @@ func TestAgentWaitingSendsADesktopNotification(t *testing.T) {
 	}})
 	messages := commandMessages(command)
 	got := notificationsIn(messages)
-	want := ansi.Notify("romty Codex: Needs your approval · alpha / 1")
+	want := ansi.Notify("romty Codex: Needs your approval · alpha / 1 · press a in romty")
 	if len(got) != 1 || got[0] != want {
 		t.Fatalf("notifications = %q, want %q", got, want)
 	}

@@ -113,9 +113,7 @@ func (s *Server) saveLocked(previous model.State) error {
 }
 
 func closeSessions(sessions []*session) {
-	for _, value := range sessions {
-		value.close()
-	}
+	closeSessionsTogether(sessions)
 }
 
 func (s *Server) removeWorkspace(rootID, path string) protocol.Response {

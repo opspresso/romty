@@ -21,6 +21,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/opspresso/romty/internal/agenthooks"
+	"github.com/opspresso/romty/internal/client"
 	"github.com/opspresso/romty/internal/gitrepo"
 	"github.com/opspresso/romty/internal/model"
 	"github.com/opspresso/romty/internal/sound"
@@ -47,6 +48,9 @@ type fakeBackend struct {
 	closedTabID            string
 	renamedTabID           string
 	renamedTabName         string
+	movedTabID             string
+	movedOffset            int
+	daemonInfo             client.DaemonInfo
 	addedPath              string
 	removedRootID          string
 	removedWorkspaceRootID string
@@ -213,6 +217,18 @@ func (f *fakeBackend) CreateTab(workspaceID string, columns, rows uint16) (model
 		}
 	}
 	return f.createdTab, nil
+}
+
+func (f *fakeBackend) MoveTab(tabID string, offset int) (model.Snapshot, error) {
+	f.movedTabID, f.movedOffset = tabID, offset
+	if err := f.failure("MoveTab"); err != nil {
+		return model.Snapshot{}, err
+	}
+	return f.snapshot, nil
+}
+
+func (f *fakeBackend) DaemonInfo() (client.DaemonInfo, error) {
+	return f.daemonInfo, f.failure("DaemonInfo")
 }
 
 func (f *fakeBackend) RenameTab(tabID, name string) (model.Snapshot, error) {
@@ -2003,7 +2019,7 @@ func TestDashboardClicksConfigControls(t *testing.T) {
 		t.Fatalf("mouse passthrough click = (enabled %v, save %v, cursor %d)",
 			value.config.MousePassthrough, save, value.configIndex)
 	}
-	soundCommand := send(&value, tea.MouseClickMsg{X: left + 2, Y: top + 5, Button: tea.MouseLeft})
+	soundCommand := send(&value, tea.MouseClickMsg{X: left + 2, Y: top + 6, Button: tea.MouseLeft})
 	if played := commandMessage[soundPlayedMsg](t, soundCommand); played.kind != sound.Done {
 		t.Fatalf("done sound click = %q, want done", played.kind)
 	}

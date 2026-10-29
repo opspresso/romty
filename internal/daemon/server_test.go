@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"syscall"
@@ -22,6 +23,7 @@ import (
 	"github.com/opspresso/romty/internal/protocol"
 	"github.com/opspresso/romty/internal/state"
 	"github.com/opspresso/romty/internal/testutil"
+	"github.com/opspresso/romty/internal/version"
 )
 
 func TestServeRecoversRemovedSocketWithoutLosingSession(t *testing.T) {
@@ -1397,5 +1399,44 @@ func TestRenameTabChangesOnlyTheName(t *testing.T) {
 	}
 	if name := snapshot.Roots[0].Directories[0].Tabs[0].Name; name != "server" {
 		t.Fatalf("name after rejected renames = %q, want server", name)
+	}
+}
+
+// move_tab reorders a workspace's tabs, stops at either end, and keeps the
+// order in the state file; ping reports the daemon's build.
+func TestMoveTabReordersAWorkspacesTabs(t *testing.T) {
+	socket := startDaemon(t).socket
+	root := t.TempDir()
+	workspacePath := filepath.Join(root, "alpha")
+	if err := os.Mkdir(workspacePath, 0o755); err != nil {
+		t.Fatalf("Mkdir() error = %v", err)
+	}
+	backend := client.New(socket)
+	testutil.WaitForDaemon(t, backend)
+	_, workspace := openWorkspace(t, backend, root, workspacePath)
+	first := createTab(t, backend, workspace)
+	second := createTab(t, backend, workspace)
+	third := createTab(t, backend, workspace)
+	order := func(snapshot model.Snapshot) []string {
+		var names []string
+		for tab := range snapshot.Tabs() {
+			names = append(names, tab.ID)
+		}
+		return names
+	}
+	snapshot, err := backend.MoveTab(third.ID, -1)
+	if err != nil {
+		t.Fatalf("MoveTab() error = %v", err)
+	}
+	if got := order(snapshot); !slices.Equal(got, []string{first.ID, third.ID, second.ID}) {
+		t.Fatalf("order after moving the third left = %v", got)
+	}
+	snapshot, err = backend.MoveTab(first.ID, -5)
+	if err != nil || !slices.Equal(order(snapshot), []string{first.ID, third.ID, second.ID}) {
+		t.Fatalf("moving the first past the start = (%v, %v), want no change", order(snapshot), err)
+	}
+	info, err := backend.DaemonInfo()
+	if err != nil || info.Version != version.String() {
+		t.Fatalf("DaemonInfo() = (%+v, %v), want this build", info, err)
 	}
 }

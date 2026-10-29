@@ -89,6 +89,21 @@ type Server struct {
 	transcripts *transcript.Reader
 	codex       codexStatusReader
 	codexErrors map[string]string
+
+	// statusMu makes concurrent status requests share one scan: each runs
+	// ps over the whole process table and reads Codex and transcript files,
+	// and every open TUI asks every two seconds. statusCache is the last
+	// result and statusAt when it was taken; an agent event or a tab change
+	// clears statusAt, so a change is never hidden by the cache.
+	statusMu    sync.Mutex
+	statusCache map[string]model.AgentStatus
+	statusAt    time.Time
+
+	// logPath is daemon.log, which housekeeping rotates while the daemon
+	// runs; configPath is config.json, where the keep-awake setting lives.
+	logPath    string
+	configPath string
+	awake      *awakeHold
 }
 
 func New(socket, statePath, shell string) (*Server, error) {
@@ -121,6 +136,7 @@ func New(socket, statePath, shell string) (*Server, error) {
 		attachments:   make(chan struct{}, maxTerminalAttachments),
 		transcripts:   transcript.NewReader(),
 		codex:         codexstate.NewReader(),
+		awake:         &awakeHold{},
 	}, nil
 }
 
@@ -178,6 +194,7 @@ func (s *Server) Serve(ctx context.Context) error {
 	listener.logger = s.logger
 	defer s.shutdown()
 	defer listener.Close()
+	go s.housekeep()
 	s.logger.Printf("listening on %s", s.socket)
 	defer s.logger.Printf("stopped")
 
@@ -452,6 +469,69 @@ func (s *Server) renameTab(tabID, name string) protocol.Response {
 	return s.snapshotResponse()
 }
 
+// moveTab moves a tab offset places among the tabs of its workspace, stopping
+// at either end. The order is the tab row's order, and the state file keeps it.
+func (s *Server) moveTab(tabID string, offset int) protocol.Response {
+	if tabID == "" {
+		return protocol.Response{Error: "tab is required"}
+	}
+	finish, ok := s.beginMutation()
+	if !ok {
+		return protocol.Response{Error: errShuttingDown}
+	}
+	s.mu.Lock()
+	index := slices.IndexFunc(s.value.Tabs, func(tab model.Tab) bool { return tab.ID == tabID })
+	if index < 0 {
+		s.mu.Unlock()
+		finish()
+		return protocol.Response{Error: errNoSession}
+	}
+	workspaceID := s.value.Tabs[index].WorkspaceID
+	// The positions of this workspace's tabs in the shared list, in order.
+	positions := make([]int, 0)
+	for position, tab := range s.value.Tabs {
+		if tab.WorkspaceID == workspaceID {
+			positions = append(positions, position)
+		}
+	}
+	at := slices.Index(positions, index)
+	target := min(max(at+offset, 0), len(positions)-1)
+	if target != at {
+		previous := cloneState(s.value)
+		moved := s.value.Tabs[index]
+		ordered := make([]model.Tab, 0, len(positions))
+		for _, position := range positions {
+			if position != index {
+				ordered = append(ordered, s.value.Tabs[position])
+			}
+		}
+		ordered = slices.Insert(ordered, target, moved)
+		for slot, position := range positions {
+			s.value.Tabs[position] = ordered[slot]
+		}
+		if err := s.saveLocked(previous); err != nil {
+			s.mu.Unlock()
+			finish()
+			return protocol.Response{Error: err.Error()}
+		}
+	}
+	s.mu.Unlock()
+	finish()
+	return s.snapshotResponse()
+}
+
+// recordingBytes is what the daemon holds of every tab's recent output.
+func (s *Server) recordingBytes() int64 {
+	s.mu.Lock()
+	sessions := s.sessionsLocked()
+	s.mu.Unlock()
+	var total int64
+	for _, value := range sessions {
+		total += int64(value.recordingCapacity())
+	}
+	return total
+}
+
 func validateTabName(name string) error {
 	if name == "" {
 		return errors.New("tab name is required")
@@ -471,7 +551,35 @@ func (s *Server) agents() map[string]model.Agent {
 	return s.scanAgents(sessions)
 }
 
+// agentStatusCacheTTL is how long one status scan answers every request.
+// It is shorter than the TUI's two-second poll, so one client always sees a
+// fresh scan, and several clients share it.
+var agentStatusCacheTTL = time.Second
+
+// agentStatusesSnapshot is the agent status of every tab, from a scan no
+// older than agentStatusCacheTTL.
 func (s *Server) agentStatusesSnapshot() map[string]model.AgentStatus {
+	s.statusMu.Lock()
+	defer s.statusMu.Unlock()
+	if s.statusCache != nil && time.Since(s.statusAt) < agentStatusCacheTTL {
+		return maps.Clone(s.statusCache)
+	}
+	result := s.scanAgentStatuses()
+	s.statusCache, s.statusAt = result, time.Now()
+	if s.awake != nil {
+		s.updateAwakeFrom(result)
+	}
+	return maps.Clone(result)
+}
+
+// invalidateAgentStatuses makes the next status request scan again.
+func (s *Server) invalidateAgentStatuses() {
+	s.statusMu.Lock()
+	s.statusAt = time.Time{}
+	s.statusMu.Unlock()
+}
+
+func (s *Server) scanAgentStatuses() map[string]model.AgentStatus {
 	s.mu.Lock()
 	sessions := s.sessionsLocked()
 	s.mu.Unlock()

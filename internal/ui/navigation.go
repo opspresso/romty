@@ -5,6 +5,7 @@ package ui
 
 import (
 	"slices"
+	"strings"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -142,6 +143,56 @@ func (m *dashboard) moveTab(delta int) {
 	}
 	count := len(m.navigationTabs()) + 1
 	m.tabIndex = (m.tabIndex + delta + count) % count
+}
+
+// moveSelectedTab moves the tab under the tab cursor delta places along the
+// row on screen, and the cursor moves with it. The new-tab slot is not a tab
+// and does not move.
+//
+// One move is out at a time: the row on screen is the order before the move
+// until the daemon answers, and a second move chosen from it would pick the
+// wrong tab. The cursor is put back on the moved tab by its ID from the
+// answer, or left where it was when the move failed.
+func (m dashboard) moveSelectedTab(delta int) (tea.Model, tea.Cmd) {
+	if m.modal != noModal || m.tabMovePending {
+		return m, nil
+	}
+	tabs := m.visibleTabs()
+	if m.tabIndex < 0 || m.tabIndex >= len(tabs) {
+		return m, nil
+	}
+	if target := min(max(m.tabIndex+delta, 0), len(tabs)-1); target == m.tabIndex {
+		return m, nil
+	}
+	tabID, backend := tabs[m.tabIndex].ID, m.backend
+	m.tabMovePending = true
+	return m, func() tea.Msg {
+		snapshot, err := backend.MoveTab(tabID, delta)
+		return tabMovedMsg{tabID: tabID, snapshot: snapshot, err: err}
+	}
+}
+
+// tabMovedMsg is the daemon's answer to a tab move.
+type tabMovedMsg struct {
+	tabID    string
+	snapshot model.Snapshot
+	err      error
+}
+
+func (m dashboard) handleTabMoved(message tabMovedMsg) (tea.Model, tea.Cmd) {
+	m.tabMovePending = false
+	if message.err != nil {
+		if !m.noteDaemonError(message.err) {
+			m.setError(terminalError, message.err.Error())
+		}
+		return m, nil
+	}
+	m.snapshotOrder++
+	m.applySnapshot(m.snapshotOrder, message.snapshot)
+	if index := slices.IndexFunc(m.visibleTabs(), func(tab model.Tab) bool { return tab.ID == message.tabID }); index >= 0 {
+		m.tabIndex = index
+	}
+	return m, nil
 }
 
 func (m dashboard) newTab() (tea.Model, tea.Cmd) {
@@ -512,9 +563,109 @@ func (m *dashboard) rememberSelection(tabID string) bool {
 // of the roots that are not collapsed. The cursor, the viewport and the mouse
 // all count rows in it.
 func (m dashboard) navigationItems() []navItem {
+	if m.treeQuery != "" {
+		return m.filteredItems()
+	}
 	return slices.DeleteFunc(m.workspaceItems(), func(item navItem) bool {
 		return item.collapsed && !item.isRoot
 	})
+}
+
+// filteredItems is the tree narrowed to the workspaces whose name contains
+// the filter, ignoring case, under their roots. A collapsed root does not
+// hide a match: finding a workspace is the reason to filter. A root whose own
+// name matches is kept even when none of its workspaces do.
+func (m dashboard) filteredItems() []navItem {
+	query := strings.ToLower(m.treeQuery)
+	matches := func(item navItem) bool {
+		return strings.Contains(strings.ToLower(item.workspace.Name), query)
+	}
+	result := make([]navItem, 0)
+	all := m.workspaceItems()
+	for index := 0; index < len(all); {
+		root := all[index]
+		end := index + 1
+		for end < len(all) && !all[end].isRoot {
+			end++
+		}
+		children := make([]navItem, 0)
+		for _, child := range all[index+1 : end] {
+			if matches(child) {
+				child.collapsed = false
+				children = append(children, child)
+			}
+		}
+		if len(children) > 0 || matches(root) {
+			root.separator = len(result) > 0
+			result = append(result, root)
+			result = append(result, children...)
+		}
+		index = end
+	}
+	return result
+}
+
+// handleTreeFilterKey edits the tree filter while / has the keyboard. The
+// arrows walk what matches, Enter opens it and ends the filter, and Esc ends
+// the filter where the cursor is.
+func (m dashboard) handleTreeFilterKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	switch message.String() {
+	case "ctrl+c":
+		return m.quit()
+	case "esc":
+		m.endTreeFilter()
+	case "tab":
+		// Leaving the pane leaves the filter, so the tree is whole when the
+		// keyboard comes back.
+		m.endTreeFilter()
+		m.focusTerminal()
+	case "up":
+		m.moveNavigation(-1)
+	case "down":
+		m.moveNavigation(1)
+	case "enter":
+		item, ok := m.navigationItem()
+		m.endTreeFilter()
+		if !ok {
+			return m, nil
+		}
+		save := m.revealWorkspace(item.workspace.Path)
+		updated, command := m.activateWorkspace()
+		return updated, tea.Batch(save, command)
+	default:
+		query := editText(m.treeQuery, message)
+		if query == m.treeQuery {
+			return m, nil
+		}
+		m.treeQuery = query
+		m.navOffset = 0
+		m.cursorToFirstMatch()
+	}
+	return m, nil
+}
+
+// cursorToFirstMatch puts the cursor on the first workspace the filter keeps,
+// or on the first row when only roots match.
+func (m *dashboard) cursorToFirstMatch() {
+	items := m.navigationItems()
+	index := slices.IndexFunc(items, func(item navItem) bool { return !item.isRoot })
+	if index < 0 {
+		index = 0
+	}
+	if len(items) > 0 {
+		m.setNavigation(index)
+		m.syncTabCursor(runningTabs(items[index].tabs))
+	}
+}
+
+// endTreeFilter shows the whole tree again with the cursor where it was.
+func (m *dashboard) endTreeFilter() {
+	path := m.cursorPath
+	m.treeFiltering, m.treeQuery = false, ""
+	if path != "" {
+		m.placeCursor(path)
+	}
+	m.ensureWorkspaceCursor()
 }
 
 // workspaceItems is the whole tree, the workspaces of collapsed roots

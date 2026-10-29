@@ -193,7 +193,7 @@ func (m dashboard) hoverTargetAt(mouse tea.Mouse) hoverTarget {
 				return hoverTarget{kind: hoverGitAction, index: row - gitActionHeaderRows}
 			}
 		case configModal:
-			if index, ok := configIndexAtContentRow(row, height); ok {
+			if index, ok := m.configIndexAtContentRow(row, height); ok {
 				return hoverTarget{kind: hoverConfigRow, index: index}
 			}
 		case branchModal:
@@ -232,7 +232,7 @@ func (m dashboard) handleConfigMouse(message tea.MouseMsg) (tea.Model, tea.Cmd, 
 		return m, nil, false
 	}
 	_, height := m.bodySize()
-	index, setting := configIndexAtContentRow(row, height)
+	index, setting := m.configIndexAtContentRow(row, height)
 	if wheel, ok := message.(tea.MouseWheelMsg); ok && setting && index == 0 {
 		switch wheel.Button {
 		case tea.MouseWheelUp:
@@ -260,9 +260,10 @@ func (m dashboard) handleConfigMouse(message tea.MouseMsg) (tea.Model, tea.Cmd, 
 	return m, nil, true
 }
 
-func configIndexAtContentRow(row, height int) (int, bool) {
-	index := row - configContentOffset(height)
-	return index, index >= 0 && index < len(configRows())
+func (m dashboard) configIndexAtContentRow(row, height int) (int, bool) {
+	start, end := m.configWindow(height)
+	index := start + row - configContentOffset(height)
+	return index, index >= start && index < end
 }
 
 // modalContentRowAt answers the same question for the modal that is open now,

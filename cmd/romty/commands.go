@@ -41,6 +41,7 @@ var commands = []command{
 	{name: "doctor", description: "Check the local romty environment"},
 	{name: "hooks", description: "Install or update agent status hooks"},
 	{name: "list", description: "List roots, workspaces, and sessions"},
+	{name: "service", description: "Start the daemon at login: install, uninstall, or status"},
 	{name: "stop", description: "Stop the daemon and all running sessions", destructive: true},
 }
 
@@ -191,6 +192,11 @@ func fieldLine(theme commandTheme, label, value string) string {
 	return theme.label(padded) + " " + value + "\n"
 }
 
+// formatMiB writes a byte count in mebibytes with one decimal.
+func formatMiB(bytes int64) string {
+	return fmt.Sprintf("%.1f MiB", float64(bytes)/(1<<20))
+}
+
 // printStoppedDaemon reports a stopped daemon and the command that starts it,
 // so the report is not a dead end. These commands never start it themselves:
 // they are read-only.
@@ -236,14 +242,24 @@ func printStatus(output io.Writer, runtime paths.Paths, theme commandTheme) erro
 	if err != nil {
 		return fmt.Errorf("read daemon status: %w", err)
 	}
+	info, err := backend.DaemonInfo()
+	if err != nil {
+		return fmt.Errorf("inspect daemon: %w", err)
+	}
 	summary := summarizeSnapshot(snapshot)
+	daemonBuild := theme.good(info.Version)
+	if info.Version != version.String() {
+		daemonBuild = theme.warning(client.DaemonBuildLabel(info.Version))
+	}
 	fields := []struct {
 		label string
 		value string
 	}{
 		{label: "daemon", value: theme.good("running")},
 		{label: "version", value: version.String()},
+		{label: "build", value: daemonBuild},
 		{label: "protocol", value: fmt.Sprint(daemonProtocol)},
+		{label: "recordings", value: formatMiB(info.RecordingBytes)},
 		{label: "roots", value: fmt.Sprint(summary.roots)},
 		{label: "workspaces", value: fmt.Sprint(summary.workspaces)},
 		{label: "sessions", value: fmt.Sprintf("%d (claude: %d, codex: %d, opencode: %d, kiro: %d, shell: %d)",
@@ -253,6 +269,9 @@ func printStatus(output io.Writer, runtime paths.Paths, theme commandTheme) erro
 		if err := printField(output, theme, field.label, field.value); err != nil {
 			return err
 		}
+	}
+	if info.Version != version.String() {
+		return printField(output, theme, "next", client.DaemonRestartAdvice)
 	}
 	return nil
 }

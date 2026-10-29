@@ -331,15 +331,19 @@ func (m dashboard) renderStatus(width, bodyHeight int) []string {
 	switch {
 	case m.daemonRestarting:
 		status = m.renderActivityStatus("STARTING", "romty daemon", width)
-	case m.daemonDown:
-		// Every other failure while the daemon is gone is a consequence of
-		// it, so the way back stays on screen whatever else was reported.
+	case m.daemonDown && (m.errorFrom == daemonError || m.errorMessage == ""):
+		// The way back while the daemon is gone. Another failure reported
+		// meanwhile takes the status bar below, and the rail keeps naming
+		// the daemon, so neither hides the other.
 		message := daemonStoppedMessage
 		if m.errorFrom == daemonError && m.errorMessage != "" {
 			message = m.errorMessage
 		}
 		status = truncate(m.styles.errorLabel.Render(" DAEMON ")+" "+m.styles.errorText.Render(display.Text(message)), width)
 	case m.errorMessage != "":
+		if m.daemonDown {
+			rail = renderShortcutRailNote(m.styles, width, m.railNote())
+		}
 		label, text, title := m.styles.errorLabel, m.styles.errorText, " ERROR "
 		if m.noticeMessage {
 			label, text, title = m.styles.noticeLabel, m.styles.noticeText, " NOTE "
@@ -458,6 +462,15 @@ func (m dashboard) renderStatus(width, bodyHeight int) []string {
 			shortcut{key: "Esc", description: "close"},
 		)
 		status = renderShortcuts(m.styles, width, shortcuts...)
+	case m.treeFiltering && m.focus == leftPane:
+		status = truncate(
+			m.styles.promptLabel.Render(" FIND ")+" "+
+				m.styles.promptText.Render(display.Text(m.treeQuery))+
+				m.styles.dividerActive.Render("█")+"  "+
+				renderShortcuts(m.styles, width, shortcut{key: "↑/↓", description: "select"},
+					shortcut{key: "Enter", description: "open"}, shortcut{key: "Esc", description: "clear"}),
+			width,
+		)
 	case m.scrollback && m.search.typing:
 		status = truncate(
 			m.styles.promptLabel.Render(" FIND ")+" "+
@@ -569,6 +582,9 @@ func (m dashboard) renderNavigation(width, height int) []string {
 	if m.hostname != "" {
 		title += "· " + display.Text(m.hostname) + " "
 	}
+	if m.keepingAwake() {
+		title += "☕ "
+	}
 	lines := []string{m.paneHeaderBadge(titleStyle, title, m.attention().summary(), width), ""}
 	items := m.navigationItems()
 	// A collapsed root stands in for the open workspace it hides.
@@ -587,7 +603,9 @@ func (m dashboard) renderNavigation(width, height int) []string {
 		remaining := max(height-len(lines), 0)
 		lines = append(lines, itemLines[:min(len(itemLines), remaining)]...)
 	}
-	if len(items) == 0 {
+	if len(items) == 0 && m.treeQuery != "" {
+		lines = append(lines, m.styles.empty.Render("  No workspace matches"))
+	} else if len(items) == 0 {
 		lines = append(lines,
 			m.styles.empty.Render("  No roots"),
 			m.styles.empty.Render("  Press F2 to add one"),

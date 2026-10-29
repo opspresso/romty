@@ -4,6 +4,7 @@
 package ui
 
 import (
+	"fmt"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -329,7 +330,7 @@ func (m dashboard) renderModalBody(width, height int) []string {
 		return m.withModalActions(modalBoxFit(m.styles, minimumModalWidth, modalWidth, "Close tab",
 			m.styles.modalStrong.Render("Close "+display.Text(m.closeTabTarget.Name)+"?"),
 			"",
-			m.styles.errorText.Render("Its running shell will be terminated."),
+			m.styles.errorText.Render(closeTabConsequence(m.closeTabTarget)),
 		))
 	}
 	if m.modal == shutdownModal {
@@ -377,6 +378,9 @@ func (m dashboard) renderModalBody(width, height int) []string {
 	if m.newerRelease != "" {
 		lines = append(lines, "", m.styles.navigationCurrent.Render("↑ "+display.Text(m.newerRelease)+" is available"))
 	}
+	if m.daemonOutdated {
+		lines = append(lines, "", m.styles.navigationCurrent.Render(display.Text(m.daemonUpdateNote())))
+	}
 	return modalBoxFit(m.styles, minimumModalWidth, modalWidth, "About", lines...)
 }
 
@@ -411,20 +415,38 @@ func (m dashboard) renderConfigModal(maximum, height int) []string {
 	if padded {
 		lines = append(lines, "")
 	}
-	for index, row := range rows {
-		lines = append(lines, m.renderConfigRow(row, index, nameWidth, valueWidth, hintWidth, rowWidth))
+	start, end := m.configWindow(height)
+	for index := start; index < end; index++ {
+		lines = append(lines, m.renderConfigRow(rows[index], index, nameWidth, valueWidth, hintWidth, rowWidth))
 	}
 	if padded {
 		lines = append(lines, "")
 	}
-	return modalBoxFit(m.styles, m.configFloorWidth(maximum), maximum, "Config", lines...)
+	title := "Config"
+	if end-start < len(rows) {
+		title = fmt.Sprintf("Config %d-%d/%d", start+1, end, len(rows))
+	}
+	return modalBoxFit(m.styles, m.configFloorWidth(maximum), maximum, title, lines...)
+}
+
+// configWindow is the settings on screen. A screen too short for all of them
+// shows the ones around the cursor, so adding a setting never pushes the box
+// past the shortest screen romty supports.
+func (m dashboard) configWindow(height int) (int, int) {
+	count := len(configRows())
+	capacity := max(modalCapacity(height)-2*configContentOffset(height), 1)
+	if count <= capacity {
+		return 0, count
+	}
+	start := min(max(m.configIndex-capacity+1, 0), count-capacity)
+	return start, start + capacity
 }
 
 // configContentOffset is the number of blank rows before the first setting.
 // Pointer handling uses the same offset as rendering so a click runs the row
 // it is visibly on.
 func configContentOffset(height int) int {
-	if height >= len(configRows())+4 {
+	if modalCapacity(height) >= len(configRows())+2 {
 		return 1
 	}
 	return 0
@@ -517,6 +539,22 @@ func (m dashboard) modalActions() []modalAction {
 		return answerActions(m.input.kind.submit(), "cancel")
 	}
 	return nil
+}
+
+// closeTabConsequence says what closing a tab ends: the agent and what it is
+// doing when one runs there, which is the work a stray Enter would lose.
+func closeTabConsequence(tab model.Tab) string {
+	name := agentDisplayNames[tab.Agent]
+	switch {
+	case name == "":
+		return "Its shell and everything running in it will end."
+	case tab.Agent == model.AgentNode:
+		return name + " runs in it and will stop."
+	case tab.AgentPhase.Busy():
+		return name + " is working in it (" + agentPhaseLabels[tab.AgentPhase] + ") and will stop."
+	default:
+		return name + " runs in it (" + agentPhaseLabels[tab.AgentPhase] + ") and will stop."
+	}
 }
 
 // removeConfirmed reports whether the removal dialog may proceed: always for

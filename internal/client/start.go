@@ -1,18 +1,17 @@
 package client
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"os/exec"
+	goruntime "runtime"
 	"syscall"
 	"time"
 
+	"github.com/opspresso/romty/internal/logfile"
 	"github.com/opspresso/romty/internal/paths"
+	"github.com/opspresso/romty/internal/service"
 )
-
-// maxDaemonLogBytes is a variable so rotation tests need not create a multi-megabyte file.
-var maxDaemonLogBytes int64 = 3 << 20
 
 var daemonStartTimeout = 3 * time.Second
 
@@ -37,8 +36,20 @@ func EnsureDaemon(runtime paths.Paths, executable string) error {
 		return err
 	}
 	if !held {
-		if err := startDaemon(runtime, executable); err != nil {
+		// The login service starts the daemon when one is installed, so the
+		// daemon is the service's rather than a child of this login.
+		home, homeErr := os.UserHomeDir()
+		installed, err := false, error(nil)
+		if homeErr == nil {
+			installed, err = service.Start(goruntime.GOOS, home)
+		}
+		if err != nil {
 			return err
+		}
+		if !installed {
+			if err := startDaemon(runtime, executable); err != nil {
+				return err
+			}
 		}
 	}
 	// A daemon with a missing socket repairs its own listener. Starting a
@@ -63,7 +74,7 @@ func EnsureDaemon(runtime paths.Paths, executable string) error {
 }
 
 func startDaemon(runtime paths.Paths, executable string) error {
-	logFile, err := openDaemonLog(runtime.Log)
+	logFile, err := logfile.Open(runtime.Log)
 	if err != nil {
 		return fmt.Errorf("open daemon log: %w", err)
 	}
@@ -87,54 +98,4 @@ func startDaemon(runtime paths.Paths, executable string) error {
 	}
 
 	return nil
-}
-
-func openDaemonLog(path string) (*os.File, error) {
-	file, info, err := openPrivateLog(path)
-	if err != nil {
-		return nil, err
-	}
-	if info.Size() < maxDaemonLogBytes {
-		return file, nil
-	}
-	if err := file.Close(); err != nil {
-		return nil, err
-	}
-	archive := path + ".1"
-	if err := os.Remove(archive); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return nil, fmt.Errorf("remove archived daemon log: %w", err)
-	}
-	if err := os.Rename(path, archive); err != nil {
-		return nil, fmt.Errorf("archive daemon log: %w", err)
-	}
-	file, _, err = openPrivateLog(path)
-	return file, err
-}
-
-func openPrivateLog(path string) (*os.File, os.FileInfo, error) {
-	fd, err := syscall.Open(path, syscall.O_CREAT|syscall.O_APPEND|syscall.O_WRONLY|
-		syscall.O_CLOEXEC|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0o600)
-	if err != nil {
-		return nil, nil, err
-	}
-	file := os.NewFile(uintptr(fd), path)
-	info, err := file.Stat()
-	if err != nil {
-		file.Close()
-		return nil, nil, err
-	}
-	stat, ok := info.Sys().(*syscall.Stat_t)
-	if !info.Mode().IsRegular() || !ok || stat.Uid != uint32(os.Geteuid()) || stat.Nlink != 1 {
-		file.Close()
-		return nil, nil, fmt.Errorf("daemon log must be a regular file owned only by the current user")
-	}
-	if err := file.Chmod(0o600); err != nil {
-		file.Close()
-		return nil, nil, err
-	}
-	if err := syscall.SetNonblock(fd, false); err != nil {
-		file.Close()
-		return nil, nil, err
-	}
-	return file, info, nil
 }

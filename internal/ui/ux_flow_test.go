@@ -1,7 +1,9 @@
 package ui
 
 import (
+	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -456,5 +458,188 @@ func TestHeldHookOfferWaitsForTheModalToClose(t *testing.T) {
 	send(&value, key(tea.KeyEscape, ""))
 	if value.modal != hookInstallModal {
 		t.Fatalf("after Help closed modal = %v, want the hook offer", value.modal)
+	}
+}
+
+// Config scrolls when a short screen cannot hold every setting, and a click
+// runs the setting drawn under it.
+func TestConfigScrollsOnAShortScreen(t *testing.T) {
+	value := newDashboard(&fakeBackend{}, model.Snapshot{})
+	value.width, value.height = 100, 10
+	send(&value, key(tea.KeyF3, ""))
+	for range len(configRows()) {
+		send(&value, key(tea.KeyDown, ""))
+	}
+	screen := ansi.Strip(value.render())
+	if !strings.Contains(screen, "╰") || !strings.Contains(screen, "Sound on waiting") || !strings.Contains(screen, "Config ") {
+		t.Fatalf("short Config lost its edge or its last row:\n%s", screen)
+	}
+	start, end := value.configWindow(value.dimensions().bodyHeight)
+	if start == 0 || end != len(configRows()) {
+		t.Fatalf("window = %d-%d, want it scrolled to the end", start, end)
+	}
+	index, ok := value.configIndexAtContentRow(end-start-1, value.dimensions().bodyHeight)
+	if !ok || index != end-1 {
+		t.Fatalf("last drawn row maps to %d (%v), want %d", index, ok, end-1)
+	}
+}
+
+func TestKeepAwakeIsASetting(t *testing.T) {
+	value := newDashboard(&fakeBackend{}, model.Snapshot{})
+	send(&value, key(tea.KeyF3, ""))
+	if command := send(&value, key('w', "w")); !value.config.AllowSleep || command == nil {
+		t.Fatal("w did not turn keeping awake off and save it")
+	}
+}
+
+// The close confirmation names the agent and what it is doing.
+func TestCloseTabSaysWhatStops(t *testing.T) {
+	for _, probe := range []struct {
+		tab  model.Tab
+		want string
+	}{
+		{model.Tab{Agent: model.AgentClaude, AgentPhase: model.AgentPhaseWorking}, "Claude Code is working in it (Working) and will stop."},
+		{model.Tab{Agent: model.AgentCodex, AgentPhase: model.AgentPhaseWaitingInput}, "Codex runs in it (Needs your answer) and will stop."},
+		{model.Tab{Agent: model.AgentNode}, "Node.js runs in it and will stop."},
+		{model.Tab{}, "Its shell and everything running in it will end."},
+	} {
+		if got := closeTabConsequence(probe.tab); got != probe.want {
+			t.Fatalf("consequence = %q, want %q", got, probe.want)
+		}
+	}
+}
+
+// a opens the agent the last notification named before walking the others.
+func TestJumpOpensTheNotifiedAgentFirst(t *testing.T) {
+	value := newDashboard(&fakeBackend{}, attentionSnapshot(model.AgentPhaseWorking, model.AgentPhaseWorking))
+	value.agentSoundReady = true
+	value.focus = leftPane
+	// Both start waiting, then only the second is reported again later.
+	send(&value, agentSnapshotMsg{value: map[string]model.AgentStatus{
+		"tab-1": {Agent: model.AgentCodex, Phase: model.AgentPhaseWaitingInput},
+		"tab-2": {Agent: model.AgentCodex, Phase: model.AgentPhaseWorking},
+	}})
+	send(&value, agentSnapshotMsg{value: map[string]model.AgentStatus{
+		"tab-1": {Agent: model.AgentCodex, Phase: model.AgentPhaseWaitingInput},
+		"tab-2": {Agent: model.AgentCodex, Phase: model.AgentPhaseWaitingApproval},
+	}})
+	if value.lastAlertTab != "tab-2" {
+		t.Fatalf("last alerted = %q, want tab-2", value.lastAlertTab)
+	}
+	send(&value, key('a', "a"))
+	if value.tabIndex != 1 {
+		t.Fatalf("a selected tab %d, want the notified second tab", value.tabIndex)
+	}
+}
+
+// Another failure while the daemon is down is shown, with the daemon named in
+// the rail.
+func TestErrorsStayVisibleWhileTheDaemonIsDown(t *testing.T) {
+	value := newDashboard(&fakeBackend{}, projectsSnapshot(nil))
+	value.width, value.height = 120, 14
+	send(&value, agentSnapshotMsg{err: gone})
+	value.setError(gitError, notAGitRepository)
+	screen := ansi.Strip(value.render())
+	if !strings.Contains(screen, notAGitRepository) || !strings.Contains(screen, "daemon stopped · F5 starts it") {
+		t.Fatalf("screen hides one of the two:\n%s", screen)
+	}
+}
+
+// / narrows the tree to the workspaces that match, collapsed roots included;
+// Enter opens the match and Esc brings the whole tree back.
+func TestTreeFilterFindsAWorkspaceAnywhere(t *testing.T) {
+	value := newDashboardWithConfig(&fakeBackend{}, collapseSnapshot(), "", Config{CollapsedRoots: []string{projectsRoot.Path}})
+	value.width, value.height = 110, 16
+	value.focus = leftPane
+	send(&value, key('/', "/"))
+	typeText(&value, "BRA")
+	if got := navigationText(value); len(got) != 2 || got[1] != "- bravo" {
+		t.Fatalf("filtered tree = %q, want projects and bravo", got)
+	}
+	if value.cursorPath != collapseBravo.Path {
+		t.Fatalf("cursor = %q, want the first match", value.cursorPath)
+	}
+	if screen := ansi.Strip(value.render()); !strings.Contains(screen, " FIND  BRA") {
+		t.Fatalf("rail does not show the filter:\n%s", screen)
+	}
+	typeText(&value, "zz")
+	if screen := ansi.Strip(value.render()); !strings.Contains(screen, "No workspace matches") {
+		t.Fatalf("an empty filter result is not explained:\n%s", screen)
+	}
+	send(&value, key(tea.KeyBackspace, ""))
+	send(&value, key(tea.KeyBackspace, ""))
+	command := send(&value, key(tea.KeyEnter, ""))
+	if value.treeFiltering || value.treeQuery != "" || command == nil {
+		t.Fatal("Enter did not open the match and end the filter")
+	}
+	if value.cursorPath != collapseBravo.Path || slices.Contains(value.config.CollapsedRoots, projectsRoot.Path) {
+		t.Fatalf("after Enter = (cursor %q, collapsed %q), want bravo shown", value.cursorPath, value.config.CollapsedRoots)
+	}
+
+	send(&value, key('/', "/"))
+	typeText(&value, "arch")
+	send(&value, key(tea.KeyEscape, ""))
+	if value.treeFiltering || len(navigationText(value)) < 4 {
+		t.Fatalf("Esc left the tree filtered: %q", navigationText(value))
+	}
+}
+
+// > moves the tab under the cursor. One move is out at a time, the cursor
+// follows the moved tab by its ID in the answer, and a failed move leaves the
+// cursor where it was. The new-tab slot does not move.
+func TestTreeMovesTheSelectedTab(t *testing.T) {
+	snapshot, _ := alphaWorkspaceSnapshot(openTabs(3))
+	backend := &fakeBackend{snapshot: snapshot}
+	value := newDashboard(backend, snapshot)
+	value.focus = leftPane
+	value.setNavigation(1)
+	value.tabIndex = 0
+	command := send(&value, key('>', ">"))
+	if command == nil || !value.tabMovePending {
+		t.Fatal("> did not start a move")
+	}
+	if again := send(&value, key('>', ">")); again != nil {
+		t.Fatal("a second move started before the first was answered")
+	}
+	message := command().(tabMovedMsg)
+	if backend.movedTabID != "tab-1" || backend.movedOffset != 1 {
+		t.Fatalf("moved = (%q, %d), want tab-1 right", backend.movedTabID, backend.movedOffset)
+	}
+	// The daemon's answer has tab-1 second.
+	tabs := message.snapshot.Roots[0].Directories[0].Tabs
+	tabs[0], tabs[1] = tabs[1], tabs[0]
+	message.snapshot.Revision++
+	send(&value, message)
+	if value.tabMovePending || value.tabIndex != 1 {
+		t.Fatalf("after the answer = (pending %v, cursor %d), want the cursor on tab-1 at 1", value.tabMovePending, value.tabIndex)
+	}
+
+	send(&value, tabMovedMsg{tabID: "tab-1", err: errors.New("daemon: moving tabs needs a newer daemon")})
+	if value.tabIndex != 1 || !strings.Contains(value.errorMessage, "newer daemon") {
+		t.Fatalf("failed move = (cursor %d, error %q)", value.tabIndex, value.errorMessage)
+	}
+	value.tabIndex = 3
+	if command := send(&value, key('>', ">")); command != nil {
+		t.Fatal("the new-tab slot moved")
+	}
+}
+
+// Ctrl+C quits from the tree filter, and Tab leaves the filter with the pane.
+func TestTreeFilterLetsCtrlCAndTabThrough(t *testing.T) {
+	value := newDashboard(&fakeBackend{}, collapseSnapshot())
+	value.focus = leftPane
+	value.terminal = newEmbeddedTerminal("tab-x", newMemoryStream(""), 40, 10)
+	t.Cleanup(func() { value.closeTerminal() })
+	send(&value, key('/', "/"))
+	typeText(&value, "al")
+	send(&value, key(tea.KeyTab, ""))
+	if value.treeFiltering || value.treeQuery != "" || value.focus != terminalPane {
+		t.Fatalf("Tab = (filtering %v, query %q, focus %v), want the filter ended and the terminal focused",
+			value.treeFiltering, value.treeQuery, value.focus)
+	}
+	value.focus = leftPane
+	send(&value, key('/', "/"))
+	if send(&value, tea.KeyPressMsg(tea.Key{Code: 'c', Mod: tea.ModCtrl})); !value.result.Quit {
+		t.Fatal("Ctrl+C did not quit from the filter")
 	}
 }

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/opspresso/romty/internal/protocol"
+	"github.com/opspresso/romty/internal/version"
 )
 
 func (s *Server) handle(connection net.Conn) {
@@ -145,20 +146,40 @@ func (s *Server) stopped() bool {
 	}
 }
 
+// changesAgentStatuses reports the actions after which a cached status scan
+// no longer describes the tabs: an agent's own report, and every action
+// that starts, ends or reopens a terminal.
+func changesAgentStatuses(action string) bool {
+	switch action {
+	case protocol.ActionAgentEvent, protocol.ActionCreateTab, protocol.ActionCloseTab,
+		protocol.ActionReopenTab, protocol.ActionRemoveRoot, protocol.ActionRemoveWorkspace:
+		return true
+	}
+	return false
+}
+
 func (s *Server) dispatch(request protocol.Request) protocol.Response {
 	finish, ok := s.beginRequest(request.Action)
 	if !ok {
 		return protocol.Response{Error: errShuttingDown}
 	}
 	defer finish()
+	if changesAgentStatuses(request.Action) {
+		// After the change, so the next status request scans the new state.
+		defer s.invalidateAgentStatuses()
+	}
 
 	switch request.Action {
 	case protocol.ActionPing:
 		return protocol.Response{
-			MinVersion:   protocol.MinimumVersion,
-			MaxVersion:   protocol.Version,
-			Capabilities: protocol.CapabilitiesForVersion(protocol.Version),
+			MinVersion:     protocol.MinimumVersion,
+			MaxVersion:     protocol.Version,
+			Capabilities:   protocol.CapabilitiesForVersion(protocol.Version),
+			DaemonVersion:  version.String(),
+			RecordingBytes: s.recordingBytes(),
 		}
+	case protocol.ActionMoveTab:
+		return s.moveTab(request.TabID, request.Offset)
 	case protocol.ActionSnapshot:
 		return s.snapshotResponse()
 	case protocol.ActionAgents:

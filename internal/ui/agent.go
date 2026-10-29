@@ -6,6 +6,7 @@ package ui
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -113,6 +114,9 @@ func (m dashboard) notifyAgentAlerts(alerts []agentAlert) tea.Cmd {
 	if more := len(alerts) - 1; more > 0 {
 		text += fmt.Sprintf(" (+%d more)", more)
 	}
+	if alerts[0].kind == sound.Waiting {
+		text += " · press a in romty"
+	}
 	return tea.Raw(ansi.Notify(text))
 }
 
@@ -218,6 +222,14 @@ func (m dashboard) jumpToWaitingAgent() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	next := nextWaitingStop(stops, m.selectedTabID())
+	// The agent a notification just named comes first: that is the one the
+	// user read about and pressed a for.
+	if alerted := slices.IndexFunc(stops, func(stop waitingAgentStop) bool {
+		return stop.tabID == m.lastAlertTab && stop.tabID != m.selectedTabID()
+	}); alerted >= 0 {
+		next = stops[alerted]
+	}
+	m.lastAlertTab = ""
 	if next.tabID == m.selectedTabID() {
 		// The only agent waiting is the one already open. Reopening it would
 		// tear the live terminal down and attach a new one in its place, so
@@ -331,6 +343,9 @@ func (m dashboard) agentStatusNote() string {
 // the tree the tabs of the workspace under the cursor, whose markers are what
 // the user is reading there.
 func (m dashboard) railNote() string {
+	if m.daemonDown {
+		return "daemon stopped · F5 starts it"
+	}
 	if m.focus == leftPane && !m.scrollback {
 		return m.cursorTabsNote()
 	}
