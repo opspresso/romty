@@ -229,11 +229,23 @@ func (f *fakeBackend) RenameTab(tabID, name string) (model.Snapshot, error) {
 	return f.snapshot, nil
 }
 
-// chooseNewSession selects the highlighted workspace, which has no running
-// terminal, and picks New session from the choice it asks.
+// chooseNewSession opens the highlighted workspace, which has no running
+// terminal. Without closed sessions Enter starts a new one at once; with them
+// it asks first, and New session is the choice's first row.
 func chooseNewSession(t *testing.T, value *dashboard) tea.Cmd {
 	t.Helper()
-	if command := send(value, key(tea.KeyEnter, "")); command != nil {
+	item, ok := value.navigationItem()
+	if !ok {
+		t.Fatal("no workspace under the cursor")
+	}
+	command := send(value, key(tea.KeyEnter, ""))
+	if len(item.closed) == 0 {
+		if value.modal != noModal {
+			t.Fatalf("a workspace with nothing to reopen opened modal %v", value.modal)
+		}
+		return command
+	}
+	if command != nil {
 		t.Fatalf("selecting a workspace without a terminal ran %T before a choice", command())
 	}
 	if value.modal != workspaceActionsModal || !value.palette.sessionChoice {
@@ -803,7 +815,8 @@ func TestDashboardSupportsIMEIndependentShortcuts(t *testing.T) {
 		t.Fatalf("F4 result = (quit %v, command %v, terminal %v), want global quit", value.result.Quit, command, value.terminal)
 	}
 
-	value = newDashboard(backend, model.Snapshot{})
+	// A tree with a root: before the first root the rail names F2 alone.
+	value = newDashboard(backend, projectsSnapshot(nil))
 	value.width = 120
 	rendered := value.render()
 	for _, status := range []string{"F1", "F2", "F3", "F4", "F5", "F6"} {

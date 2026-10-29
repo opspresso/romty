@@ -433,16 +433,20 @@ func (m dashboard) workspaceItem(path string) (navItem, bool) {
 	return navItem{}, false
 }
 
+// syncTabCursor puts the tab cursor on the open terminal when it is among
+// tabs, and otherwise on the tab last opened in their workspace, so Enter
+// returns to where the user was.
 func (m *dashboard) syncTabCursor(tabs []model.Tab) {
 	m.tabIndex = 0
-	if m.terminal == nil {
-		return
+	want := ""
+	if m.terminal != nil {
+		want = m.terminal.id
 	}
-	for index, tab := range tabs {
-		if tab.ID == m.terminal.id {
-			m.tabIndex = index
-			return
-		}
+	if !slices.ContainsFunc(tabs, func(tab model.Tab) bool { return tab.ID == want }) && len(tabs) > 0 {
+		want = m.lastTabs[tabs[0].WorkspaceID]
+	}
+	if index := slices.IndexFunc(tabs, func(tab model.Tab) bool { return tab.ID == want }); index >= 0 {
+		m.tabIndex = index
 	}
 }
 

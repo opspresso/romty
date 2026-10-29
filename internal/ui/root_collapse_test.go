@@ -140,11 +140,11 @@ func TestClickingTheRootArrowTogglesWithoutOpeningTheRoot(t *testing.T) {
 			value.modal, value.config.CollapsedRoots)
 	}
 
-	// The name still opens the root, here as a session choice.
-	send(&value, tea.MouseClickMsg{X: 4, Y: 2, Button: tea.MouseLeft})
-	if value.modal != workspaceActionsModal || len(value.config.CollapsedRoots) != 1 {
-		t.Fatalf("name click = (modal %v, collapsed %q), want the root opened and still folded",
-			value.modal, value.config.CollapsedRoots)
+	// The name still opens the root: with nothing to reopen, a new session.
+	command := send(&value, tea.MouseClickMsg{X: 4, Y: 2, Button: tea.MouseLeft})
+	if command == nil || len(value.config.CollapsedRoots) != 1 {
+		t.Fatalf("name click = (command %v, collapsed %q), want the root opened and still folded",
+			command, value.config.CollapsedRoots)
 	}
 }
 

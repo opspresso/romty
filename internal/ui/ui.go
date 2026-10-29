@@ -230,6 +230,11 @@ type dashboard struct {
 	// terminalOpenedAt is when the open terminal attached, which is what tells
 	// a drop that continues a loop from one that starts a new incident.
 	terminalOpenedAt time.Time
+	// lastTabs is the tab last opened in each workspace, by workspace ID, so
+	// coming back to a workspace lands on the terminal the user left rather
+	// than on its first one. It is replaced, never written in place, because
+	// copies of the dashboard share the map.
+	lastTabs map[string]string
 	scrollback       bool
 	// altScroll is the host's alternate scroll as romty last set it, so the
 	// sequence is sent on the transitions and not on every message.
@@ -855,6 +860,18 @@ func (m dashboard) handleKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.activateWorkspace()
 	case "space":
 		return m.toggleRoot()
+	// One letter for each Ctrl+Shift chord. A terminal without the Kitty
+	// keyboard protocol sends Ctrl+Shift+A as the same byte as Ctrl+A, so the
+	// chords cannot reach romty there. Ctrl+/ and then the letter works in
+	// every terminal, phone SSH clients included.
+	case "a":
+		return m.jumpToWaitingAgent()
+	case "t":
+		return m.newTab()
+	case "g":
+		return m.openGitActions()
+	case "f":
+		return m.toggleFileView()
 	}
 	return m, nil
 }
@@ -1106,6 +1123,14 @@ func (m dashboard) handleOpenedTerminal(message terminalOpenedMsg) (tea.Model, t
 	)
 	m.terminal = terminal
 	m.terminalOpenedAt = now()
+	if tab, ok := m.openTab(); ok {
+		lastTabs := maps.Clone(m.lastTabs)
+		if lastTabs == nil {
+			lastTabs = make(map[string]string)
+		}
+		lastTabs[tab.WorkspaceID] = tab.ID
+		m.lastTabs = lastTabs
+	}
 	// The scrollback on screen belongs to the terminal that just went away, so
 	// a switch made from it lands on the new terminal's live screen.
 	m.stopScrollback()

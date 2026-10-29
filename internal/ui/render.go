@@ -449,16 +449,29 @@ func (m dashboard) renderStatus(width, bodyHeight int) []string {
 		)
 	default:
 		contextShortcuts := []shortcut{
+			{key: "Enter", description: "open"},
 			{key: "↑/↓", description: "workspace"},
 			{key: "←/→", description: "tabs"},
-			{key: "Enter", description: "open"},
 			{key: "Space", description: "fold"},
 			{key: "Tab", description: "terminal"},
 		}
 		if m.focus == terminalPane {
 			// F7 is in the status row below; the rail names the chord the
 			// row has no room for.
-			contextShortcuts = []shortcut{{key: "Ctrl+/", description: "navigation"}}
+			contextShortcuts = []shortcut{{key: "Ctrl+/", description: "tree"}}
+		}
+		if waiting := m.attention(); waiting.input+waiting.approval > 0 {
+			// The way to the agent that is waiting comes first while one is,
+			// and only then: a shortcut for nothing would be noise.
+			jump := shortcut{key: "a", description: "waiting agent"}
+			if m.focus == terminalPane {
+				jump.key = "Ctrl+/ a"
+			}
+			contextShortcuts = append([]shortcut{jump}, contextShortcuts...)
+		}
+		if len(m.state.Roots) == 0 && m.terminal == nil {
+			// Before the first root nothing but adding one does anything.
+			contextShortcuts = []shortcut{{key: "F2", description: "add a root directory"}}
 		}
 		rail = renderShortcutRailNote(m.styles, width, m.railNote(), contextShortcuts...)
 		status = renderShortcuts(m.styles, width,
@@ -640,7 +653,24 @@ func (m dashboard) renderTerminal(width int) []string {
 		return lines
 	}
 	if m.terminal != nil {
+		if label := m.tabPreviewLabel(); label != "" && len(lines) > 1 {
+			// The tab row shows the cursor's workspace while the terminal
+			// below stays the open one; the label says whose tabs they are.
+			labelled := m.styles.empty.Render(" " + label + " ")
+			lines[1] = truncate(lines[1], max(width-lipgloss.Width(labelled), 0)) + labelled
+		}
 		return append(lines, m.terminal.renderViewport(m.scrollOffset)...)
+	}
+	if len(m.state.Roots) == 0 {
+		return append(lines,
+			"",
+			m.styles.modalStrong.Render("  Add a directory to start"),
+			"",
+			"  "+m.styles.shortcutKey.Render(" F2 ")+" "+m.styles.modalBody.Render("pick a directory, such as ~/projects"),
+			"",
+			m.styles.empty.Render("  romty lists it as a root and each directory in it as a workspace."),
+			m.styles.empty.Render("  Each workspace keeps its own terminals, even after romty closes."),
+		)
 	}
 	if _, ok := m.navigationItem(); m.focus == leftPane && !ok {
 		return append(lines, m.styles.empty.Render("  Select a root or workspace"))
@@ -649,6 +679,20 @@ func (m dashboard) renderTerminal(width int) []string {
 		return append(lines, m.styles.empty.Render("  Select + and press Enter to create a terminal"))
 	}
 	return append(lines, m.styles.empty.Render("  Select a tab and press Enter"))
+}
+
+// tabPreviewLabel names the workspace whose tabs the tab row shows when that
+// is not the workspace of the open terminal, which happens while the cursor in
+// the tree is on another workspace. It is empty otherwise.
+func (m dashboard) tabPreviewLabel() string {
+	if m.focus != leftPane || m.scrollback {
+		return ""
+	}
+	item, ok := m.navigationItem()
+	if !ok || item.workspace.Path == m.selectedPath {
+		return ""
+	}
+	return "tabs of " + display.Text(item.workspace.Name) + " · Enter opens"
 }
 
 // newTabLabel is the slot after the last tab that opens a new one.
@@ -719,14 +763,32 @@ func renderTabBarWithHover(styles *uiStyles, tabs []model.Tab, active, hover, cl
 	return []string{truncate(tabsLine.String(), width), truncate(railLine.String(), width)}
 }
 
+// renderShortcuts draws the shortcuts that fit in width, in order, and drops
+// the rest whole: a shortcut cut in the middle names neither its key nor what
+// it does. Callers list the shortcuts most worth knowing first.
 func renderShortcuts(styles *uiStyles, width int, values ...shortcut) string {
-	segments := make([]string, 0, len(values))
-	for _, value := range values {
-		segments = append(segments,
-			styles.shortcutKey.Render(" "+value.key+" ")+" "+styles.shortcutDescription.Render(value.description),
-		)
+	var line strings.Builder
+	used := 0
+	for index, value := range values {
+		segment := styles.shortcutKey.Render(" "+value.key+" ") + " " + styles.shortcutDescription.Render(value.description)
+		gap := 0
+		if index > 0 {
+			gap = 2
+		}
+		segmentWidth := lipgloss.Width(segment)
+		if used+gap+segmentWidth > width {
+			if index == 0 {
+				return truncate(segment, width)
+			}
+			break
+		}
+		if gap > 0 {
+			line.WriteString("  ")
+		}
+		line.WriteString(segment)
+		used += gap + segmentWidth
 	}
-	return truncate(strings.Join(segments, "  "), width)
+	return line.String()
 }
 
 func renderShortcutRail(styles *uiStyles, width int, values ...shortcut) string {

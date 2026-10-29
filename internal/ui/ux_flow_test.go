@@ -1,0 +1,141 @@
+package ui
+
+import (
+	"strings"
+	"testing"
+
+	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
+
+	"github.com/opspresso/romty/internal/gitrepo"
+	"github.com/opspresso/romty/internal/model"
+)
+
+// Each Ctrl+Shift chord has a letter in the tree, because a terminal without
+// the Kitty keyboard protocol cannot send the chord at all.
+func TestTreeLettersRunTheChordActions(t *testing.T) {
+	tabs := openTabs(1)
+	tabs[0].Agent, tabs[0].AgentPhase = model.AgentCodex, model.AgentPhaseWaitingInput
+	snapshot, workspace := alphaWorkspaceSnapshot(tabs)
+	backend := &fakeBackend{snapshot: snapshot, workspace: workspace}
+
+	value := newDashboard(backend, snapshot)
+	value.focus = leftPane
+	value.gitStates = map[string]gitrepo.State{workspace.Path: {Branch: "main"}}
+	send(&value, key(tea.KeyDown, ""))
+
+	if m, _ := value.Update(key('g', "g")); m.(dashboard).modal != gitActionsModal {
+		t.Fatalf("g opened modal %v, want Git actions", m.(dashboard).modal)
+	}
+	if _, command := value.Update(key('t', "t")); command == nil {
+		t.Fatal("t did not create a tab")
+	}
+	if m, _ := value.Update(key('f', "f")); !m.(dashboard).fileView.active {
+		t.Fatal("f did not open the file view")
+	}
+
+	value.setNavigation(0)
+	send(&value, key('a', "a"))
+	if value.cursorPath != workspace.Path {
+		t.Fatalf("a left the cursor on %q, want the waiting agent's workspace", value.cursorPath)
+	}
+}
+
+// The rail names the way to a waiting agent only while one is waiting, and
+// in the form that works in every terminal.
+func TestRailOffersTheWaitingAgentOnlyWhileOneWaits(t *testing.T) {
+	tabs := openTabs(1)
+	snapshot, _ := alphaWorkspaceSnapshot(tabs)
+	value := newDashboard(&fakeBackend{}, snapshot)
+	value.width, value.height = 120, 20
+	if strings.Contains(ansi.Strip(value.render()), "waiting agent") {
+		t.Fatal("rail offers a waiting agent with none waiting")
+	}
+
+	value.state.Roots[0].Directories[0].Tabs[0].Agent = model.AgentClaude
+	value.state.Roots[0].Directories[0].Tabs[0].AgentPhase = model.AgentPhaseWaitingApproval
+	if !strings.Contains(ansi.Strip(value.render()), " a  waiting agent") {
+		t.Fatalf("tree rail lacks the waiting agent:\n%s", ansi.Strip(value.render()))
+	}
+	value.focus = terminalPane
+	value.terminal = newEmbeddedTerminal("tab-1", newMemoryStream(""), 40, 10)
+	t.Cleanup(func() { value.closeTerminal() })
+	if !strings.Contains(ansi.Strip(value.render()), "Ctrl+/ a  waiting agent") {
+		t.Fatalf("terminal rail lacks the universal form:\n%s", ansi.Strip(value.render()))
+	}
+}
+
+// A shortcut row that runs out of room drops whole shortcuts, never half of
+// one, and keeps the ones listed first.
+func TestShortcutsDropWholeEntries(t *testing.T) {
+	styles := newUIStyles(true)
+	shortcuts := []shortcut{{key: "Enter", description: "open"}, {key: "Space", description: "fold"}, {key: "Tab", description: "terminal"}}
+	got := ansi.Strip(renderShortcuts(styles, 26, shortcuts...))
+	if got != " Enter  open   Space  fold" {
+		t.Fatalf("fitted shortcuts = %q", got)
+	}
+	if got := ansi.Strip(renderShortcuts(styles, 5, shortcuts...)); got != " Ent…" {
+		t.Fatalf("first shortcut alone = %q, want it truncated rather than dropped", got)
+	}
+}
+
+func TestEmptyDashboardShowsOnlyHowToStart(t *testing.T) {
+	value := newDashboard(&fakeBackend{}, model.Snapshot{})
+	value.width, value.height = 110, 16
+	screen := ansi.Strip(value.render())
+	for _, want := range []string{"Add a directory to start", "F2  pick a directory", "F2  add a root directory"} {
+		if !strings.Contains(screen, want) {
+			t.Fatalf("empty screen lacks %q:\n%s", want, screen)
+		}
+	}
+	for _, unwanted := range []string{"Select a root or workspace", "Space  fold", "Tab  terminal"} {
+		if strings.Contains(screen, unwanted) {
+			t.Fatalf("empty screen offers %q, which does nothing yet:\n%s", unwanted, screen)
+		}
+	}
+}
+
+// Coming back to a workspace lands on the tab last opened there.
+func TestReturningToAWorkspaceSelectsItsLastTab(t *testing.T) {
+	alpha := model.Workspace{ID: "workspace-1", RootID: projectsRoot.ID, Name: "alpha", Path: "/projects/alpha"}
+	bravo := model.Workspace{ID: "workspace-2", RootID: projectsRoot.ID, Name: "bravo", Path: "/projects/bravo"}
+	alphaTabs := openTabs(3)
+	bravoTab := model.Tab{ID: "tab-b", WorkspaceID: bravo.ID, Name: "1", Running: true}
+	value := newDashboard(&fakeBackend{}, projectsSnapshot([]model.WorkspaceView{
+		{Workspace: alpha, Tabs: alphaTabs}, {Workspace: bravo, Tabs: []model.Tab{bravoTab}},
+	}))
+	value.lastTabs = map[string]string{alpha.ID: "tab-3"}
+	value.terminal = newEmbeddedTerminal(bravoTab.ID, newMemoryStream(""), 40, 10)
+	t.Cleanup(func() { value.closeTerminal() })
+	value.focus = leftPane
+
+	send(&value, key(tea.KeyDown, ""))
+	if value.cursorPath != alpha.Path || value.tabIndex != 2 {
+		t.Fatalf("cursor = (%q, tab %d), want alpha's third tab", value.cursorPath, value.tabIndex)
+	}
+}
+
+// While the cursor is on another workspace, the tab row shows that
+// workspace's tabs over the open terminal, and says so.
+func TestTabRowNamesTheWorkspaceItPreviews(t *testing.T) {
+	alpha := model.Workspace{ID: "workspace-1", RootID: projectsRoot.ID, Name: "alpha", Path: "/projects/alpha"}
+	bravo := model.Workspace{ID: "workspace-2", RootID: projectsRoot.ID, Name: "bravo", Path: "/projects/bravo"}
+	value := newDashboard(&fakeBackend{}, projectsSnapshot([]model.WorkspaceView{
+		{Workspace: alpha, Tabs: openTabs(1)},
+		{Workspace: bravo, Tabs: []model.Tab{{ID: "tab-b", WorkspaceID: bravo.ID, Name: "1", Running: true}}},
+	}))
+	value.width, value.height = 110, 20
+	value.selectedWorkspaceID, value.selectedPath = alpha.ID, alpha.Path
+	value.terminal = newEmbeddedTerminal("tab-1", newMemoryStream(""), 40, 10)
+	t.Cleanup(func() { value.closeTerminal() })
+	value.focus = leftPane
+
+	value.setNavigation(1)
+	if strings.Contains(ansi.Strip(value.render()), "tabs of") {
+		t.Fatal("the open workspace's own tabs are labelled as a preview")
+	}
+	value.setNavigation(2)
+	if !strings.Contains(ansi.Strip(value.render()), "tabs of bravo · Enter opens") {
+		t.Fatalf("preview is not labelled:\n%s", ansi.Strip(value.render()))
+	}
+}
