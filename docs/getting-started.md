@@ -66,6 +66,7 @@ See the [interface guide](interface.md) for the complete key map.
 | `romty hooks` | Detect Claude Code, Codex, OpenCode, and Kiro CLI, then install or update their status hooks |
 | `romty list` | List roots, workspaces, and running terminal sessions |
 | `romty stop` | Stop the daemon and every running terminal session |
+| `romty service` | Report the login service; `install` starts the daemon at login, `uninstall` removes it |
 
 `status`, `doctor`, and `list` are read-only. When the daemon is stopped, `status` and `list` add `next: run romty to start it`. They do not start the daemon or create the runtime directory. A missing runtime directory, state file, or config file is valid before the first run. `doctor` returns an error for an invalid runtime, malformed JSON, unavailable shell, unsafe socket, or incompatible daemon protocol.
 

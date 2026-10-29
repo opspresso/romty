@@ -26,6 +26,7 @@ laptop -> Tailscale -> SSH -> always-on machine -> romty -> AI coding agent
 - Distinguish agent work, questions, approvals, completion, and interruption through native Codex state and provider hooks.
 - Save every tab's output and agent session across `romty stop`, and offer them back — output replayed, resume command pre-typed — in the workspace's next tabs.
 - Use function-key navigation that remains reliable with an active IME.
+- Keep the machine awake while an agent works, reach the latest login's SSH agent from every tab, and start the daemon at login with `romty service install`.
 
 ## Install
 
