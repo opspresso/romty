@@ -514,9 +514,6 @@ func (m dashboard) navigationItems() []navItem {
 // may be hiding, read it rather than what is on screen.
 func (m dashboard) workspaceItems() []navItem {
 	result := make([]navItem, 0)
-	// last is the item drawn above the next one, which is not the item
-	// appended last when a collapsed root hides its workspaces.
-	var last *navItem
 	for _, root := range m.state.Roots {
 		// A root is only a workspace once it holds a terminal, so a snapshot
 		// names its identifier nowhere else. Its own tabs carry it, and
@@ -538,10 +535,8 @@ func (m dashboard) workspaceItems() []navItem {
 			closed:    root.Closed,
 			isRoot:    true,
 			collapsed: collapsed,
-			// One blank row sets a root apart from what is above it. A
-			// workspace without Git already ends in a blank row, so a root
-			// after one adds none, and the gap stays one row either way.
-			separator: last != nil && !endsBlank(*last),
+			// One blank row sets a root apart from what is above it.
+			separator: len(result) > 0,
 			failure:   root.Error,
 		}
 		if collapsed {
@@ -550,7 +545,6 @@ func (m dashboard) workspaceItems() []navItem {
 			}
 		}
 		result = append(result, rootItem)
-		last = &rootItem
 		for _, directory := range root.Directories {
 			directoryGit, directoryHasGit := m.gitStates[directory.Workspace.Path]
 			item := navItem{
@@ -563,18 +557,9 @@ func (m dashboard) workspaceItems() []navItem {
 				collapsed: collapsed,
 			}
 			result = append(result, item)
-			if !collapsed {
-				last = &item
-			}
 		}
 	}
 	return result
-}
-
-// endsBlank reports whether an item's last tree row is empty: the Git row of
-// a workspace that is not a repository.
-func endsBlank(item navItem) bool {
-	return !item.isRoot && !item.hasGit
 }
 
 func (m dashboard) navigationItem() (navItem, bool) {

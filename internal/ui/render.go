@@ -573,15 +573,13 @@ func navigationWindow(items []navItem, offset, available int) (int, int) {
 }
 
 // navigationRows is the height of an item in the tree. A root takes one row,
-// plus the blank row that sets it apart from the item above.
+// plus the blank row that sets it apart from the item above. A workspace takes
+// one row, plus one for its Git state when it is a repository.
 func navigationRows(item navItem) int {
-	if item.isRoot {
-		if item.separator {
-			return 2
-		}
-		return 1
+	if item.isRoot && item.separator || !item.isRoot && item.hasGit {
+		return 2
 	}
-	return 2
+	return 1
 }
 
 func (m dashboard) renderNavigationItem(item navItem, index int, isCurrent bool, width int) []string {
@@ -634,6 +632,9 @@ func (m dashboard) renderNavigationItem(item navItem, index int, isCurrent bool,
 		if item.separator {
 			return []string{"", nameLine}
 		}
+		return []string{nameLine}
+	}
+	if !item.hasGit {
 		return []string{nameLine}
 	}
 	return []string{nameLine, m.renderNavigationGit(item, indicator, style, width)}

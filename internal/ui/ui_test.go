@@ -877,6 +877,7 @@ func TestDashboardMouseWheelScrollsTheWorkspaceWithoutMovingItsCursor(t *testing
 	value := newDashboard(&fakeBackend{}, model.Snapshot{Roots: []model.RootView{{
 		Root: projectsRoot, Directories: directories,
 	}}})
+	value.gitStates = repositoryStates(directories)
 	value.width, value.height = 120, 10
 	value.focus = terminalPane
 	before := ansi.Strip(strings.Join(value.renderNavigation(value.dimensions().leftWidth, value.dimensions().bodyHeight), "\n"))
@@ -4324,7 +4325,9 @@ func TestNavigationShowsGitStateOnSecondLine(t *testing.T) {
 	t.Fatalf("navigation does not contain workspace %q:\n%s", workspace.Name, navigation)
 }
 
-func TestNavigationUsesOneRootLineAndTwoWorkspaceLines(t *testing.T) {
+// A repository gets a second line for its Git state; a plain directory does
+// not, so the tree holds more workspaces on a short screen.
+func TestNavigationGivesOnlyRepositoriesASecondLine(t *testing.T) {
 	value := newDashboard(&fakeBackend{}, projectsSnapshot([]model.WorkspaceView{
 		{Workspace: model.Workspace{ID: "workspace-1", RootID: "root-1", Name: "first", Path: "/projects/first"}},
 		{Workspace: model.Workspace{ID: "workspace-2", RootID: "root-1", Name: "last", Path: "/projects/last"}},
@@ -4333,8 +4336,8 @@ func TestNavigationUsesOneRootLineAndTwoWorkspaceLines(t *testing.T) {
 	value.selectedPath = "/projects/first"
 	value.gitStates = map[string]gitrepo.State{"/projects/first": {Branch: "main"}}
 	lines := value.renderNavigation(28, 20)
-	if len(lines) != 7 {
-		t.Fatalf("navigation lines = %d, want header, one root line, and two lines per workspace\n%s", len(lines), strings.Join(lines, "\n"))
+	if len(lines) != 6 {
+		t.Fatalf("navigation lines = %d, want header, the root, two lines for first and one for last\n%s", len(lines), strings.Join(lines, "\n"))
 	}
 	plain := make([]string, len(lines))
 	for index, line := range lines {
@@ -4343,8 +4346,8 @@ func TestNavigationUsesOneRootLineAndTwoWorkspaceLines(t *testing.T) {
 	if plain[2] != " ▾ projects" || plain[3] != "▎ - first" || plain[4] != "▎   (main)" {
 		t.Fatalf("root and workspace rows = %#v", plain[2:5])
 	}
-	if plain[6] != "" {
-		t.Fatalf("last workspace continuation = %q, want blank", plain[6])
+	if plain[5] != "  - last" {
+		t.Fatalf("plain directory row = %q, want one line", plain[5])
 	}
 }
 
@@ -4703,6 +4706,7 @@ func TestDashboardKeepsNavigationCursorVisible(t *testing.T) {
 		Root:        model.Root{ID: "root-1", Name: "nalbam", Path: "/projects"},
 		Directories: directories,
 	}}})
+	value.gitStates = repositoryStates(directories)
 	value.width = 120
 	value.height = 12
 	view := value.dimensions()
