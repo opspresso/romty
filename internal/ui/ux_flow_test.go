@@ -458,3 +458,87 @@ func TestHeldHookOfferWaitsForTheModalToClose(t *testing.T) {
 		t.Fatalf("after Help closed modal = %v, want the hook offer", value.modal)
 	}
 }
+
+// Config scrolls when a short screen cannot hold every setting, and a click
+// runs the setting drawn under it.
+func TestConfigScrollsOnAShortScreen(t *testing.T) {
+	value := newDashboard(&fakeBackend{}, model.Snapshot{})
+	value.width, value.height = 100, 10
+	send(&value, key(tea.KeyF3, ""))
+	for range len(configRows()) {
+		send(&value, key(tea.KeyDown, ""))
+	}
+	screen := ansi.Strip(value.render())
+	if !strings.Contains(screen, "╰") || !strings.Contains(screen, "Sound on waiting") || !strings.Contains(screen, "Config ") {
+		t.Fatalf("short Config lost its edge or its last row:\n%s", screen)
+	}
+	start, end := value.configWindow(value.dimensions().bodyHeight)
+	if start == 0 || end != len(configRows()) {
+		t.Fatalf("window = %d-%d, want it scrolled to the end", start, end)
+	}
+	index, ok := value.configIndexAtContentRow(end-start-1, value.dimensions().bodyHeight)
+	if !ok || index != end-1 {
+		t.Fatalf("last drawn row maps to %d (%v), want %d", index, ok, end-1)
+	}
+}
+
+func TestKeepAwakeIsASetting(t *testing.T) {
+	value := newDashboard(&fakeBackend{}, model.Snapshot{})
+	send(&value, key(tea.KeyF3, ""))
+	if command := send(&value, key('w', "w")); !value.config.AllowSleep || command == nil {
+		t.Fatal("w did not turn keeping awake off and save it")
+	}
+}
+
+// The close confirmation names the agent and what it is doing.
+func TestCloseTabSaysWhatStops(t *testing.T) {
+	for _, probe := range []struct {
+		tab  model.Tab
+		want string
+	}{
+		{model.Tab{Agent: model.AgentClaude, AgentPhase: model.AgentPhaseWorking}, "Claude Code is working in it (Working) and will stop."},
+		{model.Tab{Agent: model.AgentCodex, AgentPhase: model.AgentPhaseWaitingInput}, "Codex runs in it (Needs your answer) and will stop."},
+		{model.Tab{Agent: model.AgentNode}, "Node.js runs in it and will stop."},
+		{model.Tab{}, "Its shell and everything running in it will end."},
+	} {
+		if got := closeTabConsequence(probe.tab); got != probe.want {
+			t.Fatalf("consequence = %q, want %q", got, probe.want)
+		}
+	}
+}
+
+// a opens the agent the last notification named before walking the others.
+func TestJumpOpensTheNotifiedAgentFirst(t *testing.T) {
+	value := newDashboard(&fakeBackend{}, attentionSnapshot(model.AgentPhaseWorking, model.AgentPhaseWorking))
+	value.agentSoundReady = true
+	value.focus = leftPane
+	// Both start waiting, then only the second is reported again later.
+	send(&value, agentSnapshotMsg{value: map[string]model.AgentStatus{
+		"tab-1": {Agent: model.AgentCodex, Phase: model.AgentPhaseWaitingInput},
+		"tab-2": {Agent: model.AgentCodex, Phase: model.AgentPhaseWorking},
+	}})
+	send(&value, agentSnapshotMsg{value: map[string]model.AgentStatus{
+		"tab-1": {Agent: model.AgentCodex, Phase: model.AgentPhaseWaitingInput},
+		"tab-2": {Agent: model.AgentCodex, Phase: model.AgentPhaseWaitingApproval},
+	}})
+	if value.lastAlertTab != "tab-2" {
+		t.Fatalf("last alerted = %q, want tab-2", value.lastAlertTab)
+	}
+	send(&value, key('a', "a"))
+	if value.tabIndex != 1 {
+		t.Fatalf("a selected tab %d, want the notified second tab", value.tabIndex)
+	}
+}
+
+// Another failure while the daemon is down is shown, with the daemon named in
+// the rail.
+func TestErrorsStayVisibleWhileTheDaemonIsDown(t *testing.T) {
+	value := newDashboard(&fakeBackend{}, projectsSnapshot(nil))
+	value.width, value.height = 120, 14
+	send(&value, agentSnapshotMsg{err: gone})
+	value.setError(gitError, notAGitRepository)
+	screen := ansi.Strip(value.render())
+	if !strings.Contains(screen, notAGitRepository) || !strings.Contains(screen, "daemon stopped · F5 starts it") {
+		t.Fatalf("screen hides one of the two:\n%s", screen)
+	}
+}

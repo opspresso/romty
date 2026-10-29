@@ -24,6 +24,7 @@ import (
 	"github.com/opspresso/romty/internal/gitrepo"
 	"github.com/opspresso/romty/internal/model"
 	"github.com/opspresso/romty/internal/sound"
+	"github.com/opspresso/romty/internal/version"
 )
 
 const (
@@ -80,6 +81,8 @@ type Backend interface {
 	ReopenTab(workspaceID, closedID string, columns, rows uint16) (model.Tab, error)
 	CloseTab(tabID string) (model.Snapshot, error)
 	RenameTab(tabID, name string) (model.Snapshot, error)
+	MoveTab(tabID string, offset int) (model.Snapshot, error)
+	DaemonInfo() (client.DaemonInfo, error)
 	OpenTerminal(tabID string) (io.ReadWriteCloser, []byte, error)
 	Resize(tabID string, columns, rows uint16) error
 	Shutdown() error
@@ -280,6 +283,15 @@ type dashboard struct {
 	restartDaemon    func() error
 	daemonDown       bool
 	daemonRestarting bool
+	// daemonBuild is the running daemon's build as it reported it, and
+	// daemonOutdated is set when that is not this romty's build: an upgrade
+	// replaced the binary, but the daemon that runs the terminals is the old
+	// one until it restarts.
+	daemonBuild    string
+	daemonOutdated bool
+	// lastAlertTab is the waiting agent the last notification named, which
+	// a is first to open.
+	lastAlertTab string
 	// hooksDeferred holds the agent hook offer until the first root exists.
 	hooksDeferred bool
 	// branches is the branch picker while it is open, and branchRequest
@@ -469,7 +481,7 @@ func (m dashboard) Init() tea.Cmd {
 	// The host starts with alternate scroll on, which is what turns a wheel
 	// notch into arrow keys romty cannot tell from typed ones. Only scrollback
 	// wants them, so the mode is off until it opens.
-	commands := []tea.Cmd{tea.RequestBackgroundColor, m.refreshAgents(), m.initialGitStatus(), altScrollCommand(false)}
+	commands := []tea.Cmd{tea.RequestBackgroundColor, m.refreshAgents(), m.initialGitStatus(), altScrollCommand(false), m.readDaemonInfo()}
 	// Bubble Tea only asks terminals it can name for synchronized output and
 	// skips SSH sessions outright — but an SSH session is where romty lives.
 	// Asked blind, a terminal that supports the mode reports it and every
@@ -690,7 +702,14 @@ func (m dashboard) update(message tea.Msg) (tea.Model, tea.Cmd) {
 				if kind, ring := m.soundForAgentTransitions(message.value); ring {
 					alerts = append(alerts, soundAlert(kind))
 				}
-				alerts = append(alerts, m.notifyAgentAlerts(m.agentAlerts(message.value)))
+				found := m.agentAlerts(message.value)
+				alerts = append(alerts, m.notifyAgentAlerts(found))
+				for _, alert := range found {
+					if alert.kind == sound.Waiting {
+						m.lastAlertTab = alert.tab.ID
+						break
+					}
+				}
 			}
 			m.updateAgents(message.value)
 			m.heardAgents = maps.Clone(message.value)
@@ -708,6 +727,8 @@ func (m dashboard) update(message tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.refreshAgents()
 	case daemonRestartedMsg:
 		return m.handleDaemonRestarted(message)
+	case daemonInfoMsg:
+		return m.handleDaemonInfo(message)
 	case soundPlayedMsg:
 		return m, nil
 	case releaseCheckedMsg:
@@ -1081,6 +1102,11 @@ func (m dashboard) toggleScrollbackMouse() (tea.Model, tea.Cmd) {
 	return m, m.saveConfig()
 }
 
+func (m dashboard) toggleKeepAwake() (tea.Model, tea.Cmd) {
+	m.config.AllowSleep = !m.config.AllowSleep
+	return m, m.saveConfig()
+}
+
 func (m dashboard) toggleNotifications() (tea.Model, tea.Cmd) {
 	m.config.MuteNotifications = !m.config.MuteNotifications
 	return m, m.saveConfig()
@@ -1366,6 +1392,56 @@ type daemonRestartedMsg struct {
 	err error
 }
 
+// daemonInfoMsg is the running daemon's report on itself.
+type daemonInfoMsg struct {
+	info client.DaemonInfo
+	err  error
+}
+
+func (m dashboard) readDaemonInfo() tea.Cmd {
+	backend := m.backend
+	return func() tea.Msg {
+		info, err := backend.DaemonInfo()
+		return daemonInfoMsg{info: info, err: err}
+	}
+}
+
+// handleDaemonInfo notes a daemon older than this romty. The status bar says
+// so once, and About keeps saying it until the daemon restarts.
+func (m dashboard) handleDaemonInfo(message daemonInfoMsg) (tea.Model, tea.Cmd) {
+	if message.err != nil {
+		m.noteDaemonError(message.err)
+		return m, nil
+	}
+	m.daemonBuild = message.info.Version
+	m.daemonOutdated = message.info.Version != version.String()
+	if m.daemonOutdated && m.errorMessage == "" {
+		m.setNotice(settingError, m.daemonUpdateNote())
+	}
+	return m, nil
+}
+
+// daemonUpdateNote says which daemon runs and how to bring it up to date.
+func (m dashboard) daemonUpdateNote() string {
+	return "the daemon is " + client.DaemonBuildLabel(m.daemonBuild) + ", this romty is " + version.String() +
+		"; " + client.DaemonRestartAdvice
+}
+
+// keepingAwake reports what the daemon does with the machine: it holds it
+// awake while an agent is busy unless config.json allows sleep. Both read
+// the same setting and the same agent phases, so the tree's mark matches.
+func (m dashboard) keepingAwake() bool {
+	if m.config.AllowSleep {
+		return false
+	}
+	for tab := range m.state.Tabs() {
+		if tab.Running && tab.AgentPhase.Busy() {
+			return true
+		}
+	}
+	return false
+}
+
 // noteDaemonError reports whether err says the daemon is gone, and if so
 // puts the dashboard in the stopped state: one message that names the way
 // back, in place of the socket error each request would otherwise show.
@@ -1389,7 +1465,8 @@ func (m dashboard) handleDaemonRestarted(message daemonRestartedMsg) (tea.Model,
 	}
 	m.daemonDown = false
 	m.setNotice(daemonError, "romty daemon started again; Enter on a workspace reopens its saved sessions")
-	return m.refreshAll()
+	updated, command := m.refreshAll()
+	return updated, tea.Batch(command, m.readDaemonInfo())
 }
 
 // requestPending reports a request a modal is waiting on: a daemon shutdown, a
