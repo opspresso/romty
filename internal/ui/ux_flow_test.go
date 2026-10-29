@@ -582,3 +582,26 @@ func TestTreeFilterFindsAWorkspaceAnywhere(t *testing.T) {
 		t.Fatalf("Esc left the tree filtered: %q", navigationText(value))
 	}
 }
+
+// > moves the tab under the cursor right and the cursor follows it; the
+// new-tab slot does not move.
+func TestTreeMovesTheSelectedTab(t *testing.T) {
+	snapshot, _ := alphaWorkspaceSnapshot(openTabs(3))
+	backend := &fakeBackend{snapshot: snapshot}
+	value := newDashboard(backend, snapshot)
+	value.focus = leftPane
+	value.setNavigation(1)
+	value.tabIndex = 0
+	command := send(&value, key('>', ">"))
+	if command == nil || value.tabIndex != 1 {
+		t.Fatalf("> = (command %v, cursor %d), want a move and the cursor on 1", command, value.tabIndex)
+	}
+	command()
+	if backend.movedTabID != "tab-1" || backend.movedOffset != 1 {
+		t.Fatalf("moved = (%q, %d), want tab-1 right", backend.movedTabID, backend.movedOffset)
+	}
+	value.tabIndex = 3
+	if command := send(&value, key('>', ">")); command != nil {
+		t.Fatal("the new-tab slot moved")
+	}
+}

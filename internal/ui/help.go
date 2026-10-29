@@ -75,6 +75,7 @@ func helpReference() []helpEntry {
 		{description: "Git actions", keys: []string{"Ctrl+Shift+G", "g"}},
 		{description: "Toggle file view", keys: []string{"Ctrl+Shift+F", "f"}},
 		{description: "Switch tab", keys: []string{"Ctrl+Shift+←/→"}},
+		{description: "Move tab", keys: []string{"Ctrl+Shift+PgUp/PgDn", "</>"}},
 		{description: "Switch workspace", keys: []string{"Ctrl+Shift+↑/↓"}},
 		{section: "MOVE", note: "lists, output and file view"},
 		{description: "Move one item / line", keys: []string{"↑/↓", "k/j"}},

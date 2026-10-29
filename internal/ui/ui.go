@@ -879,6 +879,10 @@ var globalKeys = map[string]func(dashboard) (tea.Model, tea.Cmd){
 	// The third axis: not where the user was going, but where an agent is
 	// waiting for them.
 	"ctrl+shift+a": func(m dashboard) (tea.Model, tea.Cmd) { return m.jumpToWaitingAgent() },
+	// The chord terminals with tabs use to move one. < and > do the same in
+	// the workspace pane, where every terminal can send them.
+	"ctrl+shift+pgup":   func(m dashboard) (tea.Model, tea.Cmd) { return m.moveSelectedTab(-1) },
+	"ctrl+shift+pgdown": func(m dashboard) (tea.Model, tea.Cmd) { return m.moveSelectedTab(1) },
 }
 
 func (m dashboard) handleKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
@@ -962,6 +966,10 @@ func (m dashboard) handleKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.toggleRoot()
 	case "/":
 		m.treeFiltering = true
+	case "<":
+		return m.moveSelectedTab(-1)
+	case ">":
+		return m.moveSelectedTab(1)
 	// One letter for each Ctrl+Shift chord. A terminal without the Kitty
 	// keyboard protocol sends Ctrl+Shift+A as the same byte as Ctrl+A, so the
 	// chords cannot reach romty there. Ctrl+/ and then the letter works in

@@ -145,6 +145,28 @@ func (m *dashboard) moveTab(delta int) {
 	m.tabIndex = (m.tabIndex + delta + count) % count
 }
 
+// moveSelectedTab moves the tab under the tab cursor delta places along the
+// row on screen, and the cursor moves with it. The new-tab slot is not a tab
+// and does not move.
+func (m dashboard) moveSelectedTab(delta int) (tea.Model, tea.Cmd) {
+	if m.modal != noModal {
+		return m, nil
+	}
+	tabs := m.visibleTabs()
+	if m.tabIndex < 0 || m.tabIndex >= len(tabs) {
+		return m, nil
+	}
+	target := min(max(m.tabIndex+delta, 0), len(tabs)-1)
+	if target == m.tabIndex {
+		return m, nil
+	}
+	tabID := tabs[m.tabIndex].ID
+	m.tabIndex = target
+	return m, m.snapshotCommand(func(backend Backend) (model.Snapshot, error) {
+		return backend.MoveTab(tabID, delta)
+	})
+}
+
 func (m dashboard) newTab() (tea.Model, tea.Cmd) {
 	if m.modal != noModal || m.tabPending {
 		return m, nil
