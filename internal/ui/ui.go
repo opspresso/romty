@@ -282,8 +282,10 @@ type dashboard struct {
 	daemonRestarting bool
 	// hooksDeferred holds the agent hook offer until the first root exists.
 	hooksDeferred bool
-	// branches is the branch picker while it is open.
-	branches branchPicker
+	// branches is the branch picker while it is open, and branchRequest
+	// numbers its branch reads.
+	branches      branchPicker
+	branchRequest uint64
 	// config holds every persisted setting. It is the document as loaded,
 	// so saving keeps the fields this build does not know.
 	config           Config
@@ -501,7 +503,19 @@ func (m dashboard) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	value, command = value.syncAgentAnimation(command)
 	value, command = value.syncTerminalSize(command)
+	value.offerDeferredHooks()
 	return value.syncAltScroll(command)
+}
+
+// offerDeferredHooks shows the agent hook offer a first run held back, once
+// there is a root and nothing else is being asked. Checked after every
+// message, so a root added from anywhere and a modal closed by any key both
+// let it through.
+func (m *dashboard) offerDeferredHooks() {
+	if m.hooksDeferred && len(m.state.Roots) > 0 && m.modal == noModal && !m.fileView.active {
+		m.hooksDeferred = false
+		m.modal = hookInstallModal
+	}
 }
 
 // syncTerminalSize reports the width the narrow layout just gave or took back.
@@ -606,7 +620,7 @@ func (m dashboard) update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.input.err = ""
 		} else if m.modal == branchModal && m.branches.confirming == nil {
 			m.branches.query += message.Content
-			m.branches.index, m.branches.offset = 0, 0
+			m.branches.index, m.branches.offset = m.firstBranchChoice(), 0
 		} else if m.modal == removeSelectionModal && !m.removeTarget.isRoot {
 			// Pasting the name is how a name that is hard to type, such as
 			// one with characters the keyboard lacks, is confirmed.
@@ -651,10 +665,6 @@ func (m dashboard) update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.syncSelection()
 		m.ensureWorkspaceCursor()
 		m.clampTabIndex()
-		if m.hooksDeferred && len(m.state.Roots) > 0 && m.modal == noModal {
-			m.hooksDeferred = false
-			m.modal = hookInstallModal
-		}
 		// A refresh says the tree is current; it says nothing about a failed
 		// resize or a daemon that would not stop, so it clears tree errors
 		// only.

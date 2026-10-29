@@ -23,9 +23,12 @@ type Branch struct {
 // committed first, then the remote-tracking branches that have no local
 // branch of the same name.
 // The remote's own HEAD pointer is left out: it is an alias, not a branch.
+// Names are the ref with its refs/heads/ or refs/remotes/ prefix removed,
+// not git's shortest unambiguous name, which turns a branch that shares its
+// name with a tag into heads/<name>, a name git switch does not accept.
 func Branches(ctx context.Context, path string) ([]Branch, error) {
 	output, err := stdout(ctx, path, nil, "for-each-ref", "--sort=-committerdate",
-		"--format=%(HEAD)%00%(refname)%00%(refname:short)%00%(symref)", "refs/heads", "refs/remotes")
+		"--format=%(HEAD)%00%(refname)%00%(refname:lstrip=2)%00%(symref)", "refs/heads", "refs/remotes")
 	if err != nil {
 		return nil, fmt.Errorf("list branches: %w", err)
 	}

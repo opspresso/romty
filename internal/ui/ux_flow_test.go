@@ -419,3 +419,42 @@ func TestDefaultTabNamesShowTheirProgram(t *testing.T) {
 		t.Fatalf("rename starts from %q, want the stored name", updated.(dashboard).input.text)
 	}
 }
+
+// Shortening a numbered tab to one column keeps it there: the program name
+// is added once, before fitting, so eight agent tabs fit 90 columns. Adding it
+// again after fitting widened the same row to 141.
+func TestFittedNumberedTabsDoNotGrowBack(t *testing.T) {
+	tabs := make([]model.Tab, 8)
+	for index := range tabs {
+		tabs[index] = model.Tab{ID: fmt.Sprint(index), Name: fmt.Sprint(index + 1), Running: true, Agent: model.AgentClaude}
+	}
+	row := ansi.Strip(renderTabBarWithHover(newUIStyles(true), tabs, 0, -1, -1, 0, 90)[0])
+	if width := len([]rune(strings.TrimRight(row, " "))); width > 90 || !strings.HasSuffix(strings.TrimRight(row, " "), "+") {
+		t.Fatalf("eight agent tabs = %q (%d columns), want them and + within 90", row, width)
+	}
+}
+
+// Server-side refusals and slow local commands get hints that fit them.
+func TestGitHintsMatchTheirCause(t *testing.T) {
+	if hint := gitFailureHint(" ! [remote rejected] main -> main (protected branch hook declined)"); !strings.Contains(hint, "protection") {
+		t.Fatalf("remote rejection hint = %q", hint)
+	}
+	if hint := gitFailureHint("switch timed out after 2m0s"); strings.Contains(hint, "remote") || strings.Contains(hint, "network") {
+		t.Fatalf("local timeout hint = %q", hint)
+	}
+}
+
+// A held hook offer is shown when a modal open at the first root closes.
+func TestHeldHookOfferWaitsForTheModalToClose(t *testing.T) {
+	value := newDashboard(&fakeBackend{}, model.Snapshot{})
+	value.offerAgentHooks([]agenthooks.Status{{Provider: agenthooks.ProviderClaude, State: agenthooks.StateMissing}})
+	send(&value, key(tea.KeyF1, ""))
+	send(&value, snapshotMsg{value: projectsSnapshot(nil)})
+	if value.modal != helpModal {
+		t.Fatalf("the offer replaced the open Help (modal %v)", value.modal)
+	}
+	send(&value, key(tea.KeyEscape, ""))
+	if value.modal != hookInstallModal {
+		t.Fatalf("after Help closed modal = %v, want the hook offer", value.modal)
+	}
+}

@@ -21,7 +21,10 @@ type branchPicker struct {
 	// agents names what runs in the workspace's terminals. They share its
 	// directory, so a switch changes the files under them, and the picker
 	// asks first.
-	agents   []string
+	agents []string
+	// request numbers the branch read, so the answer to a read made for a
+	// picker since closed and reopened is not applied to the new one.
+	request  uint64
 	loading  bool
 	branches []gitrepo.Branch
 	err      string
@@ -35,6 +38,7 @@ type branchPicker struct {
 
 type branchListMsg struct {
 	path     string
+	request  uint64
 	branches []gitrepo.Branch
 	err      error
 }
@@ -65,17 +69,18 @@ func (m dashboard) openBranchPicker(target navItem) (tea.Model, tea.Cmd) {
 		}
 	}
 	m.modal = branchModal
-	m.branches = branchPicker{target: target.workspace, agents: agents, loading: true}
+	m.branchRequest++
+	m.branches = branchPicker{target: target.workspace, agents: agents, loading: true, request: m.branchRequest}
 	m.clearAnyError()
-	path := target.workspace.Path
+	path, request := target.workspace.Path, m.branchRequest
 	return m, func() tea.Msg {
 		branches, err := gitrepo.Branches(context.Background(), path)
-		return branchListMsg{path: path, branches: branches, err: err}
+		return branchListMsg{path: path, request: request, branches: branches, err: err}
 	}
 }
 
 func (m dashboard) handleBranchList(message branchListMsg) (tea.Model, tea.Cmd) {
-	if m.modal != branchModal || message.path != m.branches.target.Path {
+	if m.modal != branchModal || message.path != m.branches.target.Path || message.request != m.branches.request {
 		return m, nil
 	}
 	m.branches.loading = false
@@ -83,12 +88,27 @@ func (m dashboard) handleBranchList(message branchListMsg) (tea.Model, tea.Cmd) 
 	if message.err != nil {
 		m.branches.err = message.err.Error()
 	}
-	if len(message.branches) > 1 && message.branches[0].Current {
-		// The current branch is listed first for orientation; the cursor
-		// starts on the branch most likely wanted next.
-		m.branches.index = 1
-	}
+	m.branches.index, m.branches.offset = m.firstBranchChoice(), 0
 	return m, nil
+}
+
+// firstBranchChoice is where the cursor starts in the list as filtered: the
+// first branch that is not the current one, which is the branch most likely
+// wanted next. The create row is never the start, so typing ahead of a slow
+// read cannot leave Enter on a branch the user did not choose to create.
+func (m dashboard) firstBranchChoice() int {
+	rows := m.branchRows()
+	for index, row := range rows {
+		if !row.branch.Current && !row.create {
+			return index
+		}
+	}
+	for index, row := range rows {
+		if !row.branch.Current {
+			return index
+		}
+	}
+	return 0
 }
 
 // branchRows is the list as filtered by the query, ignoring case, and the row
@@ -124,10 +144,14 @@ func (m dashboard) handleBranchKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd)
 		return m, nil
 	}
 	rows := m.branchRows()
+	// Until the list is on screen there is nothing to choose: Enter would run
+	// a row the user cannot see.
+	ready := !m.branches.loading && m.branches.err == ""
 	switch message.String() {
 	case "esc":
 		if m.branches.query != "" {
-			m.branches.query, m.branches.index, m.branches.offset = "", 0, 0
+			m.branches.query = ""
+			m.branches.index, m.branches.offset = m.firstBranchChoice(), 0
 			return m, nil
 		}
 		m.modal = noModal
@@ -136,14 +160,18 @@ func (m dashboard) handleBranchKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd)
 	case "down":
 		m.moveBranch(1, len(rows))
 	case "enter":
-		if m.branches.index < len(rows) {
+		if ready && m.branches.index < len(rows) {
 			return m.chooseBranch(rows[m.branches.index])
 		}
 	default:
 		// Every other key types: branch names are letters, so the list moves
-		// with the arrow keys alone.
-		m.branches.query = editText(m.branches.query, message)
-		m.branches.index, m.branches.offset = 0, 0
+		// with the arrow keys alone. A key that types nothing leaves the
+		// cursor where it is.
+		query := editText(m.branches.query, message)
+		if query != m.branches.query {
+			m.branches.query = query
+			m.branches.index, m.branches.offset = m.firstBranchChoice(), 0
+		}
 	}
 	return m, nil
 }

@@ -154,3 +154,40 @@ func TestBranchPickerEscClearsThenCloses(t *testing.T) {
 		t.Fatal("second Esc did not close the picker")
 	}
 }
+
+// Typing ahead of a slow branch read must not leave Enter on the create row:
+// before the list arrives Enter does nothing, and after it the cursor starts
+// on the matching branch.
+func TestBranchPickerTypingAheadOfTheListNeverCreates(t *testing.T) {
+	value, repository := branchDashboard(t, nil)
+	send(&value, key('g', "g"))
+	command := send(&value, key('b', "b"))
+	typeText(&value, "feat")
+	if again := send(&value, key(tea.KeyEnter, "")); again != nil {
+		t.Fatal("Enter ran before the list was on screen")
+	}
+	deliver(&value, command)
+	rows := value.branchRows()
+	if rows[value.branches.index].create || rows[value.branches.index].branch.Name != "feature" {
+		t.Fatalf("cursor = %+v, want feature", rows[value.branches.index])
+	}
+	deliver(&value, send(&value, key(tea.KeyEnter, "")))
+	if current := currentBranch(t, repository); current != "feature" {
+		t.Fatalf("current branch = %q, want feature", current)
+	}
+}
+
+// The answer to a read made for a picker since closed and reopened is
+// dropped.
+func TestBranchPickerDropsAStaleRead(t *testing.T) {
+	value, _ := branchDashboard(t, nil)
+	send(&value, key('g', "g"))
+	stale := send(&value, key('b', "b"))
+	send(&value, key(tea.KeyEscape, ""))
+	send(&value, key('g', "g"))
+	send(&value, key('b', "b"))
+	deliver(&value, stale)
+	if !value.branches.loading {
+		t.Fatal("a stale read was applied to the reopened picker")
+	}
+}

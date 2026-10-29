@@ -108,3 +108,30 @@ func TestSwitchKeepsConflictingLocalChanges(t *testing.T) {
 		t.Fatalf("Switch() = (%q, %v), want git's refusal", output, err)
 	}
 }
+
+// A branch that shares its name with a tag is listed by its own name, which
+// git switch accepts.
+func TestBranchSharingATagNameCanBeSwitchedTo(t *testing.T) {
+	repository := branchRepository(t)
+	testutil.RunGit(t, "-C", repository, "branch", "v1")
+	testutil.RunGit(t, "-C", repository, "tag", "v1")
+	branches, err := Branches(context.Background(), repository)
+	if err != nil {
+		t.Fatalf("Branches() error = %v", err)
+	}
+	found := false
+	for _, branch := range branches {
+		if branch.Name == "v1" {
+			found = true
+		}
+		if strings.HasPrefix(branch.Name, "heads/") {
+			t.Fatalf("branch listed as %q", branch.Name)
+		}
+	}
+	if !found {
+		t.Fatal("branch v1 is missing")
+	}
+	if output, err := Switch(context.Background(), repository, SwitchRequest{Branch: "v1"}); err != nil {
+		t.Fatalf("Switch(v1) = (%q, %v)", output, err)
+	}
+}

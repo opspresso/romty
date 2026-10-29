@@ -298,8 +298,10 @@ var gitFailureHints = []struct {
 	{"Permission denied (publickey)", "sign-in failed; press t and run it in a terminal"},
 	{"Authentication failed", "sign-in failed; press t and run it in a terminal"},
 	{"could not read Username", "credentials needed; press t and run it in a terminal"},
-	{"rejected", "the remote has newer commits; pull, then push"},
-	{"timed out", "the remote did not answer; check the network and retry"},
+	{"[remote rejected]", "the remote refused it; check the branch's protection rules"},
+	{"non-fast-forward", "the remote has newer commits; pull, then push"},
+	{"fetch first", "the remote has newer commits; pull, then push"},
+	{"timed out", "it took too long; retry, or press t and run it in a terminal"},
 }
 
 // gitFailureHint is the next step for a failure, or empty when romty has none.

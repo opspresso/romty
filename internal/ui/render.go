@@ -778,8 +778,12 @@ const newTabLabel = "  +  "
 // tabLabel is a tab's text in the tab bar. A running tab leaves one cell
 // after the leading gap for its status marker, which is drawn in its own
 // color, so the text here only reserves the width the hit test also measures.
+//
+// The name is used as given. fitTabNames turns a tab's stored name into the
+// name shown, once; every path that draws or measures a tab row goes through
+// it, so a shortened name is never widened again here.
 func tabLabel(tab model.Tab) (prefix, rest string) {
-	name := tabDisplayName(tab)
+	name := display.Text(tab.Name)
 	if tab.Running {
 		return "  ", " " + name + "  × "
 	}
@@ -838,8 +842,7 @@ func fitTabNames(tabs []model.Tab, active, width int) []model.Tab {
 		}
 		return total
 	}
-	// Fit the names as shown, program and all. tabDisplayName adds nothing
-	// to a name that is no longer a bare number, so it is not added twice.
+	// Fit the names as shown, program and all.
 	tabs = slices.Clone(tabs)
 	for index := range tabs {
 		tabs[index].Name = tabDisplayName(tabs[index])
