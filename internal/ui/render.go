@@ -590,8 +590,8 @@ func (m dashboard) renderNavigation(width, height int) []string {
 	}
 	var chips []string
 	if m.keepingAwake() {
-		// A chip of its own: in the title's colour the mark was too faint to see.
-		chips = append(chips, m.styles.awake.Render(" ☕ "))
+		// Coloured on its own: in the muted title colour it was too faint to see.
+		chips = append(chips, m.styles.awake.Render("☕"))
 	}
 	if summary := m.attention().summary(); summary != "" {
 		chips = append(chips, m.styles.attention.Render(" "+summary+" "))
