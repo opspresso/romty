@@ -681,12 +681,9 @@ func (m dashboard) renderNavigationItem(item navItem, index int, isCurrent bool,
 	}
 	markers := openTabMarkers(m.styles, style, item.tabs, m.agentAnimationFrame) +
 		openTabMarkers(m.styles, style, item.hiddenTabs, m.agentAnimationFrame)
-	for _, tab := range append(slices.Clone(item.tabs), item.hiddenTabs...) {
-		if tab.Running && m.unseenBell(tab) {
-			// A bell nobody has heard yet, in the attention colour.
-			markers += m.styles.attention.Render("!")
-			break
-		}
+	if m.rowHasUnseenBell(item) {
+		// A bell nobody has heard yet, in the attention colour.
+		markers += m.styles.attention.Render("!")
 	}
 	var nameLine string
 	if markers != "" {
@@ -1079,4 +1076,17 @@ func pad(value string, width int) string {
 		return value
 	}
 	return value + strings.Repeat(" ", missing)
+}
+
+// rowHasUnseenBell reports a bell unheard in one of the row's tabs, including
+// those of the workspaces a collapsed root hides.
+func (m dashboard) rowHasUnseenBell(item navItem) bool {
+	for _, tabs := range [][]model.Tab{item.tabs, item.hiddenTabs} {
+		for _, tab := range tabs {
+			if tab.Running && m.unseenBell(tab) {
+				return true
+			}
+		}
+	}
+	return false
 }
