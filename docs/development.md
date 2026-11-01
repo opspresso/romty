@@ -8,7 +8,7 @@ Build the command from a local checkout:
 go build -o build/romty ./cmd/romty
 ```
 
-CI runs only before a release: the release workflow calls `ci.yml` first, and pull requests and pushes do not start it. Run it by hand with `gh workflow run ci.yml --ref <branch>` when a branch needs the hosted macOS and Linux checks. Before merging, run the same checks locally:
+CI runs before every release and on demand: the release workflow calls `ci.yml` first, and `gh workflow run ci.yml --ref <branch>` runs it on a branch that needs the hosted macOS and Linux checks. Pull requests and pushes do not start it. Before merging, run the same checks locally:
 
 ```sh
 test -z "$(gofmt -s -l .)"
