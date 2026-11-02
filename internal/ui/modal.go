@@ -13,6 +13,7 @@ import (
 
 	"github.com/opspresso/romty/internal/agenthooks"
 	"github.com/opspresso/romty/internal/display"
+	"github.com/opspresso/romty/internal/gitrepo"
 	"github.com/opspresso/romty/internal/model"
 	"github.com/opspresso/romty/internal/version"
 	"golang.org/x/text/unicode/norm"
@@ -94,8 +95,14 @@ func (m dashboard) handleModalKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 			case "end", "G":
 				return m.scrollGitAction(len(m.gitActionResultLines()))
 			case "t":
+				if m.gitRun.action == gitrepo.ActionPullChildren {
+					return m, nil
+				}
 				return m.openGitResultTerminal()
 			case "f":
+				if m.gitRun.action == gitrepo.ActionPullChildren {
+					return m, nil
+				}
 				return m.openGitResultFiles()
 			}
 			return m, nil

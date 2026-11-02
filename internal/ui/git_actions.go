@@ -137,6 +137,18 @@ func (m dashboard) startGitAction() (tea.Model, tea.Cmd) {
 	}
 }
 
+func (m dashboard) startRootPull(target navItem) (tea.Model, tea.Cmd) {
+	ctx, cancel := context.WithCancel(context.Background())
+	m.modal = gitActionsModal
+	m.gitRun = gitActionRun{target: target.workspace, action: gitrepo.ActionPullChildren,
+		returnTo: workspaceActionsModal, pending: true, cancel: cancel}
+	m.clearAnyError()
+	return m, func() tea.Msg {
+		output, err := gitrepo.PullChildren(ctx, target.workspace.Path)
+		return gitActionMsg{path: target.workspace.Path, action: gitrepo.ActionPullChildren, output: output, err: err}
+	}
+}
+
 func (m dashboard) handleGitActionResult(message gitActionMsg) (tea.Model, tea.Cmd) {
 	if message.path != m.gitRun.target.Path || message.action != m.gitRun.action {
 		return m, nil
