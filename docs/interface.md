@@ -57,11 +57,12 @@ The daemon reads Git state for every open TUI and sends it when it changes; see 
 Press `g` in the workspace pane, or `Ctrl`+`Shift`+`G` in either pane, to open Git actions for a workspace. From the workspace pane it targets the row under the cursor; from the terminal pane or scrollback it targets the open terminal workspace. The menu provides `Status` (`s`), `Fetch` (`u`), `Pull` (`p`), `Push` (`P`), and `Switch branch` (`b`). The letters run an action directly. The `GIT` section of the workspace actions (`F8`) is the same list.
 
 - `Pull` uses `--ff-only` so it never creates a merge commit.
+- A root's workspace actions offer `Pull child repositories` (`v`). It runs `git pull --ff-only` in each immediate, non-hidden child directory containing a `.git` directory or file, including linked worktrees. It skips other directories. Each repository's result is shown; a failure does not prevent the remaining repositories from being tried. Git reports local changes that prevent a pull, and romty does not stash or discard them. Individual results longer than 16 KiB are truncated; failures retain the end of the output.
 - Commands run without interactive credential prompts, and their output or error remains in a scrollable result modal.
 - Captured Git output is limited to 8 MiB; exceeding it stops the command and reports an error.
 - The output is coloured: porcelain status letters take the same green, amber, and red the file view gives them, and a diffstat's `+` and `-` are split into additions and removals.
 - A common failure adds a `Next:` line that says what to do, for example when a pull cannot fast-forward or a branch has no upstream.
-- From a result, press `t` to open a terminal in the workspace or `f` to open its changed files. Press `Enter` to return to the action menu, or click `×` in its title bar to close it.
+- From a single-workspace result, press `t` to open a terminal in the workspace or `f` to open its changed files. Press `Enter` to return to the action menu, or click `×` in its title bar to close it.
 
 ### Switching branches
 
@@ -288,6 +289,7 @@ Press `F5` to start the daemon again. romty reloads the workspace tree from it. 
 | `TERMINAL` | `Open terminal` (`o`), `New tab` (`n`), `Close tab` (`x`) |
 | `FILES` | `All files` (`a`), `File changes` (`f`) |
 | `GIT` | `Status` (`s`), `Fetch` (`u`), `Pull` (`p`), `Push` (`P`), `Switch branch` (`b`) |
+| root `GIT` | `Pull child repositories` (`v`) |
 | after a rule | `Delete workspace` or `Forget root` (`d`) |
 
 An action appears only when it applies. Closing a tab asks before it terminates that shell. Deleting a workspace recursively removes all of its contents, so the confirmation accepts `Enter` only after you type or paste the workspace's name. The comparison ignores Unicode normalization, so a name that macOS stores decomposed still matches what you type. Forgetting a root removes it only from romty and confirms with `Enter`. Both removal actions terminate terminal sessions under the selected item.

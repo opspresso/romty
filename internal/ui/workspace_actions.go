@@ -26,6 +26,7 @@ const (
 	workspaceFileChangesAction
 	// workspaceGitAction runs the Git action the choice names.
 	workspaceGitAction
+	workspacePullChildrenAction
 	workspaceRemoveAction
 )
 
@@ -198,6 +199,11 @@ func (m dashboard) workspaceActionChoices() []workspaceActionChoice {
 					key: gitActionKeys[action], git: action,
 				})
 			}
+		}
+		if target.isRoot {
+			choices = append(choices, workspaceActionChoice{
+				action: workspacePullChildrenAction, label: "Pull child repositories", group: workspaceGitGroup, key: "v",
+			})
 		}
 	}
 	remove := workspaceActionChoice{
@@ -409,6 +415,8 @@ func (m dashboard) runWorkspaceAction(choice workspaceActionChoice) (tea.Model, 
 		return m.openAllFilesView(target)
 	case workspaceGitAction:
 		return m.startWorkspaceGitAction(choice.git, target)
+	case workspacePullChildrenAction:
+		return m.startRootPull(target)
 	case workspaceRemoveAction:
 		return m.confirmRemoveSelection(target)
 	default:

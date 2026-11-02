@@ -124,6 +124,17 @@ func TestWorkspaceActionsRunAGitOperationAndReturnToThePalette(t *testing.T) {
 	}
 }
 
+func TestRootActionsRunPullChildrenWithoutRootGit(t *testing.T) {
+	value := newDashboard(&fakeBackend{}, projectsSnapshot(nil))
+	value.setNavigation(0)
+	send(&value, key(tea.KeyF8, ""))
+	command := send(&value, key('v', "v"))
+	if command == nil || value.modal != gitActionsModal || !value.gitRun.pending || value.gitRun.action != gitrepo.ActionPullChildren || value.gitRun.target.Path != projectsRoot.Path {
+		t.Fatalf("root pull = (command %v, modal %v, run %+v)", command, value.modal, value.gitRun)
+	}
+	value.cancelGitAction()
+}
+
 func TestWorkspaceActionsRunTerminalAndFileCommands(t *testing.T) {
 	t.Run("new tab", func(t *testing.T) {
 		snapshot, _ := alphaWorkspaceSnapshot(nil)

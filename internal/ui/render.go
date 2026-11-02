@@ -14,6 +14,7 @@ import (
 	"github.com/rivo/uniseg"
 
 	"github.com/opspresso/romty/internal/display"
+	"github.com/opspresso/romty/internal/gitrepo"
 	"github.com/opspresso/romty/internal/model"
 )
 
@@ -397,10 +398,11 @@ func (m dashboard) renderStatus(width, bodyHeight int) []string {
 		status = m.renderActivityStatus("RUNNING", m.gitRun.action.String()+" in "+display.Text(m.gitRun.target.Name), width)
 	case m.modal == gitActionsModal && m.gitRun.complete:
 		shortcuts := []shortcut{
-			{key: "t", description: "terminal"},
-			{key: "f", description: "file changes"},
 			{key: "Enter", description: "actions"},
 			{key: "Esc", description: "close"},
+		}
+		if m.gitRun.action != gitrepo.ActionPullChildren {
+			shortcuts = append([]shortcut{{key: "t", description: "terminal"}, {key: "f", description: "file changes"}}, shortcuts...)
 		}
 		if m.maximumGitActionOffset(bodyHeight) > 0 {
 			shortcuts = append([]shortcut{{key: "↑/↓", description: "scroll"}}, shortcuts...)
