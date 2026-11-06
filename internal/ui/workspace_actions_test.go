@@ -135,6 +135,29 @@ func TestRootActionsRunPullChildrenWithoutRootGit(t *testing.T) {
 	value.cancelGitAction()
 }
 
+func TestRootPullShowsTheRepositoryInProgress(t *testing.T) {
+	value := newDashboard(&fakeBackend{}, projectsSnapshot(nil))
+	value.setNavigation(0)
+	send(&value, key(tea.KeyF8, ""))
+	send(&value, key('v', "v"))
+	value.cancelGitAction()
+	updates := make(chan tea.Msg, 1)
+	command := send(&value, pullChildrenProgressMsg{path: projectsRoot.Path, name: "alpha", index: 2, total: 5, updates: updates})
+	rendered := ansi.Strip(value.render())
+	if !strings.Contains(rendered, "Pulling alpha (2/5)…") || !strings.Contains(rendered, "Pull child repositories in projects · alpha (2/5)") {
+		t.Fatalf("root pull progress is not shown:\n%s", rendered)
+	}
+	result := gitActionMsg{path: projectsRoot.Path, action: gitrepo.ActionPullChildren, output: "done"}
+	updates <- result
+	if command == nil || command() != tea.Msg(result) {
+		t.Fatal("progress did not wait for the next root pull update")
+	}
+	send(&value, result)
+	if value.gitRun.pending || !value.gitRun.complete || value.gitRun.output != "done" {
+		t.Fatalf("root pull result = %+v", value.gitRun)
+	}
+}
+
 func TestWorkspaceActionsRunTerminalAndFileCommands(t *testing.T) {
 	t.Run("new tab", func(t *testing.T) {
 		snapshot, _ := alphaWorkspaceSnapshot(nil)
