@@ -75,6 +75,8 @@ type gitActionRun struct {
 	output   string
 	err      string
 	offset   int
+	// progress is the child repository a root pull is handling.
+	progress string
 	// cancel stops a running command when the TUI closes.
 	cancel func()
 }
@@ -137,16 +139,52 @@ func (m dashboard) startGitAction() (tea.Model, tea.Cmd) {
 	}
 }
 
+// pullChildrenProgressMsg names the child repository a root pull is handling.
+type pullChildrenProgressMsg struct {
+	path         string
+	name         string
+	index, total int
+	updates      <-chan tea.Msg
+}
+
 func (m dashboard) startRootPull(target navItem) (tea.Model, tea.Cmd) {
 	ctx, cancel := context.WithCancel(context.Background())
 	m.modal = gitActionsModal
 	m.gitRun = gitActionRun{target: target.workspace, action: gitrepo.ActionPullChildren,
 		returnTo: workspaceActionsModal, pending: true, cancel: cancel}
 	m.clearAnyError()
-	return m, func() tea.Msg {
-		output, err := gitrepo.PullChildren(ctx, target.workspace.Path)
-		return gitActionMsg{path: target.workspace.Path, action: gitrepo.ActionPullChildren, output: output, err: err}
+	path := target.workspace.Path
+	// The pull reports each repository as it starts. The channel carries those
+	// reports and then the result; a send gives up once the run is cancelled,
+	// so a closed modal never leaves the goroutine blocked. Closing the channel
+	// releases a wait left pending by a cancelled run.
+	updates := make(chan tea.Msg)
+	send := func(message tea.Msg) {
+		select {
+		case updates <- message:
+		case <-ctx.Done():
+		}
 	}
+	go func() {
+		defer close(updates)
+		output, err := gitrepo.PullChildren(ctx, path, func(name string, index, total int) {
+			send(pullChildrenProgressMsg{path: path, name: name, index: index, total: total, updates: updates})
+		})
+		send(gitActionMsg{path: path, action: gitrepo.ActionPullChildren, output: output, err: err})
+	}()
+	return m, waitForRootPull(updates)
+}
+
+func waitForRootPull(updates <-chan tea.Msg) tea.Cmd {
+	return func() tea.Msg { return <-updates }
+}
+
+func (m dashboard) handleRootPullProgress(message pullChildrenProgressMsg) (tea.Model, tea.Cmd) {
+	if !m.gitRun.pending || message.path != m.gitRun.target.Path || m.gitRun.action != gitrepo.ActionPullChildren {
+		return m, nil
+	}
+	m.gitRun.progress = fmt.Sprintf("%s (%d/%d)", message.name, message.index, message.total)
+	return m, waitForRootPull(message.updates)
 }
 
 func (m dashboard) handleGitActionResult(message gitActionMsg) (tea.Model, tea.Cmd) {
@@ -249,10 +287,14 @@ func (m dashboard) renderGitActionsModal(maximum, height int) []string {
 	target := m.styles.modalStrong.Render(display.Text(m.gitRun.target.Name)) +
 		m.styles.empty.Render("  "+display.Text(m.gitRun.target.Path))
 	if m.gitRun.pending {
+		running := "Running…"
+		if m.gitRun.progress != "" {
+			running = "Pulling " + display.Text(m.gitRun.progress) + "…"
+		}
 		return modalBoxFit(m.styles, minimumModalWidth, maximum, "Git · "+m.gitRun.action.String(),
 			target,
 			"",
-			m.styles.modalBody.Render("Running…"),
+			m.styles.modalBody.Render(running),
 			"",
 		)
 	}

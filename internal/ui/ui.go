@@ -603,6 +603,8 @@ func (m dashboard) update(message tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleTabMoved(message)
 	case gitActionMsg:
 		return m.handleGitActionResult(message)
+	case pullChildrenProgressMsg:
+		return m.handleRootPullProgress(message)
 	case fileListMsg:
 		return m.handleFileList(message)
 	case fileContentMsg:
