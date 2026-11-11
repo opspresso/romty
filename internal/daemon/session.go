@@ -104,13 +104,7 @@ func startSession(id, directory, shell string, environment []string, columns, ro
 	if environment == nil {
 		environment = os.Environ()
 	}
-	command.Env = make([]string, 0, len(environment)+3)
-	for _, value := range environment {
-		if !strings.HasPrefix(value, "ROMTY_TAB_ID=") {
-			command.Env = append(command.Env, value)
-		}
-	}
-	command.Env = append(command.Env, "TERM=xterm-256color", "ROMTY=1", "ROMTY_TAB_ID="+id)
+	command.Env = guestEnvironment(environment, id)
 	terminal, err := pty.StartWithSize(command, &pty.Winsize{Cols: columns, Rows: rows})
 	if err != nil {
 		return nil, fmt.Errorf("start shell PTY: %w", err)
