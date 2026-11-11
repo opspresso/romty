@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 	"unicode"
 
 	tea "charm.land/bubbletea/v2"
@@ -36,6 +37,17 @@ type embeddedTerminal struct {
 	// guestMouse holds the mouse tracking modes the guest application asked
 	// for. romty only mirrors them to the host when passthrough is enabled.
 	guestMouse map[ansi.DECMode]bool
+	// cursorHidden, cursorShape and cursorSteady are the cursor as the guest
+	// set it. A program that draws its own cursor hides the terminal's, and
+	// one that redraws the screen hides it while it does.
+	cursorHidden bool
+	cursorShape  tea.CursorShape
+	cursorSteady bool
+	// held is the last frame the guest finished, shown while it draws the
+	// next one inside a synchronized update. releaseScheduled says a timer is
+	// already set to end a hold the guest never ends.
+	held             *heldFrame
+	releaseScheduled bool
 	// titles removes window-title sequences before the emulator parses them,
 	// because the emulator reads the 0x9C inside characters such as "서" as
 	// the C1 string terminator and prints the rest of the title as text.
@@ -116,10 +128,20 @@ func newEmbeddedTerminal(id string, stream io.ReadWriteCloser, width, height int
 				terminal.bell = true
 			}
 		},
-		AltScreen: terminal.keyboard.SetAltScreen,
+		AltScreen:        terminal.keyboard.SetAltScreen,
+		CursorVisibility: func(visible bool) { terminal.cursorHidden = !visible },
+		// The emulator names this argument blink and passes it the opposite,
+		// whether the cursor is steady.
+		CursorStyle: func(style vt.CursorStyle, steady bool) {
+			terminal.cursorShape, terminal.cursorSteady = tea.CursorShape(style), steady
+		},
 	})
 	clampMargins(emulator)
 	terminal.followKeyboardProtocol()
+	// The emulator reports a mode as recognised once it has been set or reset.
+	// Resetting it here makes the answer to "do you support synchronized
+	// output" yes from the first time a program asks.
+	_, _ = emulator.Write([]byte(ansi.ResetModeSynchronizedOutput))
 	emulator.Emulator.RegisterOscHandler(52, func(data []byte) bool {
 		terminal.observeClipboard(data)
 		return true
@@ -350,10 +372,92 @@ func (t *embeddedTerminal) trackGuestMouse(mode ansi.Mode, enabled bool) {
 }
 
 func (t *embeddedTerminal) trackGuestMode(mode ansi.Mode, enabled bool) {
-	if mode == ansi.Mode(ansi.ModeNumericKeypad) {
+	switch mode {
+	case ansi.Mode(ansi.ModeNumericKeypad):
 		t.applicationKeypad = enabled
+	case ansi.Mode(ansi.ModeSynchronizedOutput):
+		t.holdFrame(enabled)
 	}
 	t.trackGuestMouse(mode, enabled)
+}
+
+// heldFrame is the screen and cursor as they were when a synchronized update
+// began.
+type heldFrame struct {
+	lines  []string
+	cursor *tea.Cursor
+	since  time.Time
+}
+
+// frameHoldLimit is how long a synchronized update may keep the screen from
+// changing. A program that dies between the two halves of the mode would
+// otherwise freeze its tab. It is a variable so tests need not wait it out.
+var frameHoldLimit = time.Second
+
+// holdFrame begins or ends a synchronized update (mode 2026). A program
+// sets the mode, draws a whole frame and resets it, and asks that nothing be
+// shown in between: the bytes of one frame arrive over several reads, and a
+// screen painted between two of them shows half of the old frame under half
+// of the new one.
+//
+// It runs inside the emulator's write, which holds its lock, so it reads the
+// bare emulator. A replay is not held: it is drawn off screen in one piece,
+// and rendering every frame of a long recording would only slow it down.
+func (t *embeddedTerminal) holdFrame(begin bool) {
+	if !begin {
+		t.held = nil
+		return
+	}
+	if !t.live || t.held != nil {
+		return
+	}
+	emulator := t.emulator.Emulator
+	t.held = &heldFrame{
+		lines:  splitLines(emulator.Render(), emulator.Height()),
+		cursor: t.cursorAt(emulator.CursorPosition()),
+		since:  now(),
+	}
+}
+
+// heldNow is the frame being held, or nil when none is or its time is up.
+func (t *embeddedTerminal) heldNow() *heldFrame {
+	if t.held != nil && now().Sub(t.held.since) >= frameHoldLimit {
+		t.held = nil
+	}
+	return t.held
+}
+
+// scheduleRelease reports whether a timer is needed to end the hold in case
+// the guest never does. It answers yes once for each timer.
+func (t *embeddedTerminal) scheduleRelease() bool {
+	if t.held == nil || t.releaseScheduled {
+		return false
+	}
+	t.releaseScheduled = true
+	return true
+}
+
+// cursorAt is the cursor to show at position, or nil when the guest hid it.
+func (t *embeddedTerminal) cursorAt(position uv.Position) *tea.Cursor {
+	if t.cursorHidden {
+		return nil
+	}
+	cursor := tea.NewCursor(position.X, position.Y)
+	cursor.Shape, cursor.Blink = t.cursorShape, !t.cursorSteady
+	return cursor
+}
+
+// cursor is the cursor to show, relative to the terminal's own origin, or
+// nil when there is none to show.
+func (t *embeddedTerminal) cursor() *tea.Cursor {
+	if held := t.heldNow(); held != nil {
+		if held.cursor == nil {
+			return nil
+		}
+		cursor := *held.cursor
+		return &cursor
+	}
+	return t.cursorAt(t.emulator.CursorPosition())
 }
 
 // guestMouseMode reports the host mouse mode needed to satisfy the guest, or
@@ -713,6 +817,8 @@ func (t *embeddedTerminal) paste(value string) {
 }
 
 func (t *embeddedTerminal) resize(width, height int) {
+	// A held frame was drawn for the old size.
+	t.held = nil
 	t.emulator.Resize(width, height)
 }
 
@@ -727,6 +833,9 @@ func clampSize(value int) uint16 {
 }
 
 func (t *embeddedTerminal) render() []string {
+	if held := t.heldNow(); held != nil {
+		return held.lines
+	}
 	return splitLines(t.emulator.Render(), t.emulator.Height())
 }
 
@@ -795,10 +904,6 @@ func (t *embeddedTerminal) searchLines(query string) []int {
 
 func lineMatches(line, needle string) bool {
 	return strings.Contains(strings.ToLower(ansi.Strip(line)), needle)
-}
-
-func (t *embeddedTerminal) cursorPosition() uv.Position {
-	return t.emulator.CursorPosition()
 }
 
 // close lets go of the daemon and of everything the emulator holds. It is

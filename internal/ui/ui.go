@@ -619,6 +619,8 @@ func (m dashboard) update(message tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleOpenedTerminal(message)
 	case terminalOutputMsg:
 		return m.handleTerminalOutput(message)
+	case frameReleaseMsg:
+		return m.handleFrameRelease(message)
 	case configSavedMsg:
 		// What the save reported comes first, even when a later change has
 		// already made this save out of date: a failed save must reach the
