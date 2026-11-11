@@ -129,3 +129,44 @@ func BenchmarkRecordingAppend(b *testing.B) {
 		value.append(chunk)
 	}
 }
+
+// A reader that follows the recording keeps a position in it, which has to
+// mean the same byte after older ones were dropped or the ring was rebuilt.
+func TestRecordingReadsFromAPositionThatOutlivesTrimming(t *testing.T) {
+	testutil.Set(t, &maxHistoryBytes, 8)
+	var value recording
+	value.append([]byte("abcdef"))
+	if got := string(value.readFrom(2, 3)); got != "cde" {
+		t.Fatalf("readFrom(2, 3) = %q, want %q", got, "cde")
+	}
+
+	// The ring wraps: positions 0 to 3 are gone.
+	value.append([]byte("ghijkl"))
+	if value.oldest() != 4 || value.total != 12 {
+		t.Fatalf("oldest, total = %d, %d, want 4, 12", value.oldest(), value.total)
+	}
+	if got := string(value.readFrom(4, 100)); got != "efghijkl" {
+		t.Fatalf("readFrom(oldest) = %q, want everything held", got)
+	}
+	if got := string(value.readFrom(9, 2)); got != "jk" {
+		t.Fatalf("readFrom(9, 2) = %q, want %q", got, "jk")
+	}
+	if got := value.readFrom(12, 5); len(got) != 0 {
+		t.Fatalf("readFrom(total) = %q, want nothing yet", got)
+	}
+
+	// Trimming an idle tab rebuilds the ring; the positions stay.
+	value.reshape(4)
+	if value.oldest() != 8 {
+		t.Fatalf("oldest after a trim = %d, want 8", value.oldest())
+	}
+	if got := string(value.readFrom(10, 5)); got != "kl" {
+		t.Fatalf("readFrom(10) after a trim = %q, want %q", got, "kl")
+	}
+
+	// A chunk larger than the limit keeps only its tail, and still counts.
+	value.append([]byte("0123456789"))
+	if value.total != 22 || string(value.readFrom(value.oldest(), 100)) != "23456789" {
+		t.Fatalf("after an oversized chunk: total %d, held %q", value.total, value.readFrom(value.oldest(), 100))
+	}
+}

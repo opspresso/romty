@@ -17,6 +17,7 @@ import (
 	"github.com/charmbracelet/x/vt"
 
 	"github.com/opspresso/romty/internal/keyboard"
+	"github.com/opspresso/romty/internal/screen"
 	"github.com/opspresso/romty/internal/version"
 )
 
@@ -56,7 +57,7 @@ type embeddedTerminal struct {
 	// titles removes window-title sequences before the emulator parses them,
 	// because the emulator reads the 0x9C inside characters such as "서" as
 	// the C1 string terminator and prints the rest of the title as text.
-	titles titleScrubber
+	titles screen.TitleScrubber
 	// readBuffer is reused by every read. A read is issued only after the
 	// previous output was written to the emulator, so no two reads overlap.
 	readBuffer []byte
@@ -141,8 +142,9 @@ func newEmbeddedTerminal(id string, stream io.ReadWriteCloser, width, height int
 			terminal.cursorShape, terminal.cursorSteady = tea.CursorShape(style), steady
 		},
 	})
-	clampMargins(emulator)
+	screen.Guard(emulator.Emulator)
 	terminal.followKeyboardProtocol()
+	terminal.takeDaemonReports()
 	// The emulator reports a mode as recognised once it has been set or reset.
 	// Resetting it here makes the answer to "do you support synchronized
 	// output" yes from the first time a program asks.
@@ -189,44 +191,6 @@ func newEmbeddedTerminalWithReplay(
 	return terminal
 }
 
-// clampMargins keeps the guest's scroll region inside the screen romty is
-// showing. A guest keeps drawing at the size it last knew, so shrinking the
-// pane leaves DECSTBM and DECSLRM in flight that name rows or columns the
-// emulator no longer has. The emulator takes those margins at face value and
-// then indexes its buffer with them, which panics and takes the whole
-// dashboard down with it.
-//
-// The handlers registered here run before the emulator's own, which read the
-// same parameter storage: rewriting the parameter in place and returning false
-// leaves the emulator to apply a region that fits rather than one that
-// crashes. The bare Emulator is used because the write lock is already held
-// while a sequence is being handled.
-func clampMargins(safe *vt.SafeEmulator) {
-	emulator := safe.Emulator
-	// Set Top and Bottom Margins [ansi.DECSTBM].
-	emulator.RegisterCsiHandler('r', func(params ansi.Params) bool {
-		clampParameter(params, 1, emulator.Height())
-		return false
-	})
-	// Set Left and Right Margins [ansi.DECSLRM].
-	emulator.RegisterCsiHandler('s', func(params ansi.Params) bool {
-		clampParameter(params, 1, emulator.Width())
-		return false
-	})
-}
-
-func clampParameter(params ansi.Params, index, limit int) {
-	if index >= len(params) {
-		return
-	}
-	// A missing parameter reads as zero, which is never above the limit, so
-	// the emulator keeps its own default for it.
-	if params[index].Param(0) <= limit {
-		return
-	}
-	params[index] = ansi.Param(ansi.Parameter(limit, params[index].HasMore()))
-}
-
 // followKeyboardProtocol keeps the key encoding the guest asks for and answers
 // the two questions a program asks to learn what terminal it is in. The
 // emulator knows none of these sequences.
@@ -267,10 +231,16 @@ func (t *embeddedTerminal) followKeyboardProtocol() {
 		}
 		return true
 	})
-	// The state the daemon sends after a replay, which the recording alone
-	// cannot give: its pushes may be gone, or still there to apply twice.
+}
+
+// takeDaemonReports reads what the daemon sends after a replay, which the
+// recording alone cannot give: the keyboard state, whose pushes may be gone
+// or still there to apply twice, and the screen of a full-screen program,
+// most of which was drawn before the recording begins.
+func (t *embeddedTerminal) takeDaemonReports() {
+	emulator := t.emulator.Emulator
 	emulator.RegisterApcHandler(func(data []byte) bool {
-		return t.keyboard.Restore(string(data))
+		return t.keyboard.Restore(string(data)) || screen.Apply(emulator, string(data))
 	})
 }
 
@@ -289,7 +259,7 @@ func (t *embeddedTerminal) read() tea.Cmd {
 }
 
 func (t *embeddedTerminal) writeOutput(data []byte) {
-	_, _ = t.emulator.Write(t.titles.scrub(data))
+	_, _ = t.emulator.Write(t.titles.Scrub(data))
 }
 
 func (t *embeddedTerminal) sendKey(message tea.KeyPressMsg) {

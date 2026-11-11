@@ -388,7 +388,12 @@ func (s *Server) handleAttach(connection net.Conn, request protocol.Request) {
 		}
 		ready = func(int, uint16, uint16) error { return nil }
 	}
-	if err := value.attachClientReady(connection, request.ClientID, ready); err != nil {
+	err := value.attachClientReady(connection, request.ClientID, ready)
+	if fault := value.screenFault(); fault != nil {
+		s.logger.Printf("tab %s: stopped following the full-screen display, so a reattach replays the recording alone: %v",
+			request.TabID, fault)
+	}
+	if err != nil {
 		s.logger.Printf("attach to tab %s ended: %v", request.TabID, err)
 	}
 }
