@@ -335,7 +335,10 @@ func (m dashboard) Init() tea.Cmd {
 	// The host starts with alternate scroll on, which is what turns a wheel
 	// notch into arrow keys romty cannot tell from typed ones. Only scrollback
 	// wants them, so the mode is off until it opens.
-	commands := []tea.Cmd{tea.RequestBackgroundColor, m.subscribe(), altScrollCommand(false), m.readDaemonInfo()}
+	commands := []tea.Cmd{
+		tea.RequestBackgroundColor, tea.RequestForegroundColor,
+		m.subscribe(), altScrollCommand(false), m.readDaemonInfo(),
+	}
 	// Bubble Tea only asks terminals it can name for synchronized output and
 	// skips SSH sessions outright — but an SSH session is where romty lives.
 	// Asked blind, a terminal that supports the mode reports it and every
@@ -370,7 +373,19 @@ func (m dashboard) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	value, command = value.syncAgentAnimation(command)
 	value, command = value.syncTerminalSize(command)
 	value.offerDeferredHooks()
+	value.syncGuestFocus()
 	return value.syncAltScroll(command)
+}
+
+// syncGuestFocus tells the open terminal's guest whether keys reach it: the
+// host window has the focus, the terminal pane has romty's, and nothing is
+// drawn over it. Everything that changes one of those passes through Update.
+func (m dashboard) syncGuestFocus() {
+	if m.terminal == nil {
+		return
+	}
+	m.terminal.setFocus(!m.hostBlurred && m.focus == terminalPane &&
+		m.modal == noModal && !m.scrollback && !m.fileView.active)
 }
 
 // syncTerminalSize reports the width the narrow layout just gave or took back.
@@ -436,6 +451,18 @@ func (m dashboard) update(message tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.resizeTerminal()
 	case tea.BackgroundColorMsg:
 		m.styles = newUIStyles(message.IsDark())
+		m.hostBackground = message.Color
+		m.shareHostColors()
+		return m, nil
+	case tea.ForegroundColorMsg:
+		m.hostForeground = message.Color
+		m.shareHostColors()
+		return m, nil
+	case tea.FocusMsg:
+		m.hostBlurred = false
+		return m, nil
+	case tea.BlurMsg:
+		m.hostBlurred = true
 		return m, nil
 	case tea.KeyPressMsg:
 		return m.handleKey(message)

@@ -3,6 +3,7 @@ package ui
 import (
 	"encoding/base64"
 	"fmt"
+	"image/color"
 	"io"
 	"strings"
 	"sync"
@@ -37,6 +38,10 @@ type embeddedTerminal struct {
 	// guestMouse holds the mouse tracking modes the guest application asked
 	// for. romty mirrors them to the host unless the mouse is blocked.
 	guestMouse map[ansi.DECMode]bool
+	// focused is what the guest was last told about having the keyboard. A
+	// program that asked for focus events uses them to decide whether anyone
+	// is looking, which is when Codex and Claude Code stay quiet.
+	focused bool
 	// cursorHidden, cursorShape and cursorSteady are the cursor as the guest
 	// set it. A program that draws its own cursor hides the terminal's, and
 	// one that redraws the screen hides it while it does.
@@ -822,6 +827,34 @@ func (t *embeddedTerminal) resize(width, height int) {
 	t.emulator.Resize(width, height)
 }
 
+// setFocus tells the guest it gained or lost the keyboard. The emulator sends
+// the report only to a guest that asked for focus events.
+func (t *embeddedTerminal) setFocus(focused bool) {
+	if t.focused == focused {
+		return
+	}
+	t.focused = focused
+	if focused {
+		t.emulator.Focus()
+	} else {
+		t.emulator.Blur()
+	}
+}
+
+// setHostColors gives the emulator the colours of the terminal romty runs in,
+// which is what a guest's colour query is really asking about. A program
+// picks its palette from the answer, and the emulator's own answer is white
+// on black whatever the user is looking at. A nil colour is one the host has
+// not reported.
+func (t *embeddedTerminal) setHostColors(foreground, background color.Color) {
+	if foreground != nil {
+		t.emulator.SetDefaultForegroundColor(foreground)
+	}
+	if background != nil {
+		t.emulator.SetDefaultBackgroundColor(background)
+	}
+}
+
 // size is the current viewport. Resize commands read it while holding the
 // dashboard's resize lock so their round trips cannot leave the PTY stale.
 func (t *embeddedTerminal) size() (uint16, uint16) {
@@ -906,15 +939,28 @@ func lineMatches(line, needle string) bool {
 	return strings.Contains(strings.ToLower(ansi.Strip(line)), needle)
 }
 
+// inputDrainLimit is how long close waits for input already written to reach
+// the daemon. It only runs out when the daemon has stopped reading.
+var inputDrainLimit = 100 * time.Millisecond
+
 // close lets go of the daemon and of everything the emulator holds. It is
 // safe to call more than once.
+//
+// The guest is told it lost the focus first, and the input is closed before
+// the stream so that report, like any key still in flight, is written rather
+// than cut off by the stream closing under it.
 func (t *embeddedTerminal) close() {
 	t.closeOnce.Do(func() {
 		t.closed.Store(true)
-		_ = t.stream.Close()
+		t.setFocus(false)
 		if closer, ok := t.emulator.InputPipe().(io.Closer); ok {
 			_ = closer.Close()
 		}
+		select {
+		case <-t.inputDone:
+		case <-time.After(inputDrainLimit):
+		}
+		_ = t.stream.Close()
 		<-t.inputDone
 		_ = t.emulator.Close()
 	})

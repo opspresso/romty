@@ -123,6 +123,7 @@ func (m dashboard) handleOpenedTerminal(message terminalOpenedMsg) (tea.Model, t
 		message.tabID, message.stream, message.replay, int(columns), int(rows),
 	)
 	m.terminal = terminal
+	m.shareHostColors()
 	m.terminalOpenedAt = now()
 	m.markBellSeen(message.tabID)
 	if tab, ok := m.openTab(); ok {
@@ -474,6 +475,14 @@ func (m dashboard) resizeTerminal() tea.Cmd {
 			return resizeFailedMsg{tabID: terminal.id, err: err}
 		}
 		return nil
+	}
+}
+
+// shareHostColors gives the open terminal the host's colours to answer a
+// guest's colour query with.
+func (m dashboard) shareHostColors() {
+	if m.terminal != nil {
+		m.terminal.setHostColors(m.hostForeground, m.hostBackground)
 	}
 }
 

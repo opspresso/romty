@@ -5,6 +5,7 @@
 package ui
 
 import (
+	"image/color"
 	"time"
 
 	"github.com/opspresso/romty/internal/agenthooks"
@@ -123,6 +124,13 @@ type terminalState struct {
 	terminalFullWidth bool
 	scrollOffset      int
 	search            scrollbackSearch
+	// hostBlurred is set while the host terminal reports that its window
+	// lost the focus. A host that reports nothing is taken as focused.
+	hostBlurred bool
+	// hostForeground and hostBackground are the host terminal's colours, nil
+	// until it reports them.
+	hostForeground color.Color
+	hostBackground color.Color
 }
 
 // modalState is the modal on screen and what each modal holds while it is open.
