@@ -179,7 +179,7 @@ Both file views allow directory rows to take the cursor. Press `Enter` to toggle
 | `←`/`→` or `[`/`]` | Resize the workspace pane in Config |
 | `/` | Find in scrollback, search Help, or type a path in the root picker |
 | `n`/`N` | Move to the next or previous scrollback match |
-| `p` | Toggle mouse passthrough in Config |
+| `p` | Toggle programs using the mouse in Config |
 | `m` | Toggle the scrollback mouse in Config |
 | `d`/`b` | Toggle the done and waiting sounds in Config |
 | `n` | Toggle desktop notifications in Config |
@@ -254,17 +254,19 @@ romty keeps 10,000 scrollback lines for each terminal. The status bar says where
 
 Press `/` in scrollback to find text in the retained output. Typed and pasted text edits the search query. The query is applied when `Enter` confirms it, matching without regard to case and ignoring the colours around a phrase. The view moves to the newest match first, and `n` and `N` walk towards older and newer matches, wrapping at both ends. The status bar carries the query and the position among the matches. Leaving scrollback forgets the search.
 
-Full-screen applications such as `vim`, `less`, and Claude Code use an alternate screen with no romty history. In that mode `Shift`+`PgUp`/`PgDn` is forwarded as plain `PgUp`/`PgDn` so the application can page itself, and the wheel goes to the application as well: as mouse reports when it asked for the mouse, and otherwise as three cursor keys per notch, which is what a terminal sends for alternate scroll. This does not depend on `mouse_passthrough`.
+Full-screen applications such as `vim`, `less`, and Claude Code use an alternate screen with no romty history. In that mode `Shift`+`PgUp`/`PgDn` is forwarded as plain `PgUp`/`PgDn` so the application can page itself, and the wheel goes to the application as well: as mouse reports when it asked for the mouse, and otherwise as three cursor keys per notch, which is what a terminal sends for alternate scroll. The wheel reaches the application even when `block_mouse` is set.
 
 On the live main screen, the mouse wheel enters scrollback and scrolls three lines per notch. Scrolling up with no history to show reports why in the status bar, so scrolling up with no response at all means the terminal is not sending wheel events and its mouse reporting setting needs checking. Because romty captures the live mouse, native selection uses the terminal bypass modifier: `Option` on macOS or `Shift` elsewhere. Scrollback releases mouse capture, so plain click-drag selects the full-width terminal output. File view captures the wheel to move through its tree or scroll its content, according to the pane under the pointer.
 
-Press `p` in Config, or set `mouse_passthrough` in `config.json`, to let applications receive the mouse when they request it instead:
+An application that requests the mouse receives the clicks, drags, and pointer movement inside the terminal pane, as it does in any terminal. Claude Code and Codex use them to select text, open items, and follow the pointer. romty still handles the mouse on its own tabs, tree, and divider, and takes the mouse back while scrollback is open. Hold the bypass modifier to select with the terminal instead of the application.
+
+Press `p` in Config, or set `block_mouse` in `config.json`, to keep clicks and drags from applications:
 
 ```json
-{ "mouse_passthrough": true }
+{ "block_mouse": true }
 ```
 
-With passthrough enabled, the application mouse mode is mirrored until it exits or scrollback opens.
+romty no longer reads `mouse_passthrough`, the setting this replaced. An existing value stays in `config.json` and has no effect.
 
 Scrollback normally reads the wheel as the arrow keys the terminal's alternate scroll sends. A terminal without alternate scroll — many phone SSH clients, and some desktop ones — sends nothing there, leaving scrollback scrollable by keyboard only. Press `m` in Config, or set `scrollback_mouse`, to have romty keep the mouse in scrollback instead:
 
@@ -305,7 +307,7 @@ Config (`F3`) shows the settings you change by hand. romty saves them, and the s
 | Config row | Key | `config.json` field | Default |
 |---|---|---|---|
 | Workspace pane width | `←`/`→`, `[`/`]` | `left_width` | `0`, sized from the screen; 18 to 40 when set |
-| Mouse passthrough | `p` | `mouse_passthrough` | off |
+| Programs may use the mouse | `p` | `block_mouse` (true turns it off) | on |
 | Scrollback mouse | `m` | `scrollback_mouse` | off |
 | Notifications | `n` | `mute_notifications` (true turns them off) | on |
 | Keep awake while agents work | `w` | `allow_sleep` (true turns it off; read by the daemon) | on |

@@ -35,7 +35,7 @@ type embeddedTerminal struct {
 	// key with modifiers is written to it.
 	keyboard keyboard.State
 	// guestMouse holds the mouse tracking modes the guest application asked
-	// for. romty only mirrors them to the host when passthrough is enabled.
+	// for. romty mirrors them to the host unless the mouse is blocked.
 	guestMouse map[ansi.DECMode]bool
 	// cursorHidden, cursorShape and cursorSteady are the cursor as the guest
 	// set it. A program that draws its own cursor hides the terminal's, and

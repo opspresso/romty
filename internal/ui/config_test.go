@@ -31,7 +31,7 @@ func TestConfigRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("loadConfig() error = %v", err)
 	}
-	if got.LeftWidth != want.LeftWidth || got.MousePassthrough != want.MousePassthrough ||
+	if got.LeftWidth != want.LeftWidth || got.BlockMouse != want.BlockMouse ||
 		got.GitDiffView != want.GitDiffView || got.LastWorkspacePath != want.LastWorkspacePath ||
 		got.LastTabID != want.LastTabID || !got.SoundOnDone || !got.SoundOnWaiting {
 		t.Fatalf("loadConfig() = %#v, want %#v", got, want)
@@ -66,7 +66,7 @@ func TestConfigMissingFileUsesResponsiveWidth(t *testing.T) {
 // other one, including settings only a newer romty knows.
 func TestAdjustingOneSettingKeepsTheRest(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
-	if err := os.WriteFile(path, []byte(`{"left_width":24,"mouse_passthrough":true,"sound_on_done":true,"git_diff_view":"split","future":{"enabled":true}}`+"\n"), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte(`{"left_width":24,"block_mouse":true,"sound_on_done":true,"git_diff_view":"split","future":{"enabled":true}}`+"\n"), 0o600); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 	loaded, err := loadConfig(path)
@@ -91,8 +91,8 @@ func TestAdjustingOneSettingKeepsTheRest(t *testing.T) {
 	if written.LeftWidth != 25 {
 		t.Fatalf("left_width = %d, want the adjusted 25", written.LeftWidth)
 	}
-	if !written.MousePassthrough {
-		t.Fatal("adjusting the pane width erased mouse_passthrough")
+	if !written.BlockMouse {
+		t.Fatal("adjusting the pane width erased block_mouse")
 	}
 	if written.GitDiffView != "split" {
 		t.Fatalf("adjusting the pane width changed git_diff_view to %q", written.GitDiffView)
@@ -142,7 +142,7 @@ func TestAdjustingOneSettingKeepsTheRest(t *testing.T) {
 // that setting off would drop it from the document under omitempty and then
 // restore the old value from the copy.
 func TestConfigKnowsEveryFieldItDeclares(t *testing.T) {
-	document := []byte(`{"left_width":24,"mouse_passthrough":true,"scrollback_mouse":true,` +
+	document := []byte(`{"left_width":24,"block_mouse":true,"scrollback_mouse":true,` +
 		`"sound_on_done":true,"sound_on_waiting":true,"git_diff_view":"split",` +
 		`"last_workspace_path":"/w","last_tab_id":"tab-1","custom":{"kept":true}}`)
 	var value Config
@@ -158,7 +158,7 @@ func TestConfigKnowsEveryFieldItDeclares(t *testing.T) {
 
 	// Turning every boolean off must leave them off, not restore them from the
 	// copy of the document they were read from.
-	value.MousePassthrough, value.ScrollbackMouse = false, false
+	value.BlockMouse, value.ScrollbackMouse = false, false
 	value.SoundOnDone, value.SoundOnWaiting = false, false
 	data, err := json.Marshal(value)
 	if err != nil {
@@ -168,7 +168,7 @@ func TestConfigKnowsEveryFieldItDeclares(t *testing.T) {
 	if err := json.Unmarshal(data, &written); err != nil {
 		t.Fatalf("Unmarshal() error = %v", err)
 	}
-	for _, name := range []string{"mouse_passthrough", "scrollback_mouse", "sound_on_done", "sound_on_waiting"} {
+	for _, name := range []string{"block_mouse", "scrollback_mouse", "sound_on_done", "sound_on_waiting"} {
 		if _, present := written[name]; present {
 			t.Errorf("%s is still in the document after being turned off: %s", name, data)
 		}
@@ -245,15 +245,15 @@ func TestConfigWalksAndTogglesWithTheCursor(t *testing.T) {
 		t.Fatalf("up at the first row = %d, want it to stay", value.configIndex)
 	}
 
-	// Down to "Mouse passthrough", then Enter runs the row the cursor is on.
+	// Down to "Programs may use the mouse", then Enter runs the row the cursor is on.
 	send(&value, key(tea.KeyDown, ""))
 	if value.configIndex != 1 {
 		t.Fatalf("cursor = %d, want the second setting", value.configIndex)
 	}
 	command := send(&value, key(tea.KeyEnter, ""))
-	if !value.config.MousePassthrough || command == nil {
-		t.Fatalf("Enter = (mouse passthrough %v, command %v), want the setting on and saved",
-			value.config.MousePassthrough, command)
+	if !value.config.BlockMouse || command == nil {
+		t.Fatalf("Enter = (mouse blocked %v, command %v), want the setting changed and saved",
+			value.config.BlockMouse, command)
 	}
 
 	// The row it is on is marked, and no other row is.
@@ -275,7 +275,7 @@ func TestConfigWalksAndTogglesWithTheCursor(t *testing.T) {
 	// Space runs the row too. Bubble Tea reports the space bar as "space", not
 	// as the literal " " a key case would otherwise be written with.
 	send(&value, key(tea.KeySpace, " "))
-	if value.config.MousePassthrough {
+	if value.config.BlockMouse {
 		t.Fatal("Space did not run the setting the cursor is on")
 	}
 
@@ -285,7 +285,7 @@ func TestConfigWalksAndTogglesWithTheCursor(t *testing.T) {
 		t.Fatalf("End = %d, want the last setting", value.configIndex)
 	}
 	send(&value, key(tea.KeyEnter, ""))
-	if value.config.MousePassthrough {
+	if value.config.BlockMouse {
 		t.Fatal("Enter on the last setting toggled a different one")
 	}
 }

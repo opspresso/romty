@@ -13,8 +13,8 @@ import (
 // Terminal focus means the keyboard is at the guest and hover highlights have
 // no audience, so the host is not asked to report every pointer move — over
 // an SSH session each one crosses the wire. Button events keep the chrome
-// clickable, and passthrough still hands a guest exactly what it asked for.
-func TestMouseModeFollowsFocusAndPassthrough(t *testing.T) {
+// clickable, and a guest is still handed exactly what it asked for.
+func TestMouseModeFollowsFocusAndTheGuest(t *testing.T) {
 	snapshot := model.Snapshot{}
 	base := newDashboard(&fakeBackend{snapshot: snapshot}, snapshot)
 
@@ -49,21 +49,30 @@ func TestMouseModeFollowsFocusAndPassthrough(t *testing.T) {
 			want: tea.MouseModeAllMotion,
 		},
 		{
-			name: "passthrough hands the guest the motion it asked for",
+			name: "the guest gets the motion it asked for",
 			setup: func(m *dashboard) {
 				m.focus = terminalPane
 				m.terminal = terminal
-				m.config.MousePassthrough = true
 				terminal.guestMouse[ansi.ModeMouseAnyEvent] = true
 			},
 			want: tea.MouseModeAllMotion,
+		},
+		{
+			name: "a blocked mouse stays with romty",
+			setup: func(m *dashboard) {
+				m.focus = terminalPane
+				m.terminal = terminal
+				m.config.BlockMouse = true
+				terminal.guestMouse[ansi.ModeMouseAnyEvent] = true
+			},
+			want: tea.MouseModeCellMotion,
 		},
 	} {
 		t.Run(probe.name, func(t *testing.T) {
 			value := base
 			value.modal = noModal
 			value.terminal = nil
-			value.config.MousePassthrough = false
+			value.config.BlockMouse = false
 			terminal.guestMouse = map[ansi.DECMode]bool{}
 			probe.setup(&value)
 			if got := value.mouseMode(); got != probe.want {

@@ -29,9 +29,11 @@ type Config struct {
 	// LeftWidth is the workspace pane width in columns; zero sizes it from the
 	// screen.
 	LeftWidth int `json:"left_width,omitempty"`
-	// MousePassthrough hands the mouse to applications that ask for it, at the
-	// cost of the host terminal's drag selection while they run.
-	MousePassthrough bool `json:"mouse_passthrough,omitempty"`
+	// BlockMouse keeps clicks and drags from programs that ask for the mouse.
+	// They get it by default, as they do in any terminal: a full-screen agent
+	// is clicked, selected in and scrolled with it. The wheel reaches a
+	// full-screen program either way.
+	BlockMouse bool `json:"block_mouse,omitempty"`
 	// ScrollbackMouse keeps the mouse in scrollback rather than returning it to
 	// the host. Scrolling then works on a terminal with no alternate scroll, at
 	// the cost of the drag selection scrollback otherwise offers.
@@ -192,11 +194,11 @@ func configRows() []configRow {
 			hint:  "←/→",
 		},
 		{
-			name:   "Mouse passthrough",
-			value:  func(m dashboard) string { return onOff(m.config.MousePassthrough) },
+			name:   "Programs may use the mouse",
+			value:  func(m dashboard) string { return onOff(!m.config.BlockMouse) },
 			hint:   "p",
 			keys:   []string{"p"},
-			action: dashboard.toggleMousePassthrough,
+			action: dashboard.toggleGuestMouse,
 		},
 		{
 			name:   "Scrollback mouse",
@@ -297,8 +299,8 @@ func (m *dashboard) setLeftWidth(width int) {
 	m.config.LeftWidth = min(max(width, minimumLeftWidth), maximum)
 }
 
-func (m dashboard) toggleMousePassthrough() (tea.Model, tea.Cmd) {
-	m.config.MousePassthrough = !m.config.MousePassthrough
+func (m dashboard) toggleGuestMouse() (tea.Model, tea.Cmd) {
+	m.config.BlockMouse = !m.config.BlockMouse
 	return m, m.saveConfig()
 }
 

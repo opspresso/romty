@@ -103,7 +103,7 @@ func helpReference() []helpEntry {
 		{description: "Type a picker path", keys: []string{"/"}},
 		{description: "Erase typed character", keys: []string{"Backspace"}},
 		{description: "Adjust pane width", keys: []string{"←/→", "[/]"}},
-		{description: "Toggle mouse passthrough", keys: []string{"p"}},
+		{description: "Toggle programs using the mouse", keys: []string{"p"}},
 		{description: "Toggle scrollback mouse", keys: []string{"m"}},
 		{description: "Toggle notifications", keys: []string{"n"}},
 		{description: "Toggle keeping the machine awake", keys: []string{"w"}},

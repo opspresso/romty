@@ -221,8 +221,9 @@ func TestDashboardHighlightsDialogMouseTargets(t *testing.T) {
 	}
 }
 
-func TestDashboardKeepsMouseWithTheHostUnlessPassthroughIsOn(t *testing.T) {
+func TestDashboardHandsTheMouseToAGuestUnlessItIsBlocked(t *testing.T) {
 	value := scrolledDashboard(t, 200)
+	value.config.BlockMouse = true
 	// A guest that wants the mouse, the way Claude Code and htop do.
 	value.terminal.writeOutput([]byte("\x1b[?1003h\x1b[?1006h"))
 
@@ -234,12 +235,12 @@ func TestDashboardKeepsMouseWithTheHostUnlessPassthroughIsOn(t *testing.T) {
 	}
 	send(&value, tea.MouseWheelMsg{X: 40, Y: 6, Button: tea.MouseWheelUp})
 	if !value.scrollback {
-		t.Fatal("wheel did not open scrollback while passthrough was disabled")
+		t.Fatal("wheel did not open scrollback while the mouse was blocked")
 	}
 	waitForGuestSilence(t, value.terminal, "")
 	send(&value, key(tea.KeyEscape, ""))
 
-	value.config.MousePassthrough = true
+	value.config.BlockMouse = false
 	if value.View().MouseMode != tea.MouseModeAllMotion {
 		t.Fatalf("mouse mode = %v, want the guest's own mode mirrored", value.View().MouseMode)
 	}
