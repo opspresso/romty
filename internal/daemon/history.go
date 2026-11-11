@@ -129,6 +129,9 @@ func scanControlSequence(data []byte, index, body int) (int, bool) {
 	case final == 'q' && bytes.HasPrefix(private, []byte(">")):
 		// XTVERSION, the terminal name and version request.
 		return cursor, true
+	case final == 'u' && bytes.Equal(private, []byte("?")) && len(middle) == 0:
+		// The Kitty keyboard flags request.
+		return cursor, true
 	case final == 'h' && bytes.Equal(private, []byte("?2048")):
 		// In-band resize. Setting it is not a question, but the emulator
 		// answers it like one and keeps answering on every later resize, so a

@@ -13,6 +13,9 @@ import (
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/vt"
+
+	"github.com/opspresso/romty/internal/keyboard"
+	"github.com/opspresso/romty/internal/version"
 )
 
 type embeddedTerminal struct {
@@ -27,6 +30,9 @@ type embeddedTerminal struct {
 	// applicationKeypad mirrors DECKPAM so keypad navigation and operators
 	// keep the mode the guest requested.
 	applicationKeypad bool
+	// keyboard is the key encoding the guest asked for, which decides how a
+	// key with modifiers is written to it.
+	keyboard keyboard.State
 	// guestMouse holds the mouse tracking modes the guest application asked
 	// for. romty only mirrors them to the host when passthrough is enabled.
 	guestMouse map[ansi.DECMode]bool
@@ -110,8 +116,10 @@ func newEmbeddedTerminal(id string, stream io.ReadWriteCloser, width, height int
 				terminal.bell = true
 			}
 		},
+		AltScreen: terminal.keyboard.SetAltScreen,
 	})
 	clampMargins(emulator)
+	terminal.followKeyboardProtocol()
 	emulator.Emulator.RegisterOscHandler(52, func(data []byte) bool {
 		terminal.observeClipboard(data)
 		return true
@@ -192,6 +200,53 @@ func clampParameter(params ansi.Params, index, limit int) {
 	params[index] = ansi.Param(ansi.Parameter(limit, params[index].HasMore()))
 }
 
+// followKeyboardProtocol keeps the key encoding the guest asks for and answers
+// the two questions a program asks to learn what terminal it is in. The
+// emulator knows none of these sequences.
+//
+// The answers go to the guest only while the output is live: a replayed
+// question was answered when it was first asked.
+func (t *embeddedTerminal) followKeyboardProtocol() {
+	emulator := t.emulator.Emulator
+	request := func(private byte, final byte) {
+		emulator.RegisterCsiHandler(ansi.Command(private, 0, final), func(params ansi.Params) bool {
+			values := make([]int, len(params))
+			for index := range params {
+				values[index] = params[index].Param(-1)
+			}
+			return t.keyboard.Apply(private, values, final)
+		})
+	}
+	request('>', 'u')
+	request('<', 'u')
+	request('=', 'u')
+	// XTMODKEYS shares its final byte with SGR, which has no private marker.
+	request('>', 'm')
+	// The Kitty keyboard flags request. Answering it is what tells a program
+	// the terminal encodes keys this way; Claude Code and Codex both ask.
+	emulator.RegisterCsiHandler(ansi.Command('?', 0, 'u'), func(ansi.Params) bool {
+		if t.live {
+			_, _ = fmt.Fprintf(emulator.InputPipe(), "\x1b[?%du", t.keyboard.Flags())
+		}
+		return true
+	})
+	// XTVERSION, the terminal name and version request.
+	emulator.RegisterCsiHandler(ansi.Command('>', 0, 'q'), func(params ansi.Params) bool {
+		if value, _, _ := params.Param(0, 0); value != 0 {
+			return false
+		}
+		if t.live {
+			_, _ = io.WriteString(emulator.InputPipe(), "\x1bP>|romty "+version.String()+"\x1b\\")
+		}
+		return true
+	})
+	// The state the daemon sends after a replay, which the recording alone
+	// cannot give: its pushes may be gone, or still there to apply twice.
+	emulator.RegisterApcHandler(func(data []byte) bool {
+		return t.keyboard.Restore(string(data))
+	})
+}
+
 func (t *embeddedTerminal) read() tea.Cmd {
 	return func() tea.Msg {
 		buffer := t.readBuffer
@@ -223,6 +278,13 @@ func (t *embeddedTerminal) sendKey(message tea.KeyPressMsg) {
 	if !ok {
 		return
 	}
+	flags := t.keyboard.Flags()
+	if flags&keyboard.Disambiguate != 0 {
+		if sequence, ok := kittyKey(key, flags); ok {
+			_, _ = io.WriteString(t.emulator.InputPipe(), sequence)
+			return
+		}
+	}
 	if text, ok := printableKeyText(key); ok {
 		t.emulator.SendText(text)
 		return
@@ -238,7 +300,7 @@ func (t *embeddedTerminal) sendKey(message tea.KeyPressMsg) {
 		_, _ = io.WriteString(t.emulator.InputPipe(), sequence)
 		return
 	}
-	if sequence, ok := modifiedOtherKey(key); ok {
+	if sequence, ok := t.otherKey(key); ok {
 		_, _ = io.WriteString(t.emulator.InputPipe(), sequence)
 		return
 	}
@@ -487,6 +549,130 @@ func modifiedOtherKey(key tea.Key) (string, bool) {
 		code = int(value)
 	}
 	return fmt.Sprintf("\x1b[27;%d;%d~", modifierParameter(mod), code), true
+}
+
+// otherKey encodes a modified key the emulator has no bytes for, the way the
+// guest asked: as plain xterm bytes when it turned modifyOtherKeys off, and
+// as a modifyOtherKeys sequence otherwise.
+//
+// A guest that never said is sent the sequence too. Claude Code, among
+// others, reads it without asking for it, and Shift+Enter would otherwise be
+// the same byte as Enter there.
+func (t *embeddedTerminal) otherKey(key tea.Key) (string, bool) {
+	if level, set := t.keyboard.OtherKeys(); set && level == 0 {
+		return legacyModifiedKey(key)
+	}
+	return modifiedOtherKey(key)
+}
+
+// kittyModifierMask are the modifiers the Kitty keyboard protocol encodes.
+const kittyModifierMask = xtermModifierMask | tea.ModSuper | tea.ModHyper
+
+// kittyKey encodes a key the way the Kitty keyboard protocol's "disambiguate
+// escape codes" flag asks, as CSI code ; modifiers u. It covers the keys that
+// flag changes: Escape, a modified Enter, Tab or Backspace, and a text key
+// held with anything but Shift. Every other key keeps the encoding it has
+// without the protocol, which is what the protocol specifies for them.
+func kittyKey(key tea.Key, flags int) (string, bool) {
+	mod := key.Mod & kittyModifierMask
+	code, special := modifiedOtherKeyCodes[key.Code]
+	switch {
+	case key.Code == tea.KeyEscape:
+	case special && key.Code != tea.KeySpace:
+		// Unmodified, these stay the bytes a shell reads, so a prompt is
+		// still usable after a program dies with its flags set.
+		if mod == 0 {
+			return "", false
+		}
+	case key.Code <= unicode.MaxRune && unicode.IsPrint(key.Code):
+		// Alone or with Shift the key is text.
+		if mod&^tea.ModShift == 0 {
+			return "", false
+		}
+		code = int(unicode.ToLower(key.Code))
+	default:
+		return "", false
+	}
+	var sequence strings.Builder
+	fmt.Fprintf(&sequence, "\x1b[%d", code)
+	if flags&keyboard.AlternateKeys != 0 && mod&tea.ModShift != 0 &&
+		key.ShiftedCode != 0 && key.ShiftedCode != key.Code {
+		fmt.Fprintf(&sequence, ":%d", key.ShiftedCode)
+	}
+	if parameter := kittyModifierParameter(mod); parameter > 1 {
+		fmt.Fprintf(&sequence, ";%d", parameter)
+	}
+	sequence.WriteByte('u')
+	return sequence.String(), true
+}
+
+// kittyModifierParameter is the protocol's one-based modifier encoding. It
+// agrees with xterm's on Shift, Alt and Ctrl and parts with it after them.
+func kittyModifierParameter(mod tea.KeyMod) int {
+	parameter := 1
+	for _, modifier := range [...]struct {
+		bit    tea.KeyMod
+		weight int
+	}{
+		{tea.ModShift, 1}, {tea.ModAlt, 2}, {tea.ModCtrl, 4},
+		{tea.ModSuper, 8}, {tea.ModHyper, 16}, {tea.ModMeta, 32},
+	} {
+		if mod&modifier.bit != 0 {
+			parameter += modifier.weight
+		}
+	}
+	return parameter
+}
+
+// legacyControlBytes are the control characters xterm sends for Ctrl held
+// with a key that is not a letter.
+var legacyControlBytes = map[rune]byte{
+	'2': 0x00, '@': 0x00, '3': 0x1b, '4': 0x1c, '5': 0x1d, '6': 0x1e,
+	'7': 0x1f, '/': 0x1f, '8': 0x7f, '?': 0x7f,
+}
+
+// legacyModifiedKey is what a terminal with no extended keyboard protocol
+// sends for the keys modifiedOtherKey covers: the modifier is dropped where
+// the legacy encoding has no room for it, so Shift+Enter is Enter.
+func legacyModifiedKey(key tea.Key) (string, bool) {
+	mod := key.Mod & xtermModifierMask
+	if mod&^tea.ModAlt == 0 || emulatorHandlesModifiedKey(key.Code, mod) {
+		return "", false
+	}
+	var sequence string
+	switch key.Code {
+	case tea.KeyEnter:
+		sequence = "\r"
+	case tea.KeyTab:
+		sequence = "\t"
+	case tea.KeyEscape:
+		sequence = "\x1b"
+	case tea.KeyBackspace:
+		sequence = "\x7f"
+		if mod&tea.ModCtrl != 0 {
+			sequence = "\x08"
+		}
+	default:
+		value := key.Code
+		if mod&tea.ModShift != 0 && key.ShiftedCode != 0 {
+			value = key.ShiftedCode
+		}
+		if value > unicode.MaxRune || !unicode.IsPrint(value) {
+			return "", false
+		}
+		sequence = string(value)
+		if mod&tea.ModCtrl != 0 {
+			if control, ok := legacyControlBytes[value]; ok {
+				sequence = string(rune(control))
+			} else if lower := unicode.ToLower(value); lower >= 'a' && lower <= 'z' {
+				sequence = string(lower - 'a' + 1)
+			}
+		}
+	}
+	if mod&tea.ModAlt != 0 {
+		sequence = "\x1b" + sequence
+	}
+	return sequence, true
 }
 
 func emulatorHandlesModifiedKey(code rune, mod tea.KeyMod) bool {

@@ -8,6 +8,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/opspresso/romty/internal/display"
+	"github.com/opspresso/romty/internal/keyboard"
 )
 
 // Terminal modes are sticky: a guest sets one once and it stays set for the
@@ -60,6 +61,10 @@ type guestTracker struct {
 	// keypad is DECKPAM/DECKPNM, an ESC sequence rather than a CSI mode.
 	keypad      bool
 	keypadKnown bool
+	// keyboard is the key encoding the guest asked for. It is a stack of
+	// pushes rather than a mode, so it reaches a reattaching client as one
+	// report after the recording instead of as sequences before it.
+	keyboard keyboard.State
 	// carry holds a sequence cut in half by a chunk boundary, since the PTY
 	// hands over whatever happens to have arrived.
 	carry []byte
@@ -141,13 +146,16 @@ func (t *guestTracker) observe(data []byte) {
 			t.hold(scan[index:], modeCarryLimit)
 			return
 		}
-		end, params, final, complete := scanModeSequence(scan, body)
+		end, params, final, plain, complete := scanModeSequence(scan, body)
 		if !complete {
 			t.hold(scan[index:], modeCarryLimit)
 			return
 		}
-		if final == 'h' || final == 'l' {
+		switch {
+		case final == 'h' || final == 'l':
 			t.apply(params, final == 'h')
+		case plain:
+			t.applyKeyboard(params, final)
 		}
 		index = end
 	}
@@ -186,10 +194,43 @@ func (t *guestTracker) apply(params string, enabled bool) {
 	}
 	for field := range strings.SplitSeq(params[1:], ";") {
 		mode, err := strconv.Atoi(field)
-		if err == nil && slices.Contains(trackedModes, mode) {
+		if err != nil {
+			continue
+		}
+		if slices.Contains(trackedModes, mode) {
 			t.set[mode] = enabled
 		}
+		// The two modes the dashboard's emulator switches screens on. Each
+		// screen keeps its own keyboard flags.
+		if mode == 1047 || mode == 1049 {
+			t.keyboard.SetAltScreen(enabled)
+		}
 	}
+}
+
+// applyKeyboard follows a keyboard protocol request, which carries a private
+// marker where a mode carries "?".
+func (t *guestTracker) applyKeyboard(params string, final byte) {
+	if params == "" || params[0] < '<' || params[0] > '>' {
+		return
+	}
+	var values []int
+	if len(params) > 1 {
+		for field := range strings.SplitSeq(params[1:], ";") {
+			value, err := strconv.Atoi(field)
+			if err != nil {
+				value = -1
+			}
+			values = append(values, value)
+		}
+	}
+	t.keyboard.Apply(params[0], values, final)
+}
+
+// keyboardReport is the guest's keyboard state as the sequence that sets it.
+// It follows the recording, which may hold the same pushes a second time.
+func (t *guestTracker) keyboardReport() []byte {
+	return []byte(t.keyboard.Report())
 }
 
 // restore returns the sequences that put a fresh emulator into the state the
@@ -305,18 +346,21 @@ func scanTitleSequence(data []byte, body int) (end int, content string, state ti
 }
 
 // scanModeSequence walks a CSI sequence by its grammar and reports its
-// parameters and final byte, or that it is not all here yet.
-func scanModeSequence(data []byte, body int) (end int, params string, final byte, complete bool) {
+// parameters and final byte, or that it is not all here yet. plain says the
+// sequence has no intermediate bytes, which is what tells CSI > 4 m from a
+// sequence that only ends the same way.
+func scanModeSequence(data []byte, body int) (end int, params string, final byte, plain, complete bool) {
 	cursor := body
 	for cursor < len(data) && data[cursor] >= 0x30 && data[cursor] <= 0x3f {
 		cursor++
 	}
 	parameters := string(data[body:cursor])
+	intermediates := cursor
 	for cursor < len(data) && data[cursor] >= 0x20 && data[cursor] <= 0x2f {
 		cursor++
 	}
 	if cursor >= len(data) {
-		return 0, "", 0, false
+		return 0, "", 0, false, false
 	}
-	return cursor + 1, parameters, data[cursor], true
+	return cursor + 1, parameters, data[cursor], cursor == intermediates, true
 }

@@ -313,6 +313,7 @@ func (s *session) attachClientReady(
 	// slice into it would be rewritten under the replay's feet.
 	recorded := s.history.bytes()
 	modes := s.guest.restore()
+	keyboard := s.guest.keyboardReport()
 	replayColumns, replayRows := s.columns, s.rows
 	s.activity++
 	attached := &attachment{
@@ -328,7 +329,9 @@ func (s *session) attachClientReady(
 	s.mu.Unlock()
 	go s.writeClient(connection, attached)
 
-	recorded = stripQueries(recorded)
+	// The keyboard state closes the replay: whatever the recording pushed or
+	// popped on the way, the client ends where the guest is.
+	recorded = append(stripQueries(recorded), keyboard...)
 	if err := ready(len(resetScreen)+len(modes)+len(recorded), replayColumns, replayRows); err != nil {
 		s.detach(connection)
 		return err
