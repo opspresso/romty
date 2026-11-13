@@ -1,13 +1,13 @@
 package screen
 
 import (
+	"bytes"
 	"encoding/base64"
 	"fmt"
 	"io"
 	"strconv"
 	"strings"
 
-	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/vt"
 )
@@ -62,27 +62,37 @@ func NewTracker(columns, rows int) *Tracker {
 	return tracker
 }
 
-// Write follows a piece of the guest's output. It returns an error when the
-// emulator could not take it, after which the tracker holds no screen.
-func (t *Tracker) Write(data []byte) (err error) {
+// guarded runs one step on the emulator and turns a panic in it into an
+// error, after which the tracker holds no screen. The emulator panics on some
+// of what a program can print, and a tracker runs in the daemon, where a
+// panic would end every tab.
+func (t *Tracker) guarded(step func()) (err error) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			t.Reset()
 			err = fmt.Errorf("follow terminal output: %v", recovered)
 		}
 	}()
-	if t.emulator == nil {
-		data = t.scan(data)
-		if !t.entered {
-			return nil
-		}
-		t.enter()
-	}
-	_, _ = t.emulator.Write(t.titles.Scrub(data))
-	if !t.emulator.IsAltScreen() {
-		t.Reset()
-	}
+	step()
 	return nil
+}
+
+// Write follows a piece of the guest's output. It returns an error when the
+// emulator could not take it.
+func (t *Tracker) Write(data []byte) error {
+	return t.guarded(func() {
+		if t.emulator == nil {
+			data = t.scan(data)
+			if !t.entered {
+				return
+			}
+			t.enter()
+		}
+		_, _ = t.emulator.Write(t.titles.Scrub(data))
+		if !t.emulator.IsAltScreen() {
+			t.Reset()
+		}
+	})
 }
 
 // scan reads data for the switch to the alternate screen and returns what
@@ -141,12 +151,15 @@ func (t *Tracker) Reset() {
 	t.scanner.Reset()
 }
 
-// Resize follows the terminal to a new size.
-func (t *Tracker) Resize(columns, rows int) {
+// Resize follows the terminal to a new size. It returns an error when the
+// emulator could not.
+func (t *Tracker) Resize(columns, rows int) error {
 	t.columns, t.rows = columns, rows
-	if t.emulator != nil {
-		t.emulator.Resize(columns, rows)
-	}
+	return t.guarded(func() {
+		if t.emulator != nil {
+			t.emulator.Resize(columns, rows)
+		}
+	})
 }
 
 // Close releases the emulator.
@@ -159,22 +172,46 @@ func (t *Tracker) Close() {
 // know it discards whole, which is what a dashboard older than this does.
 const snapshotPrefix = "romty:screen;"
 
+// maxSnapshotBytes bounds the cells of one snapshot. A screen of a few
+// hundred columns, every cell in a colour of its own, is about a megabyte. A
+// program can make it far more, by putting a long hyperlink on every row, and
+// then gets no snapshot: the daemon builds one for each attach, and the
+// dashboard reads the command that carries it into a buffer of four megabytes.
+const maxSnapshotBytes = 2 << 20
+
 // Snapshot is the alternate screen as the sequence that draws it over
-// whatever a replay left there, or nil when the guest is not on it.
+// whatever a replay left there. It is nil when the guest is not on that
+// screen or the screen is more than a snapshot carries, and comes with an
+// error when the emulator could not give it.
 //
 // The cells travel as data for Apply to place, not as output to print:
 // printing them would leave the reader's pen and saved cursor where the
 // snapshot put them rather than where the guest did. The cursor follows as
-// an ordinary move, which changes nothing else.
-func (t *Tracker) Snapshot() []byte {
-	if t.emulator == nil {
-		return nil
-	}
-	position := t.emulator.CursorPosition()
-	return fmt.Appendf(nil, "\x1b_%s%d;%d;%s\x1b\\\x1b[%d;%dH",
-		snapshotPrefix, t.emulator.Width(), t.emulator.Height(),
-		base64.StdEncoding.EncodeToString([]byte(t.emulator.Render())),
-		position.Y+1, position.X+1)
+// an ordinary move, which changes nothing else. A move cannot say that the
+// cursor is waiting past the last column to wrap, or that the guest counts
+// rows from a scroll region (DECOM); a reader is off by that much until the
+// program next places the cursor itself.
+func (t *Tracker) Snapshot() (snapshot []byte, err error) {
+	err = t.guarded(func() {
+		if t.emulator == nil {
+			return
+		}
+		cells := t.emulator.Render()
+		if len(cells) > maxSnapshotBytes {
+			return
+		}
+		// Which characters take two cells depends on this mode, so the
+		// reader has to lay the cells out under the same one.
+		if t.emulator.WidthMethod() == ansi.GraphemeWidth {
+			cells = ansi.SetModeUnicodeCore + cells
+		}
+		position := t.emulator.CursorPosition()
+		snapshot = fmt.Appendf(nil, "\x1b_%s%d;%d;%s\x1b\\\x1b[%d;%dH",
+			snapshotPrefix, t.emulator.Width(), t.emulator.Height(),
+			base64.StdEncoding.EncodeToString([]byte(cells)),
+			position.Y+1, position.X+1)
+	})
+	return snapshot, err
 }
 
 // Apply takes the payload of an application program command and reports
@@ -197,6 +234,51 @@ func Apply(emulator *vt.Emulator, payload string) bool {
 		!emulator.IsAltScreen() || columns != emulator.Width() || rows != emulator.Height() {
 		return true
 	}
-	uv.NewStyledString(string(cells)).Draw(emulator, uv.Rect(0, 0, columns, rows))
+	draw(emulator, cells)
 	return true
+}
+
+// draw puts a snapshot's cells on the emulator's screen.
+//
+// The cells are laid out by an emulator, not placed from the text: how many
+// columns a character takes is the emulator's own answer, and one that
+// differs by a column moves the rest of the row and leaves a cell wider than
+// the screen has room for, which the emulator later indexes past. So the text
+// is printed to a second emulator of the same size, and its cells are copied.
+// That emulator also takes whatever else the text holds, which matters
+// because a program can print a command that looks like a snapshot.
+func draw(emulator *vt.Emulator, cells []byte) {
+	columns, rows := emulator.Width(), emulator.Height()
+	layout := vt.NewEmulator(columns, rows)
+	defer Unanswered(layout)()
+	// A snapshot the second emulator cannot take is dropped, as one of
+	// another screen is: the replay stays what the recording made it.
+	defer func() { _ = recover() }()
+	Guard(layout)
+
+	// Without autowrap a row that came out too long ends at the margin
+	// instead of running into the next one.
+	text := []byte(ansi.ResetModeAutoWrap)
+	for row, line := range bytes.Split(cells, []byte("\n")) {
+		if row == rows {
+			break
+		}
+		text = fmt.Appendf(text, "\x1b[%d;1H\x1b[m", row+1)
+		text = append(text, line...)
+	}
+	var titles TitleScrubber
+	_, _ = layout.Write(titles.Scrub(text))
+
+	for y := range rows {
+		for x := 0; x < columns; {
+			cell := layout.CellAt(x, y)
+			emulator.SetCell(x, y, cell)
+			// The cells a wide character covers are set with it.
+			width := 1
+			if cell != nil && cell.Width > 1 {
+				width = cell.Width
+			}
+			x += width
+		}
+	}
 }

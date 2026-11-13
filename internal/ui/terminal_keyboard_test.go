@@ -154,3 +154,28 @@ func TestEmbeddedTerminalForgetsTheKeyboardStateOfADeadGuest(t *testing.T) {
 	terminal.sendKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter, Mod: tea.ModShift}))
 	waitForGuestSilence(t, terminal, sent+"\x1b[27;2;13~")
 }
+
+// `reset` at a prompt is how a user takes the keys back from a program that
+// died with its flags pushed. A full reset forgets every request.
+func TestEmbeddedTerminalForgetsKeyboardRequestsOnReset(t *testing.T) {
+	terminal := newEmbeddedTerminal("tab-1", newMemoryStream(""), 40, 10)
+	defer terminal.close()
+
+	terminal.writeOutput([]byte("\x1b[>1u\x1b[>4;0m"))
+	terminal.writeOutput([]byte("\x1bc"))
+	terminal.sendKey(tea.KeyPressMsg(tea.Key{Code: 'c', Mod: tea.ModCtrl}))
+	sent := waitForGuestSilence(t, terminal, "\x03")
+	terminal.sendKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter, Mod: tea.ModShift}))
+	waitForGuestSilence(t, terminal, sent+"\x1b[27;2;13~")
+}
+
+// The daemon reports only at the end of a replay. The same command in live
+// output is the guest's, and it does not change the keys.
+func TestEmbeddedTerminalTakesNoReportFromLiveOutput(t *testing.T) {
+	terminal := newEmbeddedTerminal("tab-1", newMemoryStream(""), 40, 10)
+	defer terminal.close()
+
+	terminal.writeOutput([]byte("\x1b_romty:keyboard;5;;0\x1b\\"))
+	terminal.sendKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEscape}))
+	waitForGuestSilence(t, terminal, "\x1b")
+}

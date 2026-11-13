@@ -213,6 +213,12 @@ func (t *embeddedTerminal) followKeyboardProtocol() {
 	request('=', 'u')
 	// XTMODKEYS shares its final byte with SGR, which has no private marker.
 	request('>', 'm')
+	// A full reset (RIS) takes the requests with it. The emulator's own
+	// handler does the rest of the reset.
+	emulator.RegisterEscHandler('c', func() bool {
+		t.keyboard.Reset()
+		return false
+	})
 	// The Kitty keyboard flags request. Answering it is what tells a program
 	// the terminal encodes keys this way; Claude Code and Codex both ask.
 	emulator.RegisterCsiHandler(ansi.Command('?', 0, 'u'), func(ansi.Params) bool {
@@ -237,9 +243,16 @@ func (t *embeddedTerminal) followKeyboardProtocol() {
 // recording alone cannot give: the keyboard state, whose pushes may be gone
 // or still there to apply twice, and the screen of a full-screen program,
 // most of which was drawn before the recording begins.
+//
+// They are taken only from a replay. The daemon sends them nowhere else, so
+// the same command in live output is the guest's own and is left to the
+// emulator, which discards it.
 func (t *embeddedTerminal) takeDaemonReports() {
 	emulator := t.emulator.Emulator
 	emulator.RegisterApcHandler(func(data []byte) bool {
+		if t.live {
+			return false
+		}
 		return t.keyboard.Restore(string(data)) || screen.Apply(emulator, string(data))
 	})
 }

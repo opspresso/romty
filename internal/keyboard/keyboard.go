@@ -70,6 +70,14 @@ func (s *State) Apply(private byte, params []int, final byte) bool {
 	return true
 }
 
+// Reset forgets every request, which is what a full terminal reset (RIS) does
+// to them. It is how `reset` at a prompt gets the keys back after a program
+// died with its flags pushed. The screen the guest is on is followed apart
+// from this and stays.
+func (s *State) Reset() {
+	s.stacks, s.otherKeys, s.otherKeysSet = [2][]int{}, 0, false
+}
+
 // SetAltScreen follows the guest onto and off the alternate screen.
 func (s *State) SetAltScreen(on bool) {
 	s.alt = on

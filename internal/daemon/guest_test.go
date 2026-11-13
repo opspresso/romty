@@ -340,6 +340,11 @@ func TestGuestTrackerFollowsTheKeyboardProtocol(t *testing.T) {
 			report: "\x1b_romty:keyboard;5;;\x1b\\",
 		},
 		{
+			name:   "reset after a program died with its flags pushed",
+			output: []string{"\x1b[>1u\x1b[>4;2m", "\x1b", "c"},
+			report: "\x1b_romty:keyboard;;;\x1b\\",
+		},
+		{
 			name:   "the cursor style and SGR are not keyboard requests",
 			output: []string{"\x1b[4 q\x1b[4m\x1b[38;5;4m\x1b[?4m\x1b[1u"},
 			report: "\x1b_romty:keyboard;;;\x1b\\",

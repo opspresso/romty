@@ -1,6 +1,8 @@
 package screen
 
 import (
+	"encoding/base64"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -20,6 +22,15 @@ func reader(t *testing.T, columns, rows int) *vt.Emulator {
 	return emulator
 }
 
+func mustSnapshot(t *testing.T, tracker *Tracker) []byte {
+	t.Helper()
+	snapshot, err := tracker.Snapshot()
+	if err != nil {
+		t.Fatalf("Snapshot() error = %v", err)
+	}
+	return snapshot
+}
+
 func text(emulator *vt.Emulator) string {
 	lines := strings.Split(ansi.Strip(emulator.Render()), "\n")
 	for index := range lines {
@@ -34,7 +45,7 @@ func TestTrackerHoldsNoScreenAtAShellPrompt(t *testing.T) {
 	if err := tracker.Write([]byte("$ ls\r\nREADME.md\r\n$ \x1b[?2004h\x1b[?25h")); err != nil {
 		t.Fatalf("Write() error = %v", err)
 	}
-	if snapshot := tracker.Snapshot(); snapshot != nil {
+	if snapshot := mustSnapshot(t, tracker); snapshot != nil {
 		t.Fatalf("Snapshot() = %q on the main screen, want none", snapshot)
 	}
 }
@@ -77,7 +88,7 @@ func TestSnapshotGivesAReaderTheScreenItsReplayLost(t *testing.T) {
 	if text(late) == want {
 		t.Fatal("the cut replay already matches; the test proves nothing")
 	}
-	_, _ = late.Write(tracker.Snapshot())
+	_, _ = late.Write(mustSnapshot(t, tracker))
 
 	if got := text(late); got != want {
 		t.Fatalf("screen after the snapshot:\n%s\nwant:\n%s", got, want)
@@ -104,7 +115,7 @@ func TestSnapshotLeavesTheReadersPenAlone(t *testing.T) {
 
 	late := reader(t, columns, rows)
 	_, _ = late.Write([]byte(output))
-	_, _ = late.Write(tracker.Snapshot())
+	_, _ = late.Write(mustSnapshot(t, tracker))
 	_, _ = late.Write([]byte("red"))
 
 	whole := reader(t, columns, rows)
@@ -135,7 +146,7 @@ func TestTrackerFindsTheSwitchHoweverItArrives(t *testing.T) {
 			}
 			late := reader(t, 20, 3)
 			_, _ = late.Write([]byte("\x1b[?1049h"))
-			_, _ = late.Write(tracker.Snapshot())
+			_, _ = late.Write(mustSnapshot(t, tracker))
 			if got := text(late); !strings.HasPrefix(got, "screen") {
 				t.Fatalf("snapshot drew %q, want what followed the switch", got)
 			}
@@ -151,7 +162,7 @@ func TestTrackerLetsGoOfTheScreenWhenTheProgramLeaves(t *testing.T) {
 			t.Fatalf("Write() error = %v", err)
 		}
 	}
-	if tracker.Snapshot() != nil {
+	if mustSnapshot(t, tracker) != nil {
 		t.Fatal("the tracker still holds a screen the program left")
 	}
 
@@ -161,7 +172,7 @@ func TestTrackerLetsGoOfTheScreenWhenTheProgramLeaves(t *testing.T) {
 	}
 	late := reader(t, 20, 3)
 	_, _ = late.Write([]byte("\x1b[?1049h"))
-	_, _ = late.Write(tracker.Snapshot())
+	_, _ = late.Write(mustSnapshot(t, tracker))
 	if got := text(late); got != "\nsecond\n" {
 		t.Fatalf("snapshot drew %q, want only the second program's screen", got)
 	}
@@ -177,7 +188,7 @@ func TestTrackerKeepsTitlesOffTheScreen(t *testing.T) {
 	}
 	late := reader(t, 30, 3)
 	_, _ = late.Write([]byte("\x1b[?1049h"))
-	_, _ = late.Write(tracker.Snapshot())
+	_, _ = late.Write(mustSnapshot(t, tracker))
 	if got := text(late); strings.Contains(got, "개선") || !strings.HasPrefix(got, "screen") {
 		t.Fatalf("snapshot drew %q, want the title left out", got)
 	}
@@ -187,12 +198,14 @@ func TestTrackerFollowsAResize(t *testing.T) {
 	tracker := NewTracker(20, 3)
 	defer tracker.Close()
 	_ = tracker.Write([]byte("\x1b[?1049h"))
-	tracker.Resize(40, 5)
+	if err := tracker.Resize(40, 5); err != nil {
+		t.Fatalf("Resize() error = %v", err)
+	}
 	_ = tracker.Write([]byte("\x1b[5;30Hcorner"))
 
 	late := reader(t, 40, 5)
 	_, _ = late.Write([]byte("\x1b[?1049h"))
-	_, _ = late.Write(tracker.Snapshot())
+	_, _ = late.Write(mustSnapshot(t, tracker))
 	if got := text(late); !strings.HasSuffix(got, strings.Repeat(" ", 29)+"corner") {
 		t.Fatalf("snapshot drew %q, want the new size", got)
 	}
@@ -204,7 +217,7 @@ func TestApplyDropsASnapshotOfAnotherScreen(t *testing.T) {
 	tracker := NewTracker(20, 3)
 	defer tracker.Close()
 	_ = tracker.Write([]byte("\x1b[?1049hpicture"))
-	snapshot := tracker.Snapshot()
+	snapshot := mustSnapshot(t, tracker)
 
 	onMain := reader(t, 20, 3)
 	_, _ = onMain.Write([]byte("shell"))
@@ -218,6 +231,26 @@ func TestApplyDropsASnapshotOfAnotherScreen(t *testing.T) {
 	_, _ = otherSize.Write(snapshot)
 	if got := text(otherSize); strings.Contains(got, "picture") {
 		t.Fatalf("screen of another size = %q, want the snapshot dropped", got)
+	}
+}
+
+// A dashboard older than the snapshot has no handler for it. It must discard
+// the command whole, so the replay it shows is the one it always showed, with
+// the cursor where the guest has it.
+func TestSnapshotIsNothingToAReaderThatDoesNotKnowIt(t *testing.T) {
+	tracker := NewTracker(20, 3)
+	defer tracker.Close()
+	_ = tracker.Write([]byte("\x1b[?1049hpicture\x1b[2;5H"))
+
+	older := vt.NewEmulator(20, 3)
+	t.Cleanup(Unanswered(older))
+	_, _ = older.Write([]byte("\x1b[?1049hreplayed"))
+	_, _ = older.Write(mustSnapshot(t, tracker))
+	if got := text(older); got != "replayed\n\n" {
+		t.Fatalf("screen = %q, want the replay alone", got)
+	}
+	if position := older.CursorPosition(); position.X != 4 || position.Y != 1 {
+		t.Fatalf("cursor = %v, want the guest's (4,1)", position)
 	}
 }
 
@@ -251,5 +284,39 @@ func TestGuardBoundsRepeatCounts(t *testing.T) {
 	}
 	if got := text(emulator); !strings.HasPrefix(got, strings.Repeat("a", 20)) {
 		t.Fatalf("screen = %q, want the repeat to fill what can be seen", got)
+	}
+}
+
+// A program can make its screen as large as it likes in bytes, by putting a
+// long hyperlink on every row. Such a screen is left to the recording.
+func TestSnapshotOfAScreenTooLargeToCarryIsNone(t *testing.T) {
+	tracker := NewTracker(200, 50)
+	defer tracker.Close()
+	var output strings.Builder
+	output.WriteString("\x1b[?1049h\x1b]8;;https://example.com/" + strings.Repeat("a", 100_000) + "\x1b\\")
+	for row := 1; row <= 50; row++ {
+		output.WriteString("\x1b[" + strconv.Itoa(row) + ";1H" + strings.Repeat("x", 200))
+	}
+	if err := tracker.Write([]byte(output.String())); err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+	if snapshot := mustSnapshot(t, tracker); snapshot != nil {
+		t.Fatalf("snapshot of %d bytes, want none", len(snapshot))
+	}
+}
+
+// What a snapshot carries is drawn, not obeyed: a program that printed a
+// command looking like a snapshot gets it shown as nothing at all.
+func TestSnapshotDrawsNoSnapshotItHolds(t *testing.T) {
+	tracker := NewTracker(20, 3)
+	defer tracker.Close()
+	forged := "\x1b_romty:screen;20;3;" + base64.StdEncoding.EncodeToString([]byte("forged")) + "\x1b\\"
+	_ = tracker.Write([]byte("\x1b[?1049hmine" + forged))
+
+	emulator := reader(t, 20, 3)
+	_, _ = emulator.Write([]byte("\x1b[?1049h"))
+	_, _ = emulator.Write(mustSnapshot(t, tracker))
+	if got := text(emulator); got != "mine\n\n" {
+		t.Fatalf("screen = %q, want the program's own", got)
 	}
 }

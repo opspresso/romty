@@ -151,19 +151,23 @@ func (s *session) screenStep(tracker *screen.Tracker) bool {
 	if lost {
 		tracker.Reset()
 	}
+	var err error
 	switch {
 	case event != nil && event.snapshot != nil:
-		event.snapshot <- tracker.Snapshot()
+		var picture []byte
+		picture, err = tracker.Snapshot()
+		event.snapshot <- picture
 	case event != nil && event.columns > 0:
-		tracker.Resize(int(event.columns), int(event.rows))
+		err = tracker.Resize(int(event.columns), int(event.rows))
 	case event != nil:
 		// A request already answered when its position was lost.
 	case len(data) > 0:
-		if err := tracker.Write(data); err != nil {
-			s.stopFollowingScreen(err)
-			return false
-		}
+		err = tracker.Write(data)
 	default:
+		return false
+	}
+	if err != nil {
+		s.stopFollowingScreen(err)
 		return false
 	}
 	return true
@@ -176,6 +180,10 @@ func (s *session) screenStep(tracker *screen.Tracker) bool {
 func (s *session) stopFollowingScreen(err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.screen.stopped {
+		// Stopped by a failure already, which is the one to report.
+		return
+	}
 	s.screen.stopped = true
 	s.screen.fault, s.screen.unreported = err, err != nil
 	for _, event := range s.screen.events {

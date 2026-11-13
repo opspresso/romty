@@ -335,15 +335,17 @@ func (s *session) attachClientReady(
 	// the keyboard state is set outright: whatever the recording pushed or
 	// popped on the way, the client ends where the guest is.
 	recorded = stripQueries(recorded)
+	var reports []byte
 	if screenRequest != nil {
 		s.wakeScreen()
 		select {
 		case picture := <-screenRequest:
-			recorded = append(recorded, picture...)
+			reports = append(reports, picture...)
 		case <-time.After(screenWait):
 		}
 	}
-	recorded = append(recorded, keyboard...)
+	reports = append(reports, keyboard...)
+	recorded = insertBeforeUnfinished(recorded, reports)
 	if err := ready(len(resetScreen)+len(modes)+len(recorded), replayColumns, replayRows); err != nil {
 		s.detach(connection)
 		return err

@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"errors"
 	"io"
 	"net"
 	"os"
@@ -359,5 +360,84 @@ func TestFollowerStopsWithTheOutput(t *testing.T) {
 	}
 	if fault := value.screenFault(); fault != nil {
 		t.Fatalf("screenFault() = %v, want none: the output ending is not a failure", fault)
+	}
+}
+
+// joinedScreen attaches a client between two pieces of output, the way one
+// joins a program in the middle of printing, and returns the first row of the
+// client's screen once it has taken the replay and the live output after it.
+func joinedScreen(t *testing.T, value *session, before, after string) string {
+	t.Helper()
+	value.broadcast([]byte(before))
+	client, daemonSide := net.Pipe()
+	defer daemonSide.Close()
+	announced := make(chan int, 1)
+	go func() {
+		_ = value.attachReady(client, func(replayBytes int) error {
+			announced <- replayBytes
+			return nil
+		})
+	}()
+	replay := make([]byte, <-announced)
+	value.broadcast([]byte(after))
+	daemonSide.SetReadDeadline(time.Now().Add(3 * time.Second))
+	if _, err := io.ReadFull(daemonSide, replay); err != nil {
+		t.Fatalf("read replay: %v", err)
+	}
+	live := make([]byte, len(after))
+	if _, err := io.ReadFull(daemonSide, live); err != nil {
+		t.Fatalf("read live output: %v", err)
+	}
+
+	emulator := vt.NewEmulator(followedColumns, followedRows)
+	screen.Guard(emulator)
+	emulator.RegisterApcHandler(func(data []byte) bool { return screen.Apply(emulator, string(data)) })
+	defer screen.Unanswered(emulator)()
+	_, _ = emulator.Write(replay)
+	_, _ = emulator.Write(live)
+	return strings.TrimRight(strings.Split(ansi.Strip(emulator.Render()), "\n")[0], " ")
+}
+
+// The PTY hands output over in whatever pieces it has, so a recording can end
+// inside a sequence or a character whose rest is still to come. What the
+// daemon adds to the replay must not land between the two halves.
+func TestReportsDoNotSplitWhatTheRecordingCut(t *testing.T) {
+	han := "서"
+	for _, test := range []struct {
+		name          string
+		before, after string
+		want          string
+	}{
+		{"a colour", "A\x1b[38;5;", "196mB", "AB"},
+		{"a character", "A" + han[:1], han[1:] + "B", "A서B"},
+		{"a title", "A\x1b]2;ti", "tle\x07B", "AB"},
+	} {
+		t.Run("shell/"+test.name, func(t *testing.T) {
+			value := newSessionForTest(nil)
+			value.columns, value.rows = followedColumns, followedRows
+			if got := joinedScreen(t, value, test.before, test.after); got != test.want {
+				t.Fatalf("screen = %q, want %q", got, test.want)
+			}
+		})
+		t.Run("full screen/"+test.name, func(t *testing.T) {
+			value := followedSession(t)
+			printOutput(t, value, "\x1b[?1049h\x1b[2J\x1b[H")
+			if got := joinedScreen(t, value, test.before, test.after); got != test.want {
+				t.Fatalf("screen = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
+// The failure is what the log has to say, and the output ending after it
+// must not take its place.
+func TestFollowerKeepsItsFailureToReport(t *testing.T) {
+	value := newSessionForTest(nil)
+	value.screen.wake = make(chan struct{}, 1)
+	failure := errors.New("the emulator failed")
+	value.stopFollowingScreen(failure)
+	value.stopFollowingScreen(nil)
+	if fault := value.screenFault(); !errors.Is(fault, failure) {
+		t.Fatalf("screenFault() = %v, want %v", fault, failure)
 	}
 }

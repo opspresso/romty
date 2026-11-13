@@ -118,6 +118,11 @@ func (t *guestTracker) observe(data []byte) {
 				t.keypad, t.keypadKnown = false, true
 				index += 2
 				continue
+			case 'c':
+				// A full reset (RIS) takes the keyboard requests with it.
+				t.keyboard.Reset()
+				index += 2
+				continue
 			}
 		}
 		if body, found := titleIntroducer(scan, index); found {
