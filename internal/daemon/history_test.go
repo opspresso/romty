@@ -42,6 +42,16 @@ func TestStripQueriesRemovesQueriesAndKeepsOutput(t *testing.T) {
 			want:    "beforeafter",
 		},
 		{
+			name:    "Kitty keyboard flags request",
+			history: "before\x1b[?uafter",
+			want:    "beforeafter",
+		},
+		{
+			name:    "Kitty keyboard flags being pushed",
+			history: "before\x1b[>5uafter",
+			want:    "before\x1b[>5uafter",
+		},
+		{
 			name:    "primary device attributes",
 			history: "before\x1b[cafter",
 			want:    "beforeafter",

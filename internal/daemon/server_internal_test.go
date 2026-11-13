@@ -487,6 +487,10 @@ func assertTerminalSize(t *testing.T, terminal *os.File, columns, rows int) {
 	}
 }
 
+// noKeyboardRequests is the report that closes the replay of a session whose
+// guest asked nothing of the keyboard.
+const noKeyboardRequests = "\x1b_romty:keyboard;;;\x1b\\"
+
 func TestAttachAnnouncesTheInitialReplayBoundary(t *testing.T) {
 	client, daemonSide := net.Pipe()
 	defer daemonSide.Close()
@@ -503,10 +507,34 @@ func TestAttachAnnouncesTheInitialReplayBoundary(t *testing.T) {
 		})
 	}()
 
-	want := []byte(resetScreen + "beforeafter")
+	want := []byte(resetScreen + "beforeafter" + noKeyboardRequests)
 	if got := <-announced; got != len(want) {
 		t.Fatalf("announced replay bytes = %d, want %d", got, len(want))
 	}
+	daemonSide.SetReadDeadline(time.Now().Add(3 * time.Second))
+	readReplay(t, daemonSide, want)
+	daemonSide.Close()
+	<-attached
+}
+
+// The recording still holds the push, so a client that replays it has the
+// flags once. The report after it is what keeps a recording that lost the
+// push, or holds it twice, from leaving the client somewhere else.
+func TestAttachClosesTheReplayWithTheKeyboardState(t *testing.T) {
+	testutil.Set(t, &maxHistoryBytes, 64)
+	client, daemonSide := net.Pipe()
+	defer daemonSide.Close()
+
+	value := newSessionForTest(nil)
+	for _, output := range []string{"\x1b[>4;0m\x1b[>7u", strings.Repeat("x", 200)} {
+		value.guest.observe([]byte(output))
+		value.history.append([]byte(output))
+	}
+
+	attached := make(chan error, 1)
+	go func() { attached <- value.attach(client) }()
+
+	want := []byte(resetScreen + strings.Repeat("x", 64) + "\x1b_romty:keyboard;5;;0\x1b\\")
 	daemonSide.SetReadDeadline(time.Now().Add(3 * time.Second))
 	readReplay(t, daemonSide, want)
 	daemonSide.Close()
@@ -530,7 +558,7 @@ func TestAttachInfersCapabilitiesForAPreNegotiationClient(t *testing.T) {
 	value.history.append([]byte("version five history"))
 
 	response, reader := attachAs(t, value, 5)
-	want := []byte(resetScreen + "version five history")
+	want := []byte(resetScreen + "version five history" + noKeyboardRequests)
 	if response.Version != 5 || response.ReplayBytes != len(want) ||
 		response.ReplayColumns != 90 || response.ReplayRows != 25 {
 		t.Fatalf("version 5 attach response = %#v, want replay size %d at 90x25", response, len(want))

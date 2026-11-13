@@ -533,12 +533,11 @@ func TestDashboardKeepsTheMouseInScrollbackWhenAsked(t *testing.T) {
 }
 
 // Scrollback is romty's own view of output the guest has already printed, so
-// passthrough must not take the wheel there and scroll the guest instead of the
-// history the user opened.
+// a guest that owns the mouse must not take the wheel there and be scrolled
+// instead of the history the user opened.
 func TestDashboardScrollsHistoryNotTheGuestWithBothMouseOptions(t *testing.T) {
 	value := scrolledDashboard(t, 200)
 	value.config.ScrollbackMouse = true
-	value.config.MousePassthrough = true
 	value.terminal.writeOutput([]byte("\x1b[?1003h\x1b[?1006h"))
 
 	send(&value, key(tea.KeyF6, ""))

@@ -66,7 +66,10 @@ type session struct {
 	codexHome string
 	// modes survives the recording being trimmed, so a mode the guest set
 	// long ago is still restored to a reattaching client.
-	guest      *guestTracker
+	guest *guestTracker
+	// screen follows what a full-screen guest has drawn, which a recording
+	// that lost its oldest bytes cannot give a reattaching client.
+	screen     screenFollower
 	clients    map[net.Conn]*attachment
 	foreground net.Conn
 	activity   uint64
@@ -104,13 +107,7 @@ func startSession(id, directory, shell string, environment []string, columns, ro
 	if environment == nil {
 		environment = os.Environ()
 	}
-	command.Env = make([]string, 0, len(environment)+3)
-	for _, value := range environment {
-		if !strings.HasPrefix(value, "ROMTY_TAB_ID=") {
-			command.Env = append(command.Env, value)
-		}
-	}
-	command.Env = append(command.Env, "TERM=xterm-256color", "ROMTY=1", "ROMTY_TAB_ID="+id)
+	command.Env = guestEnvironment(environment, id)
 	terminal, err := pty.StartWithSize(command, &pty.Winsize{Cols: columns, Rows: rows})
 	if err != nil {
 		return nil, fmt.Errorf("start shell PTY: %w", err)
@@ -135,8 +132,10 @@ func startSession(id, directory, shell string, environment []string, columns, ro
 		clients:   make(map[net.Conn]*attachment),
 		codexHome: sessionCodexHome(environment, directory),
 	}
+	value.screen.wake = make(chan struct{}, 1)
 	go value.read()
 	go value.wait()
+	go value.followScreen(columns, rows)
 	return value, nil
 }
 
@@ -264,6 +263,7 @@ func (s *session) broadcast(data []byte) {
 	if s.bells.scan(data) {
 		s.bellAt = time.Now()
 	}
+	s.wakeScreen()
 	stalled := make([]net.Conn, 0)
 	for connection, attached := range s.clients {
 		if attached.live {
@@ -313,6 +313,8 @@ func (s *session) attachClientReady(
 	// slice into it would be rewritten under the replay's feet.
 	recorded := s.history.bytes()
 	modes := s.guest.restore()
+	keyboard := s.guest.keyboardReport()
+	screenRequest := s.requestScreenLocked()
 	replayColumns, replayRows := s.columns, s.rows
 	s.activity++
 	attached := &attachment{
@@ -328,7 +330,22 @@ func (s *session) attachClientReady(
 	s.mu.Unlock()
 	go s.writeClient(connection, attached)
 
+	// What the recording cannot give closes the replay. A full-screen
+	// program's screen is drawn over whatever the recording left of it, and
+	// the keyboard state is set outright: whatever the recording pushed or
+	// popped on the way, the client ends where the guest is.
 	recorded = stripQueries(recorded)
+	var reports []byte
+	if screenRequest != nil {
+		s.wakeScreen()
+		select {
+		case picture := <-screenRequest:
+			reports = append(reports, picture...)
+		case <-time.After(screenWait):
+		}
+	}
+	reports = append(reports, keyboard...)
+	recorded = insertBeforeUnfinished(recorded, reports)
 	if err := ready(len(resetScreen)+len(modes)+len(recorded), replayColumns, replayRows); err != nil {
 		s.detach(connection)
 		return err
@@ -487,6 +504,9 @@ func (s *session) restore(recording []byte, marker, command string) {
 		s.mu.Lock()
 		s.history.append(recording)
 		s.history.append([]byte(marker))
+		// The screen follower skips them for the same reason: the program
+		// that switched screens in that recording is not running.
+		s.screen.position = s.history.total
 		s.mu.Unlock()
 	}
 	if command != "" {
@@ -617,6 +637,7 @@ func (s *session) applySize(columns, rows uint16) error {
 		return fmt.Errorf("resize terminal: %w", ioctlErr)
 	}
 	s.columns, s.rows = columns, rows
+	s.resizeScreenLocked(columns, rows)
 	return nil
 }
 

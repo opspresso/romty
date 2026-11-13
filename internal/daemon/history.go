@@ -3,6 +3,9 @@ package daemon
 import (
 	"bytes"
 
+	"github.com/charmbracelet/x/ansi"
+	"github.com/charmbracelet/x/ansi/parser"
+
 	"github.com/opspresso/romty/internal/display"
 )
 
@@ -129,6 +132,9 @@ func scanControlSequence(data []byte, index, body int) (int, bool) {
 	case final == 'q' && bytes.HasPrefix(private, []byte(">")):
 		// XTVERSION, the terminal name and version request.
 		return cursor, true
+	case final == 'u' && bytes.Equal(private, []byte("?")) && len(middle) == 0:
+		// The Kitty keyboard flags request.
+		return cursor, true
 	case final == 'h' && bytes.Equal(private, []byte("?2048")):
 		// In-band resize. Setting it is not a question, but the emulator
 		// answers it like one and keeps answering on every later resize, so a
@@ -230,4 +236,34 @@ func (s *historyScanner) scanDeviceControlString(data []byte, index, body int) (
 	}
 	s.noStringTerminator = true
 	return index, false
+}
+
+// insertBeforeUnfinished puts reports into a replay at the end of its last
+// complete sequence or character.
+//
+// A recording can end in the middle of one: the shell's output arrives in
+// whatever pieces the PTY hands over, and an attach takes the recording
+// between two of them. The rest follows as live output, and reports placed
+// after the cut would split the sequence, so its first half is cut short and
+// its second half is printed as text. What the cut-off tail holds has done
+// nothing to the screen yet, so the reports, taken at the end of the
+// recording, are just as true before it.
+func insertBeforeUnfinished(replay, reports []byte) []byte {
+	if len(reports) == 0 {
+		return replay
+	}
+	// The parser is the one the dashboard's emulator reads with, started
+	// where the dashboard's starts reading the recording.
+	scanner := ansi.NewParser()
+	finished := 0
+	for index, value := range replay {
+		scanner.Advance(value)
+		if scanner.State() == parser.GroundState {
+			finished = index + 1
+		}
+	}
+	result := make([]byte, 0, len(replay)+len(reports))
+	result = append(result, replay[:finished]...)
+	result = append(result, reports...)
+	return append(result, replay[finished:]...)
 }

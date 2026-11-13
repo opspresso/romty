@@ -15,7 +15,7 @@
 // arrived, so an introducer, a payload, a terminator, or a single character
 // can each be cut in half.
 
-package ui
+package screen
 
 import (
 	"bytes"
@@ -28,7 +28,9 @@ import (
 // forever would swallow the guest's output.
 const titleHoldLimit = 4096
 
-type titleScrubber struct {
+// TitleScrubber removes window titles from a stream of guest output. The zero
+// value is ready to use.
+type TitleScrubber struct {
 	// pending is a title sequence a chunk boundary cut before its terminator.
 	pending []byte
 	// skip counts the continuation bytes of a character the last chunk cut,
@@ -36,7 +38,7 @@ type titleScrubber struct {
 	skip int
 }
 
-// scrub returns data with every complete OSC 0, 1 and 2 sequence removed and
+// Scrub returns data with every complete OSC 0, 1 and 2 sequence removed and
 // every OSC 8 hyperlink put in the order the emulator reads it, holding a
 // sequence that is still missing its terminator until the next call.
 //
@@ -46,7 +48,7 @@ type titleScrubber struct {
 // "8;https://…;" and opened nothing. Handing it the fields swapped makes the
 // link it draws the one the guest sent. TestHyperlinksReachTheHostIntact fails
 // if the emulator is ever fixed, so the swap cannot outlive the bug.
-func (s *titleScrubber) scrub(data []byte) []byte {
+func (s *TitleScrubber) Scrub(data []byte) []byte {
 	scan := data
 	if len(s.pending) > 0 {
 		scan = append(s.pending, data...)

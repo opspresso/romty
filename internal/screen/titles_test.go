@@ -1,4 +1,4 @@
-package ui
+package screen
 
 import (
 	"bytes"
@@ -71,9 +71,9 @@ func TestTitleScrubberRemovesTitleSequences(t *testing.T) {
 		},
 	} {
 		t.Run(probe.name, func(t *testing.T) {
-			var scrubber titleScrubber
-			if got := string(scrubber.scrub([]byte(probe.value))); got != probe.want {
-				t.Fatalf("scrub(%q) = %q, want %q", probe.value, got, probe.want)
+			var scrubber TitleScrubber
+			if got := string(scrubber.Scrub([]byte(probe.value))); got != probe.want {
+				t.Fatalf("Scrub(%q) = %q, want %q", probe.value, got, probe.want)
 			}
 		})
 	}
@@ -84,11 +84,11 @@ func TestTitleScrubberRemovesTitleSequences(t *testing.T) {
 // halves must reach the same conclusion as scrubbing the whole.
 func TestTitleScrubberSurvivesEveryChunkBoundary(t *testing.T) {
 	value := []byte("한글 text\x1b]0;✳ 문서 개선\a middle \x9d2;서\x9c\x1b]1;t\x1b\\\x1b[31m붉은\x1b]8;;x\x1b\\ end")
-	var whole titleScrubber
-	want := string(whole.scrub(value))
+	var whole TitleScrubber
+	want := string(whole.Scrub(value))
 	for cut := 0; cut <= len(value); cut++ {
-		var scrubber titleScrubber
-		got := string(scrubber.scrub(value[:cut])) + string(scrubber.scrub(value[cut:]))
+		var scrubber TitleScrubber
+		got := string(scrubber.Scrub(value[:cut])) + string(scrubber.Scrub(value[cut:]))
 		if got != want {
 			t.Fatalf("cut at %d: scrub halves = %q, want %q", cut, got, want)
 		}
@@ -99,52 +99,12 @@ func TestTitleScrubberSurvivesEveryChunkBoundary(t *testing.T) {
 // goes through unfiltered rather than swallowing the guest's output.
 func TestTitleScrubberBoundsWhatItHoldsBack(t *testing.T) {
 	runaway := []byte("\x1b]0;" + strings.Repeat("x", titleHoldLimit+1))
-	var scrubber titleScrubber
-	got := scrubber.scrub(runaway)
+	var scrubber TitleScrubber
+	got := scrubber.Scrub(runaway)
 	if !bytes.Equal(got, runaway) {
 		t.Fatalf("scrub gave %d bytes, want the %d unfiltered", len(got), len(runaway))
 	}
 	if len(scrubber.pending) != 0 {
 		t.Fatalf("scrubber held %d bytes past its bound", len(scrubber.pending))
-	}
-}
-
-// The reason the scrubber exists: the emulator reads the 0x9C inside "✳" and
-// "서" as the C1 string terminator, ends the title there, and prints the rest
-// of it as text at the cursor — a sentence in the guest's input box that
-// nobody typed.
-func TestGuestTitleNeverRendersAsText(t *testing.T) {
-	value := []byte("\x1b]0;✳ 문서 개선\aafter")
-	for cut := 0; cut <= len(value); cut++ {
-		terminal := newEmbeddedTerminal("tab-1", newMemoryStream(""), 40, 5)
-		terminal.writeOutput(value[:cut])
-		terminal.writeOutput(value[cut:])
-		rendered := strings.Join(terminal.render(), "\n")
-		terminal.close()
-		if strings.Contains(rendered, "문서") {
-			t.Fatalf("cut at %d: title rendered as text: %q", cut, rendered)
-		}
-		if !strings.Contains(rendered, "after") {
-			t.Fatalf("cut at %d: text after the title is gone: %q", cut, rendered)
-		}
-	}
-}
-
-// A hyperlink the guest prints reaches the host terminal in the standard
-// order, OSC 8 ; params ; URI, even when it arrives in pieces.
-func TestHyperlinksReachTheHostIntact(t *testing.T) {
-	for _, chunks := range [][]string{
-		{"\x1b]8;;https://romty.dev\x1b\\romty\x1b]8;;\x1b\\ site\r\n"},
-		{"\x1b]8;id=1;https://ro", "mty.dev\aromty\x1b]8;;\a site\r\n"},
-	} {
-		terminal := newEmbeddedTerminal("x", newMemoryStream(""), 40, 4)
-		for _, chunk := range chunks {
-			terminal.writeOutput([]byte(chunk))
-		}
-		row := terminal.renderViewport(0)[0]
-		terminal.close()
-		if !strings.Contains(row, "8;id=1;https://romty.dev") && !strings.Contains(row, "8;;https://romty.dev") {
-			t.Fatalf("rendered link = %q, want OSC 8 ; params ; URI", row)
-		}
 	}
 }

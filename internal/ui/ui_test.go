@@ -582,12 +582,11 @@ func TestDashboardWithholdsUnrequestedMotionFromTheGuest(t *testing.T) {
 	value := scrolledDashboard(t, 200)
 	// ?1000h is click tracking: button press and release, no motion.
 	value.terminal.writeOutput([]byte("\x1b[?1000h\x1b[?1006h"))
-	value.config.MousePassthrough = true
 	if value.terminal.guestMouseMode() != tea.MouseModeCellMotion {
 		t.Fatalf("guest mouse mode = %v, want click tracking", value.terminal.guestMouseMode())
 	}
 	if !value.guestOwnsMouse() {
-		t.Fatal("passthrough did not hand the mouse to the guest")
+		t.Fatal("the guest was not handed the mouse it asked for")
 	}
 
 	x, y := value.dimensions().leftWidth+3+4, terminalTop+2

@@ -38,7 +38,7 @@ ROMTY_HOME=/tmp/romty-dev go run ./cmd/romty
 | Application | `daemon`, `client` | The daemon that owns sessions, state, the change stream and the shared Git reads, and the client that talks to it |
 | Wire contract | `protocol` | Framed messages, protocol revisions, and capabilities |
 | Domain | `model` | Roots, workspaces, tabs, agent phases, snapshots, change events, Git states, and the domain errors `ErrDaemonUnavailable`, `ErrNeedsNewerDaemon` and `RefusedError` |
-| Infrastructure | `agenthooks`, `codexstate`, `gitrepo`, `jsonfile`, `logfile`, `paths`, `procinfo`, `service`, `sound`, `state`, `transcript`, `update`, `workspacefs`, `display`, `version` | Files, processes, Git, the daemon log, the login service, agent integrations, and the network |
+| Infrastructure | `agenthooks`, `codexstate`, `gitrepo`, `jsonfile`, `keyboard`, `logfile`, `paths`, `procinfo`, `screen`, `service`, `sound`, `state`, `transcript`, `update`, `workspacefs`, `display`, `version` | Files, processes, Git, the daemon log, the login service, agent integrations, the keyboard protocol a guest asked for, the terminal emulator's guards and the full-screen display the daemon follows, and the network |
 
 Keep side effects such as running `git`, reading workspace files, or calling GitHub in an infrastructure package. The `ui` package decides what to show and when; it does not run commands or read the filesystem itself.
 

@@ -19,10 +19,15 @@ type recording struct {
 	// recording reaches.
 	start int
 	size  int
+	// total counts every byte ever recorded, kept or not. It gives each byte
+	// a position that does not move when older ones are dropped, which is
+	// what a reader that follows the recording at its own pace holds on to.
+	total uint64
 }
 
 // append records data, dropping whatever no longer fits.
 func (r *recording) append(data []byte) {
+	r.total += uint64(len(data))
 	limit := maxHistoryBytes
 	if limit <= 0 {
 		r.data, r.start, r.size = nil, 0, 0
@@ -79,6 +84,26 @@ func (r *recording) tail(count int) []byte {
 		return result
 	}
 	start := (r.start + r.size - count) % len(r.data)
+	front := copy(result, r.data[start:min(start+count, len(r.data))])
+	copy(result[front:], r.data)
+	return result
+}
+
+// oldest is the position of the oldest byte still held.
+func (r *recording) oldest() uint64 {
+	return r.total - uint64(r.size)
+}
+
+// readFrom returns up to count bytes starting at position, oldest first, as
+// a slice of its own. The position must lie between oldest and total.
+func (r *recording) readFrom(position uint64, count int) []byte {
+	available := int(r.total - position)
+	count = min(max(count, 0), available)
+	result := make([]byte, count)
+	if count == 0 {
+		return result
+	}
+	start := (r.start + r.size - available) % len(r.data)
 	front := copy(result, r.data[start:min(start+count, len(r.data))])
 	copy(result[front:], r.data)
 	return result

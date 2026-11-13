@@ -19,9 +19,8 @@ type hoverTarget struct {
 	index int
 }
 
-// forwardMouse relays a host mouse event to the guest application. romty only
-// receives these when passthrough handed the mouse over, so there is nothing to
-// do otherwise.
+// forwardMouse relays a host mouse event to the guest application. It is
+// called only while the guest owns the mouse.
 func (m dashboard) forwardMouse(message tea.MouseMsg) (tea.Model, tea.Cmd) {
 	if m.mouseMode() == tea.MouseModeNone {
 		return m, nil
@@ -430,9 +429,8 @@ func tabHitAtX(tabs []model.Tab, active, x, width int) (tabHit, bool) {
 
 // mouseMode asks for pointer motion wherever romty draws hoverable controls.
 // Copy mode still gives the mouse back to the host for native selection. A
-// guest application that asked for the mouse receives events only when the
-// user opted into passthrough, while romty keeps motion for its surrounding
-// dashboard chrome.
+// guest application that asked for the mouse receives the events inside its
+// pane, while romty keeps motion for its surrounding dashboard chrome.
 func (m dashboard) mouseMode() tea.MouseMode {
 	if m.modal != noModal {
 		return tea.MouseModeAllMotion
@@ -454,7 +452,7 @@ func (m dashboard) mouseMode() tea.MouseMode {
 	// and every pointer move the host reports would cross the wire of an SSH
 	// session for hover highlights nobody is looking at. Button events still
 	// carry clicks, drags and the wheel, so the chrome stays clickable; a
-	// guest that asked for more through passthrough gets what it asked for.
+	// guest that asked for more gets what it asked for.
 	if m.focus == terminalPane {
 		if m.guestOwnsMouse() {
 			return m.terminal.guestMouseMode()
@@ -462,15 +460,15 @@ func (m dashboard) mouseMode() tea.MouseMode {
 		return tea.MouseModeCellMotion
 	}
 	// Motion is what the hover highlights are drawn from, so romty asks for it
-	// even while passthrough hands the buttons to the guest. forwardMouse then
-	// keeps the motion a guest never asked for to itself.
+	// even while the buttons go to the guest. forwardMouse then keeps the
+	// motion a guest never asked for to itself.
 	return tea.MouseModeAllMotion
 }
 
-// guestOwnsMouse reports whether passthrough has handed the mouse to the guest.
-// Scrollback is romty's own view of output the guest has already printed, so
-// the guest does not own the mouse there however the passthrough is set.
+// guestOwnsMouse reports whether the guest asked for the mouse and may have
+// it. Scrollback is romty's own view of output the guest has already printed,
+// so the guest does not own the mouse there.
 func (m dashboard) guestOwnsMouse() bool {
-	return m.config.MousePassthrough && !m.scrollback &&
+	return !m.config.BlockMouse && !m.scrollback &&
 		m.terminal != nil && m.terminal.guestMouseMode() != tea.MouseModeNone
 }

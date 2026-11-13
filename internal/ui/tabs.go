@@ -123,6 +123,7 @@ func (m dashboard) handleOpenedTerminal(message terminalOpenedMsg) (tea.Model, t
 		message.tabID, message.stream, message.replay, int(columns), int(rows),
 	)
 	m.terminal = terminal
+	m.shareHostColors()
 	m.terminalOpenedAt = now()
 	m.markBellSeen(message.tabID)
 	if tab, ok := m.openTab(); ok {
@@ -168,7 +169,7 @@ func (m dashboard) handleTerminalOutput(message terminalOutputMsg) (tea.Model, t
 		}
 		if effects := m.terminalEffects(); effects != nil {
 			if message.err == nil {
-				return m, tea.Batch(effects, m.terminal.read())
+				return m, tea.Batch(effects, m.terminal.read(), m.frameRelease())
 			}
 		}
 	}
@@ -183,7 +184,38 @@ func (m dashboard) handleTerminalOutput(message terminalOutputMsg) (tea.Model, t
 		m.terminalExited = true
 		return m, m.refresh()
 	}
+	if release := m.frameRelease(); release != nil {
+		return m, tea.Batch(m.terminal.read(), release)
+	}
 	return m, m.terminal.read()
+}
+
+// frameReleaseMsg arrives when a synchronized update has had its time. The
+// screen is drawn again after every message, which is all it is for.
+type frameReleaseMsg struct {
+	terminal *embeddedTerminal
+}
+
+// frameRelease sets the timer that ends a synchronized update the guest never
+// ends, so a program that died mid-frame does not leave its tab frozen.
+func (m dashboard) frameRelease() tea.Cmd {
+	terminal := m.terminal
+	if terminal == nil || !terminal.scheduleRelease() {
+		return nil
+	}
+	return tea.Tick(frameHoldLimit, func(time.Time) tea.Msg {
+		return frameReleaseMsg{terminal: terminal}
+	})
+}
+
+// handleFrameRelease sets the timer again when the guest began another update
+// since, and otherwise leaves the screen to be redrawn without the hold.
+func (m dashboard) handleFrameRelease(message frameReleaseMsg) (tea.Model, tea.Cmd) {
+	message.terminal.releaseScheduled = false
+	if message.terminal != m.terminal || m.terminal.heldNow() == nil {
+		return m, nil
+	}
+	return m, m.frameRelease()
 }
 
 // settleAfterExit moves off a terminal whose stream ended. A shell that exited
@@ -443,6 +475,14 @@ func (m dashboard) resizeTerminal() tea.Cmd {
 			return resizeFailedMsg{tabID: terminal.id, err: err}
 		}
 		return nil
+	}
+}
+
+// shareHostColors gives the open terminal the host's colours to answer a
+// guest's colour query with.
+func (m dashboard) shareHostColors() {
+	if m.terminal != nil {
+		m.terminal.setHostColors(m.hostForeground, m.hostBackground)
 	}
 }
 

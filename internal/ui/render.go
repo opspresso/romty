@@ -211,10 +211,13 @@ func (m dashboard) View() tea.View {
 	view.WindowTitle = m.windowTitle()
 	view.MouseMode = m.mouseMode()
 	view.KeyboardEnhancements.ReportAlternateKeys = true
+	view.ReportFocus = true
 	if !m.fileView.active && !m.scrollback && m.focus == terminalPane && m.terminal != nil {
-		originX, originY := m.dimensions().terminalOrigin()
-		position := m.terminal.cursorPosition()
-		view.Cursor = tea.NewCursor(originX+position.X, originY+position.Y)
+		if cursor := m.terminal.cursor(); cursor != nil {
+			originX, originY := m.dimensions().terminalOrigin()
+			cursor.X, cursor.Y = cursor.X+originX, cursor.Y+originY
+			view.Cursor = cursor
+		}
 	}
 	return view
 }

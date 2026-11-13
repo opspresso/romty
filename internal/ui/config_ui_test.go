@@ -121,9 +121,9 @@ func TestDashboardClicksConfigControls(t *testing.T) {
 	left, top := value.modalGeometry(value.width, value.dimensions().bodyHeight).contentOrigin()
 
 	save := send(&value, tea.MouseClickMsg{X: left + 2, Y: top + 2, Button: tea.MouseLeft})
-	if !value.config.MousePassthrough || save == nil || value.configIndex != 1 {
-		t.Fatalf("mouse passthrough click = (enabled %v, save %v, cursor %d)",
-			value.config.MousePassthrough, save, value.configIndex)
+	if !value.config.BlockMouse || save == nil || value.configIndex != 1 {
+		t.Fatalf("mouse click = (blocked %v, save %v, cursor %d)",
+			value.config.BlockMouse, save, value.configIndex)
 	}
 	// The row is found by name, so adding a setting does not move the click.
 	done := slices.IndexFunc(configRows(), func(row configRow) bool { return row.name == "Sound on done" })

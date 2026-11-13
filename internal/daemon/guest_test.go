@@ -300,3 +300,64 @@ func TestGuestTitleIsCutAtACharacterBoundary(t *testing.T) {
 		t.Fatalf("title = %q (%d bytes), want the ASCII run without a split character", tracker.title, len(tracker.title))
 	}
 }
+
+// A key encoding is asked for with pushes, which a replay cannot repeat
+// safely, so the tracker reports where the guest ended up instead.
+func TestGuestTrackerFollowsTheKeyboardProtocol(t *testing.T) {
+	for _, probe := range []struct {
+		name   string
+		output []string
+		report string
+	}{
+		{
+			name:   "nothing was asked",
+			output: []string{"plain output\r\n\x1b[1;31mred\x1b[m"},
+			report: "\x1b_romty:keyboard;;;\x1b\\",
+		},
+		{
+			name:   "Codex at startup",
+			output: []string{"\x1b[?2004h\x1b[>4;0m\x1b[>7u\x1b[?1004h\x1b[?u\x1b[c"},
+			report: "\x1b_romty:keyboard;5;;0\x1b\\",
+		},
+		{
+			name:   "Codex after it left",
+			output: []string{"\x1b[>4;0m\x1b[>7u", "\x1b[?1049h", "work", "\x1b[?1049l\x1b[<1u"},
+			report: "\x1b_romty:keyboard;;;0\x1b\\",
+		},
+		{
+			name:   "Claude Code in a terminal it knows",
+			output: []string{"\x1b[<u\x1b[>5u\x1b[>4;2m"},
+			report: "\x1b_romty:keyboard;5;;2\x1b\\",
+		},
+		{
+			name:   "a push on the alternate screen",
+			output: []string{"\x1b[?1049h\x1b[>1u"},
+			report: "\x1b_romty:keyboard;;1;\x1b\\",
+		},
+		{
+			name:   "a push cut by the chunk boundary",
+			output: []string{"\x1b[>", "5", "u"},
+			report: "\x1b_romty:keyboard;5;;\x1b\\",
+		},
+		{
+			name:   "reset after a program died with its flags pushed",
+			output: []string{"\x1b[>1u\x1b[>4;2m", "\x1b", "c"},
+			report: "\x1b_romty:keyboard;;;\x1b\\",
+		},
+		{
+			name:   "the cursor style and SGR are not keyboard requests",
+			output: []string{"\x1b[4 q\x1b[4m\x1b[38;5;4m\x1b[?4m\x1b[1u"},
+			report: "\x1b_romty:keyboard;;;\x1b\\",
+		},
+	} {
+		t.Run(probe.name, func(t *testing.T) {
+			tracker := newGuestTracker()
+			for _, chunk := range probe.output {
+				tracker.observe([]byte(chunk))
+			}
+			if got := string(tracker.keyboardReport()); got != probe.report {
+				t.Fatalf("keyboardReport() = %q, want %q", got, probe.report)
+			}
+		})
+	}
+}
