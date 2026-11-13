@@ -7,9 +7,9 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -953,6 +953,10 @@ type testDaemon struct {
 // interactive shell loads dotfiles: a prompt or a terminal wrapper such as
 // Kiro CLI's kiro-cli-term then changes the output the tests read.
 func TestMain(m *testing.M) {
+	if fakeAgentNames[filepath.Base(os.Args[0])] {
+		runFakeAgent(os.Args[1:])
+		return
+	}
 	os.Setenv("SHELL", "/bin/sh")
 	os.Unsetenv("ENV")
 	os.Exit(m.Run())
@@ -1328,21 +1332,43 @@ func TestClosedTabCanBeReopenedWithItsOutputAndAgent(t *testing.T) {
 	}
 }
 
-// fakeAgent links sleep into directory under name, so a test can run a
-// process that romty recognises as that agent: the process list shows the
-// link's name. A link rather than a copy, because macOS kills a copied system
-// binary.
+// fakeAgent links the test binary into directory under name, so a test can
+// run a process that romty recognises as that agent: the process list shows
+// the link's name. A link rather than a copy, so no binary is copied per test.
 func fakeAgent(t *testing.T, directory, name string) string {
 	t.Helper()
-	source, err := exec.LookPath("sleep")
+	if !fakeAgentNames[name] {
+		t.Fatalf("fake agent %q is not in fakeAgentNames", name)
+	}
+	executable, err := os.Executable()
 	if err != nil {
-		t.Fatalf("LookPath(sleep) error = %v", err)
+		t.Fatalf("os.Executable() error = %v", err)
 	}
 	path := filepath.Join(directory, name)
-	if err := os.Symlink(source, path); err != nil {
+	if err := os.Symlink(executable, path); err != nil {
 		t.Fatalf("link %s: %v", name, err)
 	}
 	return path
+}
+
+// fakeAgentNames are the agents fakeAgent can stand in for. The test binary
+// is the stand-in: a link to it under an agent's name runs runFakeAgent. A
+// link to sleep does not work everywhere, because the coreutils of Ubuntu
+// 26.04 are one program that refuses to run under a name it does not know.
+var fakeAgentNames = map[string]bool{"claude": true}
+
+// runFakeAgent sleeps for the seconds it is given, as `sleep` does.
+func runFakeAgent(arguments []string) {
+	if len(arguments) != 1 {
+		fmt.Fprintln(os.Stderr, "usage: <agent> seconds")
+		os.Exit(2)
+	}
+	seconds, err := strconv.ParseFloat(arguments[0], 64)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(2)
+	}
+	time.Sleep(time.Duration(seconds * float64(time.Second)))
 }
 
 // waitForAgent returns once the daemon sees agent in the tab's foreground.
