@@ -28,7 +28,8 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v7
         with:
-          go-version-file: go.mod
+          go-version-file: .go-version
+          check-latest: true
 
       - name: Release
         uses: goreleaser/goreleaser-action@v7

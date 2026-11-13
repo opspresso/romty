@@ -21,6 +21,8 @@ govulncheck ./...
 
 The race detector is required because each terminal session coordinates several goroutines around one emulator.
 
+CI and the release build with the newest patch release of the Go line in `.go-version`, such as `1.26`. A Go patch release is where the Go team ships standard library security fixes, so a release picks them up without a change to this repository, and `govulncheck` fails only for a vulnerability that no release has fixed yet. The `go` line in `go.mod` is the oldest Go that builds romty from source; it does not choose the toolchain CI uses. To move to a new Go minor version, change `.go-version`.
+
 Run an isolated development instance without using normal romty state:
 
 ```sh
