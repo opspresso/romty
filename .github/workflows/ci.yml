@@ -34,7 +34,8 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v7
         with:
-          go-version-file: go.mod
+          go-version-file: .go-version
+          check-latest: true
 
       - name: Check formatting
         run: |
@@ -70,7 +71,8 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v7
         with:
-          go-version-file: go.mod
+          go-version-file: .go-version
+          check-latest: true
 
       - name: Build release snapshot
         uses: goreleaser/goreleaser-action@v7
@@ -103,7 +105,8 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v7
         with:
-          go-version-file: go.mod
+          go-version-file: .go-version
+          check-latest: true
 
       - name: Install govulncheck
         run: go install golang.org/x/vuln/cmd/govulncheck@v1.7.0
